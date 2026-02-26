@@ -1,0 +1,21 @@
+const router = require('express').Router();
+const ctrl = require('../controllers/authController');
+const auth = require('../middleware/auth');
+const validate = require('../middleware/validate');
+const schemas = require('../validators/authValidators');
+
+router.post('/register', validate(schemas.register), ctrl.register);
+router.post('/login', validate(schemas.login), ctrl.login);
+router.post('/google', ctrl.googleLogin);
+router.post('/refresh-token', ctrl.refreshToken);
+router.post('/forgot-password', validate(schemas.forgotPassword), ctrl.forgotPassword);
+router.post('/reset-password', validate(schemas.resetPassword), ctrl.resetPassword);
+
+// Phone OTP authentication (Twilio)
+router.post('/phone/send-otp', validate(schemas.sendPhoneOTP), ctrl.sendPhoneOTP);
+router.post('/phone/verify-otp', validate(schemas.verifyPhoneOTP), ctrl.verifyPhoneOTP);
+router.post('/phone/verify', auth, validate(schemas.verifyPhone), ctrl.verifyPhone);
+
+router.post('/logout', auth, ctrl.logout);
+
+module.exports = router;
