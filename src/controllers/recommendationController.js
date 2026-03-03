@@ -38,6 +38,31 @@ const getTrending = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * "What to do next" — intelligent endpoint returning the best next action
+ * based on journey state, pending quizzes, knowledge gaps, and personalized content.
+ */
+const getNextActions = async (req, res, next) => {
+  try {
+    const data = await recommendationService.getNextActions(req.user.userId);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
+/**
+ * Post-quiz recommendations — content suggestions for weak areas from a quiz.
+ */
+const getPostQuizRecommendations = async (req, res, next) => {
+  try {
+    const { weakTopics, quizTopic } = req.query;
+    const topics = weakTopics ? weakTopics.split(',') : [];
+    if (quizTopic && !topics.includes(quizTopic)) topics.push(quizTopic);
+    const data = await recommendationService.getPostQuizRecommendations(req.user.userId, topics);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  getPersonalizedFeed, getSimilarContent, getObjectiveRecommendations, getGapFilling, getTrending,
+  getPersonalizedFeed, getSimilarContent, getObjectiveRecommendations,
+  getGapFilling, getTrending, getNextActions, getPostQuizRecommendations,
 };

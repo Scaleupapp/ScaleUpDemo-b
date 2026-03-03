@@ -6,6 +6,9 @@ function paginate(query, { page = 1, limit = 20, maxLimit = 100 } = {}) {
 }
 
 function paginationMeta(total, page, limit) {
+  total = parseInt(total, 10) || 0;
+  page = parseInt(page, 10) || 1;
+  limit = parseInt(limit, 10) || 20;
   return {
     total,
     page,

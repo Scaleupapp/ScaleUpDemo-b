@@ -4,6 +4,8 @@ const ContentInteraction = require('../models/ContentInteraction');
 const ConsumptionGraph = require('../models/ConsumptionGraph');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 const UserObjective = require('../models/UserObjective');
+const Quiz = require('../models/Quiz');
+const Journey = require('../models/Journey');
 const { DIFFICULTY_MIX } = require('../utils/constants');
 const { paginationMeta } = require('../utils/pagination');
 
@@ -834,6 +836,229 @@ class RecommendationService {
     }
 
     return result;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  //  INTELLIGENT NEXT ACTIONS
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * "What to do next" — aggregates the user's state across journey, quizzes,
+   * and knowledge to produce a prioritized list of next actions.
+   *
+   * Priority order:
+   * 1. Pending quiz (user needs to take it)
+   * 2. In-progress content (resume what you started)
+   * 3. Today's journey assignment (assigned content for today)
+   * 4. Knowledge gap content (fill weak areas)
+   * 5. Personalized recommendation (explore new content)
+   */
+  async getNextActions(userId) {
+    const [pendingQuizzes, inProgressContent, journey, knowledgeProfile, consumedIds] = await Promise.all([
+      Quiz.find({ userId, status: { $in: ['ready', 'delivered'] } }).sort({ createdAt: -1 }).limit(3).lean(),
+      ContentProgress.find({ userId, status: 'in_progress' }).sort({ lastAccessedAt: -1 }).limit(3).lean(),
+      Journey.findOne({ userId, status: 'active' }),
+      KnowledgeProfile.findOne({ userId }),
+      this._getConsumedContentIds(userId),
+    ]);
+
+    const actions = [];
+
+    // 1. Pending quizzes — highest priority
+    for (const quiz of pendingQuizzes) {
+      actions.push({
+        priority: 1,
+        type: 'take_quiz',
+        label: `Quiz ready: ${quiz.topic}`,
+        subtitle: `${quiz.totalQuestions} questions on ${quiz.topic}`,
+        quizId: quiz._id,
+        topic: quiz.topic,
+      });
+    }
+
+    // 2. In-progress content — resume
+    if (inProgressContent.length > 0) {
+      const contentIds = inProgressContent.map(p => p.contentId);
+      const contents = await Content.find({ _id: { $in: contentIds } }).lean();
+      const contentMap = {};
+      for (const c of contents) contentMap[c._id.toString()] = c;
+
+      for (const progress of inProgressContent) {
+        const content = contentMap[progress.contentId.toString()];
+        if (content) {
+          actions.push({
+            priority: 2,
+            type: 'resume_content',
+            label: `Continue: ${content.title}`,
+            subtitle: `${Math.round(progress.progressPercentage || 0)}% complete`,
+            contentId: content._id,
+            content: {
+              _id: content._id,
+              title: content.title,
+              contentType: content.contentType,
+              domain: content.domain,
+              topics: content.topics,
+              duration: content.duration,
+              thumbnailUrl: content.thumbnailUrl,
+              creator: content.creator,
+              sourceType: content.sourceType,
+            },
+            progressPercentage: progress.progressPercentage || 0,
+          });
+        }
+      }
+    }
+
+    // 3. Today's journey assignment
+    if (journey) {
+      const currentWeekPlan = journey.weeklyPlans.find(w => w.weekNumber === journey.currentWeek);
+      const dayOfWeek = new Date().getDay() || 7;
+      const todayAssignment = currentWeekPlan?.dailyAssignments.find(d => d.day === dayOfWeek);
+
+      if (todayAssignment && !todayAssignment.completed) {
+        const todayContentIds = todayAssignment.contentIds || [];
+        const todayContent = await Content.find({ _id: { $in: todayContentIds } }).lean();
+        const todayProgress = await ContentProgress.find({
+          userId, contentId: { $in: todayContentIds },
+        }).lean();
+        const progressSet = new Set(todayProgress.filter(p => p.status === 'completed').map(p => p.contentId.toString()));
+
+        const unfinished = todayContent.filter(c => !progressSet.has(c._id.toString()));
+        if (unfinished.length > 0) {
+          actions.push({
+            priority: 3,
+            type: 'journey_today',
+            label: `Today's plan: ${unfinished.length} item${unfinished.length > 1 ? 's' : ''} left`,
+            subtitle: todayAssignment.topics?.join(', ') || 'Daily learning',
+            items: unfinished.slice(0, 3).map(c => ({
+              _id: c._id,
+              title: c.title,
+              contentType: c.contentType,
+              duration: c.duration,
+              thumbnailUrl: c.thumbnailUrl,
+              creator: c.creator,
+              sourceType: c.sourceType,
+            })),
+          });
+        }
+      }
+    }
+
+    // 4. Knowledge gap recommendation
+    if (knowledgeProfile && knowledgeProfile.weaknesses?.length > 0) {
+      try {
+        const gapRecs = await this.getGapFillingRecommendations(userId, { limit: 2 });
+        if (gapRecs.items?.length > 0) {
+          const weakTopics = knowledgeProfile.weaknesses.slice(0, 3).join(', ');
+          actions.push({
+            priority: 4,
+            type: 'fill_gaps',
+            label: `Strengthen: ${weakTopics}`,
+            subtitle: 'Content to improve your weakest areas',
+            items: gapRecs.items.slice(0, 2).map(c => ({
+              _id: c._id,
+              title: c.title,
+              contentType: c.contentType,
+              duration: c.duration,
+              thumbnailUrl: c.thumbnailUrl,
+              creator: c.creator,
+              sourceType: c.sourceType,
+              topics: c.topics,
+            })),
+          });
+        }
+      } catch (_) { /* Non-critical */ }
+    }
+
+    // 5. Personalized exploration
+    try {
+      const feed = await this.getPersonalizedFeed(userId, { page: 1, limit: 3 });
+      if (feed.items?.length > 0) {
+        actions.push({
+          priority: 5,
+          type: 'explore',
+          label: 'Explore new content',
+          subtitle: 'Picked for you based on your interests',
+          items: feed.items.slice(0, 3).map(c => ({
+            _id: c._id,
+            title: c.title,
+            contentType: c.contentType,
+            duration: c.duration,
+            thumbnailUrl: c.thumbnailUrl,
+            creator: c.creator,
+            sourceType: c.sourceType,
+            topics: c.topics,
+          })),
+        });
+      }
+    } catch (_) { /* Non-critical */ }
+
+    // Sort by priority
+    actions.sort((a, b) => a.priority - b.priority);
+
+    return { actions };
+  }
+
+  /**
+   * Post-quiz recommendations — specifically finds content to strengthen
+   * weak topics identified from a quiz attempt.
+   */
+  async getPostQuizRecommendations(userId, weakTopics) {
+    if (!weakTopics || weakTopics.length === 0) {
+      // Fall back to general gap-filling
+      return this.getGapFillingRecommendations(userId, { limit: 5 });
+    }
+
+    const consumedIds = await this._getConsumedContentIds(userId);
+    const knowledgeProfile = await KnowledgeProfile.findOne({ userId });
+
+    const candidates = await Content.find({
+      status: 'published',
+      topics: { $in: weakTopics },
+      _id: { $nin: consumedIds },
+    }).lean();
+
+    const scored = candidates.map(content => {
+      let score = 0;
+
+      // How many weak topics does this content address?
+      const weakOverlap = content.topics.filter(t => weakTopics.includes(t));
+      score += (weakOverlap.length / Math.max(1, weakTopics.length)) * 40;
+
+      // Prefer easier content for remediation
+      if (content.difficulty === 'beginner') score += 15;
+      else if (content.difficulty === 'intermediate') score += 10;
+      else score += 5;
+
+      // Quality
+      score += this._qualityScore(content);
+
+      // Social proof
+      score += this._socialProofScore(content);
+
+      // Knowledge gap intensity bonus
+      if (knowledgeProfile) {
+        for (const topic of weakOverlap) {
+          const entry = knowledgeProfile.topicMastery.find(t => t.topic === topic);
+          if (entry) {
+            const gapIntensity = (100 - entry.score) / 100;
+            score += gapIntensity * 10;
+          }
+        }
+      }
+
+      return { content, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const items = scored.slice(0, 5).map(s => ({
+      ...s.content,
+      _recommendationScore: Math.round(s.score * 100) / 100,
+      _reason: `Strengthen ${s.content.topics.filter(t => weakTopics.includes(t)).join(', ')}`,
+    }));
+
+    return { items };
   }
 
   /**

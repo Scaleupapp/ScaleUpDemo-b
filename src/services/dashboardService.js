@@ -4,10 +4,15 @@ const Journey = require('../models/Journey');
 const Quiz = require('../models/Quiz');
 const ContentProgress = require('../models/ContentProgress');
 const ConsumptionGraph = require('../models/ConsumptionGraph');
+const { ensureStreakFresh } = require('./streakService');
+const journeyProgressService = require('./journeyProgressService');
 
 class DashboardService {
 
   async getDashboard(userId) {
+    // Ensure streak is fresh before reading it
+    await ensureStreakFresh(userId);
+
     const [objectives, profile, journey, pendingQuizzes, graph] = await Promise.all([
       UserObjective.find({ userId, status: 'active' }).sort({ isPrimary: -1 }),
       KnowledgeProfile.findOne({ userId }),
@@ -16,11 +21,22 @@ class DashboardService {
       ConsumptionGraph.findOne({ userId }),
     ]);
 
-    // Weekly stats (last 7 days)
+    // Sync journey progress with actual content consumption
+    if (journey) {
+      await journeyProgressService.syncProgress(journey, userId);
+    }
+
+    // Weekly stats (last 7 days) + previous week for growth comparison
     const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const weeklyContentConsumed = await ContentProgress.countDocuments({
-      userId, isCompleted: true, completedAt: { $gte: oneWeekAgo },
-    });
+    const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const [weeklyContentConsumed, prevWeekContentConsumed] = await Promise.all([
+      ContentProgress.countDocuments({
+        userId, isCompleted: true, completedAt: { $gte: oneWeekAgo },
+      }),
+      ContentProgress.countDocuments({
+        userId, isCompleted: true, completedAt: { $gte: twoWeeksAgo, $lt: oneWeekAgo },
+      }),
+    ]);
 
     // Readiness score: knowledge 40% + journey 30% + consistency 30%
     const knowledgeScore = profile?.overallScore || 0;
@@ -49,6 +65,20 @@ class DashboardService {
     const upcomingMilestones = journey?.milestones
       .filter(m => m.status === 'upcoming' || m.status === 'in_progress')
       .slice(0, 3) || [];
+
+    // Weekly growth: content delta and knowledge score delta
+    const weeklyGrowth = {
+      contentDelta: weeklyContentConsumed - prevWeekContentConsumed,
+      contentThisWeek: weeklyContentConsumed,
+      contentLastWeek: prevWeekContentConsumed,
+    };
+
+    // Recent achievements: milestones achieved in last 14 days
+    const recentAchievements = (journey?.milestones || [])
+      .filter(m => m.status === 'achieved' && m.achievedAt && new Date(m.achievedAt) >= twoWeeksAgo)
+      .sort((a, b) => new Date(b.achievedAt) - new Date(a.achievedAt))
+      .slice(0, 5)
+      .map(m => ({ title: m.title, type: m.type, achievedAt: m.achievedAt }));
 
     return {
       objectives: objectives.map(o => ({
@@ -81,6 +111,8 @@ class DashboardService {
       nextActions,
       upcomingMilestones,
       pendingQuizzes,
+      weeklyGrowth,
+      recentAchievements,
     };
   }
 }

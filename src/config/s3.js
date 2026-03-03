@@ -35,13 +35,17 @@ async function uploadStream(key, stream, contentType) {
   return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 }
 
-async function uploadBuffer(key, buffer, contentType) {
-  const command = new PutObjectCommand({
+async function uploadBuffer(key, buffer, contentType, { publicRead = false } = {}) {
+  const params = {
     Bucket: process.env.S3_BUCKET_NAME,
     Key: key,
     Body: buffer,
     ContentType: contentType,
-  });
+  };
+  if (publicRead) {
+    params.ACL = 'public-read';
+  }
+  const command = new PutObjectCommand(params);
   await s3.send(command);
   return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 }

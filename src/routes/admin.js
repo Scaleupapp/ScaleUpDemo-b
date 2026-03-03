@@ -15,7 +15,13 @@ router.put('/users/:id/ban', ctrl.banUser);
 router.put('/users/:id/unban', ctrl.unbanUser);
 
 // Content moderation
+router.get('/content', ctrl.getContent);
 router.put('/content/:id/moderate', ctrl.moderateContent);
+router.put('/content/:id/remove', ctrl.removeContent);
+router.put('/content/:id/dismiss', ctrl.dismissReports);
+
+// Creator tier promotion
+router.put('/creators/:id/promote', ctrl.promoteCreator);
 
 // Platform stats
 router.get('/stats', ctrl.getStats);

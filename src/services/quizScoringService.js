@@ -1,5 +1,6 @@
 const QuizAttempt = require('../models/QuizAttempt');
 const Quiz = require('../models/Quiz');
+const UserObjective = require('../models/UserObjective');
 const { quizAnalysisQueue } = require('../config/queue');
 
 class QuizScoringService {
@@ -80,6 +81,45 @@ class QuizScoringService {
     attempt.completedAt = new Date();
     attempt.totalTime = totalTimeTaken;
     await attempt.save();
+
+    // Score feedback: update competency scores on objective after competency_assessment
+    if (quiz.type === 'competency_assessment' && quiz.objectiveId && quiz.linkedCompetencies?.length > 0) {
+      try {
+        const objective = await UserObjective.findById(quiz.objectiveId);
+        if (objective?.analysis?.competencies) {
+          const quizScore = attempt.score.percentage;
+          let updated = false;
+
+          for (const compName of quiz.linkedCompetencies) {
+            const comp = objective.analysis.competencies.find(c => c.name === compName);
+            if (comp) {
+              // Weighted average: 40% existing + 60% new assessment score
+              const existing = comp.currentScore || 0;
+              comp.currentScore = Math.round(existing * 0.4 + quizScore * 0.6);
+              updated = true;
+            }
+          }
+
+          // Also try matching by topic name for broader coverage
+          const topicComp = objective.analysis.competencies.find(
+            c => c.name.toLowerCase() === quiz.topic?.toLowerCase()
+          );
+          if (topicComp && !quiz.linkedCompetencies.includes(topicComp.name)) {
+            const existing = topicComp.currentScore || 0;
+            topicComp.currentScore = Math.round(existing * 0.4 + quizScore * 0.6);
+            updated = true;
+          }
+
+          if (updated) {
+            objective.markModified('analysis');
+            await objective.save();
+            console.log(`[QuizScoring] Updated competency scores on objective ${quiz.objectiveId} from assessment "${quiz.topic}"`);
+          }
+        }
+      } catch (err) {
+        console.error('[QuizScoring] Competency score feedback failed (non-fatal):', err.message);
+      }
+    }
 
     await quizAnalysisQueue.add('analyze', { attemptId: attempt._id, userId: attempt.userId });
 

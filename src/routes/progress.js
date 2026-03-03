@@ -4,9 +4,14 @@ const auth = require('../middleware/auth');
 
 router.use(auth);
 
-router.put('/:contentId', ctrl.updateProgress);
-router.post('/:contentId/complete', ctrl.markCompleted);
+// Static GET routes (before parameterized routes)
 router.get('/history', ctrl.getHistory);
 router.get('/stats', ctrl.getStats);
+router.get('/activity-heatmap', ctrl.getActivityHeatmap);
+router.get('/timeline', ctrl.getTimeline);
+
+// Parameterized routes
+router.put('/:contentId', ctrl.updateProgress);
+router.post('/:contentId/complete', ctrl.markCompleted);
 
 module.exports = router;

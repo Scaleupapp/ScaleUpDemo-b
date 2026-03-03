@@ -9,6 +9,13 @@ const quizAttemptSchema = new mongoose.Schema({
     selectedAnswer: { type: String, enum: ['A', 'B', 'C', 'D', 'skipped'] },
     isCorrect: { type: Boolean },
     timeTaken: { type: Number },
+    textResponse: { type: String },        // Optional free-text answer
+    competency: { type: String },          // Which competency this tests
+    textEvaluation: {                      // Claude's evaluation of text response
+      score: Number,                       // 0-100
+      feedback: String,
+      partialCredit: Boolean,
+    },
   }],
 
   score: {
@@ -42,6 +49,16 @@ const quizAttemptSchema = new mongoose.Schema({
       trend: { type: String, enum: ['improving', 'stable', 'declining'] },
     },
   },
+
+  // Competency-level breakdown (from Claude evaluation)
+  competencyBreakdown: [{
+    competency: String,
+    correct: Number,
+    total: Number,
+    percentage: Number,
+    textScoreAvg: Number,
+    level: String,
+  }],
 
   startedAt: Date,
   completedAt: Date,

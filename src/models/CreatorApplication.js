@@ -37,6 +37,11 @@ const creatorApplicationSchema = new mongoose.Schema({
   // Tier assigned on approval — all new creators start as 'rising'
   approvedTier: { type: String, enum: ['rising'], default: 'rising' },
 
+  // Rejection details (peer rejection by core/anchor)
+  rejectionNote: { type: String },
+  rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  reapplyAfter: { type: Date },
+
   // Admin can still override (reject spam applications)
   reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   reviewNote: { type: String },

@@ -1,4 +1,5 @@
 const QuizTrigger = require('../models/QuizTrigger');
+const Quiz = require('../models/Quiz');
 const ConsumptionGraph = require('../models/ConsumptionGraph');
 const Content = require('../models/Content');
 const { quizGenerationQueue } = require('../config/queue');
@@ -59,7 +60,10 @@ class QuizTriggerService {
   /**
    * On-demand quiz request from the user.
    */
-  async triggerOnDemand(userId, { topic, contentIds }) {
+  async triggerOnDemand(userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment }) {
+    // Validate and cap question count (1-20, default decided by generation service)
+    const validatedCount = questionCount ? Math.min(Math.max(Math.round(Number(questionCount)), 1), 20) : undefined;
+
     // If no contentIds provided, grab from consumption graph
     let resolvedContentIds = contentIds;
     if (!resolvedContentIds || resolvedContentIds.length === 0) {
@@ -89,6 +93,10 @@ class QuizTriggerService {
       topic,
       contentIds: resolvedContentIds,
       type: 'on_demand',
+      questionCount: validatedCount,
+      assessmentType: assessmentType || undefined,
+      objectiveId: objectiveId || undefined,
+      isSkillAssessment: isSkillAssessment || false,
     }, {
       attempts: 2,
       backoff: { type: 'exponential', delay: 10000 },
@@ -117,6 +125,56 @@ class QuizTriggerService {
       topic,
       contentIds: contentIds.map(id => id.toString()),
       type: 'weekly_review',
+    });
+
+    trigger.status = 'queued';
+    await trigger.save();
+    return trigger;
+  }
+
+  /**
+   * Auto-trigger a skill assessment quiz for a specific competency.
+   * Called after objective analysis completes.
+   */
+  async triggerSkillAssessment(userId, { competencyName, assessmentType, objectiveId, weight }) {
+    // Dedup: check if a competency_assessment already exists for this user+competency+objective
+    const existing = await Quiz.findOne({
+      userId,
+      type: 'competency_assessment',
+      topic: competencyName,
+      objectiveId,
+      status: { $in: ['ready', 'delivered', 'in_progress'] },
+    });
+    if (existing) {
+      console.log(`[QuizTrigger] Skill assessment already exists for "${competencyName}", skipping`);
+      return null;
+    }
+
+    // Question count by weight
+    const questionCount = weight >= 8 ? 10 : weight >= 5 ? 7 : 5;
+
+    const trigger = await QuizTrigger.create({
+      userId,
+      triggerType: 'on_demand',
+      topic: competencyName,
+      sourceContentIds: [],
+      status: 'pending',
+    });
+
+    await quizGenerationQueue.add('generate', {
+      triggerId: trigger._id.toString(),
+      userId: userId.toString(),
+      topic: competencyName,
+      contentIds: [],
+      type: 'on_demand',
+      questionCount,
+      assessmentType: assessmentType || 'mixed',
+      objectiveId: objectiveId?.toString(),
+      isSkillAssessment: true,
+    }, {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 10000 },
+      priority: 5,
     });
 
     trigger.status = 'queued';

@@ -1,13 +1,27 @@
 const admin = require('../config/firebase');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 
 class NotificationService {
 
   /**
-   * Send a push notification to a specific user.
-   * Silently skips if Firebase is not configured or user has no FCM token.
+   * Creates an in-app notification record (always) and sends a push notification (best-effort).
    */
   async sendToUser(userId, { title, body, data = {} }) {
+    // Always persist an in-app notification
+    try {
+      await Notification.create({
+        userId,
+        type: this._mapDataTypeToNotificationType(data.type),
+        title,
+        message: body,
+        deepLink: data.deepLink || null,
+      });
+    } catch (err) {
+      console.error(`In-app notification creation failed for user ${userId}:`, err.message);
+    }
+
+    // Attempt push notification (best-effort)
     try {
       const user = await User.findById(userId).select('fcmToken').lean();
       if (!user || !user.fcmToken) return null;
@@ -22,7 +36,6 @@ class NotificationService {
 
       return await admin.messaging().send(message);
     } catch (err) {
-      // Log but don't throw — notifications are best-effort
       console.error(`Push notification failed for user ${userId}:`, err.message);
       return null;
     }
@@ -82,6 +95,18 @@ class NotificationService {
   }
 
   /**
+   * Create an in-app notification without sending a push notification.
+   */
+  async createInApp(userId, { type, title, message, deepLink = null }) {
+    try {
+      return await Notification.create({ userId, type, title, message, deepLink });
+    } catch (err) {
+      console.error(`In-app notification creation failed for user ${userId}:`, err.message);
+      return null;
+    }
+  }
+
+  /**
    * Ensure all data values are strings (FCM requirement).
    */
   _stringifyData(data) {
@@ -90,6 +115,22 @@ class NotificationService {
       result[key] = String(value);
     }
     return result;
+  }
+
+  /**
+   * Maps push notification data.type to the in-app notification type enum.
+   */
+  _mapDataTypeToNotificationType(dataType) {
+    const map = {
+      quiz_ready: 'quiz_available',
+      milestone: 'milestone_reached',
+      streak: 'streak_reminder',
+      journey_update: 'journey_update',
+      re_engagement: 'journey_update',
+      social_follow: 'social_follow',
+      social_comment: 'social_comment',
+    };
+    return map[dataType] || 'journey_update';
   }
 }
 

@@ -19,5 +19,9 @@ router.put('/profile', rbac('creator'), ctrl.updateProfile);
 // Core/anchor creators: browse pending applications in their domain + endorse
 router.get('/applications', rbac('creator'), ctrl.getPendingApplications);
 router.post('/applications/:applicationId/endorse', rbac('creator'), ctrl.endorseApplication);
+router.post('/applications/:applicationId/reject', rbac('creator'), ctrl.rejectApplication);
+
+// Public creator profile (must be after named routes to avoid param collision)
+router.get('/:creatorId', ctrl.getPublicProfile);
 
 module.exports = router;

@@ -3,6 +3,7 @@ const CreatorProfile = require('../models/CreatorProfile');
 const User = require('../models/User');
 const ApiError = require('../utils/apiError');
 const { paginationMeta } = require('../utils/pagination');
+const socialService = require('./socialService');
 
 class CreatorService {
 
@@ -15,6 +16,13 @@ class CreatorService {
     const user = await User.findById(userId);
     if (user.role === 'creator') throw new ApiError(400, 'You are already a creator');
 
+    // Check reapply cooldown from previous rejection
+    const rejected = await CreatorApplication.findOne({ userId, status: 'rejected', reapplyAfter: { $gt: new Date() } });
+    if (rejected) {
+      const reapplyDate = rejected.reapplyAfter.toISOString().split('T')[0];
+      throw new ApiError(400, `You can reapply after ${reapplyDate}`);
+    }
+
     return CreatorApplication.create({
       userId, domain, specializations, experience,
       sampleContentLinks, motivation, portfolioUrl, socialLinks,
@@ -26,8 +34,8 @@ class CreatorService {
   }
 
   // ─── Peer Endorsement ─────────────────────────────────────────────
-  // A core or anchor creator can endorse an application in their domain.
-  // Approval rule: 2 core endorsements OR 1 anchor endorsement (same domain).
+  // Any creator (rising, core, or anchor) can endorse an application in their domain.
+  // Approval rule: 2 rising/core endorsements OR 1 anchor endorsement (same domain).
 
   async endorseApplication(endorserId, applicationId, { note } = {}) {
     const app = await CreatorApplication.findById(applicationId);
@@ -66,6 +74,7 @@ class CreatorService {
     });
 
     // Check if approval threshold is met
+    // Rule: 1 anchor endorsement OR 2 core endorsements
     const anchorEndorsements = app.endorsements.filter(e => e.creatorTier === 'anchor').length;
     const coreEndorsements = app.endorsements.filter(e => e.creatorTier === 'core').length;
 
@@ -79,6 +88,47 @@ class CreatorService {
       app.status = 'endorsed';
       await app.save();
     }
+
+    return app;
+  }
+
+  // ─── Peer Rejection ──────────────────────────────────────────────
+  // Core/anchor creators can reject applications in their domain.
+  // Anchor rejection overrides any existing endorsements.
+  // Core rejection only valid if no anchor has endorsed.
+
+  async rejectApplication(rejectorId, applicationId, { note }) {
+    const app = await CreatorApplication.findById(applicationId);
+    if (!app) throw new ApiError(404, 'Application not found');
+    if (app.status === 'approved') throw new ApiError(400, 'Application already approved');
+    if (app.status === 'rejected') throw new ApiError(400, 'Application already rejected');
+
+    const rejectorProfile = await CreatorProfile.findOne({ userId: rejectorId });
+    if (!rejectorProfile) throw new ApiError(403, 'You must be a creator to reject');
+    if (!['core', 'anchor'].includes(rejectorProfile.tier)) {
+      throw new ApiError(403, 'Only core and anchor creators can reject applications');
+    }
+    if (rejectorProfile.domain !== app.domain) {
+      throw new ApiError(400, `You can only reject applications in your domain (${rejectorProfile.domain})`);
+    }
+
+    // Core rejection: only valid if no anchor has already endorsed
+    if (rejectorProfile.tier === 'core') {
+      const anchorEndorsed = app.endorsements.some(e => e.creatorTier === 'anchor');
+      if (anchorEndorsed) {
+        throw new ApiError(400, 'Cannot reject: an anchor creator has already endorsed this application');
+      }
+    }
+
+    // Anchor rejection overrides everything
+    const reapplyAfter = new Date();
+    reapplyAfter.setDate(reapplyAfter.getDate() + 30);
+
+    app.status = 'rejected';
+    app.rejectionNote = note || 'Rejected by peer reviewer';
+    app.rejectedBy = rejectorId;
+    app.reapplyAfter = reapplyAfter;
+    await app.save();
 
     return app;
   }
@@ -100,6 +150,30 @@ class CreatorService {
     return profile.save();
   }
 
+  // ─── Public Creator Profile ──────────────────────────────────────
+
+  async getCreatorPublicProfile(creatorId, currentUserId) {
+    const user = await User.findOne({ _id: creatorId, role: 'creator', isActive: true, isBanned: false })
+      .select('firstName lastName username profilePicture bio followersCount followingCount createdAt')
+      .lean();
+    if (!user) throw new ApiError(404, 'Creator not found');
+
+    const creatorProfile = await CreatorProfile.findOne({ userId: creatorId }).lean();
+    if (!creatorProfile) throw new ApiError(404, 'Creator profile not found');
+
+    const [isFollowing, mutualFollowers] = await Promise.all([
+      currentUserId ? socialService.checkFollowStatus(currentUserId, creatorId) : false,
+      currentUserId ? socialService.getMutualFollowers(currentUserId, creatorId) : { count: 0, users: [] },
+    ]);
+
+    return {
+      ...user,
+      creatorProfile,
+      isFollowing,
+      mutualFollowers,
+    };
+  }
+
   // ─── Creator Search ───────────────────────────────────────────────
 
   async searchCreators({ search, domain, tier, page = 1, limit = 20 }) {
@@ -114,7 +188,7 @@ class CreatorService {
     }
 
     const users = await User.find(filter)
-      .select('firstName lastName username profilePicture bio followersCount')
+      .select('firstName lastName username profilePicture bio followersCount createdAt')
       .lean();
 
     // Attach creator profiles

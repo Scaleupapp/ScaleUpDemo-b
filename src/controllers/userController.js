@@ -1,6 +1,8 @@
 const User = require('../models/User');
 const apiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
+const { uploadBuffer } = require('../config/s3');
+const { v4: uuidv4 } = require('uuid');
 
 const getProfile = async (req, res, next) => {
   try {
@@ -46,4 +48,22 @@ const deleteAccount = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getProfile, getPublicProfile, updateProfile, deleteAccount };
+const uploadAvatar = async (req, res, next) => {
+  try {
+    if (!req.file) throw new ApiError(400, 'No image file provided');
+
+    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    const key = `avatars/${req.user.userId}/${uuidv4()}.${ext}`;
+    const url = await uploadBuffer(key, req.file.buffer, req.file.mimetype, { publicRead: true });
+
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      { profilePicture: url },
+      { new: true }
+    ).select('-password -refreshTokenHash');
+
+    res.json(apiResponse.success(user));
+  } catch (err) { next(err); }
+};
+
+module.exports = { getProfile, getPublicProfile, updateProfile, deleteAccount, uploadAvatar };

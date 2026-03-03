@@ -7,6 +7,8 @@ router.use(auth);
 router.get('/', ctrl.listQuizzes);
 router.get('/history', ctrl.getHistory);
 router.post('/request', ctrl.requestOnDemand);
+router.get('/pending', ctrl.getPendingQuizzes);
+router.get('/skill-assessments', ctrl.getSkillAssessments);
 router.get('/trigger/:triggerId', ctrl.getTriggerStatus);
 router.get('/:id', ctrl.getQuiz);
 router.post('/:id/start', ctrl.startAttempt);

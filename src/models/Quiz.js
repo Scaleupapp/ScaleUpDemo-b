@@ -4,9 +4,10 @@ const questionSchema = new mongoose.Schema({
   questionText: { type: String, required: true },
   questionType: {
     type: String,
-    enum: ['conceptual', 'application', 'cross_content', 'recall', 'critical_thinking'],
+    enum: ['conceptual', 'application', 'cross_content', 'recall', 'critical_thinking', 'situational', 'framework', 'case_study'],
     default: 'conceptual',
   },
+  scenario: { type: String },           // Case study / scenario context paragraph
   options: [{
     label: { type: String, enum: ['A', 'B', 'C', 'D'], required: true },
     text: { type: String, required: true },
@@ -17,6 +18,10 @@ const questionSchema = new mongoose.Schema({
   sourceContentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Content' },
   sourceTimestamp: { type: String },
   concept: { type: String },
+  competency: { type: String },          // Which competency this question tests
+  allowTextResponse: { type: Boolean, default: false },  // Show optional text box
+  textPrompt: { type: String },          // "Explain your reasoning" etc.
+  timeLimit: { type: Number },           // Override per-question time (seconds)
 }, { _id: true });
 
 const quizSchema = new mongoose.Schema({
@@ -28,13 +33,21 @@ const quizSchema = new mongoose.Schema({
     enum: [
       'topic_consolidation', 'weekly_review', 'milestone_assessment',
       'retention_check', 'on_demand', 'playlist_mastery',
+      'competency_assessment', 'applied_scenario', 'exam_simulation',
     ],
     required: true,
+  },
+
+  assessmentType: {
+    type: String,
+    enum: ['knowledge_recall', 'applied_scenario', 'situational_judgment', 'framework_application', 'exam_style', 'case_study', 'competency_gate', 'mixed'],
+    default: 'knowledge_recall',
   },
 
   topic: { type: String, lowercase: true },
   sourceContentIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Content' }],
   objectiveId: { type: mongoose.Schema.Types.ObjectId, ref: 'UserObjective' },
+  linkedCompetencies: [{ type: String }],
 
   questions: [questionSchema],
   totalQuestions: { type: Number, required: true },

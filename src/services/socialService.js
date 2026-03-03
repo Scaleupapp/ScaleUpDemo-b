@@ -59,6 +59,36 @@ class SocialService {
     return { following: following.map(f => f.followingId), pagination: paginationMeta(total, p, l) };
   }
 
+  async checkFollowStatus(followerId, followingId) {
+    const existing = await Follow.findOne({ followerId, followingId }).lean();
+    return !!existing;
+  }
+
+  async getMutualFollowers(currentUserId, targetUserId, limit = 3) {
+    // Get IDs of people the current user follows
+    const myFollowing = await Follow.find({ followerId: currentUserId }).select('followingId').lean();
+    const myFollowingIds = myFollowing.map(f => f.followingId.toString());
+
+    // Find which of them follow the target user
+    const mutualFilter = {
+      followingId: targetUserId,
+      followerId: { $in: myFollowingIds },
+    };
+
+    const [mutuals, count] = await Promise.all([
+      Follow.find(mutualFilter)
+        .populate('followerId', 'firstName lastName profilePicture')
+        .limit(limit)
+        .lean(),
+      Follow.countDocuments(mutualFilter),
+    ]);
+
+    return {
+      count,
+      users: mutuals.map(m => m.followerId).filter(Boolean),
+    };
+  }
+
   // ─── User Content Lists ──────────────────────────────────────────
 
   async getLikedContent(userId, { page = 1, limit = 20 } = {}) {
@@ -160,6 +190,22 @@ class SocialService {
     await content.save();
 
     return { rating: value, averageRating: content.averageRating, ratingCount: content.ratingCount };
+  }
+
+  async trackShare(userId, contentId) {
+    const content = await Content.findById(contentId);
+    if (!content) throw new ApiError(404, 'Content not found');
+
+    await ContentInteraction.findOneAndUpdate(
+      { userId, contentId, type: 'share' },
+      { userId, contentId, type: 'share' },
+      { upsert: true },
+    );
+
+    content.shareCount = (content.shareCount || 0) + 1;
+    await content.save();
+
+    return { shared: true, shareCount: content.shareCount };
   }
 
   // ─── Comments ──────────────────────────────────────────────────────

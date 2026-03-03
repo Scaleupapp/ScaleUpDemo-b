@@ -48,6 +48,13 @@ const unpublishContent = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const deleteContent = async (req, res, next) => {
+  try {
+    const result = await contentService.deleteContent(req.user.userId, req.params.id);
+    res.json(apiResponse.success(result, 'Content deleted'));
+  } catch (err) { next(err); }
+};
+
 const getFeed = async (req, res, next) => {
   try {
     const recommendationService = require('../services/recommendationService');
@@ -119,6 +126,29 @@ const addComment = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const trackShare = async (req, res, next) => {
+  try {
+    const result = await socialService.trackShare(req.user.userId, req.params.id);
+    res.json(apiResponse.success(result));
+  } catch (err) { next(err); }
+};
+
+const reportContent = async (req, res, next) => {
+  try {
+    const ContentReport = require('../models/ContentReport');
+    const Content = require('../models/Content');
+    const { reason, description } = req.body;
+    if (!reason) return res.status(400).json(apiResponse.error('Report reason is required'));
+
+    const existing = await ContentReport.findOne({ contentId: req.params.id, reporterId: req.user.userId });
+    if (existing) return res.status(409).json(apiResponse.error('You have already reported this content'));
+
+    await ContentReport.create({ contentId: req.params.id, reporterId: req.user.userId, reason, description });
+    await Content.findByIdAndUpdate(req.params.id, { $inc: { reportCount: 1 } });
+    res.json(apiResponse.success(null, 'Content reported'));
+  } catch (err) { next(err); }
+};
+
 const getStreamUrl = async (req, res, next) => {
   try {
     const content = await contentService.getContent(req.params.id);
@@ -135,6 +165,6 @@ const getStreamUrl = async (req, res, next) => {
 };
 
 module.exports = {
-  requestUpload, completeUpload, getMyContent, updateContent, publishContent, unpublishContent,
-  getFeed, explore, getContent, getStreamUrl, getLikedContent, getSavedContent, toggleLike, toggleSave, rateContent, getComments, addComment,
+  requestUpload, completeUpload, getMyContent, updateContent, publishContent, unpublishContent, deleteContent,
+  getFeed, explore, getContent, getStreamUrl, getLikedContent, getSavedContent, toggleLike, toggleSave, rateContent, trackShare, getComments, addComment, reportContent,
 };

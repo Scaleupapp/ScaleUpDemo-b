@@ -45,6 +45,14 @@ const getPendingApplications = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Get public creator profile
+const getPublicProfile = async (req, res, next) => {
+  try {
+    const data = await creatorService.getCreatorPublicProfile(req.params.creatorId, req.user.userId);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
 // Search for creators on the platform
 const searchCreators = async (req, res, next) => {
   try {
@@ -53,4 +61,12 @@ const searchCreators = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { apply, getMyApplication, getMyProfile, updateProfile, endorseApplication, getPendingApplications, searchCreators };
+// Core/anchor creators reject a pending application
+const rejectApplication = async (req, res, next) => {
+  try {
+    const app = await creatorService.rejectApplication(req.user.userId, req.params.applicationId, req.body);
+    res.json(apiResponse.success(app, 'Application rejected'));
+  } catch (err) { next(err); }
+};
+
+module.exports = { apply, getMyApplication, getMyProfile, updateProfile, endorseApplication, rejectApplication, getPendingApplications, searchCreators, getPublicProfile };

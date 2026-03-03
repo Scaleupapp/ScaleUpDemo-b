@@ -1,6 +1,9 @@
 const creatorService = require('../services/creatorService');
 const User = require('../models/User');
 const Content = require('../models/Content');
+const ContentReport = require('../models/ContentReport');
+const CreatorProfile = require('../models/CreatorProfile');
+const CreatorApplication = require('../models/CreatorApplication');
 const apiResponse = require('../utils/apiResponse');
 
 const getPendingApplications = async (req, res, next) => {
@@ -26,12 +29,25 @@ const getUsers = async (req, res, next) => {
     if (req.query.search) {
       filter.$or = [
         { firstName: { $regex: req.query.search, $options: 'i' } },
+        { lastName: { $regex: req.query.search, $options: 'i' } },
         { email: { $regex: req.query.search, $options: 'i' } },
+        { username: { $regex: req.query.search, $options: 'i' } },
       ];
     }
-    const users = await User.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit);
-    const total = await User.countDocuments(filter);
-    res.json(apiResponse.paginated(users, { total, page, limit, totalPages: Math.ceil(total / limit) }));
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .select('firstName lastName username email profilePicture role isActive isBanned createdAt lastLoginAt')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      User.countDocuments(filter),
+    ]);
+    const totalPages = Math.ceil(total / limit);
+    res.json(apiResponse.paginated(users, {
+      total, page, limit, totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    }));
   } catch (err) { next(err); }
 };
 
@@ -69,14 +85,92 @@ const moderateContent = async (req, res, next) => {
 
 const getStats = async (req, res, next) => {
   try {
-    const [totalUsers, totalCreators, totalContent, publishedContent] = await Promise.all([
+    const [totalUsers, totalCreators, totalContent, publishedContent, reportedContent, pendingApplications, bannedUsers] = await Promise.all([
       User.countDocuments({ isActive: true }),
       User.countDocuments({ role: 'creator' }),
       Content.countDocuments(),
       Content.countDocuments({ status: 'published' }),
+      Content.countDocuments({ reportCount: { $gte: 3 }, status: { $ne: 'removed' } }),
+      CreatorApplication.countDocuments({ status: 'pending' }),
+      User.countDocuments({ isBanned: true }),
     ]);
-    res.json(apiResponse.success({ totalUsers, totalCreators, totalContent, publishedContent }));
+    res.json(apiResponse.success({
+      totalUsers, totalCreators, totalContent, publishedContent,
+      reportedContent, pendingApplications, bannedUsers,
+    }));
   } catch (err) { next(err); }
 };
 
-module.exports = { getPendingApplications, rejectApplication, getUsers, banUser, unbanUser, moderateContent, getStats };
+const promoteCreator = async (req, res, next) => {
+  try {
+    const { tier } = req.body;
+    if (!['rising', 'core', 'anchor'].includes(tier)) {
+      return res.status(400).json(apiResponse.error('Tier must be rising, core, or anchor'));
+    }
+    const profile = await CreatorProfile.findOneAndUpdate(
+      { userId: req.params.id },
+      { tier },
+      { new: true }
+    );
+    if (!profile) return res.status(404).json(apiResponse.error('Creator profile not found'));
+    res.json(apiResponse.success(profile, `Creator tier updated to ${tier}`));
+  } catch (err) { next(err); }
+};
+
+// --- Content Moderation (new) ---
+
+const getContent = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const filter = {};
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.minReports) filter.reportCount = { $gte: parseInt(req.query.minReports) };
+    if (req.query.search) {
+      filter.title = { $regex: req.query.search, $options: 'i' };
+    }
+    const [items, total] = await Promise.all([
+      Content.find(filter)
+        .populate('creatorId', 'firstName lastName username profilePicture')
+        .sort({ reportCount: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Content.countDocuments(filter),
+    ]);
+    const totalPages = Math.ceil(total / limit);
+    res.json(apiResponse.paginated(items, {
+      total, page, limit, totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    }));
+  } catch (err) { next(err); }
+};
+
+const removeContent = async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+    if (!reason) return res.status(400).json(apiResponse.error('Removal reason is required'));
+    const content = await Content.findByIdAndUpdate(req.params.id, {
+      status: 'removed',
+      removalReason: reason,
+      removedAt: new Date(),
+      removedBy: req.user.userId,
+    }, { new: true });
+    if (!content) return res.status(404).json(apiResponse.error('Content not found'));
+    res.json(apiResponse.success(content, 'Content removed'));
+  } catch (err) { next(err); }
+};
+
+const dismissReports = async (req, res, next) => {
+  try {
+    await ContentReport.deleteMany({ contentId: req.params.id });
+    const content = await Content.findByIdAndUpdate(req.params.id, { reportCount: 0 }, { new: true });
+    if (!content) return res.status(404).json(apiResponse.error('Content not found'));
+    res.json(apiResponse.success(content, 'Reports dismissed'));
+  } catch (err) { next(err); }
+};
+
+module.exports = {
+  getPendingApplications, rejectApplication, getUsers, banUser, unbanUser,
+  moderateContent, getStats, promoteCreator, getContent, removeContent, dismissReports,
+};

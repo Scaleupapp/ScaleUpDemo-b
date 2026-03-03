@@ -42,6 +42,16 @@ class ContentService {
     return content.save();
   }
 
+  async deleteContent(creatorId, contentId) {
+    const content = await Content.findOne({ _id: contentId, creatorId });
+    if (!content) throw new ApiError(404, 'Content not found or not yours');
+    if (content.status === 'published') {
+      throw new ApiError(400, 'Unpublish content before deleting');
+    }
+    await Content.deleteOne({ _id: contentId });
+    return { deleted: true };
+  }
+
   async getContent(contentId) {
     const content = await Content.findById(contentId).populate('creatorId', 'firstName lastName username profilePicture');
     if (!content) throw new ApiError(404, 'Content not found');

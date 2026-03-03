@@ -54,6 +54,48 @@ const userObjectiveSchema = new mongoose.Schema({
 
   completedAt: { type: Date },
   pausedAt: { type: Date },
+
+  // --- AI-Generated Objective Analysis (Claude) ---
+  analysis: {
+    competencies: [{
+      name: { type: String },
+      description: String,
+      weight: { type: Number, min: 1, max: 10 },
+      category: { type: String, enum: ['core', 'advanced', 'soft_skill'] },
+      prerequisites: [String],
+      assessmentTypes: [String],
+      proficiencyLevels: [{
+        level: Number,
+        title: String,
+        description: String,
+      }],
+    }],
+    objectiveBrief: {
+      overview: String,
+      dayToDay: String,
+      challenges: String,
+      successCriteria: String,
+      industryContext: String,
+    },
+    contentCoverage: {
+      covered: [String],
+      gaps: [String],
+      gapStrategies: [{
+        competency: String,
+        strategy: { type: String, enum: ['self_study', 'external', 'practice', 'assessment_only'] },
+        resources: [String],
+      }],
+    },
+    assessmentStrategy: {
+      recommended: [{
+        competency: String,
+        assessmentType: String,
+        reasoning: String,
+      }],
+    },
+    analyzedAt: Date,
+    aiModel: String,
+  },
 }, { timestamps: true });
 
 userObjectiveSchema.index({ userId: 1, status: 1 });

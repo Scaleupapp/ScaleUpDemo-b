@@ -100,6 +100,12 @@ class KnowledgeService {
       .slice(0, 10)
       .map(t => t.topic);
 
+    // ── Compute Learning Velocity ────────────────────────────────────
+    await this._computeLearningVelocity(profile, userId);
+
+    // ── Compute Behavioral Profile ───────────────────────────────────
+    await this._computeBehavioralProfile(profile, userId);
+
     profile.lastUpdatedAt = new Date();
     await profile.save();
 
@@ -122,6 +128,17 @@ class KnowledgeService {
     if (!profile) {
       profile = await KnowledgeProfile.create({ userId, topicMastery: [] });
     }
+
+    // Backfill velocity + behavioral if never computed
+    if (profile.topicMastery.length > 0 &&
+        profile.learningVelocity?.topicsPerWeek === 0 &&
+        profile.learningVelocity?.averageScoreImprovement === 0) {
+      await this._computeLearningVelocity(profile, userId);
+      await this._computeBehavioralProfile(profile, userId);
+      profile.lastUpdatedAt = new Date();
+      await profile.save();
+    }
+
     return profile;
   }
 
@@ -183,6 +200,97 @@ class KnowledgeService {
         level: t.level,
         trend: t.trend,
       }));
+  }
+
+  // ─── Velocity & Behavioral ─────────────────────────────────────────
+
+  async _computeLearningVelocity(profile, userId) {
+    const allTopics = profile.topicMastery;
+
+    // topicsPerWeek: topics with quiz activity in the last 7 days
+    const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
+    const activeTopicsThisWeek = allTopics.filter(t =>
+      t.scoreHistory?.some(h => new Date(h.date) >= oneWeekAgo)
+    ).length;
+    profile.learningVelocity.topicsPerWeek = activeTopicsThisWeek;
+
+    // averageScoreImprovement: average (last - first) score delta across topics with 2+ history entries
+    const deltas = [];
+    for (const t of allTopics) {
+      if (t.scoreHistory && t.scoreHistory.length >= 2) {
+        const first = t.scoreHistory[0].score;
+        const last = t.scoreHistory[t.scoreHistory.length - 1].score;
+        deltas.push(last - first);
+      }
+    }
+    profile.learningVelocity.averageScoreImprovement = deltas.length > 0
+      ? Math.round((deltas.reduce((s, d) => s + d, 0) / deltas.length) * 10) / 10
+      : 0;
+
+    // contentToMasteryRatio: total content consumed / topics at intermediate+ level
+    const ContentProgress = require('../models/ContentProgress');
+    const contentCount = await ContentProgress.countDocuments({ userId, isCompleted: true });
+    const masteredTopics = allTopics.filter(t => t.score >= 50).length;
+    profile.learningVelocity.contentToMasteryRatio = masteredTopics > 0
+      ? Math.round((contentCount / masteredTopics) * 10) / 10
+      : 0;
+  }
+
+  async _computeBehavioralProfile(profile, userId) {
+    const attempts = await QuizAttempt.find({ userId, status: 'completed' })
+      .select('answers.timeTaken score.percentage completedAt totalTime')
+      .sort({ completedAt: -1 })
+      .limit(50)
+      .lean();
+
+    if (attempts.length === 0) return;
+
+    // averageAnswerTime: mean of all per-question timeTaken values
+    const allTimes = [];
+    for (const a of attempts) {
+      for (const ans of (a.answers || [])) {
+        if (typeof ans.timeTaken === 'number' && ans.timeTaken > 0) {
+          allTimes.push(ans.timeTaken);
+        }
+      }
+    }
+    profile.behavioralProfile.averageAnswerTime = allTimes.length > 0
+      ? Math.round((allTimes.reduce((s, t) => s + t, 0) / allTimes.length) * 10) / 10
+      : 0;
+
+    // consistencyScore: 1 - (coefficient of variation of scores), clamped 0–1
+    const scores = attempts.map(a => a.score?.percentage || 0);
+    const mean = scores.reduce((s, v) => s + v, 0) / scores.length;
+    const variance = scores.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / scores.length;
+    const stddev = Math.sqrt(variance);
+    const cv = mean > 0 ? stddev / mean : 1;
+    profile.behavioralProfile.consistencyScore = Math.round(Math.max(0, Math.min(1, 1 - cv)) * 100) / 100;
+
+    // peakHours: top 4 most frequent hours from completedAt timestamps
+    const hourCounts = {};
+    for (const a of attempts) {
+      if (a.completedAt) {
+        const hour = new Date(a.completedAt).getHours();
+        hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+      }
+    }
+    profile.behavioralProfile.peakHours = Object.entries(hourCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([h]) => parseInt(h));
+
+    // type: classify based on speed vs accuracy
+    const avgSpeed = profile.behavioralProfile.averageAnswerTime;
+    const avgAccuracy = mean; // mean percentage score
+    if (avgSpeed < 20 && avgAccuracy >= 70) {
+      profile.behavioralProfile.type = 'speed_focused';
+    } else if (avgSpeed >= 30 && avgAccuracy >= 75) {
+      profile.behavioralProfile.type = 'accuracy_focused';
+    } else if (avgAccuracy >= 60) {
+      profile.behavioralProfile.type = 'balanced';
+    } else {
+      profile.behavioralProfile.type = 'inconsistent';
+    }
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────

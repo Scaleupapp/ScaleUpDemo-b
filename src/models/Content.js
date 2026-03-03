@@ -64,7 +64,7 @@ const contentSchema = new mongoose.Schema({
   // --- Publishing ---
   status: {
     type: String,
-    enum: ['draft', 'processing', 'ready', 'published', 'unpublished', 'rejected'],
+    enum: ['draft', 'processing', 'ready', 'published', 'unpublished', 'rejected', 'removed'],
     default: 'draft',
   },
   publishedAt: { type: Date },
@@ -73,6 +73,12 @@ const contentSchema = new mongoose.Schema({
   moderationStatus: { type: String, enum: ['pending', 'approved', 'rejected', 'flagged'], default: 'pending' },
   moderatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   moderationNote: { type: String },
+
+  // --- Reporting & Removal ---
+  reportCount: { type: Number, default: 0 },
+  removalReason: { type: String },
+  removedAt: { type: Date },
+  removedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 
   // --- Engagement (denormalized) ---
   viewCount: { type: Number, default: 0 },

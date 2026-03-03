@@ -29,4 +29,20 @@ const getStats = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { updateProgress, markCompleted, getHistory, getStats };
+const getActivityHeatmap = async (req, res, next) => {
+  try {
+    const days = parseInt(req.query.days) || 90;
+    const data = await consumptionService.getActivityHeatmap(req.user.userId, days);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
+const getTimeline = async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const data = await consumptionService.getTimeline(req.user.userId, limit);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
+module.exports = { updateProgress, markCompleted, getHistory, getStats, getActivityHeatmap, getTimeline };

@@ -8,6 +8,7 @@ const Journey = require('../models/Journey');
 const CreatorProfile = require('../models/CreatorProfile');
 const Content = require('../models/Content');
 const { quizGenerationQueue, notificationQueue } = require('../config/queue');
+const { resetStaleStreaks } = require('../services/streakService');
 
 function startCronJobs() {
   // Use BullMQ repeatable jobs for cron scheduling
@@ -50,6 +51,12 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 7. Streak Reset — Daily 1:30 AM UTC (after journey advancement)
+  cronQueue.add('streakReset', {}, {
+    repeat: { pattern: '30 1 * * *' },
+    removeOnComplete: true,
+  });
+
   const { Worker } = require('bullmq');
   new Worker('cronJobs', async (job) => {
     switch (job.name) {
@@ -70,6 +77,9 @@ function startCronJobs() {
         break;
       case 'journeyAdvancement':
         await runJourneyAdvancement();
+        break;
+      case 'streakReset':
+        await resetStaleStreaks();
         break;
     }
   }, { connection });
