@@ -33,7 +33,7 @@ class AIProvider {
    */
   async analyzeWithClaude({ systemPrompt, userPrompt, temperature = 0.3, maxTokens = 8000 }) {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-20250514',
       max_tokens: maxTokens,
       temperature,
       system: systemPrompt,
