@@ -8,5 +8,6 @@ router.get('/unread-count', ctrl.getUnreadCount);
 router.put('/:id/read', ctrl.markAsRead);
 router.post('/read-all', ctrl.markAllAsRead);
 router.delete('/:id', ctrl.dismiss);
+router.post('/test', ctrl.sendTestNotification);
 
 module.exports = router;

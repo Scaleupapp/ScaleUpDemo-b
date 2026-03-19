@@ -73,4 +73,18 @@ const dismiss = async (req, res, next) => {
   }
 };
 
-module.exports = { getNotifications, getUnreadCount, markAsRead, markAllAsRead, dismiss };
+const sendTestNotification = async (req, res, next) => {
+  try {
+    const notificationService = require('../services/notificationService');
+    await notificationService.sendToUser(req.user.userId, {
+      title: 'Welcome to ScaleUp!',
+      body: 'Your notifications are working. Keep learning and growing!',
+      data: { deepLink: '/home' },
+    });
+    res.json(apiResponse.success(null, 'Test notification sent'));
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getNotifications, getUnreadCount, markAsRead, markAllAsRead, dismiss, sendTestNotification };
