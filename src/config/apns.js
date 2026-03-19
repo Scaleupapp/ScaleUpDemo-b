@@ -1,7 +1,11 @@
 const http2 = require('http2');
 const jwt = require('jsonwebtoken');
+const dns = require('dns');
 const fs = require('fs');
 const path = require('path');
+
+// Force IPv4 DNS resolution (EC2 often lacks IPv6 connectivity)
+dns.setDefaultResultOrder('ipv4first');
 
 // APNs configuration
 const APNS_KEY_ID = process.env.APNS_KEY_ID || '26S38JMTT4';
