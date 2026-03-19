@@ -7,7 +7,7 @@ const path = require('path');
 const APNS_KEY_ID = process.env.APNS_KEY_ID || 'A4MNMMCCVB';
 const APNS_TEAM_ID = process.env.APNS_TEAM_ID || 'NK5P69WG2H';
 const APNS_BUNDLE_ID = process.env.APNS_BUNDLE_ID || 'com.scaleupapp.ios';
-const APNS_PRODUCTION = process.env.APNS_PRODUCTION === 'true';
+const APNS_PRODUCTION = process.env.APNS_PRODUCTION !== 'false';
 
 const APNS_HOST = APNS_PRODUCTION
   ? 'api.push.apple.com'
