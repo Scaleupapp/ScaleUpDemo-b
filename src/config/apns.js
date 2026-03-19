@@ -54,15 +54,12 @@ function getToken() {
   const key = loadKey();
   if (!key) return null;
 
-  cachedToken = jwt.sign({}, key, {
+  cachedToken = jwt.sign({ iss: APNS_TEAM_ID, iat: now }, key, {
     algorithm: 'ES256',
     header: {
       alg: 'ES256',
       kid: APNS_KEY_ID,
     },
-    issuer: APNS_TEAM_ID,
-    issuedAt: now,
-    expiresIn: '1h',
   });
 
   tokenTimestamp = now;
