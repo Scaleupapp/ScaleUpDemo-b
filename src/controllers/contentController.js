@@ -164,6 +164,13 @@ const getStreamUrl = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const requestThumbnailUpload = async (req, res, next) => {
+  try {
+    const data = await uploadService.requestThumbnailUpload({ creatorId: req.user.userId });
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
 // --- Multipart Upload ---
 
 const initiateMultipart = async (req, res, next) => {
@@ -188,7 +195,7 @@ const abortMultipart = async (req, res, next) => {
 };
 
 module.exports = {
-  requestUpload, completeUpload, getMyContent, updateContent, publishContent, unpublishContent, deleteContent,
+  requestUpload, completeUpload, requestThumbnailUpload, getMyContent, updateContent, publishContent, unpublishContent, deleteContent,
   getFeed, explore, getContent, getStreamUrl, getLikedContent, getSavedContent, toggleLike, toggleSave, rateContent, trackShare, getComments, addComment, reportContent,
   initiateMultipart, completeMultipart, abortMultipart,
 };

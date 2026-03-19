@@ -53,12 +53,23 @@ class UploadService {
 
   // --- Content Registration ---
 
-  async completeUpload({ creatorId, key, title, description, contentType, domain, topics, tags, difficulty }) {
+  async requestThumbnailUpload({ creatorId }) {
+    const key = `thumbnails/${creatorId}/${crypto.randomUUID()}.jpg`;
+    const uploadURL = await generateUploadURL(key, 'image/jpeg', 3600);
+    return { uploadURL, key, expiresIn: 3600 };
+  }
+
+  async completeUpload({ creatorId, key, title, description, contentType, domain, topics, tags, difficulty, thumbnailKey }) {
     const contentURL = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+
+    const thumbnailURL = thumbnailKey
+      ? `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${thumbnailKey}`
+      : null;
 
     const content = await Content.create({
       creatorId, title, description, contentType,
-      contentURL, domain, topics, tags, difficulty,
+      contentURL, s3Key: key, domain, topics, tags, difficulty,
+      thumbnailURL, thumbnailS3Key: thumbnailKey || null,
       sourceType: 'original',
       status: 'processing', aiStatus: 'pending',
     });
