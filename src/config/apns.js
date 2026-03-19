@@ -75,7 +75,10 @@ async function send(deviceToken, { title, body, data = {} }) {
   }
 
   return new Promise((resolve, reject) => {
-    const client = http2.connect(`https://${APNS_HOST}`);
+    const client = http2.connect(`https://${APNS_HOST}`, {
+      ALPNProtocols: ['h2'],
+      servername: APNS_HOST,
+    });
 
     const payload = JSON.stringify({
       aps: {
