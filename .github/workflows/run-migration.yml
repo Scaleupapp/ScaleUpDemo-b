@@ -7,16 +7,23 @@ on:
         description: 'Script to run (relative to project root)'
         required: false
         default: 'scripts/fix-s3-keys.js'
+      shell_cmd:
+        description: 'Raw shell command to run before script (optional)'
+        required: false
+        default: ''
 
 jobs:
   migrate:
     name: Run script on EC2
     runs-on: ubuntu-latest
     steps:
-      - name: Run script via SSH
+      - name: Run via SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          script: cd /home/ubuntu/scaleup-backend && git pull origin master && node ${{ github.event.inputs.script }}
+          script: |
+            cd /home/${{ secrets.EC2_USER }}/scaleup-backend && git pull origin master
+            ${{ github.event.inputs.shell_cmd }}
+            node ${{ github.event.inputs.script }}
