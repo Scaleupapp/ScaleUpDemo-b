@@ -1,17 +1,24 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const openai = require('../config/openai');
 const Content = require('../models/Content');
+const { s3 } = require('../config/s3');
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
+
+const execFileAsync = promisify(execFile);
+const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 
 /**
  * Whisper Transcription Worker
  *
  * Processes content items that have no transcript.
- * Downloads audio via ytdl-core → sends to OpenAI Whisper → stores transcript.
- * After transcription, re-queues the content for AI processing if needed.
+ * - YouTube: Downloads audio via ytdl-core
+ * - Original uploads: Downloads from S3, extracts audio with ffmpeg
+ * Then sends to OpenAI Whisper → stores transcript → re-queues for AI analysis.
  *
  * Cost: ~$0.006/minute of audio. A 10-min video ≈ $0.06.
  */
@@ -25,44 +32,61 @@ async function transcribeContent(job) {
     return { status: 'skipped', reason: 'transcript_exists' };
   }
 
-  // Only process YouTube content for now
-  if (!content.youtubeVideoId) {
-    return { status: 'skipped', reason: 'not_youtube' };
+  // Skip non-video content
+  if (content.contentType !== 'video') {
+    return { status: 'skipped', reason: 'not_video' };
   }
 
-  const tmpFile = path.join(os.tmpdir(), `scaleup-audio-${content.youtubeVideoId}-${Date.now()}.mp4`);
+  const tmpDir = os.tmpdir();
+  const timestamp = Date.now();
+  let tmpVideoFile = null;
+  let tmpAudioFile = null;
 
   try {
-    // Dynamic import — ytdl-core uses ESM-compatible patterns
-    const ytdl = require('ytdl-core');
+    if (content.youtubeVideoId) {
+      // --- YouTube path ---
+      tmpAudioFile = path.join(tmpDir, `scaleup-audio-yt-${content.youtubeVideoId}-${timestamp}.mp4`);
+      await downloadYoutubeAudio(content.youtubeVideoId, tmpAudioFile, job);
+    } else if (content.s3Key) {
+      // --- Original upload path: download from S3, extract audio with ffmpeg ---
+      const ext = path.extname(content.s3Key) || '.mp4';
+      tmpVideoFile = path.join(tmpDir, `scaleup-video-${contentId}-${timestamp}${ext}`);
+      tmpAudioFile = path.join(tmpDir, `scaleup-audio-${contentId}-${timestamp}.mp3`);
 
-    // Download audio-only stream
-    await job.updateProgress(10);
-    const audioStream = ytdl(`https://youtube.com/watch?v=${content.youtubeVideoId}`, {
-      quality: 'lowestaudio',
-      filter: 'audioonly',
-    });
+      await job.updateProgress(5);
+      await downloadFromS3(content.s3Key, tmpVideoFile);
+      await job.updateProgress(30);
 
-    // Pipe to temp file
-    const writeStream = fs.createWriteStream(tmpFile);
-    await pipeline(audioStream, writeStream);
-    await job.updateProgress(50);
+      // Extract audio: mono, 16kHz, 64kbps — keeps file small for Whisper
+      await execFileAsync(FFMPEG_PATH, [
+        '-i', tmpVideoFile,
+        '-vn',                    // no video
+        '-ac', '1',               // mono
+        '-ar', '16000',           // 16kHz sample rate
+        '-b:a', '64k',           // 64kbps bitrate
+        '-f', 'mp3',
+        '-y',                     // overwrite
+        tmpAudioFile,
+      ], { timeout: 300000 }); // 5 min timeout for extraction
 
-    // Check file size — Whisper has a 25MB limit
-    const stats = fs.statSync(tmpFile);
-    if (stats.size > 25 * 1024 * 1024) {
-      // File too large — skip for now (could chunk in future)
-      return { status: 'skipped', reason: 'file_too_large', sizeMB: (stats.size / 1024 / 1024).toFixed(1) };
+      await job.updateProgress(50);
+    } else {
+      return { status: 'skipped', reason: 'no_source' };
     }
 
+    // Check file size — Whisper has a 25MB limit
+    const stats = fs.statSync(tmpAudioFile);
+    if (stats.size > 25 * 1024 * 1024) {
+      return { status: 'skipped', reason: 'audio_too_large', sizeMB: (stats.size / 1024 / 1024).toFixed(1) };
+    }
     if (stats.size < 1024) {
-      return { status: 'skipped', reason: 'file_too_small' };
+      return { status: 'skipped', reason: 'audio_too_small' };
     }
 
     // Send to Whisper
     await job.updateProgress(60);
     const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(tmpFile),
+      file: fs.createReadStream(tmpAudioFile),
       model: 'whisper-1',
       language: 'en',
       response_format: 'text',
@@ -78,17 +102,14 @@ async function transcribeContent(job) {
     content.transcript = transcription;
     await content.save();
 
-    // If AI hasn't processed yet or used description fallback, re-queue for AI processing
-    if (content.aiStatus === 'pending' || content.aiStatus === 'failed') {
-      const { contentProcessingQueue } = require('../config/queue');
-      await contentProcessingQueue.add('process', { contentId: content._id.toString() });
-    }
+    // Re-queue for AI processing with the transcript
+    const { contentProcessingQueue } = require('../config/queue');
+    await contentProcessingQueue.add('process', { contentId: content._id.toString() });
 
     await job.updateProgress(100);
     return { status: 'completed', transcriptLength: transcription.length };
 
   } catch (err) {
-    // Specific error handling
     if (err.message?.includes('Video unavailable') || err.message?.includes('private video')) {
       return { status: 'skipped', reason: 'video_unavailable' };
     }
@@ -97,9 +118,34 @@ async function transcribeContent(job) {
     }
     throw err; // Let BullMQ retry for transient errors
   } finally {
-    // Always clean up temp file
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    // Clean up temp files
+    if (tmpVideoFile) try { fs.unlinkSync(tmpVideoFile); } catch { /* ignore */ }
+    if (tmpAudioFile) try { fs.unlinkSync(tmpAudioFile); } catch { /* ignore */ }
   }
+}
+
+// --- Helpers ---
+
+async function downloadYoutubeAudio(videoId, outputPath, job) {
+  const ytdl = require('ytdl-core');
+  await job.updateProgress(10);
+  const audioStream = ytdl(`https://youtube.com/watch?v=${videoId}`, {
+    quality: 'lowestaudio',
+    filter: 'audioonly',
+  });
+  const writeStream = fs.createWriteStream(outputPath);
+  await pipeline(audioStream, writeStream);
+  await job.updateProgress(50);
+}
+
+async function downloadFromS3(key, outputPath) {
+  const command = new GetObjectCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+  });
+  const response = await s3.send(command);
+  const writeStream = fs.createWriteStream(outputPath);
+  await pipeline(response.Body, writeStream);
 }
 
 module.exports = transcribeContent;

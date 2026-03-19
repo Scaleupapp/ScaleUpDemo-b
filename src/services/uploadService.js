@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { generateUploadURL, initiateMultipartUpload, getPartUploadURL, completeMultipartUpload, abortMultipartUpload } = require('../config/s3');
 const Content = require('../models/Content');
-const { contentProcessingQueue } = require('../config/queue');
+const { contentProcessingQueue, whisperTranscriptionQueue } = require('../config/queue');
 const ApiError = require('../utils/apiError');
 
 const MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024; // 4 GB
@@ -74,7 +74,13 @@ class UploadService {
       status: 'processing', aiStatus: 'pending',
     });
 
-    await contentProcessingQueue.add('process', { contentId: content._id });
+    if (contentType === 'video') {
+      // For videos: transcribe first, then AI analysis (transcriber re-queues processing)
+      await whisperTranscriptionQueue.add('transcribe', { contentId: content._id.toString() });
+    } else {
+      // For non-videos: go straight to AI analysis
+      await contentProcessingQueue.add('process', { contentId: content._id.toString() });
+    }
     return content;
   }
 }
