@@ -1,4 +1,8 @@
-const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const {
+  S3Client, PutObjectCommand, GetObjectCommand,
+  CreateMultipartUploadCommand, UploadPartCommand,
+  CompleteMultipartUploadCommand, AbortMultipartUploadCommand,
+} = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
@@ -50,4 +54,50 @@ async function uploadBuffer(key, buffer, contentType, { publicRead = false } = {
   return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 }
 
-module.exports = { s3, generateUploadURL, uploadStream, uploadBuffer };
+// --- S3 Multipart Upload helpers ---
+
+async function initiateMultipartUpload(key, contentType) {
+  const command = new CreateMultipartUploadCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+    ContentType: contentType,
+  });
+  const response = await s3.send(command);
+  return response.UploadId;
+}
+
+async function getPartUploadURL(key, uploadId, partNumber, expiresIn = 21600) {
+  const command = new UploadPartCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+    UploadId: uploadId,
+    PartNumber: partNumber,
+  });
+  return getSignedUrl(s3, command, { expiresIn });
+}
+
+async function completeMultipartUpload(key, uploadId, parts) {
+  const command = new CompleteMultipartUploadCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+    UploadId: uploadId,
+    MultipartUpload: {
+      Parts: parts.map(p => ({ ETag: p.etag, PartNumber: p.partNumber })),
+    },
+  });
+  return s3.send(command);
+}
+
+async function abortMultipartUpload(key, uploadId) {
+  const command = new AbortMultipartUploadCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+    UploadId: uploadId,
+  });
+  return s3.send(command);
+}
+
+module.exports = {
+  s3, generateUploadURL, uploadStream, uploadBuffer,
+  initiateMultipartUpload, getPartUploadURL, completeMultipartUpload, abortMultipartUpload,
+};

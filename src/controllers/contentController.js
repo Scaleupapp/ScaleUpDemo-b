@@ -164,7 +164,31 @@ const getStreamUrl = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// --- Multipart Upload ---
+
+const initiateMultipart = async (req, res, next) => {
+  try {
+    const data = await uploadService.initiateMultipart({ creatorId: req.user.userId, ...req.body });
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
+const completeMultipart = async (req, res, next) => {
+  try {
+    const data = await uploadService.completeMultipart(req.body);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
+const abortMultipart = async (req, res, next) => {
+  try {
+    const data = await uploadService.abortMultipart(req.body);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   requestUpload, completeUpload, getMyContent, updateContent, publishContent, unpublishContent, deleteContent,
   getFeed, explore, getContent, getStreamUrl, getLikedContent, getSavedContent, toggleLike, toggleSave, rateContent, trackShare, getComments, addComment, reportContent,
+  initiateMultipart, completeMultipart, abortMultipart,
 };

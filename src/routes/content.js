@@ -6,6 +6,9 @@ const rbac = require('../middleware/rbac');
 // Creator endpoints
 router.post('/request-upload', auth, rbac('creator'), ctrl.requestUpload);
 router.post('/complete-upload', auth, rbac('creator'), ctrl.completeUpload);
+router.post('/multipart/initiate', auth, rbac('creator'), ctrl.initiateMultipart);
+router.post('/multipart/complete', auth, rbac('creator'), ctrl.completeMultipart);
+router.post('/multipart/abort', auth, rbac('creator'), ctrl.abortMultipart);
 router.get('/my-content', auth, rbac('creator'), ctrl.getMyContent);
 router.put('/:id', auth, rbac('creator'), ctrl.updateContent);
 router.post('/:id/publish', auth, rbac('creator'), ctrl.publishContent);
