@@ -1,6 +1,7 @@
 const admin = require('../config/firebase');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
+const apnsPush = require('../config/apns');
 
 class NotificationService {
 
@@ -26,10 +27,18 @@ class NotificationService {
       const user = await User.findById(userId).select('fcmToken').lean();
       if (!user || !user.fcmToken) return null;
 
+      const token = user.fcmToken;
+
+      // Detect if token is a raw APNs hex token (64-128 hex chars) vs FCM token
+      if (this._isApnsToken(token)) {
+        return await apnsPush.send(token, { title, body, data });
+      }
+
+      // FCM path
       if (!admin.apps.length) return null;
 
       const message = {
-        token: user.fcmToken,
+        token,
         notification: { title, body },
         data: this._stringifyData(data),
       };
@@ -48,21 +57,27 @@ class NotificationService {
     const users = await User.find({ _id: { $in: userIds }, fcmToken: { $exists: true, $ne: null } })
       .select('fcmToken').lean();
 
-    if (users.length === 0 || !admin.apps.length) return [];
+    if (users.length === 0) return [];
 
-    const messages = users.map(user => ({
-      token: user.fcmToken,
-      notification: { title, body },
-      data: this._stringifyData(data),
-    }));
-
-    try {
-      const response = await admin.messaging().sendEach(messages);
-      return response.responses;
-    } catch (err) {
-      console.error('Batch push notification failed:', err.message);
-      return [];
+    const results = [];
+    for (const user of users) {
+      try {
+        if (this._isApnsToken(user.fcmToken)) {
+          await apnsPush.send(user.fcmToken, { title, body, data });
+        } else if (admin.apps.length) {
+          await admin.messaging().send({
+            token: user.fcmToken,
+            notification: { title, body },
+            data: this._stringifyData(data),
+          });
+        }
+        results.push({ success: true });
+      } catch (err) {
+        results.push({ success: false, error: err.message });
+      }
     }
+
+    return results;
   }
 
   /**
@@ -104,6 +119,13 @@ class NotificationService {
       console.error(`In-app notification creation failed for user ${userId}:`, err.message);
       return null;
     }
+  }
+
+  /**
+   * Detect raw APNs device token (hex string, 64-200 chars, only hex chars).
+   */
+  _isApnsToken(token) {
+    return /^[a-f0-9]{64,200}$/i.test(token);
   }
 
   /**
