@@ -1,0 +1,17 @@
+name: Run DB Migration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    name: Fix s3Key for existing content
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run migration via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: cd /home/ubuntu/scaleup-backend && git pull origin master && node scripts/fix-s3-keys.js
