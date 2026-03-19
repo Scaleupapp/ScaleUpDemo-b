@@ -78,8 +78,16 @@ async function send(deviceToken, { title, body, data = {} }) {
     return null;
   }
 
-  return new Promise((resolve, reject) => {
-    const client = http2.connect(`https://${APNS_HOST}`, {
+  return new Promise(async (resolve, reject) => {
+    // Resolve IPv4 address explicitly (EC2 lacks IPv6)
+    let host = APNS_HOST;
+    try {
+      const { resolve4 } = require('dns').promises;
+      const addrs = await resolve4(APNS_HOST);
+      if (addrs.length > 0) host = addrs[0];
+    } catch (_) {}
+
+    const client = http2.connect(`https://${host}`, {
       ALPNProtocols: ['h2'],
       servername: APNS_HOST,
     });
