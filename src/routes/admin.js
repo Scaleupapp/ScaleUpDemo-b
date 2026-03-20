@@ -19,6 +19,7 @@ router.get('/content', ctrl.getContent);
 router.put('/content/:id/moderate', ctrl.moderateContent);
 router.put('/content/:id/remove', ctrl.removeContent);
 router.put('/content/:id/dismiss', ctrl.dismissReports);
+router.get('/content/:id/reports', ctrl.getContentReports);
 
 // Creator tier promotion
 router.put('/creators/:id/promote', ctrl.promoteCreator);

@@ -170,7 +170,16 @@ const dismissReports = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getContentReports = async (req, res, next) => {
+  try {
+    const reports = await ContentReport.find({ contentId: req.params.id })
+      .populate('reporterId', 'firstName lastName email')
+      .sort({ createdAt: -1 });
+    res.json(apiResponse.success(reports));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPendingApplications, rejectApplication, getUsers, banUser, unbanUser,
-  moderateContent, getStats, promoteCreator, getContent, removeContent, dismissReports,
+  moderateContent, getStats, promoteCreator, getContent, removeContent, dismissReports, getContentReports,
 };
