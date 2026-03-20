@@ -1,8 +1,29 @@
 const Content = require('../models/Content');
 const { paginationMeta } = require('../utils/pagination');
 const ApiError = require('../utils/apiError');
+const { s3 } = require('../config/s3');
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 class ContentService {
+
+  /**
+   * Replace thumbnailURL with a presigned S3 URL for items that have thumbnailS3Key.
+   * Direct S3 URLs don't work if the bucket isn't public.
+   */
+  async _signThumbnails(items) {
+    const docs = Array.isArray(items) ? items : [items];
+    await Promise.all(docs.map(async (doc) => {
+      const key = doc.thumbnailS3Key;
+      if (!key) return;
+      try {
+        const cmd = new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: key });
+        const url = await getSignedUrl(s3, cmd, { expiresIn: 86400 }); // 24h
+        doc.thumbnailURL = url;
+      } catch { /* keep original URL */ }
+    }));
+    return items;
+  }
 
   async getMyContent(creatorId, { page = 1, limit = 20, status }) {
     const filter = { creatorId };
@@ -12,6 +33,7 @@ class ContentService {
       Content.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
       Content.countDocuments(filter),
     ]);
+    await this._signThumbnails(items);
     return { items, pagination: paginationMeta(total, page, limit) };
   }
 
@@ -55,6 +77,7 @@ class ContentService {
   async getContent(contentId) {
     const content = await Content.findById(contentId).populate('creatorId', 'firstName lastName username profilePicture');
     if (!content) throw new ApiError(404, 'Content not found');
+    await this._signThumbnails([content]);
     return content;
   }
 
@@ -66,6 +89,7 @@ class ContentService {
         .populate('creatorId', 'firstName lastName username profilePicture'),
       Content.countDocuments({ status: 'published' }),
     ]);
+    await this._signThumbnails(items);
     return { items, pagination: paginationMeta(total, page, limit) };
   }
 
@@ -83,6 +107,7 @@ class ContentService {
         .populate('creatorId', 'firstName lastName username profilePicture'),
       Content.countDocuments(filter),
     ]);
+    await this._signThumbnails(items);
     return { items, pagination: paginationMeta(total, page, limit) };
   }
 }
