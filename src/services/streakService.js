@@ -1,5 +1,6 @@
 const Journey = require('../models/Journey');
 const ContentProgress = require('../models/ContentProgress');
+const QuizAttempt = require('../models/QuizAttempt');
 
 /**
  * Returns the start of a given date (midnight UTC).
@@ -11,19 +12,26 @@ function startOfDayUTC(date) {
 }
 
 /**
- * Checks whether the user completed any content on a given UTC date.
+ * Checks whether the user had any learning activity on a given UTC date.
+ * Counts both content completion AND quiz completion.
  */
 async function hadActivityOn(userId, date) {
   const dayStart = startOfDayUTC(date);
   const dayEnd = new Date(dayStart);
   dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
 
-  const count = await ContentProgress.countDocuments({
-    userId,
-    isCompleted: true,
-    completedAt: { $gte: dayStart, $lt: dayEnd },
-  });
-  return count > 0;
+  const [contentCount, quizCount] = await Promise.all([
+    ContentProgress.countDocuments({
+      userId,
+      isCompleted: true,
+      completedAt: { $gte: dayStart, $lt: dayEnd },
+    }),
+    QuizAttempt.countDocuments({
+      userId,
+      completedAt: { $gte: dayStart, $lt: dayEnd },
+    }),
+  ]);
+  return contentCount > 0 || quizCount > 0;
 }
 
 /**

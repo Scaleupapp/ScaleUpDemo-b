@@ -2,6 +2,7 @@ const QuizAttempt = require('../models/QuizAttempt');
 const Quiz = require('../models/Quiz');
 const UserObjective = require('../models/UserObjective');
 const { quizAnalysisQueue } = require('../config/queue');
+const { updateStreak } = require('./streakService');
 
 class QuizScoringService {
 
@@ -122,6 +123,9 @@ class QuizScoringService {
     }
 
     await quizAnalysisQueue.add('analyze', { attemptId: attempt._id, userId: attempt.userId });
+
+    // Update streak — quiz completion counts as daily activity
+    try { await updateStreak(attempt.userId.toString()); } catch { /* non-fatal */ }
 
     return attempt;
   }
