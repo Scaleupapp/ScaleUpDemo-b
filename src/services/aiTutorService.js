@@ -231,13 +231,16 @@ class AiTutorService {
       };
     }));
 
+    const totalPages = Math.ceil(total / limit);
     return {
       items: withPreviews,
       pagination: {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit),
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
       },
     };
   }
