@@ -104,18 +104,25 @@ async function runWeeklyReviewQuiz() {
 
     if (recentTopics.length === 0) continue;
 
+    // Use the most-consumed recent topic as the primary topic
+    const primaryTopic = recentTopics[0];
+
     // Gather content IDs from recent topics
     const contentIds = graph.topicNodes
       .filter(n => recentTopics.includes(n.topic))
-      .flatMap(n => n.contentIds.slice(-3));
+      .flatMap(n => n.contentIds.slice(-3))
+      .map(id => id.toString());
 
     await quizGenerationQueue.add('generate', {
-      userId: graph.userId,
-      topic: recentTopics.join(', '),
+      userId: graph.userId.toString(),
+      topic: primaryTopic,
       contentIds,
-      type: 'weekly_review',
+      type: 'weekly_checkpoint',  // Must match TRIGGER_TO_QUIZ_TYPE mapping
       triggerId: null,
+      questionCount: 12,
     });
+
+    console.log(`[CronJobs] Weekly review quiz queued for user ${graph.userId}, topic="${primaryTopic}", covering ${recentTopics.length} topics`);
   }
 }
 
@@ -138,9 +145,9 @@ async function runRetentionCheck() {
       if (!node || node.contentIds.length === 0) continue;
 
       await quizGenerationQueue.add('generate', {
-        userId: profile.userId,
+        userId: profile.userId.toString(),
         topic: topic.topic,
-        contentIds: node.contentIds.slice(-5),
+        contentIds: node.contentIds.slice(-5).map(id => id.toString()),
         type: 'retention_check',
         triggerId: null,
       });
