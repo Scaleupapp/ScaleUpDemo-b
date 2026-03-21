@@ -167,9 +167,14 @@ class QuizGenerationService {
 
     let questions;
     try {
-      // Scale max_tokens: ~500 tokens per question for regular, ~600 for competency (scenarios, text prompts)
-      const tokensPerQuestion = competencyContext ? 600 : 500;
-      const maxTokens = Math.max(4000, questionCount * tokensPerQuestion);
+      // Scale max_tokens based on question complexity:
+      // - Regular recall/mixed: ~500 tokens/question
+      // - Competency-based: ~700 tokens/question (scenarios, text prompts, time limits)
+      // - Case study/applied_scenario: ~800 tokens/question (long scenarios)
+      const complexTypes = ['case_study', 'applied_scenario', 'situational_judgment', 'exam_style'];
+      const isComplexType = complexTypes.includes(effectiveAssessmentType);
+      const tokensPerQuestion = competencyContext ? 700 : isComplexType ? 800 : 500;
+      const maxTokens = Math.max(4096, questionCount * tokensPerQuestion);
 
       console.log(`[QuizGeneration] Calling OpenAI for topic="${topic}", questionCount=${questionCount}, assessmentType=${effectiveAssessmentType || 'mixed'}, contentCount=${conceptData.length}, competencyAware=${!!competencyContext}, maxTokens=${maxTokens}`);
 
@@ -216,7 +221,7 @@ class QuizGenerationService {
           ],
           response_format: { type: 'json_object' },
           temperature: 0.75,
-          max_tokens: Math.max(3000, remaining * tokensPerQuestion),
+          max_tokens: Math.max(4096, remaining * tokensPerQuestion),
         });
 
         const contParsed = JSON.parse(contResponse.choices[0].message.content);
@@ -285,11 +290,25 @@ class QuizGenerationService {
 
     const quizTitle = isSkillAssessment ? `${topic} — Skill Assessment` : `${topic} — Knowledge Check`;
 
+    // Set time per question based on assessment complexity
+    const TIME_PER_QUESTION = {
+      knowledge_recall: 60,
+      applied_scenario: 90,
+      situational_judgment: 90,
+      framework_application: 120,
+      exam_style: 90,
+      case_study: 150,
+      competency_gate: 90,
+      mixed: 75,
+    };
+    const timePerQuestion = TIME_PER_QUESTION[effectiveAssessmentType] || 60;
+
     const quiz = await Quiz.create({
       userId, title: quizTitle, type: quizType, topic,
       sourceContentIds: contentIds || [],
       questions: sanitizedQuestions,
       totalQuestions: questions.length,
+      timePerQuestion,
       assessmentType: effectiveAssessmentType || undefined,
       linkedCompetencies: linkedCompetencies.length > 0 ? linkedCompetencies : undefined,
       objectiveId: objectiveId || undefined,

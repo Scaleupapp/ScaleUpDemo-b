@@ -41,6 +41,7 @@ const knowledgeProfileSchema = new mongoose.Schema({
   totalQuizzesTaken: { type: Number, default: 0 },
   totalTopicsCovered: { type: Number, default: 0 },
   lastUpdatedAt: { type: Date, default: Date.now },
+  _processedAttempts: [{ type: String }],  // Idempotency: track processed quiz attempt IDs
 }, { timestamps: true });
 
 knowledgeProfileSchema.index({ userId: 1 });

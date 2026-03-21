@@ -18,7 +18,14 @@ class KnowledgeService {
 
     let profile = await KnowledgeProfile.findOne({ userId });
     if (!profile) {
-      profile = await KnowledgeProfile.create({ userId, topicMastery: [] });
+      profile = await KnowledgeProfile.create({ userId, topicMastery: [], _processedAttempts: [] });
+    }
+
+    // Idempotency guard: skip if this attempt was already processed
+    const attemptIdStr = attemptId.toString();
+    if (profile._processedAttempts && profile._processedAttempts.includes(attemptIdStr)) {
+      console.log(`[KnowledgeService] Skipping already-processed attempt ${attemptIdStr}`);
+      return profile;
     }
 
     // Update per-topic mastery from the attempt's topic breakdown
@@ -106,6 +113,14 @@ class KnowledgeService {
     // ── Compute Behavioral Profile ───────────────────────────────────
     await this._computeBehavioralProfile(profile, userId);
 
+    // Mark this attempt as processed (idempotency)
+    if (!profile._processedAttempts) profile._processedAttempts = [];
+    profile._processedAttempts.push(attemptIdStr);
+    // Keep only last 200 to prevent unbounded growth
+    if (profile._processedAttempts.length > 200) {
+      profile._processedAttempts = profile._processedAttempts.slice(-200);
+    }
+
     profile.lastUpdatedAt = new Date();
     await profile.save();
 
@@ -127,6 +142,14 @@ class KnowledgeService {
     let profile = await KnowledgeProfile.findOne({ userId });
     if (!profile) {
       profile = await KnowledgeProfile.create({ userId, topicMastery: [] });
+    }
+
+    // Reconcile totalQuizzesTaken against actual completed attempts
+    const actualCount = await QuizAttempt.countDocuments({ userId, status: 'completed' });
+    if (profile.totalQuizzesTaken !== actualCount) {
+      console.log(`[KnowledgeService] Reconciling totalQuizzesTaken: stored=${profile.totalQuizzesTaken}, actual=${actualCount}`);
+      profile.totalQuizzesTaken = actualCount;
+      await profile.save();
     }
 
     // Backfill velocity + behavioral if never computed
