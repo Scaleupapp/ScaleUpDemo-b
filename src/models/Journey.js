@@ -18,7 +18,7 @@ const weeklyPlanSchema = new mongoose.Schema({
   dailyAssignments: [dailyAssignmentSchema],
   scheduledQuiz: {
     dayOfWeek: Number,
-    type: String,
+    type: { type: String },
     topics: [String],
     quizId: { type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' },
     completed: { type: Boolean, default: false },
