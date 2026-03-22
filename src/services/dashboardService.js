@@ -9,14 +9,19 @@ const journeyProgressService = require('./journeyProgressService');
 
 class DashboardService {
 
-  async getDashboard(userId) {
+  async getDashboard(userId, objectiveId = null) {
     // Ensure streak is fresh before reading it
     await ensureStreakFresh(userId);
+
+    let journeyQuery = { userId, status: { $in: ['active', 'paused'] } };
+    if (objectiveId) {
+      journeyQuery.objectiveId = objectiveId;
+    }
 
     const [objectives, profile, journey, pendingQuizzes, graph] = await Promise.all([
       UserObjective.find({ userId, status: 'active' }).sort({ isPrimary: -1 }),
       KnowledgeProfile.findOne({ userId }),
-      Journey.findOne({ userId, status: 'active' }),
+      Journey.findOne(journeyQuery).sort({ status: 1 }), // 'active' sorts before 'paused'
       Quiz.countDocuments({ userId, status: { $in: ['ready', 'delivered'] }, expiresAt: { $gt: new Date() } }),
       ConsumptionGraph.findOne({ userId }),
     ]);

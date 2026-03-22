@@ -9,6 +9,22 @@ const apiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { updateStreak } = require('../services/streakService');
 
+/**
+ * Calculate active elapsed time for a journey, excluding paused periods.
+ */
+function getActiveElapsedMs(journey) {
+  const now = Date.now();
+  const totalElapsed = now - new Date(journey.createdAt).getTime();
+  let pausedMs = journey.pausedDuration || 0;
+
+  // If currently paused, add the ongoing pause duration too
+  if (journey.pausedAt) {
+    pausedMs += now - new Date(journey.pausedAt).getTime();
+  }
+
+  return Math.max(0, totalElapsed - pausedMs);
+}
+
 const getActiveJourney = async (req, res, next) => {
   try {
     const journey = await Journey.findOne({ userId: req.user.userId, status: 'active' });
@@ -168,7 +184,8 @@ const pauseJourney = async (req, res, next) => {
   try {
     const journey = await Journey.findOneAndUpdate(
       { userId: req.user.userId, status: 'active' },
-      { status: 'paused' }, { new: true }
+      { status: 'paused', pausedAt: new Date(), lastResumedAt: null },
+      { new: true }
     );
     res.json(apiResponse.success(journey, 'Journey paused'));
   } catch (err) { next(err); }
@@ -176,10 +193,22 @@ const pauseJourney = async (req, res, next) => {
 
 const resumeJourney = async (req, res, next) => {
   try {
-    const journey = await Journey.findOneAndUpdate(
-      { userId: req.user.userId, status: 'paused' },
-      { status: 'active' }, { new: true }
-    );
+    // First fetch the journey to calculate accumulated paused duration
+    const journey = await Journey.findOne({ userId: req.user.userId, status: 'paused' });
+    if (!journey) {
+      return res.json(apiResponse.success(null, 'Journey resumed'));
+    }
+
+    // Accumulate time spent paused into pausedDuration
+    if (journey.pausedAt) {
+      const pausedMs = Date.now() - new Date(journey.pausedAt).getTime();
+      journey.pausedDuration = (journey.pausedDuration || 0) + pausedMs;
+    }
+    journey.pausedAt = null;
+    journey.lastResumedAt = new Date();
+    journey.status = 'active';
+    await journey.save();
+
     res.json(apiResponse.success(journey, 'Journey resumed'));
   } catch (err) { next(err); }
 };
@@ -244,7 +273,13 @@ const completeAssignment = async (req, res, next) => {
  */
 const getDashboard = async (req, res, next) => {
   try {
-    const journey = await Journey.findOne({ userId: req.user.userId, status: { $in: ['active', 'paused'] } });
+    const { objectiveId } = req.query;
+
+    let journeyQuery = { userId: req.user.userId, status: { $in: ['active', 'paused'] } };
+    if (objectiveId) {
+      journeyQuery.objectiveId = objectiveId;
+    }
+    const journey = await Journey.findOne(journeyQuery).sort({ status: 1 }); // 'active' sorts before 'paused'
     if (!journey) throw new ApiError(404, 'No active journey');
 
     // Sync progress: reconcile content watched before/outside the journey
@@ -352,9 +387,10 @@ const getDashboard = async (req, res, next) => {
       const target = new Date(objective.targetDate);
       daysRemaining = Math.max(0, Math.ceil((target - now) / (1000 * 60 * 60 * 24)));
 
-      // Expected progress based on time elapsed
+      // Expected progress based on active elapsed time (excludes paused periods)
+      const activeElapsedMs = getActiveElapsedMs(journey);
       const totalDuration = Math.ceil((target - new Date(journey.createdAt)) / (1000 * 60 * 60 * 24));
-      const elapsed = totalDuration - daysRemaining;
+      const elapsed = Math.ceil(activeElapsedMs / (1000 * 60 * 60 * 24));
       const expectedPct = Math.min(100, Math.round((elapsed / Math.max(totalDuration, 1)) * 100));
 
       if (overallPct >= expectedPct + 15) paceStatus = 'ahead';

@@ -55,6 +55,20 @@ const journeySchema = new mongoose.Schema({
   title: { type: String, required: true },
   status: { type: String, enum: ['generating', 'active', 'paused', 'completed', 'abandoned'], default: 'generating' },
 
+  pausedDuration: {
+    type: Number,
+    default: 0,
+    min: 0
+  }, // Total ms spent paused (accumulated across pause/resume cycles)
+  pausedAt: {
+    type: Date,
+    default: null
+  }, // When journey was last paused (null if active)
+  lastResumedAt: {
+    type: Date,
+    default: null
+  }, // When journey was last resumed
+
   phases: [{
     name: { type: String, required: true },
     type: { type: String, enum: ['foundation', 'building', 'strengthening', 'mastery', 'revision', 'exam_prep'] },

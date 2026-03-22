@@ -13,8 +13,22 @@ const knowledgeProfileSchema = new mongoose.Schema({
     },
     quizzesTaken: { type: Number, default: 0 },
     lastAssessedAt: { type: Date },
-    scoreHistory: [{ score: Number, date: Date, quizId: mongoose.Schema.Types.ObjectId }],
+    scoreHistory: [{
+      score: Number,
+      date: Date,
+      quizId: mongoose.Schema.Types.ObjectId,
+      objectiveId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'UserObjective',
+        default: null
+      }
+    }],
     trend: { type: String, enum: ['improving', 'stable', 'declining'], default: 'stable' },
+    objectiveId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'UserObjective',
+      default: null
+    }, // null = legacy/global entry, set = objective-specific
   }],
 
   learningVelocity: {

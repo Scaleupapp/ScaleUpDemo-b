@@ -1,4 +1,5 @@
 const UserObjective = require('../models/UserObjective');
+const Journey = require('../models/Journey');
 const ApiError = require('../utils/apiError');
 
 class ObjectiveService {
@@ -62,6 +63,79 @@ class ObjectiveService {
     await UserObjective.findByIdAndUpdate(objectiveId, { isPrimary: true });
     await this.rebalanceWeights(userId);
     return UserObjective.findById(objectiveId);
+  }
+
+  async activateObjective(userId, objectiveId) {
+    const objective = await UserObjective.findOne({ _id: objectiveId, userId, status: 'active' });
+    if (!objective) {
+      throw Object.assign(new Error('Objective not found or not active'), { statusCode: 404 });
+    }
+
+    // Already primary — no-op
+    if (objective.isPrimary) {
+      const journey = await Journey.findOne({ userId, objectiveId, status: { $in: ['active', 'paused'] } });
+      return { objective, journey, switched: false };
+    }
+
+    const previousPrimaryId = (await UserObjective.findOne({ userId, isPrimary: true, status: 'active' }))?._id;
+
+    try {
+      const now = new Date();
+
+      // 1. Pause current active journey (if any)
+      const currentJourney = await Journey.findOne({ userId, status: 'active' });
+      if (currentJourney) {
+        currentJourney.status = 'paused';
+        currentJourney.pausedAt = now;
+        currentJourney.lastResumedAt = null;
+        await currentJourney.save();
+      }
+
+      // 2. Set this objective as primary (unset others)
+      await UserObjective.updateMany(
+        { userId, status: 'active' },
+        { $set: { isPrimary: false } }
+      );
+      objective.isPrimary = true;
+      await objective.save();
+
+      // 3. Rebalance weights
+      await this.rebalanceWeights(userId);
+
+      // 4. Resume target objective's journey (if exists) or flag for generation
+      let targetJourney = await Journey.findOne({ userId, objectiveId, status: 'paused' });
+      let needsGeneration = false;
+
+      if (targetJourney) {
+        // Accumulate paused duration
+        if (targetJourney.pausedAt) {
+          const pausedMs = now.getTime() - new Date(targetJourney.pausedAt).getTime();
+          targetJourney.pausedDuration = (targetJourney.pausedDuration || 0) + pausedMs;
+        }
+        targetJourney.status = 'active';
+        targetJourney.lastResumedAt = now;
+        targetJourney.pausedAt = null;
+        await targetJourney.save();
+      } else {
+        targetJourney = await Journey.findOne({ userId, objectiveId, status: 'active' });
+        if (!targetJourney) {
+          needsGeneration = true;
+        }
+      }
+
+      return {
+        objective,
+        journey: targetJourney,
+        switched: true,
+        needsGeneration
+      };
+    } catch (error) {
+      // Rollback: restore previous primary
+      if (previousPrimaryId) {
+        await UserObjective.updateOne({ _id: previousPrimaryId }, { $set: { isPrimary: true } });
+      }
+      throw error;
+    }
   }
 
   async rebalanceWeights(userId) {

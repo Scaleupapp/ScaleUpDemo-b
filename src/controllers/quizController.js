@@ -5,6 +5,7 @@ const KnowledgeProfile = require('../models/KnowledgeProfile');
 const Content = require('../models/Content');
 const ContentProgress = require('../models/ContentProgress');
 const Journey = require('../models/Journey');
+const UserObjective = require('../models/UserObjective');
 const quizTriggerService = require('../services/quizTriggerService');
 const quizScoringService = require('../services/quizScoringService');
 const assessmentEvaluationService = require('../services/assessmentEvaluationService');
@@ -322,10 +323,25 @@ const getTriggerStatus = async (req, res, next) => {
 
 const getPendingQuizzes = async (req, res, next) => {
   try {
-    const quizzes = await Quiz.find({
+    // Get the user's primary/active objective for scoping
+    const activeObjective = await UserObjective.findOne({
       userId: req.user.userId,
-      status: { $in: ['ready', 'delivered'] },
-    }).sort({ createdAt: -1 }).select('_id title topic type totalQuestions createdAt');
+      isPrimary: true,
+      status: 'active',
+    });
+
+    let quizQuery = { userId: req.user.userId, status: { $in: ['ready', 'delivered'] } };
+    if (activeObjective) {
+      // Show quizzes for active objective OR legacy quizzes with no objective tag
+      quizQuery.$or = [
+        { objectiveId: activeObjective._id },
+        { objectiveId: null },
+        { objectiveId: { $exists: false } },
+      ];
+    }
+
+    const quizzes = await Quiz.find(quizQuery)
+      .sort({ createdAt: -1 }).select('_id title topic type totalQuestions createdAt');
     res.json(apiResponse.success(quizzes));
   } catch (err) { next(err); }
 };

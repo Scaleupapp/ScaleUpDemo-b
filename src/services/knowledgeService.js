@@ -44,6 +44,7 @@ class KnowledgeService {
           score: newScore,
           date: new Date(),
           quizId: quiz._id,
+          objectiveId: quiz.objectiveId || null,
         });
         // Keep last 20 history entries
         if (topicEntry.scoreHistory.length > 20) {
@@ -57,8 +58,9 @@ class KnowledgeService {
           level: this._scoreToLevel(newScore),
           quizzesTaken: 1,
           lastAssessedAt: new Date(),
-          scoreHistory: [{ score: newScore, date: new Date(), quizId: quiz._id }],
+          scoreHistory: [{ score: newScore, date: new Date(), quizId: quiz._id, objectiveId: quiz.objectiveId || null }],
           trend: 'stable',
+          objectiveId: quiz.objectiveId || null,
         });
       }
     }
@@ -74,7 +76,7 @@ class KnowledgeService {
         topicEntry.level = this._scoreToLevel(topicEntry.score);
         topicEntry.quizzesTaken += 1;
         topicEntry.lastAssessedAt = new Date();
-        topicEntry.scoreHistory.push({ score, date: new Date(), quizId: quiz._id });
+        topicEntry.scoreHistory.push({ score, date: new Date(), quizId: quiz._id, objectiveId: quiz.objectiveId || null });
         topicEntry.trend = this._calculateTrend(topicEntry.scoreHistory);
       } else {
         profile.topicMastery.push({
@@ -83,8 +85,9 @@ class KnowledgeService {
           level: this._scoreToLevel(score),
           quizzesTaken: 1,
           lastAssessedAt: new Date(),
-          scoreHistory: [{ score, date: new Date(), quizId: quiz._id }],
+          scoreHistory: [{ score, date: new Date(), quizId: quiz._id, objectiveId: quiz.objectiveId || null }],
           trend: 'stable',
+          objectiveId: quiz.objectiveId || null,
         });
       }
     }

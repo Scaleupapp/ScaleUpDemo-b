@@ -3,7 +3,7 @@ const apiResponse = require('../utils/apiResponse');
 
 const getDashboard = async (req, res, next) => {
   try {
-    const data = await dashboardService.getDashboard(req.user.userId);
+    const data = await dashboardService.getDashboard(req.user.userId, req.query.objectiveId);
     const response = apiResponse.success(data);
     console.log('📊 DASHBOARD RESPONSE:', JSON.stringify(response, null, 2));
     res.json(response);

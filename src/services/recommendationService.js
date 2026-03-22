@@ -266,17 +266,31 @@ class RecommendationService {
     const currentLevel = objective.currentLevel || 'beginner';
     const difficultyMix = DIFFICULTY_MIX[currentLevel] || DIFFICULTY_MIX.beginner;
 
-    const query = {
+    // Query 1: Fresh content (excludes consumed/completed content)
+    const freshQuery = {
       status: 'published',
       _id: { $nin: consumedIds },
     };
     if (topics.length) {
-      query.topics = { $in: topics };
+      freshQuery.topics = { $in: topics };
     }
 
-    const candidates = await Content.find(query).lean();
+    // Query 2: Completed content relevant to this objective (capped at 10)
+    const completedQuery = {
+      status: 'published',
+      _id: { $in: consumedIds },
+    };
+    if (topics.length) {
+      completedQuery.topics = { $in: topics };
+    }
 
-    const scored = candidates.map(content => {
+    const [freshCandidates, completedCandidates] = await Promise.all([
+      Content.find(freshQuery).lean(),
+      consumedIds.length > 0 ? Content.find(completedQuery).limit(10).lean() : Promise.resolve([]),
+    ]);
+
+    // Scoring helper for this objective
+    const scoreForObjective = (content) => {
       let score = 0;
 
       // Topic relevance to this objective
@@ -302,15 +316,33 @@ class RecommendationService {
         score += this._gapBonusScore(content, knowledgeProfile);
       }
 
-      return { content, score };
-    });
+      return score;
+    };
 
-    scored.sort((a, b) => b.score - a.score);
+    // Score fresh content
+    const freshScored = freshCandidates.map(content => ({
+      content,
+      score: scoreForObjective(content),
+      isCompleted: false,
+    }));
+    freshScored.sort((a, b) => b.score - a.score);
 
-    const items = scored.slice(0, limit).map(s => ({
+    // Score completed content
+    const completedScored = completedCandidates.map(content => ({
+      content,
+      score: scoreForObjective(content),
+      isCompleted: true,
+    }));
+    completedScored.sort((a, b) => b.score - a.score);
+
+    // Merge: fresh first (sorted by score), then completed (sorted by score)
+    const combined = [...freshScored, ...completedScored].slice(0, limit);
+
+    const items = combined.map(s => ({
       ...s.content,
       _recommendationScore: Math.round(s.score * 100) / 100,
       _forObjective: objective.objectiveType,
+      isCompleted: s.isCompleted,
     }));
 
     return { items };

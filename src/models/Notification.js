@@ -7,6 +7,11 @@ const notificationSchema = new mongoose.Schema({
     enum: ['quiz_available', 'milestone_reached', 'streak_reminder', 'journey_update', 'social_follow', 'social_comment'],
     required: true,
   },
+  objectiveId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'UserObjective',
+    default: null
+  }, // null = global notification, set = objective-specific
   title: { type: String, required: true },
   message: { type: String, required: true },
   isRead: { type: Boolean, default: false },

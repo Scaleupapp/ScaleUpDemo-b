@@ -40,4 +40,8 @@ const getObjectiveBrief = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getObjectives, createObjective, updateObjective, pauseObjective, resumeObjective, setPrimary, analyzeObjective, getObjectiveBrief };
+const activateObjective = async (req, res, next) => {
+  try { res.json(apiResponse.success(await objectiveService.activateObjective(req.user.userId, req.params.id))); } catch (err) { next(err); }
+};
+
+module.exports = { getObjectives, createObjective, updateObjective, pauseObjective, resumeObjective, setPrimary, analyzeObjective, getObjectiveBrief, activateObjective };
