@@ -7,7 +7,7 @@ const ConsumptionGraph = require('../models/ConsumptionGraph');
 const Journey = require('../models/Journey');
 const CreatorProfile = require('../models/CreatorProfile');
 const Content = require('../models/Content');
-const { quizGenerationQueue, notificationQueue } = require('../config/queue');
+const { quizGenerationQueue, notificationQueue, competitionQueue } = require('../config/queue');
 const { resetStaleStreaks } = require('../services/streakService');
 
 function startCronJobs() {
@@ -54,6 +54,54 @@ function startCronJobs() {
   // 7. Streak Reset — Daily 1:30 AM UTC (after journey advancement)
   cronQueue.add('streakReset', {}, {
     repeat: { pattern: '30 1 * * *' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Generate weekly candidates — Sunday 23:00 IST (17:30 UTC)
+  competitionQueue.add('generateWeeklyCandidates', {}, {
+    repeat: { pattern: '30 17 * * 0' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Activate daily challenge — Daily 00:00 IST (18:30 UTC prev day)
+  competitionQueue.add('activateDailyChallenge', {}, {
+    repeat: { pattern: '30 18 * * *' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Finalize daily rankings — Daily 00:30 IST (19:00 UTC prev day)
+  competitionQueue.add('finalizeDailyRankings', {}, {
+    repeat: { pattern: '0 19 * * *' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Finalize weekly leaderboard — Monday 00:30 IST (Sun 19:00 UTC)
+  competitionQueue.add('finalizeWeeklyLeaderboard', {}, {
+    repeat: { pattern: '0 19 * * 0' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Streak reminder — Daily 21:00 IST (15:30 UTC)
+  competitionQueue.add('streakReminderNotification', {}, {
+    repeat: { pattern: '30 15 * * *' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Live event reminder — Mon/Wed/Fri 19:30 IST (14:00 UTC)
+  competitionQueue.add('liveEventReminder', {}, {
+    repeat: { pattern: '0 14 * * 1,3,5' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Open live event lobby — Mon/Wed/Fri 19:55 IST (14:25 UTC)
+  competitionQueue.add('openLiveEventLobby', {}, {
+    repeat: { pattern: '25 14 * * 1,3,5' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Start live event — Mon/Wed/Fri 20:00 IST (14:30 UTC)
+  competitionQueue.add('startLiveEvent', {}, {
+    repeat: { pattern: '30 14 * * 1,3,5' },
     removeOnComplete: true,
   });
 

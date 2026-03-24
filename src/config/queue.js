@@ -11,6 +11,7 @@ const journeyAdaptationQueue = new Queue('journeyAdaptation', { connection });
 const notificationQueue = new Queue('notifications', { connection });
 const youtubeImportQueue = new Queue('youtubeImport', { connection });
 const whisperTranscriptionQueue = new Queue('whisperTranscription', { connection });
+const competitionQueue = new Queue('competition', { connection });
 
 module.exports = {
   contentProcessingQueue,
@@ -21,4 +22,5 @@ module.exports = {
   notificationQueue,
   youtubeImportQueue,
   whisperTranscriptionQueue,
+  competitionQueue,
 };

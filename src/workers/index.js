@@ -11,6 +11,7 @@ const adaptJourney = require('./journeyAdapter');
 const processYoutubeImport = require('./youtubeImporter');
 const transcribeContent = require('./whisperTranscriber');
 const { startCronJobs } = require('./cronJobs');
+require('./competitionWorker');
 
 function startWorkers() {
   new Worker('contentProcessing', processContent, { connection, concurrency: 3 });

@@ -1,0 +1,205 @@
+// src/workers/competitionWorker.js
+const { Worker } = require('bullmq');
+const Redis = require('ioredis');
+const challengeGenerationService = require('../services/challengeGenerationService');
+const competitionService = require('../services/competitionService');
+const liveEventService = require('../services/liveEventService');
+const LiveEvent = require('../models/LiveEvent');
+const ChallengeAttempt = require('../models/ChallengeAttempt');
+const DailyChallenge = require('../models/DailyChallenge');
+const WeeklyLeaderboard = require('../models/WeeklyLeaderboard');
+const CompetitionProfile = require('../models/CompetitionProfile');
+const { notificationQueue } = require('../config/queue');
+
+const connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+
+const competitionWorker = new Worker('competition', async (job) => {
+  console.log(`[CompetitionWorker] Processing job: ${job.name}`);
+
+  switch (job.name) {
+    case 'generateWeeklyCandidates':
+      return await challengeGenerationService.generateWeeklyCandidates();
+
+    case 'activateDailyChallenge':
+      const activated = await challengeGenerationService.activateDailyChallenge();
+      for (const { topic, challengeId } of activated) {
+        const KnowledgeProfile = require('../models/KnowledgeProfile');
+        const profiles = await KnowledgeProfile.find({ 'topicMastery.topic': topic });
+        for (const profile of profiles) {
+          await notificationQueue.add('send', {
+            userId: profile.userId,
+            title: "Today's Challenge is Live! ⚡",
+            body: `Test your ${topic} skills — compete with other learners!`,
+            data: { type: 'challenge_live', challengeId: challengeId.toString() },
+          });
+        }
+      }
+      return activated;
+
+    case 'finalizeDailyRankings': {
+      const yesterday = new Date(competitionService._todayIST().getTime() - 24 * 60 * 60 * 1000);
+      const challenges = await DailyChallenge.find({ date: yesterday, status: 'closed' });
+
+      for (const challenge of challenges) {
+        const attempts = await ChallengeAttempt.find({ challengeId: challenge._id, completedAt: { $ne: null } });
+        if (attempts.length < 3) continue;
+
+        const avgTimes = attempts.map(a => {
+          const totalTime = a.answers.reduce((s, ans) => s + (ans.timeSpent || 0), 0);
+          return totalTime / a.answers.length;
+        });
+        const sorted = [...avgTimes].sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+
+        for (let i = 0; i < attempts.length; i++) {
+          const speedBonus = competitionService.calculateSpeedBonus(avgTimes[i], median);
+          if (speedBonus > 0) {
+            attempts[i].handicappedScore += speedBonus * 10;
+            await attempts[i].save();
+          }
+        }
+      }
+      return { processed: challenges.length };
+    }
+
+    case 'finalizeWeeklyLeaderboard': {
+      const prevWeekStart = new Date(competitionService._currentWeekStartIST().getTime() - 7 * 24 * 60 * 60 * 1000);
+      const boards = await WeeklyLeaderboard.find({ weekStart: prevWeekStart, finalized: false });
+
+      for (const board of boards) {
+        board.entries.sort((a, b) => b.totalHandicappedScore - a.totalHandicappedScore);
+        board.entries.forEach((entry, idx) => {
+          entry.rank = idx + 1;
+          entry.percentile = Math.round(((board.entries.length - idx) / board.entries.length) * 100);
+        });
+        board.finalized = true;
+        await board.save();
+
+        if (board.entries.length > 0 && board.topic !== 'global') {
+          const winner = board.entries[0];
+          await CompetitionProfile.findOneAndUpdate(
+            { userId: winner.userId },
+            { $push: { titlesEarned: { title: `${board.topic} Weekly Champion`, earnedAt: new Date(), topic: board.topic } } },
+            { upsert: true }
+          );
+        }
+
+        for (const entry of board.entries.slice(0, 3)) {
+          await notificationQueue.add('send', {
+            userId: entry.userId,
+            title: `You finished #${entry.rank} this week! 🏆`,
+            body: `Top ${entry.percentile}% in ${board.topic} — ${entry.challengesCompleted}/7 challenges`,
+            data: { type: 'weekly_results', topic: board.topic },
+          });
+        }
+      }
+      return { finalized: boards.length };
+    }
+
+    case 'streakReminderNotification': {
+      const today = competitionService._todayIST();
+      const challenges = await DailyChallenge.find({ date: today, status: 'active' });
+      const challengeIds = challenges.map(c => c._id);
+
+      const profiles = await CompetitionProfile.find({ currentChallengeStreak: { $gte: 1 } });
+      for (const profile of profiles) {
+        const todayAttempt = await ChallengeAttempt.findOne({
+          userId: profile.userId,
+          challengeId: { $in: challengeIds },
+          completedAt: { $ne: null },
+        });
+        if (!todayAttempt) {
+          await notificationQueue.add('send', {
+            userId: profile.userId,
+            title: "Don't lose your streak! 🔥",
+            body: `${profile.currentChallengeStreak} days straight — today's challenge is waiting`,
+            data: { type: 'streak_reminder' },
+          });
+        }
+      }
+      return { checked: profiles.length };
+    }
+
+    case 'openLiveEventLobby': {
+      const now = new Date();
+      const fiveMinFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+      const events = await LiveEvent.find({
+        scheduledAt: { $lte: fiveMinFromNow, $gte: now },
+        status: 'scheduled',
+      });
+      for (const event of events) {
+        event.status = 'lobby';
+        await event.save();
+      }
+      return { opened: events.length };
+    }
+
+    case 'startLiveEvent': {
+      const events = await LiveEvent.find({ status: 'lobby' });
+      for (const event of events) {
+        if (new Date() >= event.scheduledAt) {
+          event.status = 'live';
+          event.startedAt = new Date();
+          await event.save();
+
+          const totalTime = event.questions.reduce((s, q) => {
+            const limit = { easy: 20, medium: 35, hard: 45 }[q.difficulty] || 35;
+            return s + limit + 3;
+          }, 0);
+
+          const { competitionQueue } = require('../config/queue');
+          await competitionQueue.add('completeLiveEvent', { eventId: event._id.toString() }, {
+            delay: totalTime * 1000,
+            removeOnComplete: true,
+          });
+        }
+      }
+      return { started: events.length };
+    }
+
+    case 'completeLiveEvent': {
+      const event = await liveEventService.completeLiveEvent(job.data.eventId);
+      for (const entry of event.leaderboard.slice(0, 3)) {
+        await notificationQueue.add('send', {
+          userId: entry.userId,
+          title: `Live Event Results! 🏆`,
+          body: `You finished #${entry.rank} out of ${event.leaderboard.length} in ${event.topic}`,
+          data: { type: 'live_event_results', eventId: event._id.toString() },
+        });
+      }
+      return { completed: event._id };
+    }
+
+    case 'liveEventReminder': {
+      const events = await LiveEvent.find({
+        status: 'scheduled',
+        scheduledAt: {
+          $gte: new Date(),
+          $lte: new Date(Date.now() + 35 * 60 * 1000),
+        },
+      });
+      for (const event of events) {
+        const KnowledgeProfile = require('../models/KnowledgeProfile');
+        const profiles = await KnowledgeProfile.find({ 'topicMastery.topic': event.topic });
+        for (const profile of profiles) {
+          await notificationQueue.add('send', {
+            userId: profile.userId,
+            title: 'Live Event Tonight! 🎯',
+            body: `${event.topic} starts at 8 PM — don't miss it!`,
+            data: { type: 'live_event_reminder', eventId: event._id.toString() },
+          });
+        }
+      }
+      return { reminded: events.length };
+    }
+
+    default:
+      console.warn(`[CompetitionWorker] Unknown job: ${job.name}`);
+  }
+}, { connection, concurrency: 3 });
+
+competitionWorker.on('failed', (job, err) => {
+  console.error(`[CompetitionWorker] Job ${job.name} failed:`, err.message);
+});
+
+module.exports = competitionWorker;
