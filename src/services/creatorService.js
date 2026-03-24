@@ -4,6 +4,7 @@ const User = require('../models/User');
 const ApiError = require('../utils/apiError');
 const { paginationMeta } = require('../utils/pagination');
 const socialService = require('./socialService');
+const { notificationQueue } = require('../config/queue');
 
 class CreatorService {
 
@@ -84,9 +85,25 @@ class CreatorService {
       app.reviewedAt = new Date();
       await app.save();
       await this._promoteToCreator(app);
+
+      notificationQueue.add('send', {
+        userId: app.userId.toString(),
+        title: 'Welcome, Creator! 🎉',
+        body: `Your creator application for ${app.domain} has been approved. Start sharing your knowledge!`,
+        data: { type: 'creator_approved' },
+      }).catch(err => console.error('[Creator] Failed to queue approval notification:', err.message));
     } else {
       app.status = 'endorsed';
       await app.save();
+
+      const endorser = await User.findById(endorserId).select('firstName lastName').lean();
+      const endorserName = endorser ? `${endorser.firstName} ${endorser.lastName}`.trim() : 'A creator';
+      notificationQueue.add('send', {
+        userId: app.userId.toString(),
+        title: 'Application Endorsed! ⭐',
+        body: `${endorserName} endorsed your ${app.domain} creator application. ${2 - coreEndorsements} more endorsement(s) needed.`,
+        data: { type: 'creator_endorsed' },
+      }).catch(err => console.error('[Creator] Failed to queue endorsement notification:', err.message));
     }
 
     return app;
@@ -129,6 +146,14 @@ class CreatorService {
     app.rejectedBy = rejectorId;
     app.reapplyAfter = reapplyAfter;
     await app.save();
+
+    const reapplyDate = reapplyAfter.toISOString().split('T')[0];
+    notificationQueue.add('send', {
+      userId: app.userId.toString(),
+      title: 'Application Update',
+      body: `Your ${app.domain} creator application was not approved. You can reapply after ${reapplyDate}.`,
+      data: { type: 'creator_rejected' },
+    }).catch(err => console.error('[Creator] Failed to queue rejection notification:', err.message));
 
     return app;
   }
@@ -257,6 +282,14 @@ class CreatorService {
     app.reviewNote = reviewNote;
     app.reviewedAt = new Date();
     await app.save();
+
+    notificationQueue.add('send', {
+      userId: app.userId.toString(),
+      title: 'Application Update',
+      body: `Your ${app.domain} creator application was not approved.${reviewNote ? ' Reason: ' + reviewNote : ''}`,
+      data: { type: 'creator_rejected' },
+    }).catch(err => console.error('[Creator] Failed to queue admin rejection notification:', err.message));
+
     return app;
   }
 

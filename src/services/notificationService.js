@@ -156,6 +156,9 @@ class NotificationService {
       weekly_results: 'competition_results',
       live_event_results: 'competition_results',
       live_event_reminder: 'competition_reminder',
+      creator_endorsed: 'creator_application',
+      creator_approved: 'creator_application',
+      creator_rejected: 'creator_application',
     };
     return map[dataType] || 'journey_update';
   }

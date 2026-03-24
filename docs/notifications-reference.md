@@ -173,6 +173,7 @@ Each of these triggers quiz generation, which upon completion sends this notific
 | **Top performer** (ranks in top 3) | All of the above + Weekly Leaderboard Results, Live Event Results |
 | **Live event participant** | All of the above + Live Event Reminder |
 | **Content creator** | All of the above + New Comment (when others comment on their content) |
+| **Creator applicant** | Endorsed, Approved, or Rejected notifications for their application |
 
 **Note:** There is no role-based targeting (admin/creator/consumer). All notifications are based on user activity and state.
 
@@ -193,6 +194,9 @@ The iOS app handles these `data.type` values in `PushNotificationManager.swift`:
 | `milestone` | Navigate to journey/progress |
 | `social_follow` | Navigate to follower's profile |
 | `social_comment` | Navigate to content with comment |
+| `creator_endorsed` | Navigate to application status |
+| `creator_approved` | Navigate to creator profile |
+| `creator_rejected` | Navigate to application status |
 
 ---
 
@@ -240,6 +244,48 @@ Milestone types that can trigger this: `phase_completion`, `topic_completion`, `
 
 ---
 
+### 12. Creator Application Endorsed
+
+| Field | Value |
+|-------|-------|
+| **Title** | `"Application Endorsed! ⭐"` |
+| **Body** | `"{endorser name} endorsed your {domain} creator application. {N} more endorsement(s) needed."` |
+| **Trigger** | Event-based — when a core/anchor creator endorses an application (but threshold not yet met) |
+| **Cadence** | On-demand (peer action) |
+| **Target users** | The applicant |
+| **Deep link type** | `creator_endorsed` |
+| **Source file** | `services/creatorService.js` |
+
+---
+
+### 13. Creator Application Approved
+
+| Field | Value |
+|-------|-------|
+| **Title** | `"Welcome, Creator! 🎉"` |
+| **Body** | `"Your creator application for {domain} has been approved. Start sharing your knowledge!"` |
+| **Trigger** | Event-based — when endorsement threshold is met (1 anchor OR 2 core endorsements) |
+| **Cadence** | On-demand (auto-approved when threshold met) |
+| **Target users** | The applicant |
+| **Deep link type** | `creator_approved` |
+| **Source file** | `services/creatorService.js` |
+
+---
+
+### 14. Creator Application Rejected
+
+| Field | Value |
+|-------|-------|
+| **Title** | `"Application Update"` |
+| **Body** | `"Your {domain} creator application was not approved. You can reapply after {date}."` (peer) or `"...was not approved. Reason: {note}"` (admin) |
+| **Trigger** | Event-based — when a core/anchor creator or admin rejects the application |
+| **Cadence** | On-demand (peer/admin action) |
+| **Target users** | The applicant |
+| **Deep link type** | `creator_rejected` |
+| **Source file** | `services/creatorService.js` |
+
+---
+
 ## Notification Type Mapping
 
 | Push `data.type` | DB `type` | Category |
@@ -254,6 +300,9 @@ Milestone types that can trigger this: `phase_completion`, `topic_completion`, `
 | `weekly_results` | `competition_results` | Competition |
 | `live_event_results` | `competition_results` | Competition |
 | `live_event_reminder` | `competition_reminder` | Competition |
+| `creator_endorsed` | `creator_application` | Creator |
+| `creator_approved` | `creator_application` | Creator |
+| `creator_rejected` | `creator_application` | Creator |
 
 ---
 
