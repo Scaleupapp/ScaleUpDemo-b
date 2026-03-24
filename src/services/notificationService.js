@@ -147,10 +147,15 @@ class NotificationService {
       quiz_ready: 'quiz_available',
       milestone: 'milestone_reached',
       streak: 'streak_reminder',
+      streak_reminder: 'streak_reminder',
       journey_update: 'journey_update',
       re_engagement: 'journey_update',
       social_follow: 'social_follow',
       social_comment: 'social_comment',
+      challenge_live: 'competition_challenge',
+      weekly_results: 'competition_results',
+      live_event_results: 'competition_results',
+      live_event_reminder: 'competition_reminder',
     };
     return map[dataType] || 'journey_update';
   }

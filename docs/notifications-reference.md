@@ -167,10 +167,12 @@ Each of these triggers quiz generation, which upon completion sends this notific
 | User type | Notifications they receive |
 |-----------|--------------------------|
 | **New user** (no activity) | Re-engagement (after 3 days of inactivity) |
-| **Active learner** (watches content, no competition) | Quiz Ready, Re-engagement (if inactive 3+ days) |
+| **Active learner** (watches content, no competition) | Quiz Ready, Milestone Reached, Re-engagement (if inactive 3+ days) |
+| **Social user** (follows others, comments) | All of the above + New Follower, New Comment |
 | **Competitor** (plays daily challenges) | All of the above + Daily Challenge Live, Streak Reminder |
 | **Top performer** (ranks in top 3) | All of the above + Weekly Leaderboard Results, Live Event Results |
 | **Live event participant** | All of the above + Live Event Reminder |
+| **Content creator** | All of the above + New Comment (when others comment on their content) |
 
 **Note:** There is no role-based targeting (admin/creator/consumer). All notifications are based on user activity and state.
 
@@ -188,12 +190,73 @@ The iOS app handles these `data.type` values in `PushNotificationManager.swift`:
 | `live_event_reminder` | Navigate to live event |
 | `streak_reminder` | Navigate to daily challenge |
 | `live_event_results` | Navigate to live event results |
+| `milestone` | Navigate to journey/progress |
+| `social_follow` | Navigate to follower's profile |
+| `social_comment` | Navigate to content with comment |
+
+---
+
+### 9. Milestone Reached
+
+| Field | Value |
+|-------|-------|
+| **Title** | `"Milestone Reached! 🎯"` |
+| **Body** | `"You've completed: {milestone title}"` |
+| **Trigger** | Event-based — when a journey milestone transitions to `completed` |
+| **Cadence** | Anytime (fires during journey progress sync) |
+| **Target users** | The user whose milestone was completed |
+| **Deep link type** | `milestone` |
+| **Source file** | `services/journeyProgressService.js:355` |
+
+Milestone types that can trigger this: `phase_completion`, `topic_completion`, `score_target`, `final_assessment`, `streak`.
+
+---
+
+### 10. New Follower
+
+| Field | Value |
+|-------|-------|
+| **Title** | `"New Follower"` |
+| **Body** | `"{name} started following you"` |
+| **Trigger** | Event-based — when a user follows another user |
+| **Cadence** | On-demand (user action) |
+| **Target users** | The user being followed |
+| **Deep link type** | `social_follow` |
+| **Source file** | `services/socialService.js:26` |
+
+---
+
+### 11. New Comment
+
+| Field | Value |
+|-------|-------|
+| **Title** | `"New Comment"` |
+| **Body** | `"{name} commented: "{preview}""` |
+| **Trigger** | Event-based — when someone comments on content |
+| **Cadence** | On-demand (user action) |
+| **Target users** | The content creator (not sent if commenter is the creator) |
+| **Deep link type** | `social_comment` |
+| **Source file** | `services/socialService.js:232` |
+
+---
+
+## Notification Type Mapping
+
+| Push `data.type` | DB `type` | Category |
+|---|---|---|
+| `quiz_ready` | `quiz_available` | Learning |
+| `re_engagement` | `journey_update` | Engagement |
+| `milestone` | `milestone_reached` | Learning |
+| `social_follow` | `social_follow` | Social |
+| `social_comment` | `social_comment` | Social |
+| `streak_reminder` | `streak_reminder` | Competition |
+| `challenge_live` | `competition_challenge` | Competition |
+| `weekly_results` | `competition_results` | Competition |
+| `live_event_results` | `competition_results` | Competition |
+| `live_event_reminder` | `competition_reminder` | Competition |
 
 ---
 
 ## Known Gaps
 
-1. **Milestone notifications** — `notifyMilestone()` exists in `notificationService.js` but is never called. Journey milestones don't trigger notifications.
-2. **Social notifications** — `social_follow` and `social_comment` types are defined in the Notification model but nothing sends them.
-3. **Bulk notifications** — `sendToUsers()` exists but is never used. Competition notifications loop through users individually via the queue.
-4. **DB type mapping** — Competition notifications (`challenge_live`, `weekly_results`, `live_event_results`, `live_event_reminder`) all map to `journey_update` in the DB because they're not in the `_mapDataTypeToNotificationType()` mapping. This doesn't affect push delivery but affects in-app notification categorization.
+1. **Bulk notifications** — `sendToUsers()` exists but is never used. Competition notifications loop through users individually via the queue.

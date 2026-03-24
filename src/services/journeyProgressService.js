@@ -10,6 +10,7 @@
 
 const ContentProgress = require('../models/ContentProgress');
 const Quiz = require('../models/Quiz');
+const { notificationQueue } = require('../config/queue');
 
 class JourneyProgressService {
 
@@ -352,6 +353,12 @@ class JourneyProgressService {
         milestone.status = newStatus;
         if (newStatus === 'completed') {
           milestone.completedAt = new Date();
+          notificationQueue.add('send', {
+            userId: userId.toString(),
+            title: 'Milestone Reached! 🎯',
+            body: `You've completed: ${milestone.title}`,
+            data: { type: 'milestone' },
+          }).catch(err => console.error('[JourneyProgress] Failed to queue milestone notification:', err.message));
         }
         updated = true;
       }

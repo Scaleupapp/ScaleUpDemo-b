@@ -6,6 +6,7 @@ const Playlist = require('../models/Playlist');
 const User = require('../models/User');
 const { paginate, paginationMeta } = require('../utils/pagination');
 const ApiError = require('../utils/apiError');
+const { notificationQueue } = require('../config/queue');
 
 class SocialService {
 
@@ -23,6 +24,16 @@ class SocialService {
     await Follow.create({ followerId, followingId });
     await User.findByIdAndUpdate(followerId, { $inc: { followingCount: 1 } });
     await User.findByIdAndUpdate(followingId, { $inc: { followersCount: 1 } });
+
+    // Notify the followed user
+    const follower = await User.findById(followerId).select('firstName lastName').lean();
+    const followerName = follower ? `${follower.firstName} ${follower.lastName}`.trim() : 'Someone';
+    notificationQueue.add('send', {
+      userId: followingId,
+      title: 'New Follower',
+      body: `${followerName} started following you`,
+      data: { type: 'social_follow', followerId },
+    }).catch(err => console.error('[Social] Failed to queue follow notification:', err.message));
 
     return { following: true };
   }
@@ -228,6 +239,19 @@ class SocialService {
 
     content.commentCount += 1;
     await content.save();
+
+    // Notify content creator (if commenter is not the creator)
+    if (content.creatorId && content.creatorId.toString() !== userId) {
+      const commenter = await User.findById(userId).select('firstName lastName').lean();
+      const commenterName = commenter ? `${commenter.firstName} ${commenter.lastName}`.trim() : 'Someone';
+      const preview = text.trim().length > 50 ? text.trim().substring(0, 50) + '…' : text.trim();
+      notificationQueue.add('send', {
+        userId: content.creatorId.toString(),
+        title: 'New Comment',
+        body: `${commenterName} commented: "${preview}"`,
+        data: { type: 'social_comment', contentId, commentId: comment._id.toString() },
+      }).catch(err => console.error('[Social] Failed to queue comment notification:', err.message));
+    }
 
     return comment;
   }
