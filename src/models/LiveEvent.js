@@ -5,7 +5,7 @@ const liveEventSchema = new mongoose.Schema({
   scheduledAt: { type: Date, required: true, index: true },
   questions: [{
     questionText: { type: String, required: true },
-    questionType: { type: String, enum: ['recall', 'application', 'conceptual', 'critical_thinking'] },
+    questionType: { type: String, enum: ['recall', 'application', 'conceptual', 'critical_thinking', 'analytical'] },
     options: [{ label: { type: String }, text: { type: String } }],
     correctAnswer: { type: String, enum: ['A', 'B', 'C', 'D'], required: true },
     explanation: { type: String },
