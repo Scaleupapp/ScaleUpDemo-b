@@ -4,10 +4,10 @@ const liveEventAttemptSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'LiveEvent', required: true, index: true },
   answers: [{
-    questionIndex: Number,
+    questionIndex: { type: Number, required: true },
     selectedAnswer: { type: String, enum: ['A', 'B', 'C', 'D'] },
-    timeSpent: Number,
-    answeredAt: Date,
+    timeSpent: { type: Number },
+    answeredAt: { type: Date },
   }],
   rawScore: { type: Number, min: 0, max: 100 },
   handicappedScore: { type: Number },

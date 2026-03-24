@@ -8,7 +8,7 @@ const personalBestSchema = new mongoose.Schema({
 }, { _id: false });
 
 const competitionProfileSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   personalBests: { type: Map, of: personalBestSchema, default: {} },
   totalChallengesCompleted: { type: Number, default: 0 },
   currentChallengeStreak: { type: Number, default: 0 },
