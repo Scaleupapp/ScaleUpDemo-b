@@ -12,13 +12,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy via SSH
+      - name: Fix divergent branches and deploy
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          script: /home/ubuntu/deploy.sh
+          script: |
+            cd /home/ubuntu/ScaleUpDemo-b
+            git fetch origin
+            git reset --hard origin/master
+            cd /home/ubuntu
+            ./deploy.sh
 
       - name: Health Check
         run: |
