@@ -12,26 +12,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Find repo and reset to origin
+      - name: Reset repo and deploy
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            REPO_DIR=$(grep -oP 'cd\s+\K[^\s;]+' /home/ubuntu/deploy.sh | head -1)
-            echo "Repo directory: $REPO_DIR"
-            cd "$REPO_DIR"
+            eval $(grep 'APP_DIR=' /home/ubuntu/deploy.sh)
+            echo "Repo directory: $APP_DIR"
+            cd "$APP_DIR"
             git fetch origin
             git reset --hard origin/master
-
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: /home/ubuntu/deploy.sh
+            /home/ubuntu/deploy.sh
 
       - name: Health Check
         run: |
