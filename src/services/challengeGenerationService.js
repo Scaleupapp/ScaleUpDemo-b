@@ -2,7 +2,6 @@ const openai = require('../config/openai');
 const DailyChallenge = require('../models/DailyChallenge');
 const LiveEvent = require('../models/LiveEvent');
 const UserObjective = require('../models/UserObjective');
-const KnowledgeProfile = require('../models/KnowledgeProfile');
 const normalizeTopic = require('../utils/normalizeTopic');
 
 const GENERATION_PROMPT = `You are an expert educational assessment creator for competitive daily quizzes.
@@ -104,41 +103,54 @@ class ChallengeGenerationService {
     return results;
   }
 
+  _deriveObjectiveTopic(obj) {
+    switch (obj.objectiveType) {
+      case 'upskilling':
+        return obj.specifics?.targetSkill || null;
+      case 'interview_preparation':
+        return obj.specifics?.targetRole || null;
+      case 'exam_preparation':
+        return obj.specifics?.examName || null;
+      case 'career_switch':
+        return obj.specifics?.toDomain || null;
+      default:
+        return obj.topicsOfInterest?.[0] || null;
+    }
+  }
+
   async _getActiveObjectives() {
-    const raw = await UserObjective.distinct('topicsOfInterest', { status: 'active' });
-    const normalized = [...new Set(raw.map(normalizeTopic).filter(Boolean))];
-    return normalized;
+    const objectives = await UserObjective.find(
+      { status: 'active' },
+      { objectiveType: 1, specifics: 1, topicsOfInterest: 1 }
+    ).lean();
+
+    const topics = new Set();
+    for (const obj of objectives) {
+      const topic = normalizeTopic(this._deriveObjectiveTopic(obj));
+      if (topic) topics.add(topic);
+    }
+    return [...topics];
   }
 
   async _getSubTopicsForObjective(objective) {
-    const userObjectives = await UserObjective.find(
-      { topicsOfInterest: objective, status: 'active' },
-      { userId: 1 }
-    ).lean();
-    const userIds = userObjectives.map(o => o.userId);
-
-    if (userIds.length === 0) return [objective];
-
-    const profiles = await KnowledgeProfile.find(
-      { userId: { $in: userIds } },
-      { 'topicMastery.topic': 1 }
+    const objectives = await UserObjective.find(
+      { status: 'active' },
+      { objectiveType: 1, specifics: 1, topicsOfInterest: 1 }
     ).lean();
 
-    const topicCounts = {};
-    for (const profile of profiles) {
-      if (!profile.topicMastery) continue;
-      for (const entry of profile.topicMastery) {
-        const t = normalizeTopic(entry.topic);
-        if (t) topicCounts[t] = (topicCounts[t] || 0) + 1;
+    const subTopics = new Set();
+    for (const obj of objectives) {
+      const derived = normalizeTopic(this._deriveObjectiveTopic(obj));
+      if (derived === objective && obj.topicsOfInterest) {
+        for (const t of obj.topicsOfInterest) {
+          const normalized = normalizeTopic(t);
+          if (normalized) subTopics.add(normalized);
+        }
       }
     }
 
-    const sorted = Object.entries(topicCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, MAX_SUBTOPICS)
-      .map(([topic]) => topic);
-
-    return sorted.length > 0 ? sorted : [objective];
+    const result = [...subTopics].slice(0, MAX_SUBTOPICS);
+    return result.length > 0 ? result : [objective];
   }
 
   async _getLast7DaysQuestions(objective) {

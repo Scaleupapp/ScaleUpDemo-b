@@ -175,11 +175,25 @@ const getObjectiveTopic = async (req, res, next) => {
     const UserObjective = require('../models/UserObjective');
     const objective = await UserObjective.findOne(
       { userId: req.user.userId, status: 'active', isPrimary: true },
-      { topicsOfInterest: 1 }
+      { objectiveType: 1, specifics: 1, topicsOfInterest: 1 }
     ).lean();
 
-    const topic = objective?.topicsOfInterest?.[0] || null;
-    res.json(apiResponse.success({ topic }));
+    let topic = null;
+    if (objective) {
+      switch (objective.objectiveType) {
+        case 'upskilling':
+          topic = objective.specifics?.targetSkill; break;
+        case 'interview_preparation':
+          topic = objective.specifics?.targetRole; break;
+        case 'exam_preparation':
+          topic = objective.specifics?.examName; break;
+        case 'career_switch':
+          topic = objective.specifics?.toDomain; break;
+        default:
+          topic = objective.topicsOfInterest?.[0];
+      }
+    }
+    res.json(apiResponse.success({ topic: topic || null }));
   } catch (err) { next(err); }
 };
 
