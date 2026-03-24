@@ -4,7 +4,7 @@ const challengeQuestionSchema = new mongoose.Schema({
   questionText: { type: String, required: true },
   questionType: {
     type: String,
-    enum: ['recall', 'application', 'conceptual', 'critical_thinking'],
+    enum: ['recall', 'application', 'conceptual', 'critical_thinking', 'analytical'],
     default: 'conceptual',
   },
   options: [{
