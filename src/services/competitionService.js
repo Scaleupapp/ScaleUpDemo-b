@@ -7,9 +7,7 @@ const WeeklyLeaderboard = require('../models/WeeklyLeaderboard');
 const CompetitionProfile = require('../models/CompetitionProfile');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 
-const DIFFICULTY_WEIGHTS = { easy: 0.8, medium: 1.0, hard: 1.3 };
 const LEVEL_BONUS = { beginner: 1.20, intermediate: 1.10, advanced: 1.00, expert: 0.95 };
-const TIERED_TIME_LIMITS = { easy: 20, medium: 35, hard: 45 };
 
 class CompetitionService {
 
@@ -43,10 +41,9 @@ class CompetitionService {
 
   // --- Scoring ---
 
-  calculateHandicappedScore(rawScore, questions, userLevel) {
-    const avgDifficulty = questions.reduce((sum, q) => sum + (DIFFICULTY_WEIGHTS[q.difficulty] || 1.0), 0) / questions.length;
+  calculateScore(correctAnswers, userLevel) {
     const levelBonus = LEVEL_BONUS[userLevel] || 1.0;
-    return rawScore * avgDifficulty * levelBonus;
+    return correctAnswers * levelBonus;
   }
 
   calculateSpeedBonus(userAvgTime, medianTime) {
@@ -95,14 +92,12 @@ class CompetitionService {
         questionIndex: newIdx,
         questionText: q.questionText,
         questionType: q.questionType,
-        difficulty: q.difficulty,
         concept: q.concept,
         options: shuffledOptions.map((opt, i) => ({ label: ['A', 'B', 'C', 'D'][i], text: opt.text })),
-        timeLimit: TIERED_TIME_LIMITS[q.difficulty] || 35,
       };
     });
 
-    return { attemptId: attempt._id, questions: randomizedQuestions };
+    return { attemptId: attempt._id, questions: randomizedQuestions, timeLimitSeconds: challenge.timeLimitSeconds };
   }
 
   async submitAnswer(userId, challengeId, questionIndex, selectedAnswer, timeSpent) {
@@ -135,8 +130,7 @@ class CompetitionService {
       if (originalLabel === question.correctAnswer) correct++;
     }
 
-    const rawScore = (correct / challenge.questions.length) * 100;
-    const handicappedScore = this.calculateHandicappedScore(rawScore, challenge.questions, userLevel);
+    const handicappedScore = this.calculateScore(correct, userLevel);
     const timeTaken = attempt.answers.reduce((sum, a) => sum + (a.timeSpent || 0), 0);
 
     let compProfile = await CompetitionProfile.findOne({ userId });
@@ -159,7 +153,7 @@ class CompetitionService {
     await this._updateChallengeStreak(compProfile);
     await compProfile.save();
 
-    attempt.rawScore = rawScore;
+    attempt.rawScore = correct;
     attempt.handicappedScore = handicappedScore;
     attempt.timeTaken = timeTaken;
     attempt.isPersonalBest = isPersonalBest;
@@ -169,7 +163,7 @@ class CompetitionService {
     await this._updateWeeklyLeaderboard(userId, challenge.topic, handicappedScore);
 
     return {
-      rawScore, handicappedScore, timeTaken, isPersonalBest,
+      handicappedScore, timeTaken, isPersonalBest,
       correct, total: challenge.questions.length,
       previousBest: currentBest,
     };
@@ -280,9 +274,10 @@ class CompetitionService {
   // --- All-Time Leaderboard ---
 
   async getAllTimeLeaderboard(topic) {
+    const currentWeekStart = this._currentWeekStartIST();
     const boards = await WeeklyLeaderboard.find({
       topic: topic || 'global',
-      finalized: true,
+      $or: [{ finalized: true }, { weekStart: currentWeekStart }],
     });
 
     const userScores = {};

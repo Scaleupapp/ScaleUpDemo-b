@@ -17,24 +17,30 @@ const competitionWorker = new Worker('competition', async (job) => {
   console.log(`[CompetitionWorker] Processing job: ${job.name}`);
 
   switch (job.name) {
-    case 'generateWeeklyCandidates':
-      return await challengeGenerationService.generateWeeklyCandidates();
+    case 'generateAndActivateDaily': {
+      const result = await challengeGenerationService.generateAndActivateDaily();
 
-    case 'activateDailyChallenge':
-      const activated = await challengeGenerationService.activateDailyChallenge();
-      for (const { topic, challengeId } of activated) {
-        const KnowledgeProfile = require('../models/KnowledgeProfile');
-        const profiles = await KnowledgeProfile.find({ 'topicMastery.topic': topic });
-        for (const profile of profiles) {
+      // Send notifications for activated daily challenges
+      const UserObjective = require('../models/UserObjective');
+      for (const { topic, challengeId } of result.daily) {
+        const objectives = await UserObjective.find({ topicsOfInterest: topic, status: 'active' }, { userId: 1 }).lean();
+        for (const obj of objectives) {
           await notificationQueue.add('send', {
-            userId: profile.userId,
+            userId: obj.userId.toString(),
             title: "Today's Challenge is Live! ⚡",
             body: `Test your ${topic} skills — compete with other learners!`,
             data: { type: 'challenge_live', challengeId: challengeId.toString() },
           });
         }
       }
-      return activated;
+
+      if (result.errors.length > 0) {
+        console.error('[CompetitionWorker] Generation errors:', JSON.stringify(result.errors));
+        // Log is sufficient for now — Slack alerting deferred to future iteration
+      }
+
+      return result;
+    }
 
     case 'finalizeDailyRankings': {
       const yesterday = new Date(competitionService._todayIST().getTime() - 24 * 60 * 60 * 1000);
@@ -44,19 +50,25 @@ const competitionWorker = new Worker('competition', async (job) => {
         const attempts = await ChallengeAttempt.find({ challengeId: challenge._id, completedAt: { $ne: null } });
         if (attempts.length < 3) continue;
 
-        const avgTimes = attempts.map(a => {
-          const totalTime = a.answers.reduce((s, ans) => s + (ans.timeSpent || 0), 0);
-          return totalTime / a.answers.length;
-        });
-        const sorted = [...avgTimes].sort((a, b) => a - b);
-        const median = sorted[Math.floor(sorted.length / 2)];
+        const times = attempts.map(a => a.timeTaken || 0).filter(t => t > 0);
+        if (times.length === 0) continue;
+        const sorted = [...times].sort((a, b) => a - b);
+        const medianTime = sorted[Math.floor(sorted.length / 2)];
 
-        for (let i = 0; i < attempts.length; i++) {
-          const speedBonus = competitionService.calculateSpeedBonus(avgTimes[i], median);
-          if (speedBonus > 0) {
-            attempts[i].handicappedScore += speedBonus * 10;
-            await attempts[i].save();
-          }
+        for (const attempt of attempts) {
+          const userTime = attempt.timeTaken || 0;
+          if (userTime <= 0 || userTime >= medianTime) continue;
+
+          const speedFactor = Math.max(0, (medianTime - userTime) / medianTime);
+          const baseScore = attempt.handicappedScore;
+          const speedBonus = baseScore * 0.10 * speedFactor;
+
+          attempt.handicappedScore += speedBonus;
+          await attempt.save();
+
+          await competitionService._updateWeeklyLeaderboard(
+            attempt.userId, challenge.topic, speedBonus
+          );
         }
       }
       return { processed: challenges.length };
@@ -142,14 +154,10 @@ const competitionWorker = new Worker('competition', async (job) => {
           event.startedAt = new Date();
           await event.save();
 
-          const totalTime = event.questions.reduce((s, q) => {
-            const limit = { easy: 20, medium: 35, hard: 45 }[q.difficulty] || 35;
-            return s + limit + 3;
-          }, 0);
-
+          // Fixed 20-minute duration for all live events
           const { competitionQueue } = require('../config/queue');
           await competitionQueue.add('completeLiveEvent', { eventId: event._id.toString() }, {
-            delay: totalTime * 1000,
+            delay: 20 * 60 * 1000,
             removeOnComplete: true,
           });
         }
@@ -170,6 +178,28 @@ const competitionWorker = new Worker('competition', async (job) => {
       return { completed: event._id };
     }
 
+    case 'completeLiveEventSafety': {
+      const stuckEvents = await LiveEvent.find({ status: 'live' });
+      let completed = 0;
+      for (const event of stuckEvents) {
+        try {
+          await liveEventService.completeLiveEvent(event._id.toString());
+          for (const entry of event.leaderboard?.slice(0, 3) || []) {
+            await notificationQueue.add('send', {
+              userId: entry.userId,
+              title: 'Live Event Results! 🏆',
+              body: `You finished #${entry.rank} out of ${event.leaderboard.length} in ${event.topic}`,
+              data: { type: 'live_event_results', eventId: event._id.toString() },
+            });
+          }
+          completed++;
+        } catch (err) {
+          console.error(`[CompetitionWorker] Safety complete failed for ${event._id}:`, err.message);
+        }
+      }
+      return { completed };
+    }
+
     case 'liveEventReminder': {
       const events = await LiveEvent.find({
         status: 'scheduled',
@@ -179,11 +209,14 @@ const competitionWorker = new Worker('competition', async (job) => {
         },
       });
       for (const event of events) {
-        const KnowledgeProfile = require('../models/KnowledgeProfile');
-        const profiles = await KnowledgeProfile.find({ 'topicMastery.topic': event.topic });
-        for (const profile of profiles) {
+        const UserObjective = require('../models/UserObjective');
+        const objectives = await UserObjective.find(
+          { topicsOfInterest: event.topic, status: 'active' },
+          { userId: 1 }
+        ).lean();
+        for (const obj of objectives) {
           await notificationQueue.add('send', {
-            userId: profile.userId,
+            userId: obj.userId.toString(),
             title: 'Live Event Tonight! 🎯',
             body: `${event.topic} starts at 8 PM — don't miss it!`,
             data: { type: 'live_event_reminder', eventId: event._id.toString() },

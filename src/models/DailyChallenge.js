@@ -13,17 +13,16 @@ const challengeQuestionSchema = new mongoose.Schema({
   }],
   correctAnswer: { type: String, enum: ['A', 'B', 'C', 'D'], required: true },
   explanation: { type: String },
-  difficulty: { type: String, enum: ['easy', 'medium', 'hard'], default: 'medium' },
   concept: { type: String },
 }, { _id: true });
 
 const dailyChallengeSchema = new mongoose.Schema({
   topic: { type: String, required: true, index: true },
   date: { type: Date, required: true, index: true },
-  questions: { type: [challengeQuestionSchema], validate: [arr => arr.length === 10, 'Must have exactly 10 questions'] },
-  status: { type: String, enum: ['draft', 'approved', 'active', 'closed'], default: 'draft' },
+  questions: { type: [challengeQuestionSchema], validate: [arr => arr.length === 15, 'Must have exactly 15 questions'] },
+  status: { type: String, enum: ['active', 'closed'], default: 'active' },
   participantCount: { type: Number, default: 0 },
-  createdFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'ChallengeCandidateBank' },
+  timeLimitSeconds: { type: Number, default: 720 },
   activatesAt: { type: Date },
   closesAt: { type: Date },
 }, { timestamps: true });

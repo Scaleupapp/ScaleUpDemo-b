@@ -17,6 +17,9 @@ router.get('/challenges/:id/results', auth, c.getChallengeResults);
 router.get('/leaderboard/weekly', auth, c.getWeeklyLeaderboard);
 router.get('/leaderboard/alltime', auth, c.getAllTimeLeaderboard);
 
+// Objective Topic
+router.get('/objective-topic', auth, c.getObjectiveTopic);
+
 // Profile & Stats
 router.get('/profile', auth, c.getCompetitionProfile);
 router.get('/stats', auth, c.getCompetitionStats);

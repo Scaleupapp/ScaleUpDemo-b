@@ -170,6 +170,19 @@ const triggerGeneration = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getObjectiveTopic = async (req, res, next) => {
+  try {
+    const UserObjective = require('../models/UserObjective');
+    const objective = await UserObjective.findOne(
+      { userId: req.user.userId, status: 'active', isPrimary: true },
+      { topicsOfInterest: 1 }
+    ).lean();
+
+    const topic = objective?.topicsOfInterest?.[0] || null;
+    res.json(apiResponse.success({ topic }));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getTodayChallenges, getChallengeById, startChallenge, submitChallengeAnswer,
   completeChallenge, getChallengeResults,
@@ -178,4 +191,5 @@ module.exports = {
   getUpcomingEvents, getEventById, joinLobby, getLobbyState,
   getCurrentQuestion, submitLiveAnswer, getQuestionResults, getEventResults,
   getChallengeCandidates, approveCandidates, triggerGeneration,
+  getObjectiveTopic,
 };

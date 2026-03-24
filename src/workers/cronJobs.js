@@ -57,14 +57,9 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
-  // Competition: Generate weekly candidates — Sunday 23:00 IST (17:30 UTC)
-  competitionQueue.add('generateWeeklyCandidates', {}, {
-    repeat: { pattern: '30 17 * * 0' },
-    removeOnComplete: true,
-  });
-
-  // Competition: Activate daily challenge — Daily 00:00 IST (18:30 UTC prev day)
-  competitionQueue.add('activateDailyChallenge', {}, {
+  // Competition: Generate + activate daily challenges (and live events on eve days)
+  // Daily midnight IST = 18:30 UTC previous day
+  competitionQueue.add('generateAndActivateDaily', {}, {
     repeat: { pattern: '30 18 * * *' },
     removeOnComplete: true,
   });
@@ -102,6 +97,12 @@ function startCronJobs() {
   // Competition: Start live event — Mon/Wed/Fri 20:00 IST (14:30 UTC)
   competitionQueue.add('startLiveEvent', {}, {
     repeat: { pattern: '30 14 * * 1,3,5' },
+    removeOnComplete: true,
+  });
+
+  // Competition: Safety net — complete stuck live events — Mon/Wed/Fri 20:20 IST (14:50 UTC)
+  competitionQueue.add('completeLiveEventSafety', {}, {
+    repeat: { pattern: '50 14 * * 1,3,5' },
     removeOnComplete: true,
   });
 
