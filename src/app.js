@@ -52,6 +52,7 @@ app.use('/api/v1/recommendations', require('./routes/recommendations'));
 app.use('/api/v1/admin', require('./routes/admin'));
 app.use('/api/v1/tutor', require('./routes/aiTutor'));
 app.use('/api/v1/notifications', require('./routes/notifications'));
+app.use('/api/v1/competition', require('./routes/competition'));
 
 // --- Health Check ---
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
