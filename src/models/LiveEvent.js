@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const liveEventSchema = new mongoose.Schema({
   topic: { type: String, required: true, index: true },
+  displayTitle: { type: String },
   scheduledAt: { type: Date, required: true, index: true },
   questions: [{
     questionText: { type: String, required: true },

@@ -18,6 +18,7 @@ const challengeQuestionSchema = new mongoose.Schema({
 
 const dailyChallengeSchema = new mongoose.Schema({
   topic: { type: String, required: true, index: true },
+  displayTitle: { type: String },
   date: { type: Date, required: true, index: true },
   questions: { type: [challengeQuestionSchema], validate: [arr => arr.length === 15, 'Must have exactly 15 questions'] },
   status: { type: String, enum: ['active', 'closed'], default: 'active' },

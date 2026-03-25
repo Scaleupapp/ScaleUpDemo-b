@@ -22,6 +22,17 @@ Return valid JSON with a "questions" array where each question has:
   options (array of {label, text}), correctAnswer (A/B/C/D),
   explanation, concept`;
 
+const TITLE_PROMPT = `Generate a short, professional display title for a daily learning challenge about the given topic.
+
+Rules:
+- Title Case formatting (capitalize major words)
+- 2-5 words maximum
+- Professional and engaging, like a course module title
+- Do NOT include words like "Quiz", "Challenge", "Test", or "Daily"
+- Examples: "Product Strategy & Growth", "Advanced Python Patterns", "Data Science Essentials", "Cloud Architecture Fundamentals"
+
+Return ONLY the title text, nothing else.`;
+
 const MAX_SUBTOPICS = 20;
 const MAX_RETRIES = 2;
 
@@ -41,6 +52,17 @@ class ChallengeGenerationService {
 
     const today = this._todayIST();
 
+    // Generate display titles for all topics in parallel
+    const titleMap = {};
+    await Promise.all(objectives.map(async (objective) => {
+      try {
+        titleMap[objective] = await this._generateDisplayTitle(objective);
+      } catch (err) {
+        console.error(`[ChallengeGen] Title generation failed for "${objective}":`, err.message);
+        titleMap[objective] = this._fallbackTitleCase(objective);
+      }
+    }));
+
     for (const objective of objectives) {
       try {
         const subTopics = await this._getSubTopicsForObjective(objective);
@@ -49,6 +71,7 @@ class ChallengeGenerationService {
 
         const challenge = await DailyChallenge.create({
           topic: objective,
+          displayTitle: titleMap[objective],
           date: today,
           questions,
           status: 'active',
@@ -58,7 +81,7 @@ class ChallengeGenerationService {
         });
 
         results.daily.push({ topic: objective, challengeId: challenge._id });
-        console.log(`[ChallengeGen] Daily challenge created for "${objective}"`);
+        console.log(`[ChallengeGen] Daily challenge created for "${objective}" → "${titleMap[objective]}"`);
       } catch (err) {
         console.error(`[ChallengeGen] Daily failed for "${objective}":`, err.message);
         results.errors.push({ topic: objective, type: 'daily', error: err.message });
@@ -86,6 +109,7 @@ class ChallengeGenerationService {
 
           const event = await LiveEvent.create({
             topic: objective,
+            displayTitle: titleMap[objective],
             scheduledAt: tomorrowAt8PM,
             questions,
             status: 'scheduled',
@@ -228,6 +252,33 @@ class ChallengeGenerationService {
     const istOffset = 5.5 * 60 * 60 * 1000;
     const istNow = new Date(now.getTime() + istOffset);
     return istNow.getUTCDay();
+  }
+
+  async _generateDisplayTitle(topic) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: TITLE_PROMPT },
+          { role: 'user', content: topic },
+        ],
+        temperature: 0.6,
+        max_tokens: 30,
+      });
+      const title = response.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+      return title || this._fallbackTitleCase(topic);
+    } catch (err) {
+      return this._fallbackTitleCase(topic);
+    }
+  }
+
+  _fallbackTitleCase(text) {
+    const smallWords = new Set(['a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']);
+    return text.split(' ').map((word, i) => {
+      const lower = word.toLowerCase();
+      if (i > 0 && smallWords.has(lower)) return lower;
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    }).join(' ');
   }
 }
 
