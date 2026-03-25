@@ -68,6 +68,13 @@ const getChallengeResults = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getChallengeReview = async (req, res, next) => {
+  try {
+    const result = await competitionService.getChallengeReview(req.user.userId, req.params.id);
+    res.json(apiResponse.success(result));
+  } catch (err) { next(err); }
+};
+
 // --- Leaderboard ---
 
 const getWeeklyLeaderboard = async (req, res, next) => {
@@ -229,7 +236,7 @@ const getObjectiveTopic = async (req, res, next) => {
 
 module.exports = {
   getTodayChallenges, getChallengeById, startChallenge, submitChallengeAnswer,
-  completeChallenge, getChallengeResults,
+  completeChallenge, getChallengeResults, getChallengeReview,
   getWeeklyLeaderboard, getAllTimeLeaderboard,
   getCompetitionProfile, getCompetitionStats,
   getUpcomingEvents, getEventById, joinLobby, getLobbyState,

@@ -12,6 +12,7 @@ router.post('/challenges/:id/start', auth, c.startChallenge);
 router.put('/challenges/:id/answer', auth, c.submitChallengeAnswer);
 router.post('/challenges/:id/complete', auth, c.completeChallenge);
 router.get('/challenges/:id/results', auth, c.getChallengeResults);
+router.get('/challenges/:id/review', auth, c.getChallengeReview);
 
 // Leaderboard
 router.get('/leaderboard/weekly', auth, c.getWeeklyLeaderboard);

@@ -64,6 +64,42 @@ class CompetitionService {
     return DailyChallenge.findById(challengeId);
   }
 
+  async getChallengeReview(userId, challengeId) {
+    const challenge = await DailyChallenge.findById(challengeId);
+    if (!challenge) throw new Error('Challenge not found');
+
+    const attempt = await ChallengeAttempt.findOne({ userId, challengeId, completedAt: { $ne: null } });
+    if (!attempt) throw new Error('No completed attempt found');
+
+    const questions = challenge.questions.map((q, idx) => {
+      const userAnswer = attempt.answers.find(a => a.questionIndex === idx);
+      return {
+        questionIndex: idx,
+        questionText: q.questionText,
+        concept: q.concept || null,
+        options: q.options,
+        selectedAnswer: userAnswer?.selectedAnswer || null,
+        correctAnswer: q.correctAnswer,
+        isCorrect: userAnswer?.selectedAnswer === q.correctAnswer,
+        explanation: q.explanation || null,
+        timeSpent: userAnswer?.timeSpent || 0,
+      };
+    });
+
+    const correctCount = questions.filter(q => q.isCorrect).length;
+
+    return {
+      topic: challenge.topic,
+      displayTitle: challenge.displayTitle || null,
+      totalQuestions: challenge.questions.length,
+      correctCount,
+      totalTimeTaken: attempt.timeTaken || null,
+      handicappedScore: attempt.handicappedScore || null,
+      rawScore: attempt.rawScore || null,
+      questions,
+    };
+  }
+
   async startChallenge(userId, challengeId) {
     const challenge = await DailyChallenge.findById(challengeId);
     if (!challenge || challenge.status !== 'active') {
