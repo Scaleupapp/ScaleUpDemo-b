@@ -9,7 +9,25 @@ const apiResponse = require('../utils/apiResponse');
 const getTodayChallenges = async (req, res, next) => {
   try {
     const challenges = await competitionService.getTodayChallenges();
-    res.json(apiResponse.success(challenges));
+    const ChallengeAttempt = require('../models/ChallengeAttempt');
+    const userId = req.user?.userId;
+
+    // Enrich with per-user completion data
+    const enriched = await Promise.all(challenges.map(async (ch) => {
+      const obj = ch.toObject();
+      if (userId) {
+        const attempt = await ChallengeAttempt.findOne({
+          userId,
+          challengeId: ch._id,
+          completedAt: { $ne: null },
+        }).lean();
+        obj.userCompleted = !!attempt;
+        obj.userScore = attempt?.handicappedScore || null;
+      }
+      return obj;
+    }));
+
+    res.json(apiResponse.success(enriched));
   } catch (err) { next(err); }
 };
 
@@ -89,7 +107,19 @@ const getCompetitionStats = async (req, res, next) => {
 const getUpcomingEvents = async (req, res, next) => {
   try {
     const events = await liveEventService.getUpcomingEvents();
-    res.json(apiResponse.success(events));
+    const LiveEventAttempt = require('../models/LiveEventAttempt');
+    const userId = req.user?.userId;
+
+    const enriched = await Promise.all(events.map(async (ev) => {
+      const obj = ev.toObject();
+      if (userId) {
+        const attempt = await LiveEventAttempt.findOne({ userId, eventId: ev._id }).lean();
+        obj.userJoined = !!attempt;
+      }
+      return obj;
+    }));
+
+    res.json(apiResponse.success(enriched));
   } catch (err) { next(err); }
 };
 
