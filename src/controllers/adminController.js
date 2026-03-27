@@ -13,6 +13,21 @@ const getPendingApplications = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const endorseApplication = async (req, res, next) => {
+  try {
+    const app = await CreatorApplication.findById(req.params.id);
+    if (!app) return res.status(404).json(apiResponse.error('Application not found'));
+    app.endorsements.push({
+      creatorId: req.user.userId,
+      creatorTier: 'anchor',
+      note: req.body.note || 'Admin endorsement',
+    });
+    app.status = 'endorsed';
+    await app.save();
+    res.json(apiResponse.success(app, 'Application endorsed by admin'));
+  } catch (err) { next(err); }
+};
+
 const rejectApplication = async (req, res, next) => {
   try {
     const app = await creatorService.adminRejectApplication(req.params.id, req.user.userId, req.body);
@@ -117,6 +132,33 @@ const promoteCreator = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// --- Creator listing for admin ---
+
+const getCreators = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    const profiles = await CreatorProfile.find()
+      .populate('userId', 'firstName lastName username profilePicture email')
+      .sort({ tier: 1, createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+    const items = profiles.map(p => ({
+      _id: p.userId?._id || p.userId,
+      firstName: p.userId?.firstName,
+      lastName: p.userId?.lastName,
+      username: p.userId?.username,
+      profilePicture: p.userId?.profilePicture,
+      email: p.userId?.email,
+      tier: p.tier,
+      domain: p.domain,
+      createdAt: p.createdAt,
+    }));
+    res.json(apiResponse.success(items));
+  } catch (err) { next(err); }
+};
+
 // --- Content Moderation (new) ---
 
 const getContent = async (req, res, next) => {
@@ -124,7 +166,13 @@ const getContent = async (req, res, next) => {
     const page = parseInt(req.query.page) || 1;
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const filter = {};
-    if (req.query.status) filter.status = req.query.status;
+    if (req.query.status === 'reported') {
+      // 'reported' is not a real status — it means content with 1+ reports that isn't removed
+      filter.reportCount = { $gte: 1 };
+      filter.status = { $ne: 'removed' };
+    } else if (req.query.status) {
+      filter.status = req.query.status;
+    }
     if (req.query.minReports) filter.reportCount = { $gte: parseInt(req.query.minReports) };
     if (req.query.search) {
       filter.title = { $regex: req.query.search, $options: 'i' };
@@ -180,6 +228,6 @@ const getContentReports = async (req, res, next) => {
 };
 
 module.exports = {
-  getPendingApplications, rejectApplication, getUsers, banUser, unbanUser,
-  moderateContent, getStats, promoteCreator, getContent, removeContent, dismissReports, getContentReports,
+  getPendingApplications, endorseApplication, rejectApplication, getUsers, banUser, unbanUser,
+  moderateContent, getStats, promoteCreator, getCreators, getContent, removeContent, dismissReports, getContentReports,
 };

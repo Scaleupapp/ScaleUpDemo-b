@@ -5,8 +5,9 @@ const rbac = require('../middleware/rbac');
 
 router.use(auth, rbac('admin'));
 
-// Creator applications (admin can view all + reject spam)
+// Creator applications (admin can view all, endorse, reject)
 router.get('/applications', ctrl.getPendingApplications);
+router.post('/applications/:id/endorse', ctrl.endorseApplication);
 router.post('/applications/:id/reject', ctrl.rejectApplication);
 
 // User management
@@ -21,7 +22,8 @@ router.put('/content/:id/remove', ctrl.removeContent);
 router.put('/content/:id/dismiss', ctrl.dismissReports);
 router.get('/content/:id/reports', ctrl.getContentReports);
 
-// Creator tier promotion
+// Creator listing + tier promotion
+router.get('/creators', ctrl.getCreators);
 router.put('/creators/:id/promote', ctrl.promoteCreator);
 
 // Platform stats
