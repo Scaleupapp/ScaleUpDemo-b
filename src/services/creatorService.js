@@ -179,7 +179,7 @@ class CreatorService {
 
   async getCreatorPublicProfile(creatorId, currentUserId) {
     const user = await User.findOne({ _id: creatorId, role: 'creator', isActive: true, isBanned: false })
-      .select('firstName lastName username profilePicture bio followersCount followingCount createdAt')
+      .select('firstName lastName username profilePicture bio followersCount followingCount createdAt education workExperience skills')
       .lean();
     if (!user) throw new ApiError(404, 'Creator not found');
 
