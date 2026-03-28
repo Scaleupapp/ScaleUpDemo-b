@@ -45,8 +45,12 @@ const getTodayPlan = async (req, res, next) => {
     const journey = await Journey.findOne({ userId: req.user.userId, status: 'active' });
     if (!journey) throw new ApiError(404, 'No active journey');
 
-    // Sync progress first
-    await journeyProgressService.syncProgress(journey, req.user.userId);
+    // Sync progress — non-blocking: sync failure must not crash the endpoint
+    try {
+      await journeyProgressService.syncProgress(journey, req.user.userId);
+    } catch (syncErr) {
+      console.error('[journeyController] syncProgress failed in getTodayPlan (non-fatal):', syncErr.message);
+    }
 
     const currentWeekPlan = journey.weeklyPlans.find(w => w.weekNumber === journey.currentWeek);
     const dayOfWeek = new Date().getDay() || 7;
@@ -282,8 +286,12 @@ const getDashboard = async (req, res, next) => {
     const journey = await Journey.findOne(journeyQuery).sort({ status: 1 }); // 'active' sorts before 'paused'
     if (!journey) throw new ApiError(404, 'No active journey');
 
-    // Sync progress: reconcile content watched before/outside the journey
-    await journeyProgressService.syncProgress(journey, req.user.userId);
+    // Sync progress — non-blocking: sync failure must not crash the dashboard
+    try {
+      await journeyProgressService.syncProgress(journey, req.user.userId);
+    } catch (syncErr) {
+      console.error('[journeyController] syncProgress failed (non-fatal):', syncErr.message);
+    }
 
     // Fetch objective, knowledge profile, and content breakdown in parallel
     const [objective, knowledgeProfile, contentBreakdown] = await Promise.all([

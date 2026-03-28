@@ -10,8 +10,12 @@ const journeyProgressService = require('./journeyProgressService');
 class DashboardService {
 
   async getDashboard(userId, objectiveId = null) {
-    // Ensure streak is fresh before reading it
-    await ensureStreakFresh(userId);
+    // Ensure streak is fresh — non-blocking: streak failure must not crash the dashboard
+    try {
+      await ensureStreakFresh(userId);
+    } catch (err) {
+      console.error('[DashboardService] ensureStreakFresh failed (non-fatal):', err.message);
+    }
 
     let journeyQuery = { userId, status: { $in: ['active', 'paused'] } };
     if (objectiveId) {
@@ -26,9 +30,13 @@ class DashboardService {
       ConsumptionGraph.findOne({ userId }),
     ]);
 
-    // Sync journey progress with actual content consumption
+    // Sync journey progress — non-blocking: sync failure must not crash the dashboard
     if (journey) {
-      await journeyProgressService.syncProgress(journey, userId);
+      try {
+        await journeyProgressService.syncProgress(journey, userId);
+      } catch (err) {
+        console.error('[DashboardService] syncProgress failed (non-fatal):', err.message);
+      }
     }
 
     // Weekly stats (last 7 days) + previous week for growth comparison
