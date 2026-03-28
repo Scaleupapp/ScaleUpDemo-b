@@ -264,7 +264,7 @@ class CreatorService {
         .sort({ createdAt: 1 })
         .skip(skip)
         .limit(limit)
-        .populate('userId', 'firstName lastName email profilePicture')
+        .populate('userId', 'firstName lastName email profilePicture education workExperience skills')
         .populate('endorsements.creatorId', 'firstName lastName username'),
       CreatorApplication.countDocuments(filter),
     ]);
