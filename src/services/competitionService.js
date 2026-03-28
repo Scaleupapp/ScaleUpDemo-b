@@ -71,16 +71,37 @@ class CompetitionService {
     const attempt = await ChallengeAttempt.findOne({ userId, challengeId, completedAt: { $ne: null } });
     if (!attempt) throw new Error('No completed attempt found');
 
-    const questions = challenge.questions.map((q, idx) => {
-      const userAnswer = attempt.answers.find(a => a.questionIndex === idx);
+    // Walk questions in the randomized order so indices match the user's answers
+    const questions = attempt.questionOrder.map((origIdx, displayIdx) => {
+      const q = challenge.questions[origIdx];
+      const userAnswer = attempt.answers.find(a => a.questionIndex === displayIdx);
+      const optOrder = attempt.optionOrders[displayIdx];
+
+      // De-randomize the user's selected answer back to the original label
+      let isCorrect = false;
+      let originalSelectedLabel = null;
+      if (userAnswer?.selectedAnswer && userAnswer.selectedAnswer !== 'skipped') {
+        const ansIdx = ['A', 'B', 'C', 'D'].indexOf(userAnswer.selectedAnswer);
+        if (ansIdx >= 0) {
+          originalSelectedLabel = optOrder[ansIdx];
+          isCorrect = originalSelectedLabel === q.correctAnswer;
+        }
+      }
+
+      // Return options in the randomized order the user saw them
+      const shuffledOptions = optOrder.map((label, i) => {
+        const opt = q.options.find(o => o.label === label);
+        return { label: ['A', 'B', 'C', 'D'][i], text: opt?.text || '' };
+      });
+
       return {
-        questionIndex: idx,
+        questionIndex: displayIdx,
         questionText: q.questionText,
         concept: q.concept || null,
-        options: q.options,
+        options: shuffledOptions,
         selectedAnswer: userAnswer?.selectedAnswer || null,
-        correctAnswer: q.correctAnswer,
-        isCorrect: userAnswer?.selectedAnswer === q.correctAnswer,
+        correctAnswer: ['A', 'B', 'C', 'D'][optOrder.indexOf(q.correctAnswer)],
+        isCorrect,
         explanation: q.explanation || null,
         timeSpent: userAnswer?.timeSpent || 0,
       };
