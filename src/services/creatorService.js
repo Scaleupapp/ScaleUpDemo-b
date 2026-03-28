@@ -178,13 +178,14 @@ class CreatorService {
   // ─── Public Creator Profile ──────────────────────────────────────
 
   async getCreatorPublicProfile(creatorId, currentUserId) {
-    const user = await User.findOne({ _id: creatorId, role: 'creator', isActive: true, isBanned: false })
+    // First check if a creator profile exists for this user
+    const creatorProfile = await CreatorProfile.findOne({ userId: creatorId }).lean();
+    if (!creatorProfile) throw new ApiError(404, 'Creator profile not found');
+
+    const user = await User.findOne({ _id: creatorId, role: { $in: ['creator', 'admin'] }, isActive: true, isBanned: false })
       .select('firstName lastName username profilePicture bio followersCount followingCount createdAt education workExperience skills')
       .lean();
     if (!user) throw new ApiError(404, 'Creator not found');
-
-    const creatorProfile = await CreatorProfile.findOne({ userId: creatorId }).lean();
-    if (!creatorProfile) throw new ApiError(404, 'Creator profile not found');
 
     const [isFollowing, mutualFollowers] = await Promise.all([
       currentUserId ? socialService.checkFollowStatus(currentUserId, creatorId) : false,
