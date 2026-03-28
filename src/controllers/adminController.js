@@ -118,16 +118,27 @@ const getStats = async (req, res, next) => {
 
 const promoteCreator = async (req, res, next) => {
   try {
-    const { tier } = req.body;
+    const { tier, reason } = req.body;
     if (!['rising', 'core', 'anchor'].includes(tier)) {
       return res.status(400).json(apiResponse.error('Tier must be rising, core, or anchor'));
     }
-    const profile = await CreatorProfile.findOneAndUpdate(
-      { userId: req.params.id },
-      { tier },
-      { new: true }
-    );
+    const profile = await CreatorProfile.findOne({ userId: req.params.id });
     if (!profile) return res.status(404).json(apiResponse.error('Creator profile not found'));
+
+    const previousTier = profile.tier;
+    profile.tier = tier;
+
+    // Track promotion history
+    if (!profile.tierHistory) profile.tierHistory = [];
+    profile.tierHistory.push({
+      from: previousTier,
+      to: tier,
+      reason: reason || '',
+      promotedBy: req.user.userId,
+      promotedAt: new Date(),
+    });
+
+    await profile.save();
     res.json(apiResponse.success(profile, `Creator tier updated to ${tier}`));
   } catch (err) { next(err); }
 };
@@ -138,7 +149,21 @@ const getCreators = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-    const profiles = await CreatorProfile.find()
+
+    // If search query, find matching user IDs first
+    let userFilter = {};
+    if (req.query.search) {
+      const matchingUsers = await User.find({
+        $or: [
+          { firstName: { $regex: req.query.search, $options: 'i' } },
+          { lastName: { $regex: req.query.search, $options: 'i' } },
+          { username: { $regex: req.query.search, $options: 'i' } },
+        ],
+      }).select('_id').lean();
+      userFilter = { userId: { $in: matchingUsers.map(u => u._id) } };
+    }
+
+    const profiles = await CreatorProfile.find(userFilter)
       .populate('userId', 'firstName lastName username profilePicture email')
       .sort({ tier: 1, createdAt: -1 })
       .skip((page - 1) * limit)
@@ -153,6 +178,9 @@ const getCreators = async (req, res, next) => {
       email: p.userId?.email,
       tier: p.tier,
       domain: p.domain,
+      specializations: p.specializations,
+      stats: p.stats,
+      isVerified: p.isVerified,
       createdAt: p.createdAt,
     }));
     res.json(apiResponse.success(items));
