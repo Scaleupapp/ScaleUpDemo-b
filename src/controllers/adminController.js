@@ -12,6 +12,11 @@ const WeeklyLeaderboard = require('../models/WeeklyLeaderboard');
 const auth = require('../middleware/auth');
 const apiResponse = require('../utils/apiResponse');
 
+// Escape regex special characters to prevent NoSQL injection
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 const getPendingApplications = async (req, res, next) => {
   try {
     const data = await creatorService.getPendingApplications(req.query);
@@ -48,11 +53,12 @@ const getUsers = async (req, res, next) => {
     const filter = {};
     if (req.query.role) filter.role = req.query.role;
     if (req.query.search) {
+      const s = escapeRegex(req.query.search);
       filter.$or = [
-        { firstName: { $regex: req.query.search, $options: 'i' } },
-        { lastName: { $regex: req.query.search, $options: 'i' } },
-        { email: { $regex: req.query.search, $options: 'i' } },
-        { username: { $regex: req.query.search, $options: 'i' } },
+        { firstName: { $regex: s, $options: 'i' } },
+        { lastName: { $regex: s, $options: 'i' } },
+        { email: { $regex: s, $options: 'i' } },
+        { username: { $regex: s, $options: 'i' } },
       ];
     }
     const [users, total] = await Promise.all([
@@ -218,11 +224,12 @@ const getCreators = async (req, res, next) => {
     // If search query, find matching user IDs first
     let userFilter = {};
     if (req.query.search) {
+      const s = escapeRegex(req.query.search);
       const matchingUsers = await User.find({
         $or: [
-          { firstName: { $regex: req.query.search, $options: 'i' } },
-          { lastName: { $regex: req.query.search, $options: 'i' } },
-          { username: { $regex: req.query.search, $options: 'i' } },
+          { firstName: { $regex: s, $options: 'i' } },
+          { lastName: { $regex: s, $options: 'i' } },
+          { username: { $regex: s, $options: 'i' } },
         ],
       }).select('_id').lean();
       userFilter = { userId: { $in: matchingUsers.map(u => u._id) } };
@@ -268,7 +275,7 @@ const getContent = async (req, res, next) => {
     }
     if (req.query.minReports) filter.reportCount = { $gte: parseInt(req.query.minReports) };
     if (req.query.search) {
-      filter.title = { $regex: req.query.search, $options: 'i' };
+      filter.title = { $regex: escapeRegex(req.query.search), $options: 'i' };
     }
     const [items, total] = await Promise.all([
       Content.find(filter)

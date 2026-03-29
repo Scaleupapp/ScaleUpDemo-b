@@ -12,7 +12,12 @@ app.set('etag', false);
 
 // --- Global Middleware ---
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',')
+    : ['https://scaleupapp.club', 'https://api.scaleupapp.club'],
+  credentials: true,
+}));
 app.use((req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();

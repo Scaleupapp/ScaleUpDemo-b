@@ -4,6 +4,10 @@ const User = require('../models/User');
 const { paginate, paginationMeta } = require('../utils/pagination');
 const ApiError = require('../utils/apiError');
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 class LearningPathService {
 
   // ─── Create ────────────────────────────────────────────────────────
@@ -165,7 +169,7 @@ class LearningPathService {
     if (objectiveType) filter.targetObjectiveType = objectiveType;
     if (difficulty) filter.difficulty = difficulty;
     if (creatorType) filter.creatorType = creatorType;
-    if (search) filter.title = { $regex: search, $options: 'i' };
+    if (search) filter.title = { $regex: escapeRegex(search), $options: 'i' };
 
     const total = await LearningPath.countDocuments(filter);
     const { query, page: p, limit: l } = paginate(

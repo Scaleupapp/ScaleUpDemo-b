@@ -5,6 +5,10 @@ const { s3 } = require('../config/s3');
 const { GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 class ContentService {
 
   /**
@@ -98,7 +102,7 @@ class ContentService {
     if (domain) filter.domain = domain;
     if (topics) filter.topics = { $in: Array.isArray(topics) ? topics : [topics] };
     if (difficulty) filter.difficulty = difficulty;
-    if (search) filter.title = { $regex: search, $options: 'i' };
+    if (search) filter.title = { $regex: escapeRegex(search), $options: 'i' };
     if (creatorId) filter.creatorId = creatorId;
 
     const skip = (page - 1) * limit;

@@ -6,6 +6,10 @@ const { paginationMeta } = require('../utils/pagination');
 const socialService = require('./socialService');
 const { notificationQueue } = require('../config/queue');
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 class CreatorService {
 
   // ─── Application ──────────────────────────────────────────────────
@@ -206,10 +210,11 @@ class CreatorService {
     const filter = { role: 'creator', isActive: true, isBanned: false };
 
     if (search) {
+      const s = escapeRegex(search);
       filter.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { username: { $regex: search, $options: 'i' } },
+        { firstName: { $regex: s, $options: 'i' } },
+        { lastName: { $regex: s, $options: 'i' } },
+        { username: { $regex: s, $options: 'i' } },
       ];
     }
 
