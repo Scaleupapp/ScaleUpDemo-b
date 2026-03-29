@@ -59,7 +59,7 @@ router.get('/privacy-policy', (req, res) => {
       },
       {
         heading: '11. Contact Us',
-        body: 'For any questions, concerns, or requests related to this Privacy Policy or your personal data, please contact us:\n\n**Email:** privacy@scaleupapp.com\n**Data Controller:** ScaleUp Technologies\n\nYou also have the right to lodge a complaint with your local data protection authority if you believe your rights have been violated.',
+        body: 'For any questions, concerns, or requests related to this Privacy Policy or your personal data, please contact us:\n\n**Email:** privacy@scaleupapp.club\n**Data Controller:** ScaleUp Technologies\n\nYou also have the right to lodge a complaint with your local data protection authority if you believe your rights have been violated.',
       },
     ],
   }));
@@ -131,7 +131,7 @@ router.get('/terms-of-service', (req, res) => {
       },
       {
         heading: '14. Contact',
-        body: 'For questions about these Terms, please contact us:\n\n**Email:** support@scaleupapp.com\n**Legal inquiries:** legal@scaleupapp.com',
+        body: 'For questions about these Terms, please contact us:\n\n**Email:** admin@scaleupapp.club\n**Legal inquiries:** legal@scaleupapp.club',
       },
     ],
   }));
