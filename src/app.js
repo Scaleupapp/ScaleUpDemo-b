@@ -15,7 +15,7 @@ app.use(helmet());
 app.use(cors({
   origin: process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',')
-    : ['https://scaleupapp.club', 'https://api.scaleupapp.club'],
+    : ['https://scaleupapp.club', 'https://www.scaleupapp.club', 'https://api.scaleupapp.club', 'http://scaleupapp.club', 'http://localhost:3000'],
   credentials: true,
 }));
 app.use((req, res, next) => {
@@ -60,6 +60,7 @@ app.use('/api/v1/notifications', require('./routes/notifications'));
 app.use('/api/v1/competition', require('./routes/competition'));
 app.use('/api/v1/privacy', require('./routes/gdpr'));
 app.use('/api/v1/legal', require('./routes/legal'));
+app.use('/api/v1/website', require('./routes/website'));
 
 // --- Health Check ---
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
