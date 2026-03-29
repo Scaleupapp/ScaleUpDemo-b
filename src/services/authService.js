@@ -103,6 +103,8 @@ class AuthService {
       }
     }
 
+    if (user.isBanned) throw new ApiError(403, 'Your account has been suspended');
+
     const googleReactivationCheck = this._checkDeactivated(user);
     if (googleReactivationCheck) return googleReactivationCheck;
 
@@ -123,6 +125,8 @@ class AuthService {
     const user = await User.findById(decoded.userId);
     if (!user) throw new ApiError(401, 'User no longer exists');
     if (decoded.tokenVersion !== user.tokenVersion) throw new ApiError(401, 'Refresh token revoked');
+    if (user.isBanned) throw new ApiError(403, 'Your account has been suspended');
+    if (!user.isActive) throw new ApiError(403, 'Account deactivated');
 
     return this._tokenPair(user);
   }

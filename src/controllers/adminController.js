@@ -4,6 +4,12 @@ const Content = require('../models/Content');
 const ContentReport = require('../models/ContentReport');
 const CreatorProfile = require('../models/CreatorProfile');
 const CreatorApplication = require('../models/CreatorApplication');
+const Follow = require('../models/Follow');
+const Journey = require('../models/Journey');
+const Quiz = require('../models/Quiz');
+const Notification = require('../models/Notification');
+const WeeklyLeaderboard = require('../models/WeeklyLeaderboard');
+const auth = require('../middleware/auth');
 const apiResponse = require('../utils/apiResponse');
 
 const getPendingApplications = async (req, res, next) => {
@@ -68,14 +74,73 @@ const getUsers = async (req, res, next) => {
 
 const banUser = async (req, res, next) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { isBanned: true }, { new: true });
+    const userId = req.params.id;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json(apiResponse.error('User not found'));
+
+    // 1. Ban and immediately revoke all tokens
+    user.isBanned = true;
+    user.tokenVersion += 1; // Invalidates all existing refresh tokens
+    user.fcmToken = undefined; // Stop push notifications
+    await user.save();
+
+    // 2. Hide creator content
+    if (user.role === 'creator' || user.role === 'admin') {
+      await Content.updateMany(
+        { creatorId: userId, status: 'published' },
+        { $set: { status: 'removed' } }
+      );
+    }
+
+    // 3. Pause active journeys
+    await Journey.updateMany(
+      { userId, status: 'active' },
+      { $set: { status: 'paused', pausedAt: new Date() } }
+    );
+
+    // 4. Cancel pending quizzes
+    await Quiz.updateMany(
+      { userId, status: { $in: ['ready', 'delivered'] } },
+      { $set: { status: 'cancelled' } }
+    );
+
+    // 5. Remove from leaderboards
+    await WeeklyLeaderboard.updateMany(
+      { 'entries.userId': userId },
+      { $pull: { entries: { userId } } }
+    );
+
+    // 6. Clear auth middleware cache so ban takes effect immediately
+    auth.clearCache(userId);
+
+    console.log(`[Admin] User ${userId} (${user.email}) banned by ${req.user.userId}`);
+
     res.json(apiResponse.success(user, 'User banned'));
   } catch (err) { next(err); }
 };
 
 const unbanUser = async (req, res, next) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { isBanned: false }, { new: true });
+    const userId = req.params.id;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json(apiResponse.error('User not found'));
+
+    user.isBanned = false;
+    await user.save();
+
+    // Restore creator content
+    if (user.role === 'creator' || user.role === 'admin') {
+      await Content.updateMany(
+        { creatorId: userId, status: 'removed' },
+        { $set: { status: 'published' } }
+      );
+    }
+
+    // Clear auth middleware cache
+    auth.clearCache(userId);
+
+    console.log(`[Admin] User ${userId} (${user.email}) unbanned by ${req.user.userId}`);
+
     res.json(apiResponse.success(user, 'User unbanned'));
   } catch (err) { next(err); }
 };
