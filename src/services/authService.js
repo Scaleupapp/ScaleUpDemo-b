@@ -65,6 +65,9 @@ class AuthService {
     if (!isMatch) throw new ApiError(401, 'Invalid email or password');
     if (user.isBanned) throw new ApiError(403, 'Your account has been suspended');
 
+    const reactivationCheck = this._checkDeactivated(user);
+    if (reactivationCheck) return reactivationCheck;
+
     user.lastLoginAt = new Date();
     await user.save();
 
@@ -99,6 +102,9 @@ class AuthService {
         });
       }
     }
+
+    const googleReactivationCheck = this._checkDeactivated(user);
+    if (googleReactivationCheck) return googleReactivationCheck;
 
     user.lastLoginAt = new Date();
     await user.save();
@@ -203,6 +209,10 @@ class AuthService {
     if (user) {
       // Existing user — login
       if (user.isBanned) throw new ApiError(403, 'Your account has been suspended');
+
+      const phoneReactivationCheck = this._checkDeactivated(user);
+      if (phoneReactivationCheck) return phoneReactivationCheck;
+
       user.isPhoneVerified = true;
       user.lastLoginAt = new Date();
       await user.save();
@@ -276,6 +286,94 @@ class AuthService {
       throw new ApiError(400, 'Invalid phone number');
     }
     return cleaned;
+  }
+
+  /**
+   * Check if a user is deactivated. Returns a reactivation response if within
+   * the 30-day grace period, or throws if the account is permanently gone.
+   */
+  _checkDeactivated(user) {
+    if (user.isActive) return null;
+
+    const GRACE_PERIOD_DAYS = 30;
+    const deactivatedAt = user.deletedAt || user.updatedAt;
+    const daysSince = Math.floor((Date.now() - new Date(deactivatedAt).getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysSince > GRACE_PERIOD_DAYS) {
+      throw new ApiError(403, 'This account has been permanently deleted.');
+    }
+
+    return {
+      needsReactivation: true,
+      deactivatedAt,
+      daysRemaining: GRACE_PERIOD_DAYS - daysSince,
+      userId: user._id,
+    };
+  }
+
+  /**
+   * Reactivate a deactivated account within the 30-day grace period.
+   * Called after the user confirms reactivation from the frontend.
+   */
+  async reactivate({ email, password, googleIdToken, phone, otp }) {
+    let user;
+
+    if (googleIdToken) {
+      let ticket;
+      try {
+        ticket = await this.googleClient.verifyIdToken({
+          idToken: googleIdToken,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+      } catch {
+        throw new ApiError(401, 'Invalid Google ID token');
+      }
+      const { sub: googleId } = ticket.getPayload();
+      user = await User.findOne({ googleId }).select('+password');
+      if (!user) user = await User.findOne({ email: ticket.getPayload().email }).select('+password');
+    } else if (phone && otp) {
+      const normalized = this._normalizePhone(phone);
+      const redis = require('../config/redis');
+      const otpKey = `otp:phone:${normalized}`;
+      const storedOtp = await redis.get(otpKey);
+      if (!storedOtp || storedOtp !== otp) throw new ApiError(400, 'Invalid or expired OTP');
+      await redis.del(otpKey);
+      user = await User.findOne({ phone: normalized }).select('+password');
+    } else if (email && password) {
+      user = await User.findOne({ email }).select('+password');
+      if (!user) throw new ApiError(401, 'Invalid credentials');
+      const isMatch = await user.comparePassword(password);
+      if (!isMatch) throw new ApiError(401, 'Invalid credentials');
+    } else {
+      throw new ApiError(400, 'Credentials required for reactivation');
+    }
+
+    if (!user) throw new ApiError(404, 'Account not found');
+    if (user.isActive) throw new ApiError(400, 'Account is already active');
+    if (user.isBanned) throw new ApiError(403, 'Your account has been suspended');
+
+    const GRACE_PERIOD_DAYS = 30;
+    const deactivatedAt = user.deletedAt || user.updatedAt;
+    const daysSince = Math.floor((Date.now() - new Date(deactivatedAt).getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSince > GRACE_PERIOD_DAYS) {
+      throw new ApiError(403, 'This account has been permanently deleted.');
+    }
+
+    // Reactivate
+    user.isActive = true;
+    user.deletedAt = undefined;
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    // Restore account data (unhide content, resume journeys, fix follow counts)
+    const deactivationService = require('./deactivationService');
+    await deactivationService.restoreAccount(user._id);
+
+    // Clear auth middleware cache
+    const auth = require('../middleware/auth');
+    auth.clearCache(user._id.toString());
+
+    return { user: this._sanitize(user), ...this._tokenPair(user), reactivated: true };
   }
 
   async logout(userId) {

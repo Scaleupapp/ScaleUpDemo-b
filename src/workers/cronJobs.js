@@ -57,6 +57,12 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 8. Account Deletion — Daily 2 AM UTC: permanent-delete expired deactivated accounts + send reminders
+  cronQueue.add('accountDeletion', {}, {
+    repeat: { pattern: '0 2 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -129,6 +135,9 @@ function startCronJobs() {
         break;
       case 'streakReset':
         await resetStaleStreaks();
+        break;
+      case 'accountDeletion':
+        await runAccountDeletion();
         break;
     }
   }, { connection });
@@ -310,6 +319,27 @@ async function runJourneyAdvancement() {
 
       await journey.save();
     }
+  }
+}
+
+async function runAccountDeletion() {
+  const deactivationService = require('../services/deactivationService');
+
+  // Send 7-day and 1-day deletion reminders
+  try {
+    await deactivationService.sendDeletionReminders();
+  } catch (err) {
+    console.error('[Cron] Deletion reminders failed:', err.message);
+  }
+
+  // Permanently delete accounts past 30-day grace period
+  try {
+    const count = await deactivationService.permanentlyDeleteExpiredAccounts();
+    if (count > 0) {
+      console.log(`[Cron] Permanently deleted ${count} expired account(s)`);
+    }
+  } catch (err) {
+    console.error('[Cron] Permanent deletion failed:', err.message);
   }
 }
 

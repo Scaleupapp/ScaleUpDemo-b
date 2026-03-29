@@ -72,7 +72,14 @@ const logout = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const reactivate = async (req, res, next) => {
+  try {
+    const data = await authService.reactivate(req.body);
+    res.json(apiResponse.success(data, 'Account reactivated'));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   register, login, googleLogin, refreshToken, forgotPassword, resetPassword,
-  sendPhoneOTP, verifyPhoneOTP, verifyPhone, logout,
+  sendPhoneOTP, verifyPhoneOTP, verifyPhone, logout, reactivate,
 };

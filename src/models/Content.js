@@ -64,9 +64,10 @@ const contentSchema = new mongoose.Schema({
   // --- Publishing ---
   status: {
     type: String,
-    enum: ['draft', 'processing', 'ready', 'published', 'unpublished', 'rejected', 'removed'],
+    enum: ['draft', 'processing', 'ready', 'published', 'unpublished', 'rejected', 'removed', 'deactivated'],
     default: 'draft',
   },
+  _preDeactivationStatus: { type: String }, // original status before creator deactivated
   publishedAt: { type: Date },
 
   // --- Moderation ---

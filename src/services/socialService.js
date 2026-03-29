@@ -52,22 +52,30 @@ class SocialService {
     const filter = { followingId: userId };
     const total = await Follow.countDocuments(filter);
     const { query, page: p, limit: l } = paginate(
-      Follow.find(filter).populate('followerId', 'firstName lastName username profilePicture'),
+      Follow.find(filter).populate('followerId', 'firstName lastName username profilePicture isActive'),
       { page, limit },
     );
     const followers = await query.lean();
-    return { followers: followers.map(f => f.followerId), pagination: paginationMeta(total, p, l) };
+    // Filter out deactivated users from the list
+    return {
+      followers: followers.map(f => f.followerId).filter(u => u && u.isActive !== false),
+      pagination: paginationMeta(total, p, l),
+    };
   }
 
   async getFollowing(userId, { page = 1, limit = 20 } = {}) {
     const filter = { followerId: userId };
     const total = await Follow.countDocuments(filter);
     const { query, page: p, limit: l } = paginate(
-      Follow.find(filter).populate('followingId', 'firstName lastName username profilePicture'),
+      Follow.find(filter).populate('followingId', 'firstName lastName username profilePicture isActive'),
       { page, limit },
     );
     const following = await query.lean();
-    return { following: following.map(f => f.followingId), pagination: paginationMeta(total, p, l) };
+    // Filter out deactivated users from the list
+    return {
+      following: following.map(f => f.followingId).filter(u => u && u.isActive !== false),
+      pagination: paginationMeta(total, p, l),
+    };
   }
 
   async checkFollowStatus(followerId, followingId) {

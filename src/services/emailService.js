@@ -39,6 +39,21 @@ class EmailService {
       `,
     });
   }
+
+  async sendDeletionReminder(email, firstName, daysRemaining) {
+    const urgency = daysRemaining <= 1 ? 'FINAL NOTICE' : 'Reminder';
+    await this._send({
+      to: email,
+      subject: `${urgency}: Your ScaleUp account will be permanently deleted in ${daysRemaining} day${daysRemaining > 1 ? 's' : ''}`,
+      html: `
+        <h2>Hi ${firstName || 'there'},</h2>
+        <p>Your ScaleUp account is scheduled for permanent deletion in <strong>${daysRemaining} day${daysRemaining > 1 ? 's' : ''}</strong>.</p>
+        <p>Once deleted, all your learning progress, quiz history, and account data will be permanently removed and cannot be recovered.</p>
+        <p><strong>To keep your account:</strong> Simply log back into ScaleUp and confirm reactivation.</p>
+        <p>If you intended to delete your account, no action is needed.</p>
+      `,
+    });
+  }
 }
 
 module.exports = new EmailService();

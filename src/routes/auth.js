@@ -16,6 +16,7 @@ router.post('/phone/send-otp', validate(schemas.sendPhoneOTP), ctrl.sendPhoneOTP
 router.post('/phone/verify-otp', validate(schemas.verifyPhoneOTP), ctrl.verifyPhoneOTP);
 router.post('/phone/verify', auth, validate(schemas.verifyPhone), ctrl.verifyPhone);
 
+router.post('/reactivate', ctrl.reactivate);
 router.post('/logout', auth, ctrl.logout);
 
 module.exports = router;

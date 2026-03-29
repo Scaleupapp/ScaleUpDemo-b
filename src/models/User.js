@@ -60,6 +60,7 @@ const userSchema = new mongoose.Schema({
   // --- Status ---
   isActive: { type: Boolean, default: true },
   isBanned: { type: Boolean, default: false },
+  isPermanentlyDeleted: { type: Boolean, default: false },
   lastLoginAt: { type: Date },
   deletedAt: { type: Date },
 }, { timestamps: true });
