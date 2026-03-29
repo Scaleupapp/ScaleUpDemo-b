@@ -53,6 +53,8 @@ app.use('/api/v1/admin', require('./routes/admin'));
 app.use('/api/v1/tutor', require('./routes/aiTutor'));
 app.use('/api/v1/notifications', require('./routes/notifications'));
 app.use('/api/v1/competition', require('./routes/competition'));
+app.use('/api/v1/privacy', require('./routes/gdpr'));
+app.use('/api/v1/legal', require('./routes/legal'));
 
 // --- Health Check ---
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));

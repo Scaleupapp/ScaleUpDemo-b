@@ -14,10 +14,15 @@ const UserObjective = require('../models/UserObjective');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 const CompetitionProfile = require('../models/CompetitionProfile');
 const ContentProgress = require('../models/ContentProgress');
+const ContentInteraction = require('../models/ContentInteraction');
 const ConsumptionGraph = require('../models/ConsumptionGraph');
 const Notification = require('../models/Notification');
 const Comment = require('../models/Comment');
+const Conversation = require('../models/Conversation');
 const ChallengeAttempt = require('../models/ChallengeAttempt');
+const CreatorApplication = require('../models/CreatorApplication');
+const Playlist = require('../models/Playlist');
+const AuditLog = require('../models/AuditLog');
 const emailService = require('./emailService');
 
 const GRACE_PERIOD_DAYS = 30;
@@ -107,7 +112,7 @@ class DeactivationService {
    * Hard-anonymize a single user and delete their related data.
    */
   async _permanentlyDeleteUser(userId) {
-    // Delete all related data
+    // Delete ALL user data across every collection
     await Promise.all([
       Content.deleteMany({ creatorId: userId }),
       Journey.deleteMany({ userId }),
@@ -117,10 +122,15 @@ class DeactivationService {
       KnowledgeProfile.deleteMany({ userId }),
       CompetitionProfile.deleteMany({ userId }),
       ContentProgress.deleteMany({ userId }),
+      ContentInteraction.deleteMany({ userId }),
       ConsumptionGraph.deleteMany({ userId }),
       Notification.deleteMany({ userId }),
       Comment.deleteMany({ userId }),
+      Conversation.deleteMany({ userId }),
       ChallengeAttempt.deleteMany({ userId }),
+      CreatorApplication.deleteMany({ userId }),
+      Playlist.deleteMany({ userId }),
+      AuditLog.deleteMany({ userId }),
       Follow.deleteMany({ $or: [{ followerId: userId }, { followingId: userId }] }),
     ]);
 

@@ -3,9 +3,10 @@ const ctrl = require('../controllers/authController');
 const auth = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const schemas = require('../validators/authValidators');
+const auditLog = require('../middleware/auditLog');
 
-router.post('/register', validate(schemas.register), ctrl.register);
-router.post('/login', validate(schemas.login), ctrl.login);
+router.post('/register', validate(schemas.register), auditLog('register', 'auth'), ctrl.register);
+router.post('/login', validate(schemas.login), auditLog('login', 'auth'), ctrl.login);
 router.post('/google', ctrl.googleLogin);
 router.post('/refresh-token', ctrl.refreshToken);
 router.post('/forgot-password', validate(schemas.forgotPassword), ctrl.forgotPassword);

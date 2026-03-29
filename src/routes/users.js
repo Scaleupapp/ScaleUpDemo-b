@@ -2,6 +2,7 @@ const router = require('express').Router();
 const multer = require('multer');
 const ctrl = require('../controllers/userController');
 const auth = require('../middleware/auth');
+const auditLog = require('../middleware/auditLog');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -18,9 +19,9 @@ const upload = multer({
 router.use(auth);
 
 router.get('/me', ctrl.getProfile);
-router.put('/me', ctrl.updateProfile);
-router.put('/me/avatar', upload.single('avatar'), ctrl.uploadAvatar);
-router.delete('/me', ctrl.deleteAccount);
+router.put('/me', auditLog('profile_update', 'profile'), ctrl.updateProfile);
+router.put('/me/avatar', auditLog('avatar_upload', 'profile'), upload.single('avatar'), ctrl.uploadAvatar);
+router.delete('/me', auditLog('account_deactivate', 'data'), ctrl.deleteAccount);
 router.get('/:userId', ctrl.getPublicProfile);
 
 module.exports = router;

@@ -57,6 +57,14 @@ const userSchema = new mongoose.Schema({
   fcmToken: { type: String },
   deviceType: { type: String, enum: ['ios', 'android', 'web'] },
 
+  // --- Consent (GDPR) ---
+  consentTerms: { type: Date },        // when user accepted Terms of Service
+  consentTermsVersion: { type: String }, // which version they accepted
+  consentPrivacy: { type: Date },       // when user accepted Privacy Policy
+  consentPrivacyVersion: { type: String },
+  consentMarketing: { type: Date },     // optional marketing consent
+  consentWithdrawnAt: { type: Date },   // if user withdrew consent
+
   // --- Status ---
   isActive: { type: Boolean, default: true },
   isBanned: { type: Boolean, default: false },

@@ -42,7 +42,8 @@ class EmailService {
 
   async sendDeletionReminder(email, firstName, daysRemaining) {
     const urgency = daysRemaining <= 1 ? 'FINAL NOTICE' : 'Reminder';
-    await this._send({
+    await this.transporter.sendMail({
+      from: this.from,
       to: email,
       subject: `${urgency}: Your ScaleUp account will be permanently deleted in ${daysRemaining} day${daysRemaining > 1 ? 's' : ''}`,
       html: `
@@ -51,6 +52,44 @@ class EmailService {
         <p>Once deleted, all your learning progress, quiz history, and account data will be permanently removed and cannot be recovered.</p>
         <p><strong>To keep your account:</strong> Simply log back into ScaleUp and confirm reactivation.</p>
         <p>If you intended to delete your account, no action is needed.</p>
+      `,
+    });
+  }
+
+  async sendBreachNotification(email, firstName, { title, description, dataAffected, actionRequired }) {
+    await this.transporter.sendMail({
+      from: this.from,
+      to: email,
+      subject: `Security Notice: ${title}`,
+      html: `
+        <h2>Important Security Notice</h2>
+        <p>Dear ${firstName || 'User'},</p>
+        <p>We are writing to inform you of a security incident that may affect your ScaleUp account.</p>
+        <h3>What happened</h3>
+        <p>${description}</p>
+        <h3>What data was affected</h3>
+        <p>${dataAffected}</p>
+        <h3>What you should do</h3>
+        <p>${actionRequired}</p>
+        <h3>What we are doing</h3>
+        <p>We have taken immediate steps to secure our systems, investigate the incident, and prevent future occurrences. We have also notified the relevant data protection authorities as required by law.</p>
+        <p>If you have any questions or concerns, please contact us at <a href="mailto:privacy@scaleupapp.com">privacy@scaleupapp.com</a>.</p>
+        <p>We sincerely apologize for any inconvenience.</p>
+        <p>— The ScaleUp Security Team</p>
+      `,
+    });
+  }
+
+  async sendDataExportReady(email, firstName) {
+    await this.transporter.sendMail({
+      from: this.from,
+      to: email,
+      subject: 'Your ScaleUp data export is ready',
+      html: `
+        <h2>Hi ${firstName || 'there'},</h2>
+        <p>Your data export is ready. Open the ScaleUp app and go to <strong>Settings > Privacy > Download My Data</strong> to access it.</p>
+        <p>The export contains all personal data we hold about you in JSON format, as required by GDPR Articles 15 and 20.</p>
+        <p>If you did not request this export, please contact us immediately at <a href="mailto:privacy@scaleupapp.com">privacy@scaleupapp.com</a>.</p>
       `,
     });
   }
