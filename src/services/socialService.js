@@ -144,6 +144,21 @@ class SocialService {
     return { items, pagination: paginationMeta(total, p, l) };
   }
 
+  // ─── Interaction Status ────────────────────────────────────────────
+
+  async getInteractionStatus(userId, contentId) {
+    const [like, save, rating] = await Promise.all([
+      ContentInteraction.findOne({ userId, contentId, type: 'like' }).lean(),
+      ContentInteraction.findOne({ userId, contentId, type: 'save' }).lean(),
+      ContentInteraction.findOne({ userId, contentId, type: 'rate' }).lean(),
+    ]);
+    return {
+      isLiked: !!like,
+      isSaved: !!save,
+      userRating: rating?.value ?? 0,
+    };
+  }
+
   // ─── Content Interactions (used by contentController) ──────────────
 
   async toggleLike(userId, contentId) {

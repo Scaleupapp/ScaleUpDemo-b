@@ -22,6 +22,7 @@ router.get('/explore', auth, ctrl.explore);
 router.get('/liked', auth, ctrl.getLikedContent);
 router.get('/saved', auth, ctrl.getSavedContent);
 router.get('/:id', auth, ctrl.getContent);
+router.get('/:id/interaction-status', auth, ctrl.getInteractionStatus);
 router.get('/:id/stream', auth, ctrl.getStreamUrl);
 router.post('/:id/like', auth, ctrl.toggleLike);
 router.post('/:id/save', auth, ctrl.toggleSave);

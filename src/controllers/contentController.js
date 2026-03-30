@@ -194,8 +194,15 @@ const abortMultipart = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getInteractionStatus = async (req, res, next) => {
+  try {
+    const data = await socialService.getInteractionStatus(req.user.userId, req.params.id);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   requestUpload, completeUpload, requestThumbnailUpload, getMyContent, updateContent, publishContent, unpublishContent, deleteContent,
   getFeed, explore, getContent, getStreamUrl, getLikedContent, getSavedContent, toggleLike, toggleSave, rateContent, trackShare, getComments, addComment, reportContent,
-  initiateMultipart, completeMultipart, abortMultipart,
+  initiateMultipart, completeMultipart, abortMultipart, getInteractionStatus,
 };
