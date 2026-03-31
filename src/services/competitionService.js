@@ -355,8 +355,10 @@ class CompetitionService {
     const User = require('../models/User');
     const top50 = sorted.slice(0, 50);
     for (const entry of top50) {
-      const user = await User.findById(entry.userId).select('firstName lastName username profilePicture');
-      entry.user = user;
+      const user = await User.findById(entry.userId).select('firstName lastName username profilePicture').lean();
+      if (user) {
+        entry.userId = { _id: user._id, firstName: user.firstName, lastName: user.lastName, username: user.username, profilePicture: user.profilePicture };
+      }
     }
 
     return { entries: top50, topic: topic || 'global' };
