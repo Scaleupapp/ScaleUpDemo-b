@@ -26,7 +26,7 @@ async function processContent(job) {
   await content.save();
 
   try {
-    const contentText = content.transcript || content.description || '';
+    const contentText = content.ocrText || content.transcript || content.description || '';
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',

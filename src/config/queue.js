@@ -12,6 +12,8 @@ const notificationQueue = new Queue('notifications', { connection });
 const youtubeImportQueue = new Queue('youtubeImport', { connection });
 const whisperTranscriptionQueue = new Queue('whisperTranscription', { connection });
 const competitionQueue = new Queue('competition', { connection });
+const ocrProcessingQueue = new Queue('ocrProcessing', { connection });
+const flashcardGenerationQueue = new Queue('flashcardGeneration', { connection });
 
 module.exports = {
   contentProcessingQueue,
@@ -23,4 +25,6 @@ module.exports = {
   youtubeImportQueue,
   whisperTranscriptionQueue,
   competitionQueue,
+  ocrProcessingQueue,
+  flashcardGenerationQueue,
 };

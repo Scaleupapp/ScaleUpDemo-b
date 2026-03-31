@@ -97,13 +97,14 @@ class ContentService {
     return { items, pagination: paginationMeta(total, page, limit) };
   }
 
-  async explore({ domain, topics, difficulty, search, creatorId, page = 1, limit = 20 }) {
+  async explore({ domain, topics, difficulty, search, creatorId, contentType, page = 1, limit = 20 }) {
     const filter = { status: 'published' };
     if (domain) filter.domain = domain;
     if (topics) filter.topics = { $in: Array.isArray(topics) ? topics : [topics] };
     if (difficulty) filter.difficulty = difficulty;
     if (search) filter.title = { $regex: escapeRegex(search), $options: 'i' };
     if (creatorId) filter.creatorId = creatorId;
+    if (contentType) filter.contentType = contentType;
 
     const skip = (page - 1) * limit;
     const [items, total] = await Promise.all([

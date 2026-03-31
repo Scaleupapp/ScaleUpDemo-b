@@ -34,6 +34,7 @@
     "node-fetch": "^2.7.0",
     "nodemailer": "^6.9.16",
     "openai": "^4.73.0",
+    "pdf-parse": "^2.4.5",
     "twilio": "^5.4.0",
     "winston": "^3.17.0",
     "youtube-transcript": "^1.2.1"

@@ -11,6 +11,8 @@ const adaptJourney = require('./journeyAdapter');
 const processYoutubeImport = require('./youtubeImporter');
 const transcribeContent = require('./whisperTranscriber');
 const processNotification = require('./notificationWorker');
+const processOCR = require('./ocrProcessor');
+const generateFlashcards = require('./flashcardGenerator');
 const { startCronJobs } = require('./cronJobs');
 require('./competitionWorker');
 
@@ -23,6 +25,8 @@ function startWorkers() {
   new Worker('youtubeImport', processYoutubeImport, { connection, concurrency: 1 });
   new Worker('whisperTranscription', transcribeContent, { connection, concurrency: 1 });
   new Worker('notifications', processNotification, { connection, concurrency: 3 });
+  new Worker('ocrProcessing', processOCR, { connection, concurrency: 2 });
+  new Worker('flashcardGeneration', generateFlashcards, { connection, concurrency: 2 });
 
   startCronJobs();
 

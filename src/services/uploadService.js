@@ -59,7 +59,7 @@ class UploadService {
     return { uploadURL, key, expiresIn: 3600 };
   }
 
-  async completeUpload({ creatorId, key, title, description, contentType, domain, topics, tags, difficulty, thumbnailKey }) {
+  async completeUpload({ creatorId, key, title, description, contentType, domain, topics, tags, difficulty, thumbnailKey, collegeId, collegeName, fileFormat }) {
     const contentURL = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
     const thumbnailURL = thumbnailKey
@@ -72,13 +72,23 @@ class UploadService {
       thumbnailURL, thumbnailS3Key: thumbnailKey || null,
       sourceType: 'original',
       status: 'processing', aiStatus: 'pending',
+      // Notes-specific
+      ...(contentType === 'notes' && {
+        collegeId: collegeId || undefined,
+        collegeName: collegeName || undefined,
+        fileFormat: fileFormat || 'pdf',
+      }),
     });
 
     if (contentType === 'video') {
       // For videos: transcribe first, then AI analysis (transcriber re-queues processing)
       await whisperTranscriptionQueue.add('transcribe', { contentId: content._id.toString() });
+    } else if (contentType === 'notes') {
+      // For notes: OCR first, then AI analysis (OCR worker re-queues processing)
+      const { ocrProcessingQueue } = require('../config/queue');
+      await ocrProcessingQueue.add('ocr', { contentId: content._id.toString() });
     } else {
-      // For non-videos: go straight to AI analysis
+      // For non-videos/non-notes: go straight to AI analysis
       await contentProcessingQueue.add('process', { contentId: content._id.toString() });
     }
     return content;

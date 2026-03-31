@@ -38,7 +38,7 @@ const userSchema = new mongoose.Schema({
   skills: [{ type: String, lowercase: true, trim: true }],
 
   // --- Role & Auth ---
-  role: { type: String, enum: ['consumer', 'creator', 'admin'], default: 'consumer' },
+  role: { type: String, enum: ['consumer', 'contributor', 'creator', 'admin'], default: 'consumer' },
   authProvider: { type: String, enum: ['local', 'google', 'linkedin', 'phone'], default: 'local' },
   googleId: { type: String, sparse: true },
   linkedinId: { type: String, sparse: true },
@@ -52,6 +52,13 @@ const userSchema = new mongoose.Schema({
   // --- Engagement (denormalized counters) ---
   followersCount: { type: Number, default: 0 },
   followingCount: { type: Number, default: 0 },
+
+  // --- Contributor Stats (for notes uploaders) ---
+  contributorStats: {
+    totalNotes: { type: Number, default: 0 },
+    totalViews: { type: Number, default: 0 },
+    totalSaves: { type: Number, default: 0 },
+  },
 
   // --- Device & Notifications ---
   fcmToken: { type: String },

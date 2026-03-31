@@ -12,7 +12,7 @@ const contentSchema = new mongoose.Schema({
   creatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   title: { type: String, required: true, trim: true, maxlength: 200 },
   description: { type: String, maxlength: 5000 },
-  contentType: { type: String, enum: ['video', 'article', 'infographic'], required: true },
+  contentType: { type: String, enum: ['video', 'article', 'infographic', 'notes'], required: true },
 
   // --- Media ---
   contentURL: { type: String, required: true },
@@ -21,6 +21,13 @@ const contentSchema = new mongoose.Schema({
   thumbnailS3Key: { type: String },
   duration: { type: Number },
   wordCount: { type: Number },
+
+  // --- Notes-specific ---
+  pageCount: { type: Number },
+  fileFormat: { type: String, enum: ['pdf', 'image'] },
+  collegeId: { type: mongoose.Schema.Types.ObjectId, ref: 'College' },
+  collegeName: { type: String },
+  ocrText: { type: String },
 
   // --- Source Attribution (critical for copyright) ---
   sourceType: { type: String, enum: ['original', 'youtube'], default: 'original' },
@@ -95,6 +102,7 @@ contentSchema.index({ creatorId: 1, status: 1 });
 contentSchema.index({ domain: 1, topics: 1, status: 1, publishedAt: -1 });
 contentSchema.index({ status: 1, publishedAt: -1 });
 contentSchema.index({ tags: 1 });
+contentSchema.index({ contentType: 1, status: 1, publishedAt: -1 });
 contentSchema.index({ youtubeVideoId: 1 }, { sparse: true });
 
 module.exports = mongoose.model('Content', contentSchema);
