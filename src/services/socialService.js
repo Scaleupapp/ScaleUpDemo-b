@@ -314,11 +314,40 @@ class SocialService {
     return Playlist.find({ userId }).sort({ updatedAt: -1 }).lean();
   }
 
-  async getPlaylist(playlistId) {
+  async getPlaylist(playlistId, userId) {
     const playlist = await Playlist.findById(playlistId)
-      .populate('items.contentId', 'title description contentType domain thumbnailURL duration creatorId')
+      .populate({
+        path: 'items.contentId',
+        select: 'title description contentType domain thumbnailURL duration creatorId',
+        populate: { path: 'creatorId', select: 'firstName lastName username profilePicture' }
+      })
       .lean();
     if (!playlist) throw new ApiError(404, 'Playlist not found');
+
+    // Attach progress info for each content item if userId provided
+    if (userId) {
+      const ContentProgress = require('../models/ContentProgress');
+      const contentIds = playlist.items
+        .filter(i => i.contentId)
+        .map(i => i.contentId._id || i.contentId);
+      const progressRecords = await ContentProgress.find({
+        userId,
+        contentId: { $in: contentIds }
+      }).lean();
+      const progressMap = {};
+      for (const p of progressRecords) {
+        progressMap[p.contentId.toString()] = {
+          status: p.isCompleted ? 'completed' : (p.percentageCompleted > 0 ? 'in_progress' : 'not_started'),
+          progressPercentage: p.percentageCompleted || 0,
+        };
+      }
+      for (const item of playlist.items) {
+        if (item.contentId && item.contentId._id) {
+          item.contentId._progress = progressMap[item.contentId._id.toString()] || null;
+        }
+      }
+    }
+
     return playlist;
   }
 

@@ -34,7 +34,7 @@ const getMyPlaylists = async (req, res, next) => {
   try { res.json(apiResponse.success(await socialService.getMyPlaylists(req.user.userId))); } catch (err) { next(err); }
 };
 const getPlaylist = async (req, res, next) => {
-  try { res.json(apiResponse.success(await socialService.getPlaylist(req.params.playlistId))); } catch (err) { next(err); }
+  try { res.json(apiResponse.success(await socialService.getPlaylist(req.params.playlistId, req.user.userId))); } catch (err) { next(err); }
 };
 const updatePlaylist = async (req, res, next) => {
   try { res.json(apiResponse.success(await socialService.updatePlaylist(req.user.userId, req.params.playlistId, req.body))); } catch (err) { next(err); }
