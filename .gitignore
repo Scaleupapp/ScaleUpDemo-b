@@ -10,3 +10,4 @@ coverage/
 *.tgz
 *-player-script.js
 PRODUCT_ANALYSIS.md
+data/colleges.json

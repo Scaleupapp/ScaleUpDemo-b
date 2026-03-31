@@ -61,6 +61,7 @@ app.use('/api/v1/competition', require('./routes/competition'));
 app.use('/api/v1/privacy', require('./routes/gdpr'));
 app.use('/api/v1/legal', require('./routes/legal'));
 app.use('/api/v1/website', require('./routes/website'));
+app.use('/api/v1/colleges', require('./routes/colleges'));
 
 // --- Health Check ---
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
