@@ -25,6 +25,15 @@ const getFollowing = async (req, res, next) => {
 const deleteComment = async (req, res, next) => {
   try { res.json(apiResponse.success(await socialService.deleteComment(req.user.userId, req.params.commentId))); } catch (err) { next(err); }
 };
+const editComment = async (req, res, next) => {
+  try { res.json(apiResponse.success(await socialService.editComment(req.user.userId, req.params.commentId, req.body.text))); } catch (err) { next(err); }
+};
+const toggleCommentLike = async (req, res, next) => {
+  try { res.json(apiResponse.success(await socialService.toggleCommentLike(req.user.userId, req.params.commentId))); } catch (err) { next(err); }
+};
+const getReplies = async (req, res, next) => {
+  try { res.json(apiResponse.success(await socialService.getReplies(req.params.commentId, req.query))); } catch (err) { next(err); }
+};
 
 // ─── Playlists ───────────────────────────────────────────────────────
 const createPlaylist = async (req, res, next) => {
@@ -51,6 +60,6 @@ const deletePlaylist = async (req, res, next) => {
 
 module.exports = {
   followUser, unfollowUser, getFollowers, getFollowing,
-  deleteComment,
+  deleteComment, editComment, toggleCommentLike, getReplies,
   createPlaylist, getMyPlaylists, getPlaylist, updatePlaylist, addToPlaylist, removeFromPlaylist, deletePlaylist,
 };

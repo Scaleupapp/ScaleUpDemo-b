@@ -280,13 +280,25 @@ class SocialService {
   }
 
   async getComments(contentId, { page = 1, limit = 20 } = {}) {
-    const filter = { contentId, deletedAt: { $exists: false } };
+    // Only top-level comments (no parentId)
+    const filter = { contentId, parentId: { $exists: false }, deletedAt: { $exists: false } };
     const total = await Comment.countDocuments(filter);
     const { query, page: p, limit: l } = paginate(
       Comment.find(filter).sort({ createdAt: -1 }).populate('userId', 'firstName lastName username profilePicture'),
       { page, limit },
     );
     const comments = await query.lean();
+
+    // Attach reply count for each comment
+    const commentIds = comments.map(c => c._id);
+    const replyCounts = await Comment.aggregate([
+      { $match: { parentId: { $in: commentIds }, deletedAt: { $exists: false } } },
+      { $group: { _id: '$parentId', count: { $sum: 1 } } },
+    ]);
+    const replyMap = {};
+    for (const r of replyCounts) { replyMap[r._id.toString()] = r.count; }
+    for (const c of comments) { c.replyCount = replyMap[c._id.toString()] || 0; }
+
     return { comments, pagination: paginationMeta(total, p, l) };
   }
 
@@ -302,6 +314,51 @@ class SocialService {
     await Content.findByIdAndUpdate(comment.contentId, { $inc: { commentCount: -1 } });
 
     return { deleted: true };
+  }
+
+  async editComment(userId, commentId, text) {
+    if (!text || text.trim().length === 0) throw new ApiError(400, 'Comment text is required');
+    if (text.trim().length > 1000) throw new ApiError(400, 'Comment too long (max 1000 characters)');
+
+    const comment = await Comment.findById(commentId);
+    if (!comment) throw new ApiError(404, 'Comment not found');
+    if (comment.userId.toString() !== userId) throw new ApiError(403, 'Not your comment');
+    if (comment.deletedAt) throw new ApiError(400, 'Cannot edit deleted comment');
+
+    comment.text = text.trim();
+    comment.isEdited = true;
+    await comment.save();
+
+    return comment;
+  }
+
+  async toggleCommentLike(userId, commentId) {
+    const comment = await Comment.findById(commentId);
+    if (!comment) throw new ApiError(404, 'Comment not found');
+
+    const existing = await ContentInteraction.findOne({ userId, contentId: commentId, type: 'comment_like' });
+    if (existing) {
+      await ContentInteraction.deleteOne({ _id: existing._id });
+      comment.likeCount = Math.max(0, comment.likeCount - 1);
+      await comment.save();
+      return { liked: false, likeCount: comment.likeCount };
+    }
+
+    await ContentInteraction.create({ userId, contentId: commentId, type: 'comment_like' });
+    comment.likeCount += 1;
+    await comment.save();
+    return { liked: true, likeCount: comment.likeCount };
+  }
+
+  async getReplies(parentId, { page = 1, limit = 10 } = {}) {
+    const filter = { parentId, deletedAt: { $exists: false } };
+    const total = await Comment.countDocuments(filter);
+    const { query, page: p, limit: l } = paginate(
+      Comment.find(filter).sort({ createdAt: 1 }).populate('userId', 'firstName lastName username profilePicture'),
+      { page, limit },
+    );
+    const replies = await query.lean();
+    return { replies, pagination: paginationMeta(total, p, l) };
   }
 
   // ─── Playlists ─────────────────────────────────────────────────────

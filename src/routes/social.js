@@ -11,7 +11,10 @@ router.get('/followers/:userId', ctrl.getFollowers);
 router.get('/following/:userId', ctrl.getFollowing);
 
 // Comments
+router.put('/comments/:commentId', ctrl.editComment);
 router.delete('/comments/:commentId', ctrl.deleteComment);
+router.post('/comments/:commentId/like', ctrl.toggleCommentLike);
+router.get('/comments/:commentId/replies', ctrl.getReplies);
 
 // Playlists
 router.post('/playlists', ctrl.createPlaylist);
