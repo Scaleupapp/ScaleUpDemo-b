@@ -59,41 +59,59 @@ async function processOCR(job) {
 
     await job.updateProgress(50);
 
-    // If text extraction got very little text (likely scanned/handwritten), use GPT-4o Vision
+    // If text extraction got very little text (likely scanned/handwritten), use GPT-4o
     if (extractedText.trim().length < 100) {
-      console.log(`[OCR] Text extraction insufficient (${extractedText.length} chars), using GPT-4o Vision`);
+      console.log(`[OCR] Text extraction insufficient (${extractedText.length} chars), using GPT-4o`);
 
-      // Read file as base64 for Vision API
       const fileBuffer = fs.readFileSync(tmpFile);
-      const base64 = fileBuffer.toString('base64');
-      const mimeType = content.s3Key?.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg';
+      const ext = path.extname(content.s3Key || '.pdf').toLowerCase();
+      const isImage = ['.jpg', '.jpeg', '.png', '.heic'].includes(ext);
 
-      // For PDFs, we send as a document. For images, send directly.
-      // GPT-4o can handle PDFs natively now
-      const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an OCR assistant. Extract ALL text from the provided document. Preserve the structure, headings, bullet points, and formatting as much as possible. For handwritten text, do your best to accurately transcribe. Return only the extracted text, nothing else.',
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image_url',
-                image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' },
-              },
+      if (isImage) {
+        // Images: send directly as image_url to GPT-4o Vision
+        const base64 = fileBuffer.toString('base64');
+        const mimeMap = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.heic': 'image/jpeg' };
+        const mimeType = mimeMap[ext] || 'image/jpeg';
+
+        const response = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: 'You are an OCR assistant. Extract ALL text from the provided image. Preserve structure, headings, bullet points. For handwritten text, do your best to accurately transcribe. Return only the extracted text.' },
+            { role: 'user', content: [
+              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' } },
+              { type: 'text', text: 'Extract all text from this image.' },
+            ]},
+          ],
+          max_tokens: 4096,
+          temperature: 0.1,
+        });
+        extractedText = response.choices[0]?.message?.content || '';
+      } else {
+        // PDFs: upload as file to OpenAI, then use in chat
+        const file = await openai.files.create({
+          file: fs.createReadStream(tmpFile),
+          purpose: 'assistants',
+        });
+
+        const response = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: 'You are an OCR assistant. Extract ALL text from the provided document. Preserve structure, headings, bullet points. For handwritten text, do your best to accurately transcribe. Return only the extracted text.' },
+            { role: 'user', content: [
+              { type: 'file', file: { file_id: file.id } },
               { type: 'text', text: 'Extract all text from this document.' },
-            ],
-          },
-        ],
-        max_tokens: 4096,
-        temperature: 0.1,
-      });
+            ]},
+          ],
+          max_tokens: 4096,
+          temperature: 0.1,
+        });
+        extractedText = response.choices[0]?.message?.content || '';
 
-      extractedText = response.choices[0]?.message?.content || '';
-      if (!pageCount) pageCount = 1; // At least 1 page if we got here
+        // Cleanup uploaded file
+        try { await openai.files.del(file.id); } catch {}
+      }
+
+      if (!pageCount) pageCount = 1;
     }
 
     await job.updateProgress(70);
