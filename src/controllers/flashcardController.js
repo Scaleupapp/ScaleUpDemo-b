@@ -7,16 +7,9 @@ const generateFlashcards = async (req, res, next) => {
     const { contentId } = req.body;
     if (!contentId) return res.status(400).json(apiResponse.error('contentId is required'));
 
-    // Queue async generation
-    await flashcardGenerationQueue.add('generate', {
-      userId: req.user.userId,
-      contentId,
-    }, {
-      attempts: 2,
-      backoff: { type: 'exponential', delay: 5000 },
-    });
-
-    res.status(202).json(apiResponse.success({ status: 'generating', contentId }, 'Flashcards are being generated'));
+    // Generate synchronously — GPT-4o takes 3-5 seconds, acceptable for UX
+    const result = await flashcardService.generate(req.user.userId, contentId);
+    res.json(apiResponse.success(result, 'Flashcards generated'));
   } catch (err) { next(err); }
 };
 

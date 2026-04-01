@@ -147,14 +147,15 @@ const uploadAvatar = async (req, res, next) => {
 
 const getContributorCard = async (req, res, next) => {
   try {
-    const user = await User.findById(req.params.id)
+    const userId = req.params.userId || req.params.id;
+    const user = await User.findById(userId)
       .select('firstName lastName username profilePicture bio role education workExperience contributorStats')
       .lean();
     if (!user) return res.status(404).json(apiResponse.error('User not found'));
 
     // Get their published notes
     const notes = await Content.find({
-      creatorId: req.params.id,
+      creatorId: userId,
       contentType: 'notes',
       status: 'published',
     })
@@ -165,7 +166,7 @@ const getContributorCard = async (req, res, next) => {
 
     const totalViews = notes.reduce((s, n) => s + (n.viewCount || 0), 0);
     const totalNotes = await Content.countDocuments({
-      creatorId: req.params.id,
+      creatorId: userId,
       contentType: 'notes',
       status: 'published',
     });
