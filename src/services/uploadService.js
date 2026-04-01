@@ -9,7 +9,14 @@ const MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024; // 4 GB
 class UploadService {
 
   async requestUpload({ creatorId, fileName, fileType, fileSize }) {
-    const allowedTypes = ['video/mp4', 'video/quicktime', 'image/jpeg', 'image/png', 'application/pdf'];
+    const allowedTypes = [
+      'video/mp4', 'video/quicktime',
+      'image/jpeg', 'image/png', 'image/heic',
+      'application/pdf',
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/octet-stream',
+    ];
     if (!allowedTypes.includes(fileType)) throw new ApiError(400, 'File type not allowed');
     if (fileSize > MAX_FILE_SIZE) throw new ApiError(400, 'File too large. Max 4GB.');
 
@@ -23,7 +30,14 @@ class UploadService {
   // --- S3 Multipart Upload ---
 
   async initiateMultipart({ creatorId, fileName, fileType, fileSize, partSize }) {
-    const allowedTypes = ['video/mp4', 'video/quicktime', 'image/jpeg', 'image/png', 'application/pdf'];
+    const allowedTypes = [
+      'video/mp4', 'video/quicktime',
+      'image/jpeg', 'image/png', 'image/heic',
+      'application/pdf',
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/octet-stream',
+    ];
     if (!allowedTypes.includes(fileType)) throw new ApiError(400, 'File type not allowed');
     if (fileSize > MAX_FILE_SIZE) throw new ApiError(400, 'File too large. Max 4GB.');
 
