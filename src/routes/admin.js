@@ -26,6 +26,9 @@ router.get('/content/:id/reports', ctrl.getContentReports);
 router.get('/creators', ctrl.getCreators);
 router.put('/creators/:id/promote', ctrl.promoteCreator);
 
+// Notes moderation
+router.get('/notes/pending', ctrl.getPendingNotes);
+
 // Platform stats
 router.get('/stats', ctrl.getStats);
 

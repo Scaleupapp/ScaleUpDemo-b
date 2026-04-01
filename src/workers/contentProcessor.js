@@ -69,11 +69,37 @@ async function processContent(job) {
     } else if (content.isYoutubeImport && hasHighSeverityFlags) {
       content.status = 'ready';
       content.moderationStatus = 'flagged';
-    } else if (content.contentType === 'notes' && passesQuality && !hasHighSeverityFlags) {
-      // Notes: auto-publish if quality passes
-      content.status = 'published';
-      content.publishedAt = new Date();
-      content.moderationStatus = 'approved';
+    } else if (content.contentType === 'notes') {
+      // Notes approval flow
+      if (hasHighSeverityFlags) {
+        content.status = 'rejected';
+        content.moderationStatus = 'rejected';
+        content.moderationNote = 'Auto-rejected: content flagged for moderation concerns';
+      } else if (!passesQuality) {
+        content.status = 'rejected';
+        content.moderationStatus = 'rejected';
+        content.moderationNote = `Auto-rejected: quality score ${analysis.qualityScore}/100`;
+      } else {
+        // Check if contributor has 3+ approved notes → auto-publish, else → pending review
+        const Content = require('../models/Content');
+        const approvedCount = await Content.countDocuments({
+          creatorId: content.creatorId,
+          contentType: 'notes',
+          moderationStatus: 'approved',
+          _id: { $ne: content._id },
+        });
+
+        if (approvedCount >= 3) {
+          // Trusted contributor — auto-publish
+          content.status = 'published';
+          content.publishedAt = new Date();
+          content.moderationStatus = 'approved';
+        } else {
+          // New contributor — needs admin review
+          content.status = 'ready';
+          content.moderationStatus = 'pending';
+        }
+      }
     } else {
       // Original creator content — stays at 'ready' for manual publish
       content.status = 'ready';
@@ -81,16 +107,44 @@ async function processContent(job) {
 
     await content.save();
 
-    // Send notification for notes completion
+    // Notifications for notes
     if (content.contentType === 'notes' && content.creatorId) {
+      const { notificationQueue } = require('../config/queue');
       try {
-        const { notificationQueue } = require('../config/queue');
-        await notificationQueue.add('send', {
-          userId: content.creatorId.toString(),
-          title: 'Your notes are ready!',
-          body: `"${content.title}" has been processed. ${content.status === 'published' ? 'It\'s now live!' : 'You can publish it now.'}`,
-          data: { type: 'notes_ready', contentId: content._id.toString() },
-        });
+        if (content.moderationStatus === 'pending') {
+          // Notify user: under review
+          await notificationQueue.add('send', {
+            userId: content.creatorId.toString(),
+            title: 'Notes submitted for review',
+            body: `"${content.title}" is being reviewed. We'll notify you once approved.`,
+            data: { type: 'notes_pending_review', contentId: content._id.toString() },
+          });
+          // Notify admins
+          const User = require('../models/User');
+          const admins = await User.find({ role: 'admin' }).select('_id').lean();
+          for (const admin of admins) {
+            await notificationQueue.add('send', {
+              userId: admin._id.toString(),
+              title: 'New notes to review',
+              body: `A contributor uploaded "${content.title}". Please review.`,
+              data: { type: 'admin_notes_review', contentId: content._id.toString() },
+            });
+          }
+        } else if (content.status === 'published') {
+          await notificationQueue.add('send', {
+            userId: content.creatorId.toString(),
+            title: 'Your notes are live!',
+            body: `"${content.title}" has been published and is now visible to everyone.`,
+            data: { type: 'notes_published', contentId: content._id.toString() },
+          });
+        } else if (content.moderationStatus === 'rejected') {
+          await notificationQueue.add('send', {
+            userId: content.creatorId.toString(),
+            title: 'Notes not approved',
+            body: `"${content.title}" didn't meet our quality standards. ${content.moderationNote || ''}`,
+            data: { type: 'notes_rejected', contentId: content._id.toString() },
+          });
+        }
       } catch {}
     }
   } catch (err) {

@@ -165,6 +165,29 @@ const moderateContent = async (req, res, next) => {
       content.status = 'rejected';
       await content.save();
     }
+
+    // Notify the content owner about moderation result
+    if (content.creatorId) {
+      const { notificationQueue } = require('../config/queue');
+      try {
+        if (moderationStatus === 'approved') {
+          await notificationQueue.add('send', {
+            userId: content.creatorId.toString(),
+            title: content.contentType === 'notes' ? 'Notes approved!' : 'Content approved!',
+            body: `"${content.title}" has been approved and is now live!`,
+            data: { type: 'content_approved', contentId: content._id.toString() },
+          });
+        } else if (moderationStatus === 'rejected') {
+          await notificationQueue.add('send', {
+            userId: content.creatorId.toString(),
+            title: content.contentType === 'notes' ? 'Notes not approved' : 'Content not approved',
+            body: `"${content.title}" was not approved.${moderationNote ? ' Reason: ' + moderationNote : ''}`,
+            data: { type: 'content_rejected', contentId: content._id.toString() },
+          });
+        }
+      } catch {}
+    }
+
     res.json(apiResponse.success(content));
   } catch (err) { next(err); }
 };
@@ -327,7 +350,22 @@ const getContentReports = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getPendingNotes = async (req, res, next) => {
+  try {
+    const notes = await Content.find({
+      contentType: 'notes',
+      moderationStatus: 'pending',
+      aiStatus: 'completed',
+    })
+      .populate('creatorId', 'firstName lastName username profilePicture contributorStats')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(apiResponse.success(notes));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPendingApplications, endorseApplication, rejectApplication, getUsers, banUser, unbanUser,
   moderateContent, getStats, promoteCreator, getCreators, getContent, removeContent, dismissReports, getContentReports,
+  getPendingNotes,
 };
