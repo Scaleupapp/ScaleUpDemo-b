@@ -63,6 +63,12 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 9. Flashcard Review Reminders — Daily 9 AM IST (3:30 AM UTC)
+  cronQueue.add('flashcardReviewReminder', {}, {
+    repeat: { pattern: '30 3 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -138,6 +144,9 @@ function startCronJobs() {
         break;
       case 'accountDeletion':
         await runAccountDeletion();
+        break;
+      case 'flashcardReviewReminder':
+        await runFlashcardReviewReminder();
         break;
     }
   }, { connection });
@@ -341,6 +350,51 @@ async function runAccountDeletion() {
   } catch (err) {
     console.error('[Cron] Permanent deletion failed:', err.message);
   }
+}
+
+// --- Flashcard Spaced Repetition Reminders ---
+async function runFlashcardReviewReminder() {
+  const FlashcardSet = require('../models/FlashcardSet');
+
+  // Find flashcard sets that are due for review
+  // Spaced repetition schedule:
+  // - Never studied → remind after 1 day
+  // - Studied 1x → remind after 2 days
+  // - Studied 2x → remind after 4 days
+  // - Studied 3x+ → remind after 7 days
+  const now = new Date();
+  const sets = await FlashcardSet.find({ status: 'ready' }).lean();
+
+  for (const set of sets) {
+    if (!set.lastStudiedAt && set.createdAt) {
+      // Never studied — remind 1 day after creation
+      const dayAfter = new Date(set.createdAt.getTime() + 24 * 60 * 60 * 1000);
+      if (now >= dayAfter) {
+        await sendFlashcardReminder(set, 'Time to study your flashcards!');
+      }
+    } else if (set.lastStudiedAt) {
+      const studied = set.timesStudied || 0;
+      const daysUntilReview = studied <= 1 ? 2 : studied <= 2 ? 4 : 7;
+      const dueDate = new Date(set.lastStudiedAt.getTime() + daysUntilReview * 24 * 60 * 60 * 1000);
+      if (now >= dueDate) {
+        const mastery = set.totalCards > 0 ? Math.round((set.masteredCount / set.totalCards) * 100) : 0;
+        if (mastery < 100) {
+          await sendFlashcardReminder(set, `Review due — ${mastery}% mastered`);
+        }
+      }
+    }
+  }
+}
+
+async function sendFlashcardReminder(set, message) {
+  try {
+    await notificationQueue.add('send', {
+      userId: set.userId.toString(),
+      title: 'Flashcard Review Due',
+      body: `${set.title}: ${message}`,
+      data: { type: 'flashcard_review', flashcardSetId: set._id.toString() },
+    });
+  } catch {}
 }
 
 module.exports = { startCronJobs };
