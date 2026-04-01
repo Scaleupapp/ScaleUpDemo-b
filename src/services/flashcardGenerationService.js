@@ -79,6 +79,17 @@ class FlashcardGenerationService {
       flashcardSet.generatedAt = new Date();
       await flashcardSet.save();
 
+      // Send notification
+      try {
+        const { notificationQueue } = require('../config/queue');
+        await notificationQueue.add('send', {
+          userId,
+          title: 'Flashcards ready!',
+          body: `${cards.length} flashcards generated from "${content.title}". Start studying!`,
+          data: { type: 'flashcards_ready', flashcardSetId: flashcardSet._id.toString(), contentId },
+        });
+      } catch {}
+
       return flashcardSet;
     } catch (err) {
       flashcardSet.status = 'failed';
@@ -117,6 +128,15 @@ class FlashcardGenerationService {
     set.timesStudied += 1;
     if (masteredCount !== undefined) set.masteredCount = masteredCount;
     await set.save();
+
+    // Feed flashcard performance into knowledge profile
+    try {
+      const knowledgeService = require('./knowledgeService');
+      await knowledgeService.updateFromFlashcardStudy(userId, flashcardSetId);
+    } catch (err) {
+      console.error('[Flashcard] Failed to update knowledge profile:', err.message);
+    }
+
     return set;
   }
 

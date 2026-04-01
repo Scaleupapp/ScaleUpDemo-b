@@ -329,6 +329,60 @@ class KnowledgeService {
     return 'not_started';
   }
 
+  /**
+   * Update knowledge profile from flashcard study session.
+   * Flashcards have lighter weight than quizzes (20% influence vs quiz's 60%).
+   */
+  async updateFromFlashcardStudy(userId, flashcardSetId) {
+    const FlashcardSet = require('../models/FlashcardSet');
+    const Content = require('../models/Content');
+
+    const set = await FlashcardSet.findById(flashcardSetId);
+    if (!set || set.totalCards === 0) return;
+
+    const content = await Content.findById(set.contentId).lean();
+    if (!content) return;
+
+    const topic = (content.domain || '').toLowerCase();
+    if (!topic) return;
+
+    let profile = await KnowledgeProfile.findOne({ userId });
+    if (!profile) {
+      profile = await KnowledgeProfile.create({ userId, topicMastery: [], _processedAttempts: [] });
+    }
+
+    const masteryPercent = Math.round((set.masteredCount / set.totalCards) * 100);
+    let topicEntry = profile.topicMastery.find(t => t.topic === topic);
+
+    if (topicEntry) {
+      // Light influence: 20% flashcard score, 80% existing
+      topicEntry.score = Math.round(masteryPercent * 0.2 + topicEntry.score * 0.8);
+      topicEntry.level = this._scoreToLevel(topicEntry.score);
+      topicEntry.lastAssessedAt = new Date();
+    } else {
+      // First interaction with this topic via flashcards — start at lower weight
+      profile.topicMastery.push({
+        topic,
+        score: Math.round(masteryPercent * 0.3), // Lower starting weight for flashcard-only
+        level: this._scoreToLevel(Math.round(masteryPercent * 0.3)),
+        quizzesTaken: 0,
+        lastAssessedAt: new Date(),
+        scoreHistory: [],
+        trend: 'stable',
+      });
+    }
+
+    // Recalculate aggregates
+    const allTopics = profile.topicMastery;
+    profile.totalTopicsCovered = allTopics.length;
+    profile.overallScore = allTopics.length > 0
+      ? Math.round(allTopics.reduce((sum, t) => sum + t.score, 0) / allTopics.length)
+      : 0;
+
+    await profile.save();
+    return profile;
+  }
+
   _calculateTrend(scoreHistory) {
     if (!scoreHistory || scoreHistory.length < 2) return 'stable';
 

@@ -69,12 +69,30 @@ async function processContent(job) {
     } else if (content.isYoutubeImport && hasHighSeverityFlags) {
       content.status = 'ready';
       content.moderationStatus = 'flagged';
+    } else if (content.contentType === 'notes' && passesQuality && !hasHighSeverityFlags) {
+      // Notes: auto-publish if quality passes
+      content.status = 'published';
+      content.publishedAt = new Date();
+      content.moderationStatus = 'approved';
     } else {
       // Original creator content — stays at 'ready' for manual publish
       content.status = 'ready';
     }
 
     await content.save();
+
+    // Send notification for notes completion
+    if (content.contentType === 'notes' && content.creatorId) {
+      try {
+        const { notificationQueue } = require('../config/queue');
+        await notificationQueue.add('send', {
+          userId: content.creatorId.toString(),
+          title: 'Your notes are ready!',
+          body: `"${content.title}" has been processed. ${content.status === 'published' ? 'It\'s now live!' : 'You can publish it now.'}`,
+          data: { type: 'notes_ready', contentId: content._id.toString() },
+        });
+      } catch {}
+    }
   } catch (err) {
     content.aiStatus = 'failed';
     await content.save();
