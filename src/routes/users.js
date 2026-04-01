@@ -23,5 +23,6 @@ router.put('/me', auditLog('profile_update', 'profile'), ctrl.updateProfile);
 router.put('/me/avatar', auditLog('avatar_upload', 'profile'), upload.single('avatar'), ctrl.uploadAvatar);
 router.delete('/me', auditLog('account_deactivate', 'data'), ctrl.deleteAccount);
 router.get('/:userId', ctrl.getPublicProfile);
+router.get('/:userId/contributor-card', ctrl.getContributorCard);
 
 module.exports = router;

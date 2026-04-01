@@ -145,4 +145,50 @@ const uploadAvatar = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getProfile, getPublicProfile, updateProfile, deleteAccount, uploadAvatar };
+const getContributorCard = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select('firstName lastName username profilePicture bio role education workExperience contributorStats')
+      .lean();
+    if (!user) return res.status(404).json(apiResponse.error('User not found'));
+
+    // Get their published notes
+    const notes = await Content.find({
+      creatorId: req.params.id,
+      contentType: 'notes',
+      status: 'published',
+    })
+      .select('title domain pageCount viewCount likeCount saveCount createdAt')
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean();
+
+    const totalViews = notes.reduce((s, n) => s + (n.viewCount || 0), 0);
+    const totalNotes = await Content.countDocuments({
+      creatorId: req.params.id,
+      contentType: 'notes',
+      status: 'published',
+    });
+
+    res.json(apiResponse.success({
+      user: {
+        _id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
+        profilePicture: user.profilePicture,
+        bio: user.bio,
+        role: user.role,
+        education: (user.education || []).slice(0, 2),
+        workExperience: (user.workExperience || []).slice(0, 2),
+      },
+      stats: {
+        totalNotes,
+        totalViews,
+      },
+      recentNotes: notes,
+    }));
+  } catch (err) { next(err); }
+};
+
+module.exports = { getProfile, getPublicProfile, updateProfile, deleteAccount, uploadAvatar, getContributorCard };
