@@ -21,10 +21,36 @@ class AudioSummaryService {
     const generating = await AudioSummary.findOne({ contentId, status: 'generating' });
     if (generating) return generating;
 
-    const summaryText = content.aiData?.summary;
-    if (!summaryText || summaryText.length < 20) {
+    const summary = content.aiData?.summary;
+    if (!summary || summary.length < 20) {
       throw new ApiError(400, 'Content has no AI summary to convert to audio');
     }
+
+    // Build a richer narration script (~1.5-3 min)
+    const parts = [];
+    parts.push(`Here's a summary of "${content.title}".`);
+    parts.push(summary);
+
+    // Add key concepts
+    const concepts = content.aiData?.keyConcepts;
+    if (concepts && concepts.length > 0) {
+      parts.push('Now let\'s go through the key concepts.');
+      for (const kc of concepts.slice(0, 8)) {
+        let line = kc.concept;
+        if (kc.description) line += `: ${kc.description}`;
+        parts.push(line);
+      }
+    }
+
+    // Add prerequisites
+    const prereqs = content.aiData?.prerequisites;
+    if (prereqs && prereqs.length > 0) {
+      parts.push(`Before diving deeper, it helps to know: ${prereqs.join(', ')}.`);
+    }
+
+    parts.push('That\'s the end of this audio summary. Happy studying!');
+
+    const narrationText = parts.join('\n\n');
 
     const s3Key = `audio-summaries/${contentId}.mp3`;
 
@@ -36,11 +62,12 @@ class AudioSummaryService {
     });
 
     try {
-      // Call OpenAI TTS
+      // Call OpenAI TTS (max 4096 chars input)
+      const ttsInput = narrationText.slice(0, 4096);
       const response = await openai.audio.speech.create({
         model: 'tts-1',
         voice: 'alloy',
-        input: summaryText,
+        input: ttsInput,
       });
 
       const arrayBuffer = await response.arrayBuffer();
@@ -50,7 +77,7 @@ class AudioSummaryService {
       await uploadBuffer(s3Key, buffer, 'audio/mpeg');
 
       // Estimate duration: TTS-1 speaks at ~150 words/min
-      const wordCount = summaryText.split(/\s+/).length;
+      const wordCount = ttsInput.split(/\s+/).length;
       const estimatedDuration = Math.round((wordCount / 150) * 60);
 
       audioSummary.status = 'ready';
