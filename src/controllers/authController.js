@@ -53,8 +53,10 @@ const sendPhoneOTP = async (req, res, next) => {
 const verifyPhoneOTP = async (req, res, next) => {
   try {
     const data = await authService.verifyPhoneOTP(req.body);
-    const message = data.isNewUser ? 'Account created and logged in' : 'Login successful';
-    res.json(apiResponse.success(data, message));
+    if (data.needsRegistration) {
+      return res.json(apiResponse.success(data, 'Phone number not registered. Please sign up first.'));
+    }
+    res.json(apiResponse.success(data, 'Login successful'));
   } catch (err) { next(err); }
 };
 

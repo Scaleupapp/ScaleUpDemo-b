@@ -221,20 +221,8 @@ class AuthService {
       user.lastLoginAt = new Date();
       await user.save();
     } else {
-      // New user — register
-      if (!firstName) throw new ApiError(400, 'firstName is required for new users');
-
-      user = await User.create({
-        phone: normalized,
-        firstName,
-        lastName: lastName || '',
-        isPhoneVerified: true,
-        authProvider: 'phone',
-        // Generate a placeholder email since schema requires it
-        email: `${normalized.replace(/\+/g, '')}@phone.scaleup.local`,
-        lastLoginAt: new Date(),
-      });
-      isNewUser = true;
+      // Phone not registered — tell the client to go through full registration
+      return { needsRegistration: true, phone: normalized };
     }
 
     return {
