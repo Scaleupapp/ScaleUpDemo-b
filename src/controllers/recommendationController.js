@@ -62,7 +62,16 @@ const getPostQuizRecommendations = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getTrendingNotes = async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const data = await recommendationService.getTrendingNotes(req.user.userId, { limit });
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getPersonalizedFeed, getSimilarContent, getObjectiveRecommendations,
   getGapFilling, getTrending, getNextActions, getPostQuizRecommendations,
+  getTrendingNotes,
 };

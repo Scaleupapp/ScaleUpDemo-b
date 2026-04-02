@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/notesController');
+const analyticsCtrl = require('../controllers/notesAnalyticsController');
 const auth = require('../middleware/auth');
 
 // Any authenticated user can upload notes (no creator gate)
@@ -12,6 +13,8 @@ router.post('/multipart/abort', auth, ctrl.abortMultipart);
 
 // Notes management
 router.get('/my-notes', auth, ctrl.getMyNotes);
+router.get('/analytics', auth, analyticsCtrl.getAnalytics);
+router.get('/analytics/:id', auth, analyticsCtrl.getNoteDetail);
 router.put('/:id', auth, ctrl.updateNote);
 router.post('/:id/publish', auth, ctrl.publishNote);
 router.post('/:id/unpublish', auth, ctrl.unpublishNote);

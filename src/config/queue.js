@@ -14,6 +14,7 @@ const whisperTranscriptionQueue = new Queue('whisperTranscription', { connection
 const competitionQueue = new Queue('competition', { connection });
 const ocrProcessingQueue = new Queue('ocrProcessing', { connection });
 const flashcardGenerationQueue = new Queue('flashcardGeneration', { connection });
+const audioSummaryQueue = new Queue('audioSummaryGeneration', { connection });
 
 module.exports = {
   contentProcessingQueue,
@@ -27,4 +28,5 @@ module.exports = {
   competitionQueue,
   ocrProcessingQueue,
   flashcardGenerationQueue,
+  audioSummaryQueue,
 };

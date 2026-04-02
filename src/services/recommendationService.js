@@ -1112,6 +1112,41 @@ class RecommendationService {
       items: items.map(c => ({ ...c, _trendingScore: null })),
     };
   }
+
+  /**
+   * Trending notes — notes-only trending content
+   */
+  async getTrendingNotes(userId, { limit = 10 } = {}) {
+    const consumedIds = await this._getConsumedContentIds(userId);
+    const twoWeeksAgo = new Date(Date.now() - 14 * MS_PER_DAY);
+
+    const candidates = await Content.find({
+      status: 'published',
+      contentType: 'notes',
+      publishedAt: { $gte: twoWeeksAgo },
+      _id: { $nin: consumedIds },
+    })
+      .sort({ viewCount: -1, likeCount: -1, publishedAt: -1 })
+      .populate('creatorId', 'firstName lastName username profilePicture role isVerifiedContributor')
+      .lean();
+
+    const scored = candidates.map(content => {
+      let score = 0;
+      score += this._socialProofScore(content) * 2;
+      score += this._recencyScore(content);
+      score += this._qualityScore(content);
+      return { content, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const items = scored.slice(0, limit).map(s => ({
+      ...s.content,
+      _trendingScore: Math.round(s.score * 100) / 100,
+    }));
+
+    return { items };
+  }
 }
 
 module.exports = new RecommendationService();

@@ -107,6 +107,41 @@ async function processContent(job) {
 
     await content.save();
 
+    // --- Verified Contributor Badge Check ---
+    if (content.contentType === 'notes' && content.moderationStatus === 'approved' && content.creatorId) {
+      try {
+        const User = require('../models/User');
+        const creator = await User.findById(content.creatorId);
+        if (creator && !creator.isVerifiedContributor) {
+          const approvedNotes = await Content.find({
+            creatorId: content.creatorId,
+            contentType: 'notes',
+            moderationStatus: 'approved',
+            'aiData.qualityScore': { $exists: true, $gt: 0 },
+          }).select('aiData.qualityScore').lean();
+
+          if (approvedNotes.length >= 10) {
+            const avgScore = approvedNotes.reduce((sum, n) => sum + (n.aiData?.qualityScore || 0), 0) / approvedNotes.length;
+            if (avgScore >= 70) {
+              creator.isVerifiedContributor = true;
+              creator.verifiedContributorAt = new Date();
+              await creator.save();
+
+              const { notificationQueue } = require('../config/queue');
+              await notificationQueue.add('send', {
+                userId: creator._id.toString(),
+                title: 'Verified Contributor!',
+                body: 'Congratulations! You\'ve earned the Verified Contributor badge for consistently uploading high-quality notes.',
+                data: { type: 'verified_contributor' },
+              });
+            }
+          }
+        }
+      } catch (badgeErr) {
+        console.error('Verified badge check failed:', badgeErr.message);
+      }
+    }
+
     // Notifications for notes
     if (content.contentType === 'notes' && content.creatorId) {
       const { notificationQueue } = require('../config/queue');

@@ -58,7 +58,12 @@ const userSchema = new mongoose.Schema({
     totalNotes: { type: Number, default: 0 },
     totalViews: { type: Number, default: 0 },
     totalSaves: { type: Number, default: 0 },
+    requestsFulfilled: { type: Number, default: 0 },
   },
+
+  // --- Verified Contributor ---
+  isVerifiedContributor: { type: Boolean, default: false },
+  verifiedContributorAt: { type: Date },
 
   // --- Device & Notifications ---
   fcmToken: { type: String },
