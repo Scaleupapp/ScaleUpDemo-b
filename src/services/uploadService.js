@@ -15,6 +15,7 @@ class UploadService {
       'application/pdf',
       'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       'application/octet-stream',
     ];
     if (!allowedTypes.includes(fileType)) throw new ApiError(400, 'File type not allowed');
@@ -36,6 +37,7 @@ class UploadService {
       'application/pdf',
       'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       'application/octet-stream',
     ];
     if (!allowedTypes.includes(fileType)) throw new ApiError(400, 'File type not allowed');

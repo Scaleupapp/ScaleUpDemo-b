@@ -10,12 +10,13 @@ const openai = require('../config/openai');
 /**
  * OCR Processing Worker
  *
- * Extracts text from notes (PDF/images).
+ * Extracts text from notes (PDF/images/presentations).
  * - Text PDFs: Uses pdf-parse (fast, free)
  * - Scanned/handwritten PDFs: Falls back to GPT-4o Vision
+ * - PPTX/PPT presentations: Uploaded to OpenAI Files API, extracted via GPT-4o
  * Then re-queues for AI analysis (same pipeline as video content).
  *
- * Cost: Text PDFs = free. Vision OCR ≈ $0.01-0.03/page.
+ * Cost: Text PDFs = free. Vision OCR / file extraction ≈ $0.01-0.03/page.
  */
 async function processOCR(job) {
   const { contentId } = job.data;
@@ -44,8 +45,12 @@ async function processOCR(job) {
     let extractedText = '';
     let pageCount = 0;
 
-    // Try text extraction with pdf-parse first
-    if (content.fileFormat === 'pdf' || content.s3Key?.endsWith('.pdf')) {
+    const isPresentationFile = content.fileFormat === 'presentation'
+      || content.s3Key?.endsWith('.pptx')
+      || content.s3Key?.endsWith('.ppt');
+
+    // Try text extraction with pdf-parse first (skip for presentations)
+    if (!isPresentationFile && (content.fileFormat === 'pdf' || content.s3Key?.endsWith('.pdf'))) {
       try {
         const pdfParse = require('pdf-parse');
         const dataBuffer = fs.readFileSync(tmpFile);
@@ -87,7 +92,7 @@ async function processOCR(job) {
         });
         extractedText = response.choices[0]?.message?.content || '';
       } else {
-        // PDFs: upload as file to OpenAI, then use in chat
+        // PDFs & presentations: upload as file to OpenAI, then use in chat
         const file = await openai.files.create({
           file: fs.createReadStream(tmpFile),
           purpose: 'assistants',

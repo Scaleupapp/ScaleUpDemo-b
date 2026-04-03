@@ -24,7 +24,7 @@ const contentSchema = new mongoose.Schema({
 
   // --- Notes-specific ---
   pageCount: { type: Number },
-  fileFormat: { type: String, enum: ['pdf', 'image'] },
+  fileFormat: { type: String, enum: ['pdf', 'image', 'presentation'] },
   collegeId: { type: mongoose.Schema.Types.ObjectId, ref: 'College' },
   collegeName: { type: String },
   ocrText: { type: String },
