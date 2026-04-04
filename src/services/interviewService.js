@@ -1,0 +1,458 @@
+const InterviewSession = require('../models/InterviewSession');
+const ApiError = require('../utils/apiError');
+const aiProvider = require('../config/aiProvider');
+const { uploadBuffer } = require('../config/s3');
+const { interviewEvaluationQueue, notificationQueue } = require('../config/queue');
+const { paginationMeta } = require('../utils/pagination');
+
+// --- Type-specific interview guidelines ---
+
+const TYPE_GUIDELINES = {
+  mba_admissions: `
+MBA ADMISSIONS INTERVIEW:
+- Focus on: leadership experiences, career goals, why MBA, why this school, teamwork, ethical dilemmas, strengths/weaknesses.
+- Ask about: post-MBA plans, significant achievements, failure and learning, diversity contribution, extracurriculars.
+- Probe for self-awareness, maturity, and clarity of thought.
+- Include at least one behavioral question (STAR format expected).
+- Include a "walk me through your resume" or "tell me about yourself" opener.
+`,
+  placement_hr: `
+HR/BEHAVIORAL PLACEMENT INTERVIEW:
+- Focus on: communication skills, cultural fit, teamwork, conflict resolution, motivation, adaptability.
+- Ask about: strengths/weaknesses, why this company, where do you see yourself in 5 years, handling pressure, past experiences.
+- Use behavioral questions (tell me about a time when...).
+- Assess: enthusiasm, professionalism, self-awareness.
+- Include situational/hypothetical scenarios relevant to the role.
+`,
+  placement_technical: `
+TECHNICAL PLACEMENT INTERVIEW:
+- Focus on: problem-solving, technical knowledge relevant to the role, coding/system design concepts, analytical thinking.
+- Ask about: projects, technical challenges faced, fundamentals of the domain, approach to debugging.
+- Include at least 2-3 conceptual/theoretical questions and 2-3 scenario-based questions.
+- Probe depth of understanding, not just surface knowledge.
+- Adapt difficulty based on candidate responses.
+`,
+  case_study: `
+CASE STUDY INTERVIEW:
+- Present a business case or scenario and guide the candidate through analysis.
+- Assess: structured thinking, framework application, quantitative reasoning, creativity, communication.
+- Start with a broad case prompt, then drill down with follow-up questions.
+- Evaluate how the candidate breaks down problems, asks clarifying questions, and synthesizes insights.
+- Include market sizing, profitability, or strategy cases appropriate to difficulty level.
+`,
+  behavioral: `
+BEHAVIORAL INTERVIEW:
+- Use the STAR method (Situation, Task, Action, Result) framework.
+- Focus on: leadership, teamwork, conflict resolution, initiative, adaptability, time management.
+- Ask about specific past experiences with concrete examples.
+- Probe for details: what exactly did YOU do, what was the measurable outcome.
+- Cover at least 3-4 different competency areas.
+`,
+};
+
+class InterviewService {
+
+  /**
+   * Start a new interview session
+   */
+  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate' }) {
+    // Check user doesn't have an existing in_progress session
+    const existing = await InterviewSession.findOne({ userId, status: 'in_progress' });
+    if (existing) {
+      throw new ApiError(409, 'You already have an interview in progress. Complete or abandon it before starting a new one.');
+    }
+
+    // Gather previously asked questions from past sessions to avoid repeats
+    const pastSessions = await InterviewSession.find(
+      { userId, status: { $in: ['completed', 'evaluating', 'evaluated'] } },
+      { 'transcript.content': 1, 'transcript.role': 1 }
+    ).sort({ createdAt: -1 }).limit(5).lean();
+
+    const previousQuestions = [];
+    for (const session of pastSessions) {
+      for (const entry of (session.transcript || [])) {
+        if (entry.role === 'interviewer') {
+          previousQuestions.push(entry.content);
+        }
+      }
+    }
+
+    const prevQuestionsStr = previousQuestions.length > 0
+      ? previousQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')
+      : 'None — this is the candidate\'s first session.';
+
+    const typeLabel = interviewType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const companyStr = targetCompany || 'a leading company';
+
+    // Build Gemini system instruction
+    const systemInstruction = `You are a professional ${typeLabel} interviewer conducting a mock interview.
+Role being interviewed for: ${targetRole || 'General'}
+Company: ${companyStr}
+Difficulty: ${difficulty}
+
+RULES:
+- Introduce yourself warmly and ask the first question.
+- Ask ONE question at a time. Wait for the candidate to finish.
+- After each answer, decide: follow-up to probe deeper OR move to next topic.
+- Cover 8-12 primary questions total.
+- Be professional but appropriately challenging for ${difficulty} level.
+- When done (after 8-12 questions), conclude by saying "That concludes our interview today."
+- Generate unique questions each time. Never use the same question twice.
+- Adapt follow-ups based on the candidate's actual answers.
+- Keep your responses conversational and natural, as this is a voice-based interview.
+- Do NOT provide feedback during the interview. Save all evaluation for after.
+- If the candidate asks you to repeat a question, repeat it clearly.
+
+Previously asked questions to AVOID (from past sessions):
+${prevQuestionsStr}
+
+INTERVIEW TYPE GUIDELINES:
+${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}`;
+
+    // Create session
+    const session = await InterviewSession.create({
+      userId,
+      interviewType,
+      targetRole: targetRole || undefined,
+      targetCompany: targetCompany || undefined,
+      difficulty,
+      status: 'in_progress',
+      systemInstruction,
+      transcript: [],
+      totalQuestions: 0,
+      startedAt: new Date(),
+      integrity: {
+        cameraEnabled: false,
+        cameraSnapshots: [],
+        gazeAlerts: [],
+        voiceAlerts: [],
+        responseTimes: [],
+        flaggedResponses: [],
+      },
+    });
+
+    return {
+      session: {
+        _id: session._id,
+        interviewType: session.interviewType,
+        targetRole: session.targetRole,
+        targetCompany: session.targetCompany,
+        difficulty: session.difficulty,
+        status: session.status,
+        startedAt: session.startedAt,
+      },
+      systemInstruction,
+    };
+  }
+
+  /**
+   * Save transcript and complete the interview, then queue evaluation
+   */
+  async saveTranscript(userId, sessionId, { transcript, integrityData }) {
+    const session = await InterviewSession.findOne({ _id: sessionId, userId });
+    if (!session) throw new ApiError(404, 'Interview session not found');
+    if (session.status !== 'in_progress') {
+      throw new ApiError(400, `Cannot complete interview — session status is "${session.status}"`);
+    }
+
+    // Save transcript
+    session.transcript = (transcript || []).map(entry => ({
+      role: entry.role,
+      content: entry.content,
+      questionNumber: entry.questionNumber,
+      isFollowUp: entry.isFollowUp || false,
+      timestamp: entry.timestamp,
+      responseDuration: entry.responseDuration,
+    }));
+
+    // Count total questions (interviewer entries with a questionNumber)
+    session.totalQuestions = session.transcript.filter(
+      e => e.role === 'interviewer' && e.questionNumber != null
+    ).length;
+
+    // Save integrity data
+    if (integrityData) {
+      session.integrity.cameraEnabled = integrityData.cameraEnabled || false;
+      session.integrity.gazeAlerts = integrityData.gazeAlerts || [];
+      session.integrity.voiceConsistencyScore = integrityData.voiceConsistencyScore;
+      session.integrity.voiceAlerts = integrityData.voiceAlerts || [];
+    }
+
+    // Analyze response times and flag anomalies
+    const responseTimes = [];
+    const flaggedResponses = [];
+    for (const entry of session.transcript) {
+      if (entry.role === 'candidate' && entry.questionNumber != null && entry.responseDuration != null) {
+        responseTimes.push({ questionNumber: entry.questionNumber, seconds: entry.responseDuration });
+        if (entry.responseDuration < 5) {
+          flaggedResponses.push({ questionNumber: entry.questionNumber, reason: 'too_fast' });
+        } else if (entry.responseDuration > 180) {
+          flaggedResponses.push({ questionNumber: entry.questionNumber, reason: 'too_slow' });
+        }
+      }
+    }
+    session.integrity.responseTimes = responseTimes;
+    session.integrity.flaggedResponses = flaggedResponses;
+
+    // Mark completed
+    session.status = 'completed';
+    session.completedAt = new Date();
+    session.duration = Math.round((session.completedAt - session.startedAt) / 1000);
+
+    await session.save();
+
+    // Queue evaluation
+    await interviewEvaluationQueue.add('evaluate', { sessionId: session._id.toString() }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+    });
+
+    return {
+      _id: session._id,
+      status: session.status,
+      totalQuestions: session.totalQuestions,
+      duration: session.duration,
+      completedAt: session.completedAt,
+    };
+  }
+
+  /**
+   * Evaluate interview using Claude
+   */
+  async evaluateInterview(sessionId) {
+    const session = await InterviewSession.findById(sessionId);
+    if (!session) throw new Error(`Interview session ${sessionId} not found`);
+
+    session.status = 'evaluating';
+    await session.save();
+
+    try {
+      // Build transcript text for evaluation
+      const transcriptText = session.transcript.map(entry => {
+        const role = entry.role === 'interviewer' ? 'Interviewer' : 'Candidate';
+        const qNum = entry.questionNumber ? ` (Q${entry.questionNumber}${entry.isFollowUp ? ' follow-up' : ''})` : '';
+        const timing = entry.responseDuration ? ` [responded in ${entry.responseDuration}s]` : '';
+        return `${role}${qNum}${timing}: ${entry.content}`;
+      }).join('\n\n');
+
+      // Build integrity summary
+      const integrityInfo = [];
+      if (session.integrity.flaggedResponses?.length > 0) {
+        integrityInfo.push(`Flagged responses: ${session.integrity.flaggedResponses.map(f => `Q${f.questionNumber} (${f.reason})`).join(', ')}`);
+      }
+      if (session.integrity.gazeAlerts?.length > 0) {
+        integrityInfo.push(`Gaze alerts: ${session.integrity.gazeAlerts.length} occurrences`);
+      }
+      if (session.integrity.voiceAlerts?.length > 0) {
+        integrityInfo.push(`Voice alerts: ${session.integrity.voiceAlerts.length} occurrences`);
+      }
+      if (session.integrity.voiceConsistencyScore != null) {
+        integrityInfo.push(`Voice consistency score: ${session.integrity.voiceConsistencyScore}/100`);
+      }
+      const integritySummary = integrityInfo.length > 0
+        ? integrityInfo.join('\n')
+        : 'No integrity issues detected.';
+
+      const typeLabel = session.interviewType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+      const systemPrompt = `You are an expert interview coach and evaluator. You evaluate mock interview performances and provide detailed, constructive, actionable feedback. Be encouraging but honest. Score fairly — a perfect score should be extremely rare.`;
+
+      const userPrompt = `Evaluate this ${typeLabel} mock interview.
+
+INTERVIEW DETAILS:
+- Type: ${typeLabel}
+- Target Role: ${session.targetRole || 'Not specified'}
+- Target Company: ${session.targetCompany || 'Not specified'}
+- Difficulty: ${session.difficulty}
+- Duration: ${session.duration ? Math.round(session.duration / 60) + ' minutes' : 'Unknown'}
+- Total Questions: ${session.totalQuestions}
+
+TRANSCRIPT:
+${transcriptText}
+
+INTEGRITY DATA:
+${integritySummary}
+
+Provide your evaluation as a JSON object with this exact structure:
+{
+  "overallScore": <0-100>,
+  "summary": "<2-3 sentence overall assessment>",
+  "communication": { "score": <0-100>, "feedback": "<specific feedback on communication skills, clarity, articulation>" },
+  "content": { "score": <0-100>, "feedback": "<specific feedback on answer quality, depth, relevance>" },
+  "structure": { "score": <0-100>, "feedback": "<specific feedback on answer structure, organization, frameworks used>" },
+  "confidence": { "score": <0-100>, "feedback": "<specific feedback on confidence, poise, professionalism>" },
+  "perQuestion": [
+    {
+      "questionNumber": <number>,
+      "question": "<the interviewer question>",
+      "answer": "<summary of candidate answer>",
+      "score": <0-10>,
+      "feedback": "<specific feedback for this answer>",
+      "modelAnswer": "<what an ideal answer would include>",
+      "strengths": ["<strength1>", "<strength2>"],
+      "improvements": ["<improvement1>", "<improvement2>"],
+      "responseTime": <seconds or null>,
+      "integrityFlag": "<clean|too_fast|too_slow or null>"
+    }
+  ],
+  "overallStrengths": ["<strength1>", "<strength2>", "<strength3>"],
+  "overallImprovements": ["<area1>", "<area2>", "<area3>"],
+  "integrityReport": {
+    "overallIntegrity": "clean|minor_flags|suspicious",
+    "flags": ["<flag description if any>"],
+    "recommendation": "<recommendation about integrity>"
+  }
+}
+
+IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON object.`;
+
+      const result = await aiProvider.evaluateWithClaude({
+        systemPrompt,
+        userPrompt,
+        temperature: 0.2,
+        maxTokens: 8000,
+      });
+
+      // Save evaluation
+      session.evaluation = {
+        overallScore: result.overallScore,
+        summary: result.summary,
+        communication: result.communication || {},
+        content: result.content || {},
+        structure: result.structure || {},
+        confidence: result.confidence || {},
+        perQuestion: (result.perQuestion || []).map(pq => ({
+          questionNumber: pq.questionNumber,
+          question: pq.question,
+          answer: pq.answer,
+          score: pq.score,
+          feedback: pq.feedback,
+          modelAnswer: pq.modelAnswer,
+          strengths: pq.strengths || [],
+          improvements: pq.improvements || [],
+          responseTime: pq.responseTime,
+          integrityFlag: pq.integrityFlag,
+        })),
+        overallStrengths: result.overallStrengths || [],
+        overallImprovements: result.overallImprovements || [],
+        integrityReport: {
+          overallIntegrity: result.integrityReport?.overallIntegrity || 'clean',
+          flags: result.integrityReport?.flags || [],
+          recommendation: result.integrityReport?.recommendation || '',
+        },
+      };
+
+      session.status = 'evaluated';
+      await session.save();
+
+      // Send push notification
+      try {
+        await notificationQueue.add('send', {
+          userId: session.userId.toString(),
+          title: 'Interview Evaluation Ready!',
+          body: `Your ${typeLabel} mock interview has been evaluated. You scored ${result.overallScore}/100.`,
+          data: {
+            type: 'interview_evaluated',
+            interviewSessionId: session._id.toString(),
+            score: String(result.overallScore),
+          },
+        });
+      } catch (notifErr) {
+        console.error('[InterviewEval] Failed to send notification:', notifErr.message);
+      }
+
+      return session;
+    } catch (err) {
+      console.error(`[InterviewEval] Evaluation failed for session ${sessionId}:`, err.message);
+      // Revert to completed so it can be retried
+      session.status = 'completed';
+      await session.save();
+      throw err;
+    }
+  }
+
+  /**
+   * Get a single session by ID
+   */
+  async getSession(userId, sessionId) {
+    const session = await InterviewSession.findOne({ _id: sessionId, userId }).lean();
+    if (!session) throw new ApiError(404, 'Interview session not found');
+    return session;
+  }
+
+  /**
+   * Get evaluation status for polling
+   */
+  async getStatus(userId, sessionId) {
+    const session = await InterviewSession.findOne(
+      { _id: sessionId, userId },
+      { status: 1, 'evaluation.overallScore': 1, 'evaluation.summary': 1 }
+    ).lean();
+    if (!session) throw new ApiError(404, 'Interview session not found');
+    return {
+      _id: session._id,
+      status: session.status,
+      overallScore: session.evaluation?.overallScore,
+      summary: session.evaluation?.summary,
+    };
+  }
+
+  /**
+   * List sessions with pagination
+   */
+  async listSessions(userId, { page = 1, limit = 20 } = {}) {
+    page = Math.max(1, parseInt(page, 10) || 1);
+    limit = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const filter = { userId };
+
+    const [sessions, total] = await Promise.all([
+      InterviewSession.find(filter)
+        .select('interviewType targetRole targetCompany difficulty status totalQuestions duration evaluation.overallScore evaluation.summary startedAt completedAt createdAt')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      InterviewSession.countDocuments(filter),
+    ]);
+
+    return {
+      items: sessions,
+      pagination: paginationMeta(total, page, limit),
+    };
+  }
+
+  /**
+   * Delete a session
+   */
+  async deleteSession(userId, sessionId) {
+    const result = await InterviewSession.findOneAndDelete({ _id: sessionId, userId });
+    if (!result) throw new ApiError(404, 'Interview session not found');
+    return { deleted: true };
+  }
+
+  /**
+   * Upload a camera snapshot for anti-cheat
+   */
+  async uploadSnapshot(userId, sessionId, imageBuffer) {
+    const session = await InterviewSession.findOne({ _id: sessionId, userId });
+    if (!session) throw new ApiError(404, 'Interview session not found');
+    if (session.status !== 'in_progress') {
+      throw new ApiError(400, 'Can only upload snapshots during an active interview');
+    }
+
+    const timestamp = Math.round((Date.now() - session.startedAt.getTime()) / 1000);
+    const s3Key = `interviews/${sessionId}/snap_${timestamp}.jpg`;
+
+    await uploadBuffer(s3Key, imageBuffer, 'image/jpeg');
+
+    session.integrity.cameraSnapshots.push({ s3Key, timestamp });
+    session.integrity.cameraEnabled = true;
+    await session.save();
+
+    return { s3Key, timestamp };
+  }
+}
+
+module.exports = new InterviewService();

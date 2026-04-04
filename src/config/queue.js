@@ -15,6 +15,7 @@ const competitionQueue = new Queue('competition', { connection });
 const ocrProcessingQueue = new Queue('ocrProcessing', { connection });
 const flashcardGenerationQueue = new Queue('flashcardGeneration', { connection });
 const audioSummaryQueue = new Queue('audioSummaryGeneration', { connection });
+const interviewEvaluationQueue = new Queue('interviewEvaluation', { connection });
 
 module.exports = {
   contentProcessingQueue,
@@ -29,4 +30,5 @@ module.exports = {
   ocrProcessingQueue,
   flashcardGenerationQueue,
   audioSummaryQueue,
+  interviewEvaluationQueue,
 };

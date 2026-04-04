@@ -67,6 +67,7 @@ app.use('/api/v1/flashcards', require('./routes/flashcards'));
 app.use('/api/v1/mindmaps', require('./routes/mindmaps'));
 app.use('/api/v1/audio-summaries', require('./routes/audioSummaries'));
 app.use('/api/v1/note-requests', require('./routes/noteRequests'));
+app.use('/api/v1/interviews', require('./routes/interviews'));
 
 // --- Health Check ---
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
