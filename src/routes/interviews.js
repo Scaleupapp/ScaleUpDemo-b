@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const multer = require('multer');
 const ctrl = require('../controllers/interviewController');
+const analyticsCtrl = require('../controllers/interviewAnalyticsController');
 const auth = require('../middleware/auth');
 
 const upload = multer({
@@ -18,7 +19,10 @@ const upload = multer({
 router.use(auth);
 
 router.post('/start', ctrl.startInterview);
+router.get('/analytics', analyticsCtrl.getAnalytics);
 router.post('/:id/complete', ctrl.completeInterview);
+router.post('/:id/upload-url', ctrl.getUploadURL);
+router.post('/:id/process-answer', ctrl.processVoiceAnswer);
 router.post('/:id/snapshot', upload.single('image'), ctrl.uploadSnapshot);
 router.get('/:id/status', ctrl.getStatus);
 router.get('/:id', ctrl.getSession);

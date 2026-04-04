@@ -33,6 +33,7 @@ const interviewSessionSchema = new mongoose.Schema({
   targetRole: { type: String },
   targetCompany: { type: String },
   difficulty: { type: String, enum: ['easy', 'moderate', 'hard'], default: 'moderate' },
+  objectiveId: { type: mongoose.Schema.Types.ObjectId, ref: 'UserObjective' },
 
   status: {
     type: String,

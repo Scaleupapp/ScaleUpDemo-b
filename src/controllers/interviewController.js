@@ -11,8 +11,9 @@ const startInterview = async (req, res, next) => {
       return res.status(400).json(apiResponse.error(`interviewType must be one of: ${validTypes.join(', ')}`));
     }
 
+    const { objectiveId } = req.body;
     const data = await interviewService.startInterview(req.user.userId, {
-      interviewType, targetRole, targetCompany, difficulty,
+      interviewType, targetRole, targetCompany, difficulty, objectiveId,
     });
     res.status(201).json(apiResponse.success(data, 'Interview started'));
   } catch (err) { next(err); }
@@ -80,6 +81,23 @@ const deleteSession = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getUploadURL = async (req, res, next) => {
+  try {
+    const data = await interviewService.getUploadURL(req.user.userId, req.params.id);
+    res.json(apiResponse.success(data, 'Upload URL generated'));
+  } catch (err) { next(err); }
+};
+
+const processVoiceAnswer = async (req, res, next) => {
+  try {
+    const { audioKey } = req.body;
+    if (!audioKey) return res.status(400).json(apiResponse.error('audioKey is required'));
+
+    const data = await interviewService.processVoiceAnswer(req.user.userId, req.params.id, audioKey);
+    res.json(apiResponse.success(data, 'Voice answer processed'));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   startInterview,
   completeInterview,
@@ -88,4 +106,6 @@ module.exports = {
   getStatus,
   listSessions,
   deleteSession,
+  getUploadURL,
+  processVoiceAnswer,
 };

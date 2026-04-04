@@ -1,7 +1,14 @@
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { pipeline } = require('stream/promises');
 const InterviewSession = require('../models/InterviewSession');
 const ApiError = require('../utils/apiError');
 const aiProvider = require('../config/aiProvider');
-const { uploadBuffer } = require('../config/s3');
+const openai = require('../config/openai');
+const { s3, generateUploadURL, uploadBuffer } = require('../config/s3');
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { interviewEvaluationQueue, notificationQueue } = require('../config/queue');
 const { paginationMeta } = require('../utils/pagination');
 
@@ -55,7 +62,7 @@ class InterviewService {
   /**
    * Start a new interview session
    */
-  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate' }) {
+  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId }) {
     // Check user doesn't have an existing in_progress session
     const existing = await InterviewSession.findOne({ userId, status: 'in_progress' });
     if (existing) {
@@ -116,6 +123,7 @@ ${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}`;
       targetRole: targetRole || undefined,
       targetCompany: targetCompany || undefined,
       difficulty,
+      objectiveId: objectiveId || undefined,
       status: 'in_progress',
       systemInstruction,
       transcript: [],
@@ -345,6 +353,11 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
       session.status = 'evaluated';
       await session.save();
 
+      // Log objective linkage (objective progress updates handled separately)
+      if (session.objectiveId) {
+        console.log(`[InterviewEval] Session ${sessionId} linked to objective ${session.objectiveId} — score: ${result.overallScore}`);
+      }
+
       // Send push notification
       try {
         await notificationQueue.add('send', {
@@ -452,6 +465,168 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
     await session.save();
 
     return { s3Key, timestamp };
+  }
+  /**
+   * Generate a presigned upload URL for voice answer audio
+   */
+  async getUploadURL(userId, sessionId) {
+    const session = await InterviewSession.findOne({ _id: sessionId, userId });
+    if (!session) throw new ApiError(404, 'Interview session not found');
+    if (session.status !== 'in_progress') {
+      throw new ApiError(400, 'Session is not in progress');
+    }
+
+    const audioKey = `interviews/${sessionId}/answer_${Date.now()}.m4a`;
+    const uploadURL = await generateUploadURL(audioKey, 'audio/mp4');
+
+    return { uploadURL, audioKey };
+  }
+
+  /**
+   * Process a voice answer: transcribe, generate next question with TTS, return turn data
+   */
+  async processVoiceAnswer(userId, sessionId, audioKey) {
+    const session = await InterviewSession.findOne({ _id: sessionId, userId });
+    if (!session) throw new ApiError(404, 'Interview session not found');
+    if (session.status !== 'in_progress') {
+      throw new ApiError(400, 'Session is not in progress');
+    }
+
+    // 1. Download audio from S3
+    const getCommand = new GetObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: audioKey,
+    });
+    const s3Response = await s3.send(getCommand);
+
+    // 2. Save to temp file
+    const tmpFile = path.join(os.tmpdir(), `interview_answer_${sessionId}_${Date.now()}.m4a`);
+    const writeStream = fs.createWriteStream(tmpFile);
+    await pipeline(s3Response.Body, writeStream);
+
+    let candidateText;
+    try {
+      // 3. Transcribe with Whisper
+      candidateText = await openai.audio.transcriptions.create({
+        file: fs.createReadStream(tmpFile),
+        model: 'whisper-1',
+        language: 'en',
+        response_format: 'text',
+      });
+    } finally {
+      // 4. Clean up temp file
+      try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    }
+
+    // 5. Determine current question number
+    const interviewerEntries = session.transcript.filter(e => e.role === 'interviewer');
+    const currentQ = interviewerEntries.length;
+
+    // 6. Save candidate transcript entry
+    session.transcript.push({
+      role: 'candidate',
+      content: candidateText,
+      questionNumber: currentQ,
+      timestamp: Math.round((Date.now() - session.startedAt.getTime()) / 1000),
+    });
+
+    // 7. Build conversation history for GPT-4o
+    const messages = [];
+
+    // System message
+    messages.push({
+      role: 'system',
+      content: session.systemInstruction,
+    });
+
+    // Tracking message
+    messages.push({
+      role: 'system',
+      content: `Current question: ${currentQ}. Target: 8-12 questions.`,
+    });
+
+    // Map transcript to GPT-4o format
+    for (const entry of session.transcript) {
+      messages.push({
+        role: entry.role === 'interviewer' ? 'assistant' : 'user',
+        content: entry.content,
+      });
+    }
+
+    // 8. Call GPT-4o for next question
+    const chatResponse = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages,
+      temperature: 0.7,
+      max_tokens: 1024,
+    });
+
+    const aiResponseText = chatResponse.choices[0].message.content;
+
+    // 9. Check if interview is complete
+    const completionMarkers = ['[INTERVIEW_COMPLETE]', 'That concludes our interview', 'concludes our interview today', 'end of our interview'];
+    const isComplete = completionMarkers.some(marker =>
+      aiResponseText.toLowerCase().includes(marker.toLowerCase())
+    );
+
+    const nextQ = currentQ + 1;
+
+    // 10. Generate TTS audio of AI response
+    const ttsResponse = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: 'alloy',
+      input: aiResponseText,
+    });
+
+    // 11. Upload TTS MP3 to S3
+    const ttsKey = `interviews/${sessionId}/q${nextQ}.mp3`;
+    const ttsBuffer = Buffer.from(await ttsResponse.arrayBuffer());
+    await uploadBuffer(ttsKey, ttsBuffer, 'audio/mpeg');
+
+    // 12. Generate presigned GET URL for the audio
+    const getAudioCommand = new GetObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: ttsKey,
+    });
+    const audioURL = await getSignedUrl(s3, getAudioCommand, { expiresIn: 3600 });
+
+    // 13. Save interviewer transcript entry
+    session.transcript.push({
+      role: 'interviewer',
+      content: aiResponseText,
+      questionNumber: nextQ,
+      timestamp: Math.round((Date.now() - session.startedAt.getTime()) / 1000),
+    });
+
+    session.totalQuestions = session.transcript.filter(
+      e => e.role === 'interviewer' && e.questionNumber != null
+    ).length;
+
+    // 14. If complete, update status and queue evaluation
+    if (isComplete) {
+      session.status = 'completed';
+      session.completedAt = new Date();
+      session.duration = Math.round((session.completedAt - session.startedAt) / 1000);
+
+      await session.save();
+
+      await interviewEvaluationQueue.add('evaluate', { sessionId: session._id.toString() }, {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+      });
+    } else {
+      await session.save();
+    }
+
+    return {
+      transcript: candidateText,
+      nextQuestion: {
+        text: aiResponseText,
+        audioURL,
+      },
+      isComplete,
+      questionNumber: nextQ,
+    };
   }
 }
 
