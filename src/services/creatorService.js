@@ -35,7 +35,13 @@ class CreatorService {
   }
 
   async getMyApplication(userId) {
-    return CreatorApplication.findOne({ userId }).sort({ createdAt: -1 });
+    const app = await CreatorApplication.findOne({ userId })
+      .sort({ createdAt: -1 })
+      .populate('endorsements.creatorId', 'firstName lastName username');
+    if (!app) return null;
+    const obj = app.toObject();
+    obj.statusDetail = this._computeStatusDetail(obj);
+    return obj;
   }
 
   // ─── Peer Endorsement ─────────────────────────────────────────────
@@ -104,13 +110,15 @@ class CreatorService {
       const endorserName = endorser ? `${endorser.firstName} ${endorser.lastName}`.trim() : 'A creator';
       notificationQueue.add('send', {
         userId: app.userId.toString(),
-        title: 'Application Endorsed! ⭐',
+        title: 'Application Endorsed!',
         body: `${endorserName} endorsed your ${app.domain} creator application. ${2 - coreEndorsements} more endorsement(s) needed.`,
         data: { type: 'creator_endorsed' },
       }).catch(err => console.error('[Creator] Failed to queue endorsement notification:', err.message));
     }
 
-    return app;
+    const obj = app.toObject();
+    obj.statusDetail = this._computeStatusDetail(obj);
+    return obj;
   }
 
   // ─── Peer Rejection ──────────────────────────────────────────────
@@ -159,7 +167,9 @@ class CreatorService {
       data: { type: 'creator_rejected' },
     }).catch(err => console.error('[Creator] Failed to queue rejection notification:', err.message));
 
-    return app;
+    const obj = app.toObject();
+    obj.statusDetail = this._computeStatusDetail(obj);
+    return obj;
   }
 
   // ─── Creator Profile ──────────────────────────────────────────────
@@ -260,8 +270,13 @@ class CreatorService {
 
   // ─── Pending Applications (for core/anchor creators to browse) ──
 
-  async getPendingApplications({ domain, page = 1, limit = 20 }) {
-    const filter = { status: { $in: ['pending', 'endorsed'] } };
+  async getPendingApplications({ domain, status, page = 1, limit = 20 }) {
+    const filter = {};
+    if (status && ['pending', 'endorsed', 'approved', 'rejected'].includes(status)) {
+      filter.status = status;
+    } else {
+      filter.status = { $in: ['pending', 'endorsed'] };
+    }
     if (domain) filter.domain = domain.toLowerCase();
 
     const skip = (page - 1) * limit;
@@ -274,7 +289,44 @@ class CreatorService {
         .populate('endorsements.creatorId', 'firstName lastName username'),
       CreatorApplication.countDocuments(filter),
     ]);
-    return { items: apps, pagination: paginationMeta(total, page, limit) };
+    const items = apps.map(a => {
+      const obj = a.toObject();
+      obj.statusDetail = this._computeStatusDetail(obj);
+      return obj;
+    });
+    return { items, pagination: paginationMeta(total, page, limit) };
+  }
+
+  _computeStatusDetail(app) {
+    const endorsements = app.endorsements || [];
+    const anchorCount = endorsements.filter(e => e.creatorTier === 'anchor').length;
+    const coreCount = endorsements.filter(e => e.creatorTier === 'core').length;
+    const total = endorsements.length;
+
+    switch (app.status) {
+      case 'pending':
+        return 'Awaiting endorsements from core or anchor creators';
+      case 'endorsed': {
+        const parts = [];
+        if (anchorCount > 0) parts.push(`${anchorCount} anchor`);
+        if (coreCount > 0) parts.push(`${coreCount} core`);
+        const who = parts.join(' and ') + ` creator${total > 1 ? 's' : ''}`;
+        const needed = coreCount >= 1
+          ? '1 more core or 1 anchor endorsement needed'
+          : '1 anchor or 2 core endorsements needed';
+        return `Endorsed by ${who}. ${needed}`;
+      }
+      case 'approved':
+        return 'Approved — joined as Rising creator';
+      case 'rejected': {
+        const reapply = app.reapplyAfter
+          ? `. Can reapply after ${new Date(app.reapplyAfter).toISOString().split('T')[0]}`
+          : '';
+        return `Application rejected${reapply}`;
+      }
+      default:
+        return '';
+    }
   }
 
   // ─── Admin Override (reject spam/bad applications) ────────────────

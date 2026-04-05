@@ -7,7 +7,7 @@ router.use(auth, rbac('admin'));
 
 // Creator applications (admin can view all, endorse, reject)
 router.get('/applications', ctrl.getPendingApplications);
-router.post('/applications/:id/endorse', ctrl.endorseApplication);
+router.post('/applications/:id/approve', ctrl.approveApplication);
 router.post('/applications/:id/reject', ctrl.rejectApplication);
 
 // User management

@@ -24,18 +24,30 @@ const getPendingApplications = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-const endorseApplication = async (req, res, next) => {
+const approveApplication = async (req, res, next) => {
   try {
     const app = await CreatorApplication.findById(req.params.id);
     if (!app) return res.status(404).json(apiResponse.error('Application not found'));
-    app.endorsements.push({
-      creatorId: req.user.userId,
-      creatorTier: 'anchor',
-      note: req.body.note || 'Admin endorsement',
-    });
-    app.status = 'endorsed';
+    if (app.status === 'approved') return res.status(400).json(apiResponse.error('Application already approved'));
+
+    app.status = 'approved';
+    app.reviewedBy = req.user.userId;
+    app.reviewNote = req.body.note || 'Approved by admin';
+    app.reviewedAt = new Date();
     await app.save();
-    res.json(apiResponse.success(app, 'Application endorsed by admin'));
+
+    // Create creator profile (rising tier) and update user role
+    await creatorService._promoteToCreator(app);
+
+    const { notificationQueue } = require('../config/queue');
+    notificationQueue.add('send', {
+      userId: app.userId.toString(),
+      title: 'Welcome, Creator!',
+      body: `Your creator application for ${app.domain} has been approved by an admin. Start sharing your knowledge!`,
+      data: { type: 'creator_approved' },
+    }).catch(err => console.error('[Admin] Failed to queue approval notification:', err.message));
+
+    res.json(apiResponse.success(app, 'Application approved'));
   } catch (err) { next(err); }
 };
 
@@ -365,7 +377,7 @@ const getPendingNotes = async (req, res, next) => {
 };
 
 module.exports = {
-  getPendingApplications, endorseApplication, rejectApplication, getUsers, banUser, unbanUser,
+  getPendingApplications, approveApplication, rejectApplication, getUsers, banUser, unbanUser,
   moderateContent, getStats, promoteCreator, getCreators, getContent, removeContent, dismissReports, getContentReports,
   getPendingNotes,
 };
