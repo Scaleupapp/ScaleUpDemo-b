@@ -561,48 +561,60 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
       max_tokens: 1024,
     });
 
-    const aiResponseText = chatResponse.choices[0].message.content;
+    const rawResponseText = chatResponse.choices[0].message.content;
 
-    // 9. Check if interview is complete
+    // 9. Clean markdown from AI response (strip bold, italic markers)
+    const aiResponseText = rawResponseText
+      .replace(/\*\*([^*]*)\*\*/g, '$1')
+      .replace(/\*([^*]*)\*/g, '$1')
+      .trim();
+
+    // 10. Check if interview is complete
     const completionMarkers = ['[INTERVIEW_COMPLETE]', 'That concludes our interview', 'concludes our interview today', 'end of our interview'];
     const isComplete = completionMarkers.some(marker =>
       aiResponseText.toLowerCase().includes(marker.toLowerCase())
     );
 
-    const nextQ = currentQ + 1;
+    // 11. Detect follow-up vs new question
+    const lowerResponse = aiResponseText.toLowerCase();
+    const followUpSignals = ['elaborate', 'tell me more', 'can you give', 'could you expand', 'follow up', 'follow-up', 'dig deeper', 'more about', 'specific example'];
+    const isFollowUp = followUpSignals.some(signal => lowerResponse.includes(signal));
 
-    // 10. Generate TTS audio of AI response
+    const nextQ = isFollowUp ? currentQ : currentQ + 1;
+
+    // 12. Generate TTS audio of AI response
     const ttsResponse = await openai.audio.speech.create({
       model: 'tts-1',
       voice: 'alloy',
       input: aiResponseText,
     });
 
-    // 11. Upload TTS MP3 to S3
-    const ttsKey = `interviews/${sessionId}/q${nextQ}.mp3`;
+    // 13. Upload TTS MP3 to S3
+    const ttsKey = `interviews/${sessionId}/q${nextQ}${isFollowUp ? '_followup' : ''}_${Date.now()}.mp3`;
     const ttsBuffer = Buffer.from(await ttsResponse.arrayBuffer());
     await uploadBuffer(ttsKey, ttsBuffer, 'audio/mpeg');
 
-    // 12. Generate presigned GET URL for the audio
+    // 14. Generate presigned GET URL for the audio
     const getAudioCommand = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: ttsKey,
     });
     const audioURL = await getSignedUrl(s3, getAudioCommand, { expiresIn: 3600 });
 
-    // 13. Save interviewer transcript entry
+    // 15. Save interviewer transcript entry
     session.transcript.push({
       role: 'interviewer',
       content: aiResponseText,
-      questionNumber: nextQ,
+      questionNumber: isComplete ? null : nextQ,
+      isFollowUp,
       timestamp: Math.round((Date.now() - session.startedAt.getTime()) / 1000),
     });
 
     session.totalQuestions = session.transcript.filter(
-      e => e.role === 'interviewer' && e.questionNumber != null
+      e => e.role === 'interviewer' && e.questionNumber != null && !e.isFollowUp
     ).length;
 
-    // 14. If complete, update status and queue evaluation
+    // 16. If complete, update status and queue evaluation
     if (isComplete) {
       session.status = 'completed';
       session.completedAt = new Date();
@@ -626,6 +638,7 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
       },
       isComplete,
       questionNumber: nextQ,
+      isFollowUp,
     };
   }
 }
