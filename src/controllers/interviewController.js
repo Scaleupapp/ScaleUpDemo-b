@@ -98,6 +98,13 @@ const processVoiceAnswer = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getRealtimeToken = async (req, res, next) => {
+  try {
+    const data = await interviewService.getRealtimeToken(req.user.userId, req.params.id);
+    res.json(apiResponse.success(data, 'Realtime token generated'));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   startInterview,
   completeInterview,
@@ -108,4 +115,5 @@ module.exports = {
   deleteSession,
   getUploadURL,
   processVoiceAnswer,
+  getRealtimeToken,
 };

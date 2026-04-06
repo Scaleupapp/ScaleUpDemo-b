@@ -265,14 +265,17 @@ ${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}`;
 
       const typeLabel = session.interviewType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-      const systemPrompt = `You are an expert interview coach and evaluator. You evaluate mock interview performances and provide detailed, constructive, actionable feedback. Be encouraging but honest. Score fairly — a perfect score should be extremely rare.`;
+      const roleStr = session.targetRole || 'the role';
+      const companyStr = session.targetCompany || 'the target company';
+
+      const systemPrompt = `You are an expert interview coach and evaluator specializing in ${typeLabel} interviews for ${roleStr} positions${session.targetCompany ? ` at ${session.targetCompany}` : ''}. You evaluate mock interview performances and provide detailed, constructive, actionable feedback. Be encouraging but honest. Score fairly — a perfect score should be extremely rare.`;
 
       const userPrompt = `Evaluate this ${typeLabel} mock interview.
 
 INTERVIEW DETAILS:
 - Type: ${typeLabel}
-- Target Role: ${session.targetRole || 'Not specified'}
-- Target Company: ${session.targetCompany || 'Not specified'}
+- Target Role: ${roleStr}
+- Target Company: ${companyStr}
 - Difficulty: ${session.difficulty}
 - Duration: ${session.duration ? Math.round(session.duration / 60) + ' minutes' : 'Unknown'}
 - Total Questions: ${session.totalQuestions}
@@ -283,33 +286,40 @@ ${transcriptText}
 INTEGRITY DATA:
 ${integritySummary}
 
+EVALUATION GUIDELINES:
+- The summary MUST reference specific things the candidate said. Quote or paraphrase their actual words. Do NOT write generic summaries.
+- Model answers MUST be tailored to ${roleStr} at ${companyStr}. What would ${companyStr} specifically look for? What frameworks, experiences, or competencies are valued at ${companyStr} for this role?
+- Every piece of feedback must cite concrete examples from the transcript. Say "When you said X, it showed Y" or "Your answer about Z lacked specific metrics."
+- Strengths and improvements must reference specific moments, not generic advice.
+- For model answers: describe what a top candidate for ${roleStr} at ${companyStr} would say, including specific frameworks, metrics, and structure.
+
 Provide your evaluation as a JSON object with this exact structure:
 {
   "overallScore": <0-100>,
-  "summary": "<2-3 sentence overall assessment>",
-  "communication": { "score": <0-100>, "feedback": "<specific feedback on communication skills, clarity, articulation>" },
-  "content": { "score": <0-100>, "feedback": "<specific feedback on answer quality, depth, relevance>" },
-  "structure": { "score": <0-100>, "feedback": "<specific feedback on answer structure, organization, frameworks used>" },
-  "confidence": { "score": <0-100>, "feedback": "<specific feedback on confidence, poise, professionalism>" },
+  "summary": "<2-3 sentence personalized assessment referencing specific candidate responses>",
+  "communication": { "score": <0-100>, "feedback": "<specific feedback citing examples from transcript>" },
+  "content": { "score": <0-100>, "feedback": "<specific feedback citing examples from transcript>" },
+  "structure": { "score": <0-100>, "feedback": "<specific feedback citing examples from transcript>" },
+  "confidence": { "score": <0-100>, "feedback": "<specific feedback citing examples from transcript>" },
   "perQuestion": [
     {
       "questionNumber": <number>,
       "question": "<the interviewer question>",
       "answer": "<summary of candidate answer>",
       "score": <0-10>,
-      "feedback": "<specific feedback for this answer>",
-      "modelAnswer": "<what an ideal answer would include>",
-      "strengths": ["<strength1>", "<strength2>"],
-      "improvements": ["<improvement1>", "<improvement2>"],
+      "feedback": "<specific feedback for this answer citing what the candidate said>",
+      "modelAnswer": "<detailed ideal answer tailored to ${roleStr} at ${companyStr}, including specific frameworks and structure>",
+      "strengths": ["<specific strength from this answer>"],
+      "improvements": ["<specific improvement with actionable advice>"],
       "responseTime": <seconds or null>,
       "integrityFlag": "<clean|too_fast|too_slow or null>"
     }
   ],
-  "overallStrengths": ["<strength1>", "<strength2>", "<strength3>"],
-  "overallImprovements": ["<area1>", "<area2>", "<area3>"],
+  "overallStrengths": ["<strength citing specific example>", "<strength citing specific example>", "<strength citing specific example>"],
+  "overallImprovements": ["<improvement with actionable advice>", "<improvement with actionable advice>", "<improvement with actionable advice>"],
   "integrityReport": {
     "overallIntegrity": "clean|minor_flags|suspicious",
-    "flags": ["<flag description if any>"],
+    "flags": ["<specific flag description>"],
     "recommendation": "<recommendation about integrity>"
   }
 }
@@ -355,9 +365,12 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
       session.status = 'evaluated';
       await session.save();
 
-      // Log objective linkage (objective progress updates handled separately)
-      if (session.objectiveId) {
-        console.log(`[InterviewEval] Session ${sessionId} linked to objective ${session.objectiveId} — score: ${result.overallScore}`);
+      // Update KnowledgeProfile with interview results
+      try {
+        const knowledgeService = require('./knowledgeService');
+        await knowledgeService.updateFromInterview(session._id, session.userId, session.objectiveId);
+      } catch (kErr) {
+        console.error('[InterviewEval] Knowledge profile update failed:', kErr.message);
       }
 
       // Send push notification
@@ -641,6 +654,66 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
       isComplete,
       questionNumber: nextQ,
       isFollowUp,
+    };
+  }
+
+  /**
+   * Generate an ephemeral OpenAI Realtime API token for iOS real-time voice interviews.
+   */
+  async getRealtimeToken(userId, sessionId) {
+    const session = await InterviewSession.findOne({ _id: sessionId, userId });
+    if (!session) throw new ApiError(404, 'Interview session not found');
+    if (session.status !== 'in_progress') {
+      throw new ApiError(400, 'Session is not in progress');
+    }
+
+    const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-realtime-preview',
+        voice: 'alloy',
+        instructions: session.systemInstruction,
+        input_audio_format: 'pcm16',
+        output_audio_format: 'pcm16',
+        input_audio_transcription: { model: 'whisper-1' },
+        turn_detection: null,
+        tools: [
+          {
+            type: 'function',
+            name: 'report_question_meta',
+            description: 'Report metadata about the question you just asked. Call this EVERY time you ask a question or follow-up.',
+            parameters: {
+              type: 'object',
+              properties: {
+                question_number: { type: 'integer', description: 'Current question number (starts at 1)' },
+                is_follow_up: { type: 'boolean', description: 'True if this is a follow-up to the previous question' },
+                is_complete: { type: 'boolean', description: 'True if you have concluded the interview' },
+                question_text: { type: 'string', description: 'The exact question you asked' },
+              },
+              required: ['question_number', 'is_follow_up', 'is_complete', 'question_text'],
+              additionalProperties: false,
+            },
+            strict: true,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      console.error('[RealtimeToken] OpenAI error:', errBody);
+      throw new ApiError(502, 'Failed to create realtime session token');
+    }
+
+    const data = await response.json();
+
+    return {
+      token: data.client_secret.value,
+      expiresAt: data.client_secret.expires_at,
     };
   }
 }

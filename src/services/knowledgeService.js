@@ -383,6 +383,93 @@ class KnowledgeService {
     return profile;
   }
 
+  /**
+   * Update knowledge profile from interview evaluation results.
+   * Interviews have moderate weight (40% new, 60% old) — less than quizzes.
+   */
+  async updateFromInterview(sessionId, userId, objectiveId) {
+    const InterviewSession = require('../models/InterviewSession');
+    const session = await InterviewSession.findById(sessionId);
+    if (!session || session.status !== 'evaluated' || !session.evaluation) return;
+
+    let profile = await KnowledgeProfile.findOne({ userId });
+    if (!profile) {
+      profile = await KnowledgeProfile.create({ userId, topicMastery: [], _processedAttempts: [] });
+    }
+
+    // Idempotency
+    const key = `interview_${sessionId}`;
+    if (!profile._processedAttempts) profile._processedAttempts = [];
+    if (profile._processedAttempts.includes(key)) return profile;
+
+    const eval_ = session.evaluation;
+    const typeLabel = session.interviewType.replace(/_/g, ' ');
+
+    // Update topic mastery for interview dimensions
+    const dimensions = [
+      { topic: `${typeLabel}: communication`, score: eval_.communication?.score || 0 },
+      { topic: `${typeLabel}: content`, score: eval_.content?.score || 0 },
+      { topic: `${typeLabel}: structure`, score: eval_.structure?.score || 0 },
+      { topic: `${typeLabel}: confidence`, score: eval_.confidence?.score || 0 },
+    ];
+
+    // Also add an overall topic for the interview type
+    dimensions.push({ topic: `interview: ${typeLabel}`, score: eval_.overallScore || 0 });
+
+    for (const dim of dimensions) {
+      let topicEntry = profile.topicMastery.find(t => t.topic === dim.topic);
+      if (topicEntry) {
+        topicEntry.score = Math.round(dim.score * 0.4 + topicEntry.score * 0.6);
+        topicEntry.level = this._scoreToLevel(topicEntry.score);
+        topicEntry.quizzesTaken += 1;
+        topicEntry.lastAssessedAt = new Date();
+        topicEntry.scoreHistory.push({
+          score: dim.score, date: new Date(),
+          quizId: null, interviewSessionId: session._id,
+          objectiveId: objectiveId || null,
+        });
+        if (topicEntry.scoreHistory.length > 20) {
+          topicEntry.scoreHistory = topicEntry.scoreHistory.slice(-20);
+        }
+        topicEntry.trend = this._calculateTrend(topicEntry.scoreHistory);
+      } else {
+        profile.topicMastery.push({
+          topic: dim.topic, score: dim.score,
+          level: this._scoreToLevel(dim.score),
+          quizzesTaken: 1, lastAssessedAt: new Date(),
+          scoreHistory: [{ score: dim.score, date: new Date(), quizId: null, interviewSessionId: session._id, objectiveId: objectiveId || null }],
+          trend: 'stable', objectiveId: objectiveId || null,
+        });
+      }
+    }
+
+    // Recalculate aggregates
+    const allTopics = profile.topicMastery;
+    profile.totalTopicsCovered = allTopics.length;
+    profile.overallScore = allTopics.length > 0
+      ? Math.round(allTopics.reduce((sum, t) => sum + t.score, 0) / allTopics.length)
+      : 0;
+    profile.strengths = allTopics.filter(t => t.score >= 70).sort((a, b) => b.score - a.score).slice(0, 10).map(t => t.topic);
+    profile.weaknesses = allTopics.filter(t => t.score < 50 && t.quizzesTaken > 0).sort((a, b) => a.score - b.score).slice(0, 10).map(t => t.topic);
+
+    profile._processedAttempts.push(key);
+    if (profile._processedAttempts.length > 200) {
+      profile._processedAttempts = profile._processedAttempts.slice(-200);
+    }
+
+    profile.lastUpdatedAt = new Date();
+    await profile.save();
+
+    // Trigger journey adaptation
+    await journeyAdaptationQueue.add('adapt', {
+      userId: userId.toString(),
+      trigger: 'interview_completed',
+      data: { interviewType: session.interviewType, score: eval_.overallScore, sessionId: sessionId.toString() },
+    });
+
+    return profile;
+  }
+
   _calculateTrend(scoreHistory) {
     if (!scoreHistory || scoreHistory.length < 2) return 'stable';
 

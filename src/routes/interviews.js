@@ -21,6 +21,7 @@ router.use(auth);
 router.post('/start', ctrl.startInterview);
 router.get('/analytics', analyticsCtrl.getAnalytics);
 router.post('/:id/complete', ctrl.completeInterview);
+router.post('/:id/realtime-token', ctrl.getRealtimeToken);
 router.post('/:id/upload-url', ctrl.getUploadURL);
 router.post('/:id/process-answer', ctrl.processVoiceAnswer);
 router.post('/:id/snapshot', upload.single('image'), ctrl.uploadSnapshot);
