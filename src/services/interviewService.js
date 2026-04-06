@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { pipeline } = require('stream/promises');
+const fetch = require('node-fetch');
 const InterviewSession = require('../models/InterviewSession');
 const ApiError = require('../utils/apiError');
 const aiProvider = require('../config/aiProvider');
