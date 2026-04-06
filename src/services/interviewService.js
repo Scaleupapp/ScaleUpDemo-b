@@ -698,7 +698,6 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
               required: ['question_number', 'is_follow_up', 'is_complete', 'question_text'],
               additionalProperties: false,
             },
-            strict: true,
           },
         ],
       }),
