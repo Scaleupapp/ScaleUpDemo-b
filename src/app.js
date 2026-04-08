@@ -49,6 +49,7 @@ app.use('/api/v1/quizzes', require('./routes/quizzes'));
 app.use('/api/v1/knowledge', require('./routes/knowledge'));
 app.use('/api/v1/journey', require('./routes/journey'));
 app.use('/api/v1/dashboard', require('./routes/dashboard'));
+app.use('/api/v1/today', require('./routes/today'));
 app.use('/api/v1/social', require('./routes/social'));
 app.use('/api/v1/users', require('./routes/users'));
 app.use('/api/v1/learning-paths', require('./routes/learningPaths'));
