@@ -26,7 +26,7 @@ const getSummary = async (req, res, next) => {
       KnowledgeProfile.findOne({ userId }).lean(),
       Journey.findOne({ userId, status: { $in: ['active', 'paused'] } }).sort({ status: 1 }).lean(),
       Quiz.find({ userId, status: { $in: ['ready', 'delivered'] }, expiresAt: { $gt: new Date() } })
-        .select('topic totalQuestions type status triggerContext expiresAt').lean(),
+        .select('title topic totalQuestions type status triggerContext expiresAt questions').lean(),
       _getTodayChallengesWithStatus(userId),
     ]);
 
