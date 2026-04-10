@@ -6,6 +6,9 @@ const User = require('../models/User');
 const redis = require('../config/redis');
 const ApiError = require('../utils/apiError');
 const emailService = require('./emailService');
+const Follow = require('../models/Follow');
+
+const SCALEUP_ADMIN_ID = '699d8aeca7eb4b450fbd22e0';
 
 class AuthService {
 
@@ -52,6 +55,7 @@ class AuthService {
     const tokens = this._tokenPair(user);
 
     emailService.sendWelcome(email, firstName).catch(() => {});
+    this._autoFollowAdmin(user._id).catch(() => {});
 
     return { user: this._sanitize(user), ...tokens };
   }
@@ -89,6 +93,7 @@ class AuthService {
     if (!email) throw new ApiError(400, 'Google account does not have an email');
 
     let user = await User.findOne({ googleId });
+    let isNewUser = false;
     if (!user) {
       user = await User.findOne({ email });
       if (user) {
@@ -96,6 +101,7 @@ class AuthService {
         user.authProvider = 'google';
         if (!user.profilePicture && picture) user.profilePicture = picture;
       } else {
+        isNewUser = true;
         user = new User({
           email, firstName: firstName || 'User', lastName: lastName || '',
           googleId, authProvider: 'google', profilePicture: picture, isEmailVerified: true,
@@ -110,6 +116,10 @@ class AuthService {
 
     user.lastLoginAt = new Date();
     await user.save();
+
+    if (isNewUser) {
+      this._autoFollowAdmin(user._id).catch(() => {});
+    }
 
     return { user: this._sanitize(user), ...this._tokenPair(user) };
   }
@@ -278,6 +288,18 @@ class AuthService {
       throw new ApiError(400, 'Invalid phone number');
     }
     return cleaned;
+  }
+
+  /**
+   * Auto-follow the ScaleUp Admin account so new users see curated content immediately.
+   */
+  async _autoFollowAdmin(userId) {
+    const adminId = SCALEUP_ADMIN_ID;
+    if (userId.toString() === adminId) return;
+
+    await Follow.create({ followerId: userId, followingId: adminId });
+    await User.findByIdAndUpdate(userId, { $inc: { followingCount: 1 } });
+    await User.findByIdAndUpdate(adminId, { $inc: { followersCount: 1 } });
   }
 
   /**
