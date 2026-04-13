@@ -10,13 +10,12 @@ const rateLimiter = ({ windowMs = 60000, max = 100, keyPrefix = 'rl' } = {}) => 
         await redis.pexpire(key, windowMs);
       }
       if (current > max) {
-        throw new ApiError(429, 'Too many requests, please try again later');
+        return next(new ApiError(429, 'Too many requests, please try again later'));
       }
-      next();
+      return next();
     } catch (err) {
-      if (err instanceof ApiError) throw err;
-      // If Redis is down, allow the request
-      next();
+      // If Redis is down or any other error, allow the request (fail-open)
+      return next();
     }
   };
 };

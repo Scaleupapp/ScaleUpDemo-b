@@ -7,6 +7,10 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
+// Trust the single nginx proxy in front of Node — makes req.ip resolve to the real client IP
+// (previously all traffic shared req.ip = ::ffff:127.0.0.1, causing rate limiter to lock out everyone)
+app.set('trust proxy', 1);
+
 // Disable ETags — prevents 304 empty-body responses that break mobile clients
 app.set('etag', false);
 
