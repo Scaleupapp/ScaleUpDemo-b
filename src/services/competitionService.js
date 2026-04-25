@@ -232,7 +232,18 @@ class CompetitionService {
     const ws = weekStart || this._currentWeekStartIST();
     const board = await WeeklyLeaderboard.findOne({ topic, weekStart: ws })
       .populate('entries.userId', 'firstName lastName username profilePicture');
-    return board;
+    if (board) return board;
+
+    // No board exists yet this week — return a well-formed empty shell so the
+    // client renders the empty state instead of a blank screen.
+    const weekEnd = new Date(ws.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+    return {
+      topic,
+      weekStart: ws,
+      weekEnd,
+      entries: [],
+      totalParticipants: 0,
+    };
   }
 
   async getCompetitionProfile(userId) {

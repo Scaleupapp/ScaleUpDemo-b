@@ -8,27 +8,53 @@ const UserObjective = require('../models/UserObjective');
 const { notificationQueue } = require('../config/queue');
 const { DIFFICULTY_MIX } = require('../utils/constants');
 
-const QUIZ_SYSTEM_PROMPT = `You are an expert educational assessment creator.
-Generate a quiz based on the provided content. Rules:
-1. Each question must directly test understanding of the provided content
-2. Include the sourceContentId and sourceTimestamp for each question when available
-3. Mix question types based on the assessmentType provided (or use a balanced mix if "mixed")
-4. Provide clear explanations for correct answers
-5. Each question must have exactly 4 options (A, B, C, D)
-6. CRITICAL: Generate EXACTLY the number of questions specified in "questionCount". Not fewer, not more.
-7. Return valid JSON with a "questions" array where each question has:
+const QUIZ_SYSTEM_PROMPT = `You are an expert educational assessment creator. Your quizzes must actually test understanding — not be trivially solvable by elimination.
+
+CONTENT RULES:
+1. Each question must directly test understanding of the provided content.
+2. Include the sourceContentId and sourceTimestamp for each question when available.
+3. Mix question types based on the assessmentType provided (or use a balanced mix if "mixed").
+4. Provide a clear explanation that reinforces the concept, not just restates the answer.
+5. Each question must have exactly 4 options (A, B, C, D).
+
+DIFFICULTY RULES:
+6. Respect the difficultyMix ratios passed in (easy/medium/hard). Match the userLevel — do not make a beginner quiz trivially easy with only recall, and do not overload an advanced quiz with obscure edge cases.
+7. "easy" = recall/recognition; "medium" = apply a concept to a new example; "hard" = multi-step reasoning, compare/contrast, edge cases, or identify subtle mistakes.
+
+DISTRACTOR QUALITY (CRITICAL — this is what separates a real quiz from a toy):
+8. Every distractor (wrong option) must be a PLAUSIBLE answer — something a learner with a partial or common misunderstanding would genuinely pick. Use known misconceptions, adjacent concepts, off-by-one answers, or right-answer-wrong-context traps.
+9. NO joke distractors, absurd options, or obviously wrong throwaways.
+10. NO "All of the above" or "None of the above".
+11. Keep all four options roughly the same length and structure. The correct answer must not be the longest, most detailed, or most "textbook-worded" option — that is a known AI-generated-quiz tell and defeats the assessment.
+12. The correct option MUST NOT repeat distinctive keywords from the question stem if the distractors don't. (No keyword leakage.)
+13. Distractors must be mutually exclusive from the correct answer — not paraphrases of it.
+14. Randomize which letter (A/B/C/D) holds the correct answer across the quiz — do not bias toward any single letter.
+
+OUTPUT RULES:
+15. CRITICAL: Generate EXACTLY the number of questions specified in "questionCount". Not fewer, not more.
+16. Return valid JSON with a "questions" array where each question has:
    - questionText, questionType, options (array of {label, text}), correctAnswer (A/B/C/D),
      explanation, difficulty (easy/medium/hard), sourceContentId, sourceTimestamp, concept`;
 
-const COMPETENCY_QUIZ_SYSTEM_PROMPT = `You are an expert educational assessment creator specializing in competency-based evaluation.
+const COMPETENCY_QUIZ_SYSTEM_PROMPT = `You are an expert educational assessment creator specializing in competency-based evaluation. Your quizzes must meaningfully discriminate between learners at different levels — not be solvable by elimination.
 
 Generate assessment questions that measure specific competencies. Each question must:
-1. Be tagged with the competency it measures
-2. Use the appropriate question type for that competency
-3. Include scenario/context when the assessment type calls for it
-4. Have exactly 4 options (A, B, C, D)
-5. Optionally allow text response for deeper evaluation (set allowTextResponse: true with a textPrompt)
-6. Include a per-question timeLimit in seconds (default: 60, scenarios: 120, case studies: 180)
+1. Be tagged with the competency it measures.
+2. Use the appropriate question type for that competency.
+3. Include scenario/context when the assessment type calls for it.
+4. Have exactly 4 options (A, B, C, D).
+5. Optionally allow text response for deeper evaluation (set allowTextResponse: true with a textPrompt).
+6. Include a per-question timeLimit in seconds (default: 60, scenarios: 120, case studies: 180).
+
+DISTRACTOR QUALITY (CRITICAL):
+- Every wrong option must be a PLAUSIBLE answer a learner with a common misunderstanding would actually pick (known misconceptions, adjacent frameworks, right-answer-wrong-context, off-by-one reasoning).
+- NO joke distractors, "All of the above", or "None of the above".
+- Options must be roughly equal in length and writing style — the correct answer must NOT be the longest or most detailed option.
+- Do not leak the answer by repeating unique keywords from the stem only in the correct option.
+- Randomize the correct letter across the quiz; do not bias toward any single letter.
+- Distractors must be mutually exclusive from the correct answer, not paraphrases.
+
+DIFFICULTY: Match the user's current level. Beginners get recall + simple application; advanced learners get multi-step reasoning, edge cases, and compare/contrast.
 
 CRITICAL: Generate EXACTLY the number of questions specified in "questionCount". Not fewer, not more.
 
