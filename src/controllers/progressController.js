@@ -1,4 +1,5 @@
 const consumptionService = require('../services/consumptionService');
+const progressInsightsService = require('../services/progressInsightsService');
 const apiResponse = require('../utils/apiResponse');
 
 const updateProgress = async (req, res, next) => {
@@ -45,4 +46,12 @@ const getTimeline = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { updateProgress, markCompleted, getHistory, getStats, getActivityHeatmap, getTimeline };
+const getInsights = async (req, res, next) => {
+  try {
+    const refresh = req.query.refresh === 'true' || req.query.refresh === '1';
+    const data = await progressInsightsService.generateForUser(req.user.userId, { refresh });
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
+module.exports = { updateProgress, markCompleted, getHistory, getStats, getActivityHeatmap, getTimeline, getInsights };

@@ -9,6 +9,7 @@ router.get('/history', ctrl.getHistory);
 router.get('/stats', ctrl.getStats);
 router.get('/activity-heatmap', ctrl.getActivityHeatmap);
 router.get('/timeline', ctrl.getTimeline);
+router.get('/insights', ctrl.getInsights);
 
 // Parameterized routes
 router.put('/:contentId', ctrl.updateProgress);
