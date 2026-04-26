@@ -23,6 +23,7 @@ const QuizAttempt = require('../models/QuizAttempt');
 const ChallengeAttempt = require('../models/ChallengeAttempt');
 const ContentProgress = require('../models/ContentProgress');
 const UserObjective = require('../models/UserObjective');
+const ProgressInsightSnapshot = require('../models/ProgressInsightSnapshot');
 const openai = require('../config/openai');
 
 // ──────────────────────────────────────────────────────────────
@@ -81,6 +82,11 @@ const T = {
   MIN_ATTEMPTS_FOR_ANOMALY: 5,
   COLD_START_QUIZ_COUNT: 0,  // no quizzes ever = cold start
   IDLE_DAYS: 14,             // user with quizzes but inactive this long
+  // Phase 3 — snapshot + follow-through tunables
+  SNAPSHOT_MIN_INTERVAL_MS: 60 * 60 * 1000,        // persist at most one snapshot per hour
+  FOLLOWTHROUGH_MIN_AGE_MS: 12 * 60 * 60 * 1000,   // ignore snapshots <12h old (no time to act)
+  FOLLOWTHROUGH_MAX_AGE_MS: 7 * 24 * 60 * 60 * 1000, // ignore snapshots >7d old (too stale)
+  FOLLOWTHROUGH_MIN_SCORE_DELTA: 5,                // pp gain to call it a positive follow-through
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -124,12 +130,33 @@ async function generateForUser(userId, opts = {}) {
     objective,
   });
 
-  const templateCards = _buildCards({ state, signals, profile, objective });
+  // Phase 3: load the most recent prior snapshot (12h–7d old) to drive
+  // follow-through detection and repeat suppression. Silently ignores
+  // failures so a snapshot read error never breaks the response.
+  const priorSnapshot = await _loadPriorSnapshotSafe(userId);
+
+  let templateCards = _buildCards({ state, signals, profile, objective });
+
+  // Phase 3a: drop suggestions the user already ignored last time so we
+  // don't robotically repeat ourselves. Runs before narrativization so
+  // the LLM never sees suppressed cards.
+  templateCards = _suppressRepeats(templateCards, priorSnapshot, recentAttempts);
+
+  // Phase 3b: prepend follow-through cards if the user acted on a prior
+  // suggestion and their score moved.
+  const followThroughCards = _detectFollowThroughs({
+    priorSnapshot,
+    profile,
+    recentAttempts,
+  });
+  templateCards = [...followThroughCards, ...templateCards];
 
   // Phase 2 — rewrite card bodies into warmer prose via gpt-4o-mini.
   // Skipped for cold_start / idle (template copy is appropriate there) and
   // when no cards are present. Always silently falls back to templates on error.
   const cards = await _maybeNarrativize({ cards: templateCards, state, signals, objective });
+
+  const narrativeMode = cards.some(c => c._narrativized) ? 'llm' : 'template';
 
   const result = {
     state,
@@ -138,11 +165,21 @@ async function generateForUser(userId, opts = {}) {
     objective: _objectiveSummary(objective, signals.objectiveAlignment),
     generatedAt: new Date().toISOString(),
     cacheTtlSeconds: CACHE_TTL_MS / 1000,
-    narrativeMode: cards.some(c => c._narrativized) ? 'llm' : 'template',
+    narrativeMode,
   };
 
-  // Strip the internal flag before returning to clients
-  for (const c of result.cards) delete c._narrativized;
+  // Strip internal/snapshot-only fields before returning to clients
+  for (const c of result.cards) {
+    delete c._narrativized;
+    delete c.suggestedTopic;
+    delete c.suggestionType;
+    delete c.topicScoreAtSuggestion;
+  }
+
+  // Phase 3: persist a snapshot if last one is older than SNAPSHOT_MIN_INTERVAL_MS.
+  // Fire-and-forget — never blocks the response if the write fails.
+  _maybePersistSnapshot({ userId, state, cards: result.cards, signals, objective, narrativeMode })
+    .catch(err => console.warn('[progressInsights] snapshot persist failed:', err.message));
 
   _setCached(userId, result);
   return result;
@@ -625,7 +662,7 @@ function _buildCards({ state, signals, profile, objective }) {
   if (headingCard) cards.push(headingCard);
 
   // 3. "Worth your attention" — pull highest-priority anomaly/stale/declining
-  const attentionCard = _attentionCard(signals);
+  const attentionCard = _attentionCard(signals, profile);
   if (attentionCard) cards.push(attentionCard);
 
   // 4. Optional milestone celebration if any in the last 24h
@@ -757,7 +794,9 @@ function _objectiveCard(alignment, objective) {
   };
 }
 
-function _attentionCard(signals) {
+function _attentionCard(signals, profile) {
+  const lookupScore = topic => _topicScore(profile, topic);
+
   // Priority: critical-stale-objective-linked > anomaly accuracy_drop > declining momentum > generic stale
   const blockers = signals.objectiveAlignment?.blockers || [];
   const criticalBlocker = blockers.find(b => b.daysSinceActivity != null && b.daysSinceActivity >= T.STALE_DAYS_CRITICAL);
@@ -768,6 +807,9 @@ function _attentionCard(signals) {
       title: 'Worth your attention',
       body: `${_titleCase(criticalBlocker.competency)} hasn\'t been touched in ${criticalBlocker.daysSinceActivity} days — and it\'s on your goal path. 10 minutes today moves your readiness needle.`,
       cta: { label: `Practice ${_titleCase(criticalBlocker.competency)}`, deeplink: `scaleup://topic/${_slug(criticalBlocker.competency)}` },
+      suggestedTopic: criticalBlocker.competency,
+      suggestionType: 'practice_blocker',
+      topicScoreAtSuggestion: criticalBlocker.score ?? lookupScore(criticalBlocker.competency),
     };
   }
 
@@ -781,6 +823,9 @@ function _attentionCard(signals) {
       body: `Your ${_titleCase(anomaly.topic)} score has dropped ${Math.abs(anomaly.deltaPp)} points across your last ${anomaly.attempts} attempts (now ${anomaly.recentAvg}% vs ${anomaly.baseline}% baseline). A short focused session usually fixes this.`,
       metric: { label: 'recent avg', value: `${anomaly.recentAvg}%`, delta: `${anomaly.deltaPp}pp` },
       cta: { label: `Review ${_titleCase(anomaly.topic)}`, deeplink: `scaleup://topic/${_slug(anomaly.topic)}` },
+      suggestedTopic: anomaly.topic,
+      suggestionType: 'address_drop',
+      topicScoreAtSuggestion: anomaly.recentAvg,
     };
   }
 
@@ -792,6 +837,9 @@ function _attentionCard(signals) {
       title: 'Worth your attention',
       body: `${_titleCase(declining.topic)} is trending down — recent attempts average ${declining.toScore}%, vs ${declining.fromScore}% earlier. Worth circling back before the gap grows.`,
       cta: { label: `Practice ${_titleCase(declining.topic)}`, deeplink: `scaleup://topic/${_slug(declining.topic)}` },
+      suggestedTopic: declining.topic,
+      suggestionType: 'address_drop',
+      topicScoreAtSuggestion: declining.toScore ?? lookupScore(declining.topic),
     };
   }
 
@@ -803,6 +851,9 @@ function _attentionCard(signals) {
       title: 'Worth your attention',
       body: `You haven\'t practiced ${_titleCase(stale.topic)} in ${stale.daysSinceActivity} days. Memory fades — a quick recall session locks it back in.`,
       cta: { label: `Refresh ${_titleCase(stale.topic)}`, deeplink: `scaleup://topic/${_slug(stale.topic)}` },
+      suggestedTopic: stale.topic,
+      suggestionType: 'practice_stale',
+      topicScoreAtSuggestion: stale.lastScore ?? lookupScore(stale.topic),
     };
   }
 
@@ -815,10 +866,21 @@ function _attentionCard(signals) {
       title: 'Strongest signal',
       body: `${_titleCase(improving.topic)} is your fastest-growing area: up ${improving.deltaPp} points across your recent attempts. Lean into it.`,
       metric: { label: 'recent avg', value: `${improving.toScore}%`, delta: `+${improving.deltaPp}pp` },
+      suggestedTopic: improving.topic,
+      suggestionType: 'maintain_momentum',
+      topicScoreAtSuggestion: improving.toScore ?? lookupScore(improving.topic),
     };
   }
 
   return null;
+}
+
+/** Look up the current score on a topic from the KnowledgeProfile. */
+function _topicScore(profile, topic) {
+  if (!profile?.topicMastery || !topic) return null;
+  const t = topic.toLowerCase();
+  const tm = profile.topicMastery.find(x => (x.topic || '').toLowerCase() === t);
+  return tm?.score ?? null;
 }
 
 function _milestoneCard(milestones) {
@@ -842,6 +904,179 @@ function _milestoneCard(milestones) {
     };
   }
   return null;
+}
+
+// ──────────────────────────────────────────────────────────────
+// Phase 3 — snapshot history + follow-through + suppression
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * Load the most recent snapshot in the [12h, 7d] window. Anything more
+ * recent and the user hasn't had time to act on its suggestions; anything
+ * older and the suggestion isn't relevant to "right now".
+ * Wraps the DB call so any failure returns null silently.
+ */
+async function _loadPriorSnapshotSafe(userId) {
+  try {
+    const cutoffNew = new Date(Date.now() - T.FOLLOWTHROUGH_MIN_AGE_MS);
+    const cutoffOld = new Date(Date.now() - T.FOLLOWTHROUGH_MAX_AGE_MS);
+    return await ProgressInsightSnapshot.findOne({
+      userId,
+      generatedAt: { $gte: cutoffOld, $lte: cutoffNew },
+    }).sort({ generatedAt: -1 }).lean();
+  } catch (err) {
+    console.warn('[progressInsights] loadPriorSnapshot failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * For each card the prior snapshot suggested with a topic, check whether
+ * the user took at least one quiz on that topic since the snapshot AND
+ * whether the score moved. If so, prepend a follow-through card.
+ *
+ * Returns 0–2 cards.
+ */
+function _detectFollowThroughs({ priorSnapshot, profile, recentAttempts }) {
+  if (!priorSnapshot?.cards?.length) return [];
+  const since = new Date(priorSnapshot.generatedAt).getTime();
+
+  const out = [];
+  // Index attempts by topic so we don't repeat scans
+  const attemptsByTopic = new Map();
+  for (const a of recentAttempts) {
+    const ts = new Date(a.completedAt).getTime();
+    if (ts < since) continue;
+    const topic = (a.topicBreakdown?.[0]?.topic || a.topic || '').toString().toLowerCase();
+    if (!topic) continue;
+    if (!attemptsByTopic.has(topic)) attemptsByTopic.set(topic, []);
+    attemptsByTopic.get(topic).push(a);
+  }
+
+  // Only the topic-bearing nudges count. Skip recent-activity / objective cards.
+  const SUGGESTION_TYPES_THAT_FOLLOW_THROUGH = new Set([
+    'practice_stale', 'address_drop', 'practice_blocker',
+  ]);
+
+  for (const card of priorSnapshot.cards) {
+    if (!card.suggestedTopic) continue;
+    if (!SUGGESTION_TYPES_THAT_FOLLOW_THROUGH.has(card.suggestionType)) continue;
+
+    const topic = card.suggestedTopic.toLowerCase();
+    const newAttempts = attemptsByTopic.get(topic);
+    if (!newAttempts || newAttempts.length === 0) continue; // user didn't act
+
+    const beforeScore = card.topicScoreAtSuggestion;
+    const currentScore = _topicScore(profile, topic);
+    if (beforeScore == null || currentScore == null) continue;
+
+    const delta = Math.round(currentScore - beforeScore);
+    const titleTopic = _titleCase(card.suggestedTopic);
+
+    if (delta >= T.FOLLOWTHROUGH_MIN_SCORE_DELTA) {
+      out.push({
+        id: `follow-through-${_slug(card.suggestedTopic)}`,
+        kind: 'milestone', icon: 'checkmark.seal.fill', tone: 'celebration',
+        title: 'Nice move',
+        body: `You followed through on ${titleTopic} — your score moved from ${Math.round(beforeScore)}% to ${Math.round(currentScore)}% (+${delta} points). Real progress.`,
+        metric: { label: 'now', value: `${Math.round(currentScore)}%`, delta: `+${delta}pp since the nudge` },
+        cta: null,
+        suggestedTopic: card.suggestedTopic,
+        suggestionType: 'follow_through_positive',
+        topicScoreAtSuggestion: currentScore,
+      });
+    } else if (newAttempts.length >= 1) {
+      // They acted, score didn't meaningfully move — small acknowledgement
+      out.push({
+        id: `follow-through-steady-${_slug(card.suggestedTopic)}`,
+        kind: 'milestone', icon: 'arrow.right.circle.fill', tone: 'neutral',
+        title: 'Reps logged',
+        body: `You came back to ${titleTopic} — score is holding around ${Math.round(currentScore)}%. A couple more focused reps usually unlocks the next level.`,
+        metric: null, cta: null,
+        suggestedTopic: card.suggestedTopic,
+        suggestionType: 'follow_through_steady',
+        topicScoreAtSuggestion: currentScore,
+      });
+    }
+
+    // Cap at 2 follow-through cards so we don't overwhelm the section.
+    if (out.length >= 2) break;
+  }
+
+  return out;
+}
+
+/**
+ * If the immediately previous snapshot already suggested a topic AND the
+ * user took zero quizzes on it since, drop that card and let the next
+ * candidate take its slot. Prevents robotic repetition.
+ *
+ * Only suppresses cards with the same suggestionType — we don't want a
+ * "stale" nudge to suppress a separate "address_drop" on the same topic.
+ */
+function _suppressRepeats(currentCards, priorSnapshot, recentAttempts) {
+  if (!priorSnapshot?.cards?.length) return currentCards;
+  const since = new Date(priorSnapshot.generatedAt).getTime();
+
+  const ignoredKeys = new Set();
+  for (const prior of priorSnapshot.cards) {
+    if (!prior.suggestedTopic || !prior.suggestionType) continue;
+    if (prior.suggestionType.startsWith('follow_through')) continue;
+    const topic = prior.suggestedTopic.toLowerCase();
+    const acted = recentAttempts.some(a => {
+      const ts = new Date(a.completedAt).getTime();
+      const at = (a.topicBreakdown?.[0]?.topic || a.topic || '').toString().toLowerCase();
+      return ts >= since && at === topic;
+    });
+    if (!acted) ignoredKeys.add(`${prior.suggestionType}:${topic}`);
+  }
+
+  if (ignoredKeys.size === 0) return currentCards;
+
+  return currentCards.filter(c => {
+    if (!c.suggestedTopic || !c.suggestionType) return true;
+    const key = `${c.suggestionType}:${c.suggestedTopic.toLowerCase()}`;
+    return !ignoredKeys.has(key);
+  });
+}
+
+/**
+ * Persist a snapshot — but only if the most recent one is older than
+ * T.SNAPSHOT_MIN_INTERVAL_MS. Caps storage at ~24 snapshots/user/day max
+ * even if the endpoint is hammered. Fire-and-forget; never throws.
+ */
+async function _maybePersistSnapshot({ userId, state, cards, signals, objective, narrativeMode }) {
+  try {
+    const lastSnap = await ProgressInsightSnapshot.findOne({ userId })
+      .sort({ generatedAt: -1 })
+      .select('generatedAt')
+      .lean();
+    if (lastSnap && (Date.now() - new Date(lastSnap.generatedAt).getTime()) < T.SNAPSHOT_MIN_INTERVAL_MS) {
+      return;
+    }
+
+    const cardsForSnapshot = cards.map(c => ({
+      id: c.id,
+      kind: c.kind,
+      tone: c.tone,
+      title: c.title,
+      body: c.body,
+      suggestedTopic: c.suggestedTopic ?? null,
+      suggestionType: c.suggestionType ?? null,
+      topicScoreAtSuggestion: c.topicScoreAtSuggestion ?? null,
+    }));
+
+    await ProgressInsightSnapshot.create({
+      userId,
+      generatedAt: new Date(),
+      state,
+      narrativeMode,
+      cards: cardsForSnapshot,
+      signalsDigest: _signalsDigest(signals, objective),
+    });
+  } catch (err) {
+    console.warn('[progressInsights] _maybePersistSnapshot failed:', err.message);
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -907,6 +1142,8 @@ module.exports = {
     _classifyState, _computeSignals, _computeMomentum, _computeMilestones,
     _computeAnomalies, _computeObjectiveAlignment, _buildCards,
     _maybeNarrativize, _signalsDigest, _hashCards, _applyBodies,
+    _detectFollowThroughs, _suppressRepeats, _maybePersistSnapshot,
+    _loadPriorSnapshotSafe, _topicScore,
     NARRATIVE_SYSTEM_PROMPT,
   },
 };
