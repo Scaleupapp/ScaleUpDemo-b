@@ -27,6 +27,7 @@ const ProgressInsightSnapshot = require('../models/ProgressInsightSnapshot');
 const misconceptionService = require('./misconceptionService');
 const spacedRepetitionService = require('./spacedRepetitionService');
 const cognitiveFingerprintService = require('./cognitiveFingerprintService');
+const prerequisiteGraphService = require('./prerequisiteGraphService');
 const openai = require('../config/openai');
 
 // ──────────────────────────────────────────────────────────────
@@ -146,6 +147,12 @@ async function generateForUser(userId, opts = {}) {
   const priorSnapshot = await _loadPriorSnapshotSafe(userId);
 
   let templateCards = _buildCards({ state, signals, profile, objective, recurringMisconceptions, dueConcepts, cognitiveTraits });
+
+  // BUG-8 Phase 7: when an attention card surfaces a struggling topic,
+  // walk the prerequisite graph backward to find the actual root cause.
+  // If a weak prerequisite is found, swap the attention card's body to
+  // call it out — that's far more actionable than the symptom.
+  templateCards = await _augmentWithRootCauses(userId, templateCards, profile, dueConcepts);
 
   // Phase 3a: drop suggestions the user already ignored last time so we
   // don't robotically repeat ourselves. Runs before narrativization so
@@ -758,6 +765,60 @@ function _cognitiveTraitCard(traits, currentCards) {
     };
   }
   return null;
+}
+
+/** BUG-8 Phase 7 — augment attention cards with root-cause analysis when one is found. */
+async function _augmentWithRootCauses(userId, cards, profile, dueConcepts) {
+  if (!cards?.length || !profile) return cards;
+  const out = [];
+  for (const card of cards) {
+    if (card.kind !== 'attention' || !card.suggestedTopic) {
+      out.push(card);
+      continue;
+    }
+    // Only run traversal for symptom-type cards (drop/decline). Stale and
+    // momentum cards aren't really "stuck on something else" — they're
+    // about the topic itself.
+    if (!['address_drop'].includes(card.suggestionType)) {
+      out.push(card);
+      continue;
+    }
+    // Fire & forget: ensure the struggling concept has prerequisites
+    // extracted so the next time we ask, we have data. Don't block on it.
+    prerequisiteGraphService.ensureExtracted(card.suggestedTopic).catch(() => {});
+
+    let root = null;
+    try {
+      root = await prerequisiteGraphService.getRootCause(userId, card.suggestedTopic, profile, dueConcepts);
+    } catch (err) {
+      // silent fallback
+    }
+    if (!root) {
+      out.push(card);
+      continue;
+    }
+
+    // Replace the attention card's body with the root-cause framing.
+    // Keep the same id/icon/tone — we're saying the same kind of thing,
+    // just with sharper diagnosis.
+    const causeName = _titleCase(root.rootCause);
+    const topicName = _titleCase(card.suggestedTopic);
+    const scoreClause = root.scoreAtCause != null
+      ? ` (you're at ~${Math.round(root.scoreAtCause)}% on ${causeName})`
+      : '';
+    out.push({
+      ...card,
+      body: `Your ${topicName} score is dropping, but the data points to ${causeName} as the actual gap${scoreClause}. Tightening up ${causeName} usually unblocks ${topicName} fast.`,
+      cta: { label: `Practice ${causeName}`, deeplink: `scaleup://topic/${_slug(root.rootCause)}` },
+      // Re-tag this card to track follow-through against the ROOT cause,
+      // not the symptom — Phase 3 will then check whether the user
+      // actually practiced the prerequisite.
+      suggestedTopic: root.rootCause,
+      suggestionType: 'practice_blocker',
+      topicScoreAtSuggestion: root.scoreAtCause,
+    });
+  }
+  return out;
 }
 
 /** BUG-8 Phase 5 — spaced repetition due-for-review card. */
