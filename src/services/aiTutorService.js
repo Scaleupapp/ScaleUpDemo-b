@@ -3,6 +3,8 @@ const Content = require('../models/Content');
 const Conversation = require('../models/Conversation');
 const ApiError = require('../utils/apiError');
 const { whisperTranscriptionQueue } = require('../config/queue');
+// BUG-8 Phase 8: cross-feature memory layer
+const userContextService = require('./userContextService');
 
 // ──────────────────────────────────────────────
 // System prompts
@@ -155,10 +157,33 @@ class AiTutorService {
     // Extract timestamp from user message for focused context
     const timestampContext = isFull ? this._extractTimestampContext(userMessage, content.transcript) : '';
 
+    // BUG-8 Phase 8: pull cross-feature user context (weak topics, recurring
+    // misconceptions, recent quiz performance, cognitive traits). Lets the
+    // tutor open with knowledge of what the user just struggled with rather
+    // than treating each conversation cold. Failure is silent — the tutor
+    // still works without it.
+    let userContextSummary = '';
+    try {
+      const ctx = await userContextService.getUserContext(userId);
+      userContextSummary = userContextService.summarize(ctx);
+    } catch (err) {
+      console.warn('[aiTutorService] user-context fetch failed:', err.message);
+    }
+
     const messages = [
       { role: 'system', content: systemPrompt },
       { role: 'system', content: contentContext },
     ];
+
+    if (userContextSummary) {
+      // Soft hint — the tutor can use this to anchor explanations to what
+      // the user has been working on, without breaking out of the
+      // current-video scope guardrails set in the system prompt.
+      messages.push({
+        role: 'system',
+        content: `BACKGROUND ON THIS LEARNER (use to anchor examples, never as the topic itself; do not bring up unless directly relevant): ${userContextSummary}`,
+      });
+    }
 
     if (timestampContext) {
       messages.push({ role: 'system', content: `FOCUSED TRANSCRIPT CONTEXT (around the timestamp the user asked about):\n${timestampContext}` });
