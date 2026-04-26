@@ -4,6 +4,7 @@ const UserObjective = require('../models/UserObjective');
 const { quizAnalysisQueue } = require('../config/queue');
 const { updateStreak } = require('./streakService');
 const misconceptionService = require('./misconceptionService');
+const spacedRepetitionService = require('./spacedRepetitionService');
 
 class QuizScoringService {
 
@@ -135,6 +136,14 @@ class QuizScoringService {
       await misconceptionService.recordFromAttempt(attempt.userId, attempt, quiz);
     } catch (err) {
       console.warn('[QuizScoring] misconception ledger update failed:', err.message);
+    }
+
+    // BUG-8 Phase 5: update spaced-repetition state for the concepts touched.
+    // Same non-fatal contract.
+    try {
+      await spacedRepetitionService.recordFromAttempt(attempt.userId, attempt, quiz);
+    } catch (err) {
+      console.warn('[QuizScoring] spaced-repetition update failed:', err.message);
     }
 
     return attempt;

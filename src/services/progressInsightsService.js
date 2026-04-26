@@ -25,6 +25,7 @@ const ContentProgress = require('../models/ContentProgress');
 const UserObjective = require('../models/UserObjective');
 const ProgressInsightSnapshot = require('../models/ProgressInsightSnapshot');
 const misconceptionService = require('./misconceptionService');
+const spacedRepetitionService = require('./spacedRepetitionService');
 const openai = require('../config/openai');
 
 // ──────────────────────────────────────────────────────────────
@@ -104,7 +105,7 @@ async function generateForUser(userId, opts = {}) {
     if (cached) return cached;
   }
 
-  const [profile, recentAttempts, recentChallenges, recentContent, objective, recurringMisconceptions] = await Promise.all([
+  const [profile, recentAttempts, recentChallenges, recentContent, objective, recurringMisconceptions, dueConcepts] = await Promise.all([
     KnowledgeProfile.findOne({ userId }),
     QuizAttempt.find({ userId, completedAt: { $exists: true } })
       .sort({ completedAt: -1 })
@@ -121,6 +122,8 @@ async function generateForUser(userId, opts = {}) {
     UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
     // BUG-8 Phase 4 — misconception signal. Failure here is non-fatal.
     misconceptionService.getRecurringPatterns(userId, 1).catch(() => []),
+    // BUG-8 Phase 5 — spaced-repetition due-for-review signal. Same contract.
+    spacedRepetitionService.getDueConcepts(userId, { limit: 5 }).catch(() => []),
   ]);
 
   const state = _classifyState(profile, recentAttempts, recentChallenges);
@@ -138,7 +141,7 @@ async function generateForUser(userId, opts = {}) {
   // failures so a snapshot read error never breaks the response.
   const priorSnapshot = await _loadPriorSnapshotSafe(userId);
 
-  let templateCards = _buildCards({ state, signals, profile, objective, recurringMisconceptions });
+  let templateCards = _buildCards({ state, signals, profile, objective, recurringMisconceptions, dueConcepts });
 
   // Phase 3a: drop suggestions the user already ignored last time so we
   // don't robotically repeat ourselves. Runs before narrativization so
@@ -651,7 +654,7 @@ function _computeObjectiveAlignment({ profile, objective, recentAttempts }) {
 // Headline cards (what the FE renders)
 // ──────────────────────────────────────────────────────────────
 
-function _buildCards({ state, signals, profile, objective, recurringMisconceptions }) {
+function _buildCards({ state, signals, profile, objective, recurringMisconceptions, dueConcepts }) {
   if (state === 'cold_start') return _coldStartCards();
   if (state === 'idle') return _idleCards(signals, profile);
 
@@ -674,11 +677,41 @@ function _buildCards({ state, signals, profile, objective, recurringMisconceptio
   const misconceptionCard = _misconceptionCard(recurringMisconceptions?.[0]);
   if (misconceptionCard) cards.push(misconceptionCard);
 
-  // 5. Optional milestone celebration if any in the last 24h
+  // 5. BUG-8 Phase 5: spaced-repetition "due for review" card.
+  // Only surfaces when the user has 2+ concepts overdue — a single overdue
+  // concept is more naturally addressed by the topic attention card.
+  const dueCard = _dueConceptsCard(dueConcepts);
+  if (dueCard) cards.push(dueCard);
+
+  // 6. Optional milestone celebration if any in the last 24h
   const celebrationCard = _milestoneCard(signals.milestones);
   if (celebrationCard) cards.push(celebrationCard);
 
   return cards;
+}
+
+/** BUG-8 Phase 5 — spaced repetition due-for-review card. */
+function _dueConceptsCard(dueConcepts) {
+  if (!Array.isArray(dueConcepts) || dueConcepts.length < 2) return null;
+  const total = dueConcepts.length;
+  const top = dueConcepts.slice(0, 3).map(d => _titleCase(d.concept));
+  const topLabel = top.length === 1 ? top[0]
+    : top.length === 2 ? `${top[0]} and ${top[1]}`
+    : `${top.slice(0, -1).join(', ')}, and ${top[top.length - 1]}`;
+  const oldest = Math.round(dueConcepts[0]?.daysOverdue ?? 0);
+  return {
+    id: 'spaced-repetition-due',
+    kind: 'attention',
+    icon: 'arrow.triangle.2.circlepath.circle.fill',
+    tone: 'neutral',
+    title: 'Time for a refresh',
+    body: `${total} concept${total === 1 ? '' : 's'} ${total === 1 ? 'is' : 'are'} due for review — your forgetting curve says recall is slipping. Worth a quick pass on ${topLabel}.`,
+    metric: { label: 'overdue', value: `${total}`, delta: oldest > 0 ? `oldest ${oldest}d past due` : null },
+    cta: { label: 'Start a review', deeplink: 'scaleup://my-plan' },
+    suggestedTopic: dueConcepts[0]?.concept || null,
+    suggestionType: 'practice_stale',
+    topicScoreAtSuggestion: null,
+  };
 }
 
 /** BUG-8 Phase 4 — pattern card for a recurring tagged misconception. */
