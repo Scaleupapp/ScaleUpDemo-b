@@ -28,6 +28,7 @@ const misconceptionService = require('./misconceptionService');
 const spacedRepetitionService = require('./spacedRepetitionService');
 const cognitiveFingerprintService = require('./cognitiveFingerprintService');
 const prerequisiteGraphService = require('./prerequisiteGraphService');
+const userInferenceService = require('./userInferenceService');
 const openai = require('../config/openai');
 
 // ──────────────────────────────────────────────────────────────
@@ -153,6 +154,12 @@ async function generateForUser(userId, opts = {}) {
   // If a weak prerequisite is found, swap the attention card's body to
   // call it out — that's far more actionable than the symptom.
   templateCards = await _augmentWithRootCauses(userId, templateCards, profile, dueConcepts);
+
+  // BUG-8 Phase 9: respect user-dismissed inferences. Cards built from
+  // inferred data (cognitive traits, currently) are filtered out if the
+  // user has previously dismissed that inference. Recording new
+  // inferences also happens here so they appear in the panel.
+  templateCards = await _filterAndRecordInferences(userId, templateCards, cognitiveTraits);
 
   // Phase 3a: drop suggestions the user already ignored last time so we
   // don't robotically repeat ourselves. Runs before narrativization so
@@ -765,6 +772,73 @@ function _cognitiveTraitCard(traits, currentCards) {
     };
   }
   return null;
+}
+
+/**
+ * BUG-8 Phase 9 — record new inferences for the transparency panel and
+ * filter out cards backed by user-dismissed inferences.
+ *
+ * Today only cognitive-trait cards are inference-backed (the others are
+ * derived directly from explicit user activity, so there's nothing to
+ * "confirm"). Recording happens fire-and-forget; filtering happens
+ * synchronously since it's a bounded set lookup.
+ */
+async function _filterAndRecordInferences(userId, cards, cognitiveTraits) {
+  // Record any high-confidence cognitive traits as pending inferences so
+  // they appear in the user-facing transparency panel.
+  for (const trait of cognitiveTraits || []) {
+    const key = `cognitive:${trait.kind}`;
+    const { title, description } = _describeTrait(trait);
+    if (!title) continue;
+    userInferenceService.recordInference(userId, key, 'cognitive_trait', title, description, trait)
+      .catch(() => {}); // fire-and-forget
+  }
+
+  // Filter: if a cognitive card's matching inference was dismissed, drop it.
+  const out = [];
+  for (const card of cards) {
+    const traitKind = _cardCognitiveKind(card.id);
+    if (traitKind) {
+      try {
+        const dismissed = await userInferenceService.isDismissed(userId, `cognitive:${traitKind}`);
+        if (dismissed) continue;
+      } catch { /* on lookup failure we keep the card */ }
+    }
+    out.push(card);
+  }
+  return out;
+}
+
+function _cardCognitiveKind(cardId) {
+  if (cardId === 'cognitive-time-of-day') return 'time_of_day';
+  if (cardId === 'cognitive-modality') return 'modality';
+  if (cardId === 'cognitive-session-rhythm') return 'session_rhythm';
+  return null;
+}
+
+function _describeTrait(trait) {
+  if (trait.kind === 'time_of_day') {
+    return {
+      title: 'You learn better in the ' + (trait.bestHourBlock || 'evening'),
+      description: `Your ${trait.bestHourBlock || 'best'} sessions average ${trait.bestHourScoreLift} points higher than other times.`,
+    };
+  }
+  if (trait.kind === 'modality') {
+    return {
+      title: 'You prefer ' + (trait.preferred || 'one format') + ' content',
+      description: `You finish more ${trait.preferred} content than ${trait.secondPreferred || 'other formats'}.`,
+    };
+  }
+  if (trait.kind === 'session_rhythm') {
+    const styleLabel = trait.style === 'short_bursts' ? 'short bursts'
+                     : trait.style === 'deep_focus' ? 'long focused sessions'
+                     : 'medium sessions';
+    return {
+      title: 'You learn in ' + styleLabel,
+      description: `Your typical session is around ${trait.medianSessionMinutes} minutes.`,
+    };
+  }
+  return { title: null, description: null };
 }
 
 /** BUG-8 Phase 7 — augment attention cards with root-cause analysis when one is found. */
