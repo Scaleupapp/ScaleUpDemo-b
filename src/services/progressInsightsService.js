@@ -26,6 +26,7 @@ const UserObjective = require('../models/UserObjective');
 const ProgressInsightSnapshot = require('../models/ProgressInsightSnapshot');
 const misconceptionService = require('./misconceptionService');
 const spacedRepetitionService = require('./spacedRepetitionService');
+const cognitiveFingerprintService = require('./cognitiveFingerprintService');
 const openai = require('../config/openai');
 
 // ──────────────────────────────────────────────────────────────
@@ -105,7 +106,7 @@ async function generateForUser(userId, opts = {}) {
     if (cached) return cached;
   }
 
-  const [profile, recentAttempts, recentChallenges, recentContent, objective, recurringMisconceptions, dueConcepts] = await Promise.all([
+  const [profile, recentAttempts, recentChallenges, recentContent, objective, recurringMisconceptions, dueConcepts, cognitiveTraits] = await Promise.all([
     KnowledgeProfile.findOne({ userId }),
     QuizAttempt.find({ userId, completedAt: { $exists: true } })
       .sort({ completedAt: -1 })
@@ -124,6 +125,9 @@ async function generateForUser(userId, opts = {}) {
     misconceptionService.getRecurringPatterns(userId, 1).catch(() => []),
     // BUG-8 Phase 5 — spaced-repetition due-for-review signal. Same contract.
     spacedRepetitionService.getDueConcepts(userId, { limit: 5 }).catch(() => []),
+    // BUG-8 Phase 6 — cognitive-fingerprint traits, only those above
+    // confidence threshold (sparse-data inferences are filtered out).
+    cognitiveFingerprintService.getHighConfidenceTraits(userId).catch(() => []),
   ]);
 
   const state = _classifyState(profile, recentAttempts, recentChallenges);
@@ -141,7 +145,7 @@ async function generateForUser(userId, opts = {}) {
   // failures so a snapshot read error never breaks the response.
   const priorSnapshot = await _loadPriorSnapshotSafe(userId);
 
-  let templateCards = _buildCards({ state, signals, profile, objective, recurringMisconceptions, dueConcepts });
+  let templateCards = _buildCards({ state, signals, profile, objective, recurringMisconceptions, dueConcepts, cognitiveTraits });
 
   // Phase 3a: drop suggestions the user already ignored last time so we
   // don't robotically repeat ourselves. Runs before narrativization so
@@ -654,7 +658,7 @@ function _computeObjectiveAlignment({ profile, objective, recentAttempts }) {
 // Headline cards (what the FE renders)
 // ──────────────────────────────────────────────────────────────
 
-function _buildCards({ state, signals, profile, objective, recurringMisconceptions, dueConcepts }) {
+function _buildCards({ state, signals, profile, objective, recurringMisconceptions, dueConcepts, cognitiveTraits }) {
   if (state === 'cold_start') return _coldStartCards();
   if (state === 'idle') return _idleCards(signals, profile);
 
@@ -683,11 +687,77 @@ function _buildCards({ state, signals, profile, objective, recurringMisconceptio
   const dueCard = _dueConceptsCard(dueConcepts);
   if (dueCard) cards.push(dueCard);
 
-  // 6. Optional milestone celebration if any in the last 24h
+  // 6. BUG-8 Phase 6: cognitive-fingerprint card. Surfaces only the single
+  // most confident trait, and only when confidence is above threshold.
+  // Skipped if any other "you should do X" card is already present so we
+  // don't tell the user too many things at once.
+  const cognitiveCard = _cognitiveTraitCard(cognitiveTraits, cards);
+  if (cognitiveCard) cards.push(cognitiveCard);
+
+  // 7. Optional milestone celebration if any in the last 24h
   const celebrationCard = _milestoneCard(signals.milestones);
   if (celebrationCard) cards.push(celebrationCard);
 
   return cards;
+}
+
+/** BUG-8 Phase 6 — surfaces a single cognitive-fingerprint insight if any
+ * trait is high-confidence enough. Returns null when there's nothing
+ * worth saying or the section already has enough cards. */
+function _cognitiveTraitCard(traits, currentCards) {
+  if (!Array.isArray(traits) || traits.length === 0) return null;
+  // Don't pile on if we already have an attention card and a milestone
+  if ((currentCards || []).length >= 5) return null;
+  // Pick the highest-confidence trait
+  const trait = [...traits].sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
+  if (!trait) return null;
+
+  if (trait.kind === 'time_of_day') {
+    const block = trait.bestHourBlock || 'a particular time of day';
+    return {
+      id: 'cognitive-time-of-day',
+      kind: 'momentum',
+      icon: 'clock.badge.checkmark.fill',
+      tone: 'neutral',
+      title: 'A pattern about you',
+      body: `Your ${block} sessions score ${trait.bestHourScoreLift} points higher on average than your other times. Worth scheduling the harder material there.`,
+      metric: { label: 'lift in ' + block, value: `+${trait.bestHourScoreLift}pp`, delta: `from ${trait.sampleSize} attempts` },
+      cta: null,
+      suggestedTopic: null, suggestionType: null, topicScoreAtSuggestion: null,
+    };
+  }
+  if (trait.kind === 'modality') {
+    const verb = trait.preferred === 'video' ? 'finish more videos than'
+              : trait.preferred === 'notes' ? 'complete notes faster than'
+              : 'finish more articles than';
+    const otherType = trait.secondPreferred || 'other formats';
+    return {
+      id: 'cognitive-modality',
+      kind: 'momentum',
+      icon: 'rectangle.stack.fill',
+      tone: 'neutral',
+      title: 'A pattern about you',
+      body: `You ${verb} ${otherType}. When you're choosing what to study next, leaning into ${trait.preferred} is likely to pay off most.`,
+      cta: null,
+      suggestedTopic: null, suggestionType: null, topicScoreAtSuggestion: null,
+    };
+  }
+  if (trait.kind === 'session_rhythm') {
+    const desc = trait.style === 'short_bursts' ? `short bursts (~${trait.medianSessionMinutes} min each)`
+              : trait.style === 'deep_focus' ? `long focused sessions (~${trait.medianSessionMinutes} min each)`
+              : `medium sessions (~${trait.medianSessionMinutes} min each)`;
+    return {
+      id: 'cognitive-session-rhythm',
+      kind: 'momentum',
+      icon: 'timer',
+      tone: 'neutral',
+      title: 'A pattern about you',
+      body: `You typically learn in ${desc}. We'll match content suggestions to that cadence.`,
+      cta: null,
+      suggestedTopic: null, suggestionType: null, topicScoreAtSuggestion: null,
+    };
+  }
+  return null;
 }
 
 /** BUG-8 Phase 5 — spaced repetition due-for-review card. */
