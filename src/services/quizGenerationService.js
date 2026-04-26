@@ -30,10 +30,17 @@ DISTRACTOR QUALITY (CRITICAL — this is what separates a real quiz from a toy):
 13. Distractors must be mutually exclusive from the correct answer — not paraphrases of it.
 14. Randomize which letter (A/B/C/D) holds the correct answer across the quiz — do not bias toward any single letter.
 
+DISTRACTOR MISCONCEPTION TAGGING (REQUIRED — used by the platform to track per-user learning patterns):
+15. For EACH distractor option (NOT the correct one), include a "misconception" object with:
+    - tag: a short snake_case identifier of the false belief (e.g. "treats_correlation_as_causation", "off_by_one_indexing", "confuses_p_a_given_b_with_p_b_given_a", "applies_formula_outside_assumptions"). Use stable, reusable tags — the same misconception in different questions should use the same tag.
+    - explanation: one sentence in plain English describing what the learner who picked this option is misunderstanding.
+16. The correct option's "misconception" field must be omitted or set to null.
+17. Tags should be domain-meaningful, not generic. "wrong_answer" is forbidden. "guesses_randomly" is forbidden. Tags must capture a SPECIFIC misconception a real learner could hold.
+
 OUTPUT RULES:
-15. CRITICAL: Generate EXACTLY the number of questions specified in "questionCount". Not fewer, not more.
-16. Return valid JSON with a "questions" array where each question has:
-   - questionText, questionType, options (array of {label, text}), correctAnswer (A/B/C/D),
+18. CRITICAL: Generate EXACTLY the number of questions specified in "questionCount". Not fewer, not more.
+19. Return valid JSON with a "questions" array where each question has:
+   - questionText, questionType, options (array of {label, text, misconception: {tag, explanation} | null}), correctAnswer (A/B/C/D),
      explanation, difficulty (easy/medium/hard), sourceContentId, sourceTimestamp, concept`;
 
 const COMPETENCY_QUIZ_SYSTEM_PROMPT = `You are an expert educational assessment creator specializing in competency-based evaluation. Your quizzes must meaningfully discriminate between learners at different levels — not be solvable by elimination.
@@ -53,6 +60,11 @@ DISTRACTOR QUALITY (CRITICAL):
 - Do not leak the answer by repeating unique keywords from the stem only in the correct option.
 - Randomize the correct letter across the quiz; do not bias toward any single letter.
 - Distractors must be mutually exclusive from the correct answer, not paraphrases.
+
+DISTRACTOR MISCONCEPTION TAGGING (REQUIRED):
+- For EACH distractor option, include a "misconception" object: { tag: snake_case stable identifier (e.g. "confuses_competency_with_seniority", "applies_framework_outside_context"), explanation: one sentence describing the misunderstanding }.
+- The correct option's "misconception" must be omitted or null.
+- Use stable tags — the same misconception across different questions must use the same tag. Avoid generic tags like "wrong_answer" or "guesses_randomly".
 
 DIFFICULTY: Match the user's current level. Beginners get recall + simple application; advanced learners get multi-step reasoning, edge cases, and compare/contrast.
 

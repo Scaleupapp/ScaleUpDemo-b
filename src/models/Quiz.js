@@ -11,6 +11,13 @@ const questionSchema = new mongoose.Schema({
   options: [{
     label: { type: String, enum: ['A', 'B', 'C', 'D'], required: true },
     text: { type: String, required: true },
+    // BUG-8 Phase 4: when this option is a distractor, the false belief it
+    // represents. Lets us build a per-user misconception ledger over time.
+    // Null/undefined for the correct option.
+    misconception: {
+      tag: { type: String },        // snake_case stable key, e.g. "treats_correlation_as_causation"
+      explanation: { type: String } // one human sentence describing the misconception
+    },
   }],
   correctAnswer: { type: String, enum: ['A', 'B', 'C', 'D'], required: true },
   explanation: { type: String },

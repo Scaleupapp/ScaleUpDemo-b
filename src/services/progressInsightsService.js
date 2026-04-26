@@ -24,6 +24,7 @@ const ChallengeAttempt = require('../models/ChallengeAttempt');
 const ContentProgress = require('../models/ContentProgress');
 const UserObjective = require('../models/UserObjective');
 const ProgressInsightSnapshot = require('../models/ProgressInsightSnapshot');
+const misconceptionService = require('./misconceptionService');
 const openai = require('../config/openai');
 
 // ──────────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ async function generateForUser(userId, opts = {}) {
     if (cached) return cached;
   }
 
-  const [profile, recentAttempts, recentChallenges, recentContent, objective] = await Promise.all([
+  const [profile, recentAttempts, recentChallenges, recentContent, objective, recurringMisconceptions] = await Promise.all([
     KnowledgeProfile.findOne({ userId }),
     QuizAttempt.find({ userId, completedAt: { $exists: true } })
       .sort({ completedAt: -1 })
@@ -118,6 +119,8 @@ async function generateForUser(userId, opts = {}) {
       .limit(80)
       .lean(),
     UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
+    // BUG-8 Phase 4 — misconception signal. Failure here is non-fatal.
+    misconceptionService.getRecurringPatterns(userId, 1).catch(() => []),
   ]);
 
   const state = _classifyState(profile, recentAttempts, recentChallenges);
@@ -135,7 +138,7 @@ async function generateForUser(userId, opts = {}) {
   // failures so a snapshot read error never breaks the response.
   const priorSnapshot = await _loadPriorSnapshotSafe(userId);
 
-  let templateCards = _buildCards({ state, signals, profile, objective });
+  let templateCards = _buildCards({ state, signals, profile, objective, recurringMisconceptions });
 
   // Phase 3a: drop suggestions the user already ignored last time so we
   // don't robotically repeat ourselves. Runs before narrativization so
@@ -648,7 +651,7 @@ function _computeObjectiveAlignment({ profile, objective, recentAttempts }) {
 // Headline cards (what the FE renders)
 // ──────────────────────────────────────────────────────────────
 
-function _buildCards({ state, signals, profile, objective }) {
+function _buildCards({ state, signals, profile, objective, recurringMisconceptions }) {
   if (state === 'cold_start') return _coldStartCards();
   if (state === 'idle') return _idleCards(signals, profile);
 
@@ -665,11 +668,40 @@ function _buildCards({ state, signals, profile, objective }) {
   const attentionCard = _attentionCard(signals, profile);
   if (attentionCard) cards.push(attentionCard);
 
-  // 4. Optional milestone celebration if any in the last 24h
+  // 4. BUG-8 Phase 4: recurring-misconception card. Surfaced as a separate
+  // "pattern" card so it's not in competition with the topic-specific
+  // attention card — the two say complementary things.
+  const misconceptionCard = _misconceptionCard(recurringMisconceptions?.[0]);
+  if (misconceptionCard) cards.push(misconceptionCard);
+
+  // 5. Optional milestone celebration if any in the last 24h
   const celebrationCard = _milestoneCard(signals.milestones);
   if (celebrationCard) cards.push(celebrationCard);
 
   return cards;
+}
+
+/** BUG-8 Phase 4 — pattern card for a recurring tagged misconception. */
+function _misconceptionCard(pattern) {
+  if (!pattern) return null;
+  const topics = (pattern.topicsAffected || []).slice(0, 3).map(_titleCase);
+  const topicsLabel = topics.length === 1 ? topics[0]
+    : topics.length === 2 ? `${topics[0]} and ${topics[1]}`
+    : `${topics.slice(0, -1).join(', ')}, and ${topics[topics.length - 1]}`;
+  const baseExpl = pattern.explanation || 'a recurring confusion shows up in your wrong answers';
+  return {
+    id: `pattern-${_slug(pattern.tag)}`,
+    kind: 'attention',
+    icon: 'lightbulb.max.fill',
+    tone: 'caution',
+    title: 'A pattern in your mistakes',
+    body: `Across your last ${pattern.count} wrong answers in ${topicsLabel}, the same misunderstanding keeps showing up: ${baseExpl} Worth a focused 5-minute drill on just that.`,
+    metric: { label: 'occurrences', value: `${pattern.count}×`, delta: `across ${pattern.topicsAffected?.length ?? 1} topics` },
+    cta: null,
+    suggestedTopic: pattern.recentTopic || null,
+    suggestionType: null, // not a follow-throughable suggestion type
+    topicScoreAtSuggestion: null,
+  };
 }
 
 function _coldStartCards() {

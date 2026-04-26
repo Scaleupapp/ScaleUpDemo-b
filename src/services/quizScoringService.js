@@ -3,6 +3,7 @@ const Quiz = require('../models/Quiz');
 const UserObjective = require('../models/UserObjective');
 const { quizAnalysisQueue } = require('../config/queue');
 const { updateStreak } = require('./streakService');
+const misconceptionService = require('./misconceptionService');
 
 class QuizScoringService {
 
@@ -126,6 +127,15 @@ class QuizScoringService {
 
     // Update streak — quiz completion counts as daily activity
     try { await updateStreak(attempt.userId.toString()); } catch { /* non-fatal */ }
+
+    // BUG-8 Phase 4: record any tagged misconceptions the user just exhibited.
+    // Non-fatal — the scored quiz response should never fail because the
+    // ledger write failed.
+    try {
+      await misconceptionService.recordFromAttempt(attempt.userId, attempt, quiz);
+    } catch (err) {
+      console.warn('[QuizScoring] misconception ledger update failed:', err.message);
+    }
 
     return attempt;
   }
