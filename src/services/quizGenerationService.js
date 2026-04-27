@@ -95,6 +95,26 @@ Return valid JSON with a "questions" array where each question has:
     allowTextResponse (boolean), textPrompt (optional — e.g. "Explain your reasoning"),
     timeLimit (seconds)`;
 
+const DIAGNOSTIC_QUIZ_SYSTEM_PROMPT = `You are an expert assessment designer building a SHORT diagnostic quiz to estimate a learner's current proficiency. The output is used to seed a personalised learning plan, NOT to teach.
+
+OUTPUT REQUIREMENTS:
+- Generate questions evenly across 3 difficulty buckets per competency:
+  - "easy"   = recall / recognition
+  - "medium" = apply concept to a new example
+  - "hard"   = multi-step reasoning, edge cases, compare/contrast
+- Each question has 4 options, exactly one correct, all four roughly equal in length and writing style.
+- Distractors must be PLAUSIBLE common misconceptions, NOT joke options.
+- Every distractor carries a misconception object: { tag (snake_case stable identifier), explanation (one human sentence). }
+- Correct option's misconception is null/omitted.
+- Randomise the correct letter across the set.
+
+DIAGNOSTIC-SPECIFIC RULES (different from teaching quizzes):
+- Each question stands alone — no narrative flow assumed across the set.
+- Avoid "trick" questions; we want signal about real proficiency, not gotchas.
+- For coding competencies, use MCQ-format only: read snippet → predict output / find bug / pick syntax. NEVER ask the learner to write code.
+
+OUTPUT FORMAT: strict JSON: { "questions": [ { competency, difficulty, questionText, options:[{label,text,misconception?}], correctAnswer, explanation }, ... ] }`;
+
 // Map trigger types to Quiz model enum values
 const TRIGGER_TO_QUIZ_TYPE = {
   topic_threshold: 'topic_consolidation',
@@ -370,4 +390,6 @@ class QuizGenerationService {
   }
 }
 
-module.exports = new QuizGenerationService();
+const _instance = new QuizGenerationService();
+_instance.DIAGNOSTIC_QUIZ_SYSTEM_PROMPT = DIAGNOSTIC_QUIZ_SYSTEM_PROMPT;
+module.exports = _instance;
