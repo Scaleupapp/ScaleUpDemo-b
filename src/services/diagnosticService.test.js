@@ -115,3 +115,93 @@ test('submitSelfRating stores ratings on the attempt', async () => {
   assert.strictEqual(savedAttempt.selfRatings.get('sql'), 'familiar');
   assert.strictEqual(savedAttempt.poolQuestionIds.length, 2);
 });
+
+test('nextQuestion returns done:true when all competencies converged', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const attempt = {
+    _id: new mongoose.Types.ObjectId(),
+    selfRatings: new Map([['sql', 'novice']]),
+    answers: [
+      { competency: 'sql', difficulty: 'easy', isCorrect: true, timeTaken: 5 },
+      { competency: 'sql', difficulty: 'easy', isCorrect: true, timeTaken: 5 },
+    ],
+    poolQuestionIds: ['q1', 'q2', 'q3'],
+    save: async () => {},
+  };
+  require.cache[dapath] = {
+    exports: { findById: async () => attempt },
+    loaded: true, id: dapath,
+  };
+  const bankPath = require.resolve('../models/DiagnosticQuestionBank');
+  require.cache[bankPath] = {
+    exports: { findById: async (id) => ({ _id: id, difficulty: 'easy' }) },
+    loaded: true, id: bankPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  const result = await svc.nextQuestion(attempt._id);
+  assert.strictEqual(result.done, true);
+});
+
+test('nextQuestion picks an unused pool question of the right difficulty', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const attempt = {
+    _id: new mongoose.Types.ObjectId(),
+    selfRatings: new Map([['sql', 'familiar']]),
+    answers: [],
+    poolQuestionIds: ['q-easy', 'q-medium', 'q-hard'],
+    save: async () => {},
+  };
+  require.cache[dapath] = {
+    exports: { findById: async () => attempt },
+    loaded: true, id: dapath,
+  };
+  const bankPath = require.resolve('../models/DiagnosticQuestionBank');
+  require.cache[bankPath] = {
+    exports: {
+      findById: async (id) => ({
+        _id: id,
+        difficulty: id.includes('easy') ? 'easy' : id.includes('medium') ? 'medium' : 'hard',
+        questionText: 'q', options: [], correctAnswer: 'A', canonicalCompetency: 'sql',
+      }),
+    },
+    loaded: true, id: bankPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  const result = await svc.nextQuestion(attempt._id);
+  assert.ok(result.question);
+  // First question for familiar should be easy or medium
+  assert.match(result.question.difficulty, /^(easy|medium)$/);
+});
+
+test('submitAnswer marks correctness and stores the answer', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  let saved = null;
+  const attempt = {
+    _id: new mongoose.Types.ObjectId(),
+    answers: [],
+    save: async function () { saved = this; },
+  };
+  require.cache[dapath] = {
+    exports: { findById: async () => attempt },
+    loaded: true, id: dapath,
+  };
+  const bankPath = require.resolve('../models/DiagnosticQuestionBank');
+  require.cache[bankPath] = {
+    exports: {
+      findById: async (id) => ({
+        _id: id, canonicalCompetency: 'sql', difficulty: 'medium',
+        correctAnswer: 'B',
+      }),
+    },
+    loaded: true, id: bankPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  await svc.submitAnswer(attempt._id, 'q1', 'B', 12);
+  assert.ok(saved);
+  assert.strictEqual(saved.answers[0].isCorrect, true);
+  assert.strictEqual(saved.answers[0].selectedAnswer, 'B');
+  assert.strictEqual(saved.answers[0].competency, 'sql');
+});

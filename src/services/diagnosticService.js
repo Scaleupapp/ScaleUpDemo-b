@@ -15,6 +15,8 @@ const DiagnosticAttempt = require('../models/DiagnosticAttempt');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 const UserObjective = require('../models/UserObjective');
 const diagnosticPoolService = require('./diagnosticPoolService');
+const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
+const selector = require('./diagnosticSelectorService');
 
 /**
  * Decide flow type based on whether the user has any prior platform activity.
@@ -72,8 +74,94 @@ async function submitSelfRating(attemptId, ratings) {
   return { ready: true, poolSize: pool.length };
 }
 
+function _perfForCompetency(answers, competency) {
+  const filt = answers.filter(a => a.competency === competency);
+  return ['easy', 'medium', 'hard'].reduce((acc, d) => {
+    acc[d] = {
+      correct: filt.filter(a => a.difficulty === d && a.isCorrect).length,
+      wrong:   filt.filter(a => a.difficulty === d && !a.isCorrect).length,
+    };
+    return acc;
+  }, {});
+}
+
+async function nextQuestion(attemptId) {
+  const attempt = await DiagnosticAttempt.findById(attemptId);
+  if (!attempt) throw new Error('attempt not found');
+
+  // Find the next competency to ask about — first one that hasn't converged
+  const competencies = Array.from(attempt.selfRatings.keys());
+  for (const comp of competencies) {
+    const perf = _perfForCompetency(attempt.answers, comp);
+    const asked = attempt.answers.filter(a => a.competency === comp).length;
+    const lastForComp = attempt.answers.filter(a => a.competency === comp).slice(-1)[0];
+    const decision = selector.selectNext({
+      perf,
+      questionsAsked: asked,
+      selfRating: attempt.selfRatings.get(comp),
+      currentDifficulty: lastForComp?.difficulty,
+      lastAnswer: lastForComp ? { correct: lastForComp.isCorrect, fast: (lastForComp.timeTaken || 99) < 15 } : null,
+    });
+    if (decision.shouldStop) continue;
+
+    // Find a pool question matching (competency, difficulty), not already used
+    const usedIds = new Set(attempt.answers.map(a => String(a.questionId)));
+    for (const qid of attempt.poolQuestionIds) {
+      if (usedIds.has(String(qid))) continue;
+      const q = await DiagnosticQuestionBank.findById(qid);
+      if (!q) continue;
+      if (q.difficulty !== decision.nextDifficulty) continue;
+      // We don't strictly require q.canonicalCompetency === comp — pool may have other competencies; keep moving if mismatch
+      if (q.canonicalCompetency && q.canonicalCompetency !== comp) continue;
+      return {
+        done: false,
+        question: {
+          id: q._id, competency: comp, difficulty: q.difficulty,
+          questionText: q.questionText, options: q.options,
+        },
+      };
+    }
+    // No matching question in pool — try any difficulty for this competency
+    for (const qid of attempt.poolQuestionIds) {
+      if (usedIds.has(String(qid))) continue;
+      const q = await DiagnosticQuestionBank.findById(qid);
+      if (q && q.canonicalCompetency === comp) {
+        return {
+          done: false,
+          question: {
+            id: q._id, competency: comp, difficulty: q.difficulty,
+            questionText: q.questionText, options: q.options,
+          },
+        };
+      }
+    }
+  }
+  return { done: true };
+}
+
+async function submitAnswer(attemptId, questionId, selectedAnswer, timeTaken) {
+  const attempt = await DiagnosticAttempt.findById(attemptId);
+  if (!attempt) throw new Error('attempt not found');
+  const q = await DiagnosticQuestionBank.findById(questionId);
+  if (!q) throw new Error('question not found');
+
+  const isCorrect = q.correctAnswer === selectedAnswer;
+  attempt.answers.push({
+    questionId,
+    competency: q.canonicalCompetency,
+    difficulty: q.difficulty,
+    selectedAnswer,
+    isCorrect,
+    timeTaken: timeTaken || 0,
+  });
+  await attempt.save();
+  return { ack: true };
+}
+
 module.exports = {
   startAttempt,
   submitSelfRating,
+  nextQuestion,
+  submitAnswer,
   _internal: { _decideFlowType },
 };
