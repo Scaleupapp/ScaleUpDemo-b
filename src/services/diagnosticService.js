@@ -23,6 +23,10 @@ const selector = require('./diagnosticSelectorService');
 
 const RATING_TO_NUM = { novice: 0, familiar: 1, proficient: 2, expert: 3, unsure: 0 };
 
+const CONFIDENCE_LOW_THRESHOLD_S = 5;
+const CONFIDENCE_MEDIUM_THRESHOLD_S = 12;
+const ACTIVE_ATTEMPT_STATUSES = ['in_progress', 'awaiting_self_rating'];
+
 /**
  * Decide flow type based on whether the user has any prior platform activity.
  * Threshold: any completed quiz attempt → existing-user flow.
@@ -86,7 +90,7 @@ async function startAttempt(userId) {
   // This keeps the partial unique index (one_active_attempt_per_user) clean and makes the
   // user's intent to start fresh explicit.
   await DiagnosticAttempt.updateMany(
-    { userId, status: { $in: ['in_progress', 'awaiting_self_rating'] } },
+    { userId, status: { $in: ACTIVE_ATTEMPT_STATUSES } },
     { $set: { status: 'abandoned', abandonedAt: new Date() } },
   );
 
@@ -242,8 +246,13 @@ async function finishAttempt(attemptId) {
   }
 
   const totalTime = attempt.answers.reduce((s, a) => s + (a.timeTaken || 0), 0);
+  // Zero answers (e.g., abandon-then-finish race): treat as full confidence.
   const avgTime = attempt.answers.length > 0 ? totalTime / attempt.answers.length : Infinity;
-  attempt.confidence = avgTime < 5 ? 'low' : avgTime < 12 ? 'medium' : 'high';
+  attempt.confidence = avgTime < CONFIDENCE_LOW_THRESHOLD_S
+    ? 'low'
+    : avgTime < CONFIDENCE_MEDIUM_THRESHOLD_S
+    ? 'medium'
+    : 'high';
 
   attempt.status = 'completed';
   attempt.completedAt = new Date();

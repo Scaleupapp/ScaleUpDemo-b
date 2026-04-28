@@ -65,7 +65,8 @@ const diagnosticAttemptSchema = new mongoose.Schema({
     default: () => new Map(),
   },
 
-  // Snapshot of the user's active objective at attempt time (used for retake cooldown override)
+  // Snapshot of the user's primary objective at attempt creation; used by the
+  // retake cooldown to detect objective changes (Edge 6).
   objectiveSnapshot: {
     _id: { type: mongoose.Schema.Types.ObjectId, ref: 'UserObjective' },
   },
@@ -77,6 +78,8 @@ const diagnosticAttemptSchema = new mongoose.Schema({
 
 diagnosticAttemptSchema.index({ userId: 1, status: 1, startedAt: -1 });
 diagnosticAttemptSchema.index({ userId: 1, status: 1, completedAt: -1 });
+// At-most-one active attempt per user (in_progress + awaiting_self_rating);
+// startAttempt abandons priors before creating a new one.
 diagnosticAttemptSchema.index(
   { userId: 1 },
   {
