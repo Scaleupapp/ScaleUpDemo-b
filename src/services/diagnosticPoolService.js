@@ -8,6 +8,9 @@
  * This file holds the calculator. LLM/bank integration arrives in later tasks.
  */
 
+const openai = require('../config/openai');
+const quizGenerationService = require('./quizGenerationService');
+
 const FLOOR_QUESTIONS_PER_COMPETENCY = 3;
 const DEFAULT_POOL_SIZE = 24;
 
@@ -41,10 +44,58 @@ function calculatePoolAllocation(competencies, totalPoolSize = DEFAULT_POOL_SIZE
   });
 }
 
+/**
+ * Calls gpt-4o-mini to generate a question pool covering the given allocation.
+ * Returns a flat array of questions with competency/difficulty tags. Returns
+ * empty array on any failure (caller falls back to bank-only path).
+ */
+async function generatePoolFromLLM(allocation, { objective } = {}) {
+  if (!allocation?.length) return [];
+
+  const userPayload = {
+    objective: objective || null,
+    allocation: allocation.map(a => ({
+      competency: a.name,
+      easy: a.easy, medium: a.medium, hard: a.hard,
+    })),
+  };
+
+  try {
+    const resp = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.4,
+      max_tokens: 3000,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: quizGenerationService.DIAGNOSTIC_QUIZ_SYSTEM_PROMPT },
+        { role: 'user', content: JSON.stringify(userPayload) },
+      ],
+    });
+
+    const raw = resp?.choices?.[0]?.message?.content;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.questions)) return [];
+
+    // Light validation; drop bad rows silently
+    return parsed.questions.filter(q =>
+      q && typeof q.competency === 'string'
+      && ['easy', 'medium', 'hard'].includes(q.difficulty)
+      && typeof q.questionText === 'string'
+      && Array.isArray(q.options) && q.options.length === 4
+      && ['A', 'B', 'C', 'D'].includes(q.correctAnswer)
+    );
+  } catch (err) {
+    console.warn('[diagnosticPoolService] generatePoolFromLLM failed:', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   _internal: {
     calculatePoolAllocation,
     FLOOR_QUESTIONS_PER_COMPETENCY,
     DIFFICULTY_MIX,
+    generatePoolFromLLM,
   },
 };
