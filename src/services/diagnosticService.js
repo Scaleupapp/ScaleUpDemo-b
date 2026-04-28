@@ -11,6 +11,7 @@
  */
 
 const mongoose = require('mongoose');
+const telemetry = require('./diagnosticTelemetryService');
 const DiagnosticAttempt = require('../models/DiagnosticAttempt');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 const ConceptMastery = require('../models/ConceptMastery');
@@ -48,6 +49,7 @@ async function startAttempt(userId) {
     startedAt: new Date(),
   });
   await attempt.save();
+  telemetry.logEvent('diagnostic.started', { userId: String(userId), flowType });
 
   return {
     attemptId: attempt._id,
@@ -74,6 +76,7 @@ async function submitSelfRating(attemptId, ratings) {
   });
   attempt.poolQuestionIds = pool.map(q => q._id).filter(Boolean);
   await attempt.save();
+  telemetry.logEvent('diagnostic.self_rating_submitted', { attemptId: String(attemptId) });
   return { ready: true, poolSize: pool.length };
 }
 
@@ -207,6 +210,7 @@ async function finishAttempt(attemptId) {
     console.warn('[diagnosticService] plan regenerate failed:', err.message);
   }
 
+  telemetry.logEvent('diagnostic.finished', { userId: String(attempt.userId), questionsAnswered: attempt.answers.length });
   return _resultsObjectFromAttempt(attempt);
 }
 
@@ -281,6 +285,7 @@ async function abandon(attemptId) {
   attempt.abandonStrategy = 'dropped';
   attempt.abandonedAt = new Date();
   await attempt.save();
+  telemetry.logEvent('diagnostic.abandoned', { userId: String(attempt.userId), strategy: 'dropped', pct: Math.round(pct * 100) });
   return { status: 'abandoned', abandonStrategy: 'dropped' };
 }
 
