@@ -241,6 +241,10 @@ async function finishAttempt(attemptId) {
     attempt.results.set(comp, { assessedBand: band, score, calibrationDelta, questionsAsked });
   }
 
+  const totalTime = attempt.answers.reduce((s, a) => s + (a.timeTaken || 0), 0);
+  const avgTime = attempt.answers.length > 0 ? totalTime / attempt.answers.length : Infinity;
+  attempt.confidence = avgTime < 5 ? 'low' : avgTime < 12 ? 'medium' : 'high';
+
   attempt.status = 'completed';
   attempt.completedAt = new Date();
   await attempt.save();

@@ -587,3 +587,88 @@ test('startAttempt does not block when prior attempt has null objectiveSnapshot'
     if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
   }
 });
+
+test('finishAttempt sets confidence:low when avg time per answer < 5s', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  const cmPath = require.resolve('../models/ConceptMastery');
+  const svcPath = require.resolve('./diagnosticService');
+  const orig = {
+    da: require.cache[dapath], kp: require.cache[kpPath],
+    cm: require.cache[cmPath], svc: require.cache[svcPath],
+  };
+  try {
+    let saved = null;
+    const attempt = {
+      _id: new (require('mongoose')).Types.ObjectId(),
+      userId: new (require('mongoose')).Types.ObjectId(),
+      status: 'in_progress',
+      selfRatings: new Map([['sql', 'novice']]),
+      answers: [
+        { competency: 'sql', difficulty: 'easy', isCorrect: true, timeTaken: 3 },
+        { competency: 'sql', difficulty: 'easy', isCorrect: true, timeTaken: 4 },
+      ],
+      results: new Map(),
+      save: async function () { saved = this; },
+    };
+    require.cache[dapath] = {
+      exports: { findById: async () => attempt },
+      loaded: true, id: dapath,
+    };
+    require.cache[kpPath] = {
+      exports: { findOne: async () => null, findOneAndUpdate: async () => null },
+      loaded: true, id: kpPath,
+    };
+    require.cache[cmPath] = {
+      exports: { findOneAndUpdate: async () => null },
+      loaded: true, id: cmPath,
+    };
+    delete require.cache[svcPath];
+    const svc = require(svcPath);
+    await svc.finishAttempt(attempt._id);
+    assert.strictEqual(saved.confidence, 'low');
+  } finally {
+    if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
+    if (orig.kp) require.cache[kpPath] = orig.kp; else delete require.cache[kpPath];
+    if (orig.cm) require.cache[cmPath] = orig.cm; else delete require.cache[cmPath];
+    if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
+  }
+});
+
+test('finishAttempt sets confidence:medium when avg time 5-12s', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  const cmPath = require.resolve('../models/ConceptMastery');
+  const svcPath = require.resolve('./diagnosticService');
+  const orig = {
+    da: require.cache[dapath], kp: require.cache[kpPath],
+    cm: require.cache[cmPath], svc: require.cache[svcPath],
+  };
+  try {
+    let saved = null;
+    const attempt = {
+      _id: new (require('mongoose')).Types.ObjectId(),
+      userId: new (require('mongoose')).Types.ObjectId(),
+      status: 'in_progress',
+      selfRatings: new Map([['sql', 'novice']]),
+      answers: [
+        { competency: 'sql', difficulty: 'easy', isCorrect: true, timeTaken: 8 },
+        { competency: 'sql', difficulty: 'easy', isCorrect: true, timeTaken: 10 },
+      ],
+      results: new Map(),
+      save: async function () { saved = this; },
+    };
+    require.cache[dapath] = { exports: { findById: async () => attempt }, loaded: true, id: dapath };
+    require.cache[kpPath] = { exports: { findOne: async () => null, findOneAndUpdate: async () => null }, loaded: true, id: kpPath };
+    require.cache[cmPath] = { exports: { findOneAndUpdate: async () => null }, loaded: true, id: cmPath };
+    delete require.cache[svcPath];
+    const svc = require(svcPath);
+    await svc.finishAttempt(attempt._id);
+    assert.strictEqual(saved.confidence, 'medium');
+  } finally {
+    if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
+    if (orig.kp) require.cache[kpPath] = orig.kp; else delete require.cache[kpPath];
+    if (orig.cm) require.cache[cmPath] = orig.cm; else delete require.cache[cmPath];
+    if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
+  }
+});

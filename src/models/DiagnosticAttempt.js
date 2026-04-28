@@ -72,6 +72,7 @@ const diagnosticAttemptSchema = new mongoose.Schema({
 
   // Telemetry
   cohort: { type: String }, // 'pre_diagnostic' | 'post_diagnostic_taken' | etc.
+  confidence: { type: String, enum: ['high', 'medium', 'low'], default: 'high' },
 }, { timestamps: true });
 
 diagnosticAttemptSchema.index({ userId: 1, status: 1, startedAt: -1 });
