@@ -107,3 +107,52 @@ test('generatePoolFromLLM returns empty array when LLM returns malformed JSON', 
   const out = await _internal.generatePoolFromLLM([{ name: 'x', easy: 1, medium: 0, hard: 0 }], {});
   assert.deepStrictEqual(out, []);
 });
+
+test('lookupFromBank returns up to N questions per (competency, difficulty)', async () => {
+  // Stub the model
+  const modelPath = require.resolve('../models/DiagnosticQuestionBank');
+  const stubDocs = [
+    { _id: '1', canonicalCompetency: 'sql', difficulty: 'easy', questionText: 'q1' },
+    { _id: '2', canonicalCompetency: 'sql', difficulty: 'easy', questionText: 'q2' },
+  ];
+  require.cache[modelPath] = {
+    exports: {
+      find: () => ({ sort: () => ({ limit: () => ({ lean: async () => stubDocs }) }) }),
+      insertMany: async (docs) => docs.map((d, i) => ({ ...d, _id: 'new'+i })),
+    },
+    loaded: true, id: modelPath,
+  };
+  delete require.cache[require.resolve('./diagnosticPoolService')];
+  const { _internal } = require('./diagnosticPoolService');
+
+  const out = await _internal.lookupFromBank('sql', 'easy', 5);
+  assert.strictEqual(out.length, 2);
+});
+
+test('persistToBank writes new questions with normalized canonical competency', async () => {
+  let captured = null;
+  const modelPath = require.resolve('../models/DiagnosticQuestionBank');
+  require.cache[modelPath] = {
+    exports: {
+      find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }),
+      insertMany: async (docs) => { captured = docs; return docs; },
+    },
+    loaded: true, id: modelPath,
+  };
+  delete require.cache[require.resolve('./diagnosticPoolService')];
+  const { _internal } = require('./diagnosticPoolService');
+
+  const generated = [{
+    competency: 'SQL Joins', difficulty: 'easy',
+    questionText: 'q', options: [
+      { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
+      { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
+    ], correctAnswer: 'A',
+  }];
+  await _internal.persistToBank(generated);
+  assert.ok(captured);
+  assert.strictEqual(captured.length, 1);
+  // 'sql joins' should resolve to 'database joins' via the alias dictionary
+  assert.strictEqual(captured[0].canonicalCompetency, 'database joins');
+  assert.deepStrictEqual(captured[0].rawCompetencyAliases, ['SQL Joins']);
+});

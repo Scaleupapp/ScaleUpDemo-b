@@ -10,6 +10,8 @@
 
 const openai = require('../config/openai');
 const quizGenerationService = require('./quizGenerationService');
+const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
+const { normalize } = require('./competencyNormalizer');
 
 const FLOOR_QUESTIONS_PER_COMPETENCY = 3;
 const DEFAULT_POOL_SIZE = 24;
@@ -91,11 +93,47 @@ async function generatePoolFromLLM(allocation, { objective } = {}) {
   }
 }
 
+/**
+ * Look up cached questions for a (competency, difficulty) bucket. Returns up to
+ * `limit` documents, prioritising least-used (round-robin so we don't burn a
+ * single question on every diagnostic).
+ */
+async function lookupFromBank(competency, difficulty, limit) {
+  const canonical = normalize(competency);
+  if (!canonical) return [];
+  return DiagnosticQuestionBank
+    .find({ canonicalCompetency: canonical, difficulty, status: 'active' })
+    .sort({ timesUsed: 1, generatedAt: -1 })
+    .limit(limit)
+    .lean();
+}
+
+/**
+ * Persist freshly-generated questions to the bank. Normalises competency
+ * names so future lookups hit cache regardless of how the user phrased it.
+ */
+async function persistToBank(generatedQuestions) {
+  if (!generatedQuestions?.length) return [];
+  const docs = generatedQuestions.map(q => ({
+    canonicalCompetency: normalize(q.competency),
+    rawCompetencyAliases: [q.competency],
+    difficulty: q.difficulty,
+    questionText: q.questionText,
+    options: q.options,
+    correctAnswer: q.correctAnswer,
+    explanation: q.explanation,
+    source: 'live_generated',
+  }));
+  return DiagnosticQuestionBank.insertMany(docs);
+}
+
 module.exports = {
   _internal: {
     calculatePoolAllocation,
     FLOOR_QUESTIONS_PER_COMPETENCY,
     DIFFICULTY_MIX,
     generatePoolFromLLM,
+    lookupFromBank,
+    persistToBank,
   },
 };
