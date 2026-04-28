@@ -14,6 +14,7 @@ const mongoose = require('mongoose');
 const DiagnosticAttempt = require('../models/DiagnosticAttempt');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 const UserObjective = require('../models/UserObjective');
+const diagnosticPoolService = require('./diagnosticPoolService');
 
 /**
  * Decide flow type based on whether the user has any prior platform activity.
@@ -50,7 +51,29 @@ async function startAttempt(userId) {
   };
 }
 
+async function submitSelfRating(attemptId, ratings) {
+  const attempt = await DiagnosticAttempt.findById(attemptId);
+  if (!attempt) throw new Error('attempt not found');
+
+  // Persist ratings
+  for (const [comp, rating] of Object.entries(ratings || {})) {
+    attempt.selfRatings.set(comp, rating);
+  }
+
+  // Calculate allocation + assemble pool
+  const competencies = Array.from(attempt.selfRatings.entries())
+    .map(([name, selfRating]) => ({ name, selfRating }));
+  const allocation = diagnosticPoolService._internal.calculatePoolAllocation(competencies);
+  const pool = await diagnosticPoolService.assemblePool(allocation, {
+    objective: attempt.objectiveLabel || null,
+  });
+  attempt.poolQuestionIds = pool.map(q => q._id).filter(Boolean);
+  await attempt.save();
+  return { ready: true, poolSize: pool.length };
+}
+
 module.exports = {
   startAttempt,
+  submitSelfRating,
   _internal: { _decideFlowType },
 };

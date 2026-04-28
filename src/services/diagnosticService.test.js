@@ -33,6 +33,16 @@ function setupStubs({ existingProfile = null } = {}) {
     loaded: true, id: objpath,
   };
 
+  // Stub pool service so diagnosticService loads without OPENAI_API_KEY
+  const poolPath = require.resolve('./diagnosticPoolService');
+  require.cache[poolPath] = {
+    exports: {
+      assemblePool: async () => [],
+      _internal: { calculatePoolAllocation: () => [] },
+    },
+    loaded: true, id: poolPath,
+  };
+
   delete require.cache[require.resolve('./diagnosticService')];
   const svc = require('./diagnosticService');
   return { svc, getSaved: () => saved };
@@ -72,4 +82,36 @@ test('startAttempt returns null when objective has no competencies (caller falls
   const svc = require('./diagnosticService');
   const result = await svc.startAttempt(new mongoose.Types.ObjectId());
   assert.strictEqual(result, null);
+});
+
+test('submitSelfRating stores ratings on the attempt', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  let savedAttempt = null;
+  const fakeAttempt = {
+    _id: new mongoose.Types.ObjectId(),
+    selfRatings: new Map(),
+    poolQuestionIds: [],
+    save: async function () { savedAttempt = this; return this; },
+  };
+  require.cache[dapath] = {
+    exports: { findById: async () => fakeAttempt },
+    loaded: true, id: dapath,
+  };
+  // Stub pool service to return a small pool
+  const poolPath = require.resolve('./diagnosticPoolService');
+  require.cache[poolPath] = {
+    exports: {
+      assemblePool: async () => [{ _id: 'q1' }, { _id: 'q2' }],
+      _internal: {
+        calculatePoolAllocation: () => [{ name: 'sql', easy: 1, medium: 1, hard: 0 }],
+      },
+    },
+    loaded: true, id: poolPath,
+  };
+
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  await svc.submitSelfRating(fakeAttempt._id, { sql: 'familiar' });
+  assert.strictEqual(savedAttempt.selfRatings.get('sql'), 'familiar');
+  assert.strictEqual(savedAttempt.poolQuestionIds.length, 2);
 });
