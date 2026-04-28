@@ -224,3 +224,81 @@ test('assemblePool falls back to LLM when bank is empty', async () => {
   const out = await assemblePool(allocation, { objective: 'x' });
   assert.strictEqual(out.length, 6);
 });
+
+test('generatePoolFromLLM splits per-competency and survives one failure', async () => {
+  // Two competencies: 'math' will fail on first call, 'science' will succeed.
+  // Expect non-empty output because science succeeds.
+  const openaiPath = require.resolve('../config/openai');
+  let callCount = 0;
+  require.cache[openaiPath] = {
+    exports: {
+      chat: {
+        completions: {
+          create: async (params) => {
+            callCount++;
+            // First call (for any competency) throws; subsequent calls succeed.
+            if (callCount === 1) throw new Error('transient network error');
+            return {
+              choices: [{ message: { content: JSON.stringify({
+                questions: [
+                  {
+                    competency: 'science', difficulty: 'easy',
+                    questionText: 'What is H2O?',
+                    options: [
+                      { label: 'A', text: 'Water' }, { label: 'B', text: 'Oxygen' },
+                      { label: 'C', text: 'Hydrogen' }, { label: 'D', text: 'Salt' },
+                    ],
+                    correctAnswer: 'A',
+                  },
+                ],
+              }) } }],
+            };
+          },
+        },
+      },
+    },
+    loaded: true, id: openaiPath,
+  };
+  delete require.cache[require.resolve('./diagnosticPoolService')];
+  const { _internal } = require('./diagnosticPoolService');
+
+  // Allocation with two competencies; math will fail its first call (attempt 1),
+  // retry will also fail (attempt 2 — callCount=2 succeeds but returns science questions
+  // — still valid). What matters: output is non-empty from the science competency.
+  const allocation = [
+    { name: 'math', easy: 1, medium: 1, hard: 1 },
+    { name: 'science', easy: 1, medium: 0, hard: 0 },
+  ];
+  const out = await _internal.generatePoolFromLLM(allocation, { objective: 'test' });
+  assert.ok(out.length > 0, 'expected non-empty output when at least one competency succeeds');
+});
+
+test('assemblePool throws when total pool < MIN_VIABLE_POOL_SIZE', async () => {
+  // Bank is empty and LLM returns nothing → pool is empty → should throw.
+  const modelPath = require.resolve('../models/DiagnosticQuestionBank');
+  require.cache[modelPath] = {
+    exports: {
+      find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }),
+      insertMany: async (d) => d,
+    },
+    loaded: true, id: modelPath,
+  };
+  const openaiPath = require.resolve('../config/openai');
+  require.cache[openaiPath] = {
+    exports: {
+      chat: { completions: { create: async () => ({ choices: [] }) } },
+    },
+    loaded: true, id: openaiPath,
+  };
+  delete require.cache[require.resolve('./diagnosticPoolService')];
+  const { assemblePool } = require('./diagnosticPoolService');
+
+  const allocation = [{ name: 'history', easy: 2, medium: 2, hard: 2 }];
+  await assert.rejects(
+    () => assemblePool(allocation, {}),
+    (err) => {
+      assert.ok(err.message.includes('Could not assemble enough questions'), `unexpected message: ${err.message}`);
+      return true;
+    },
+  );
+});

@@ -23,7 +23,12 @@ const submitSelfRating = async (req, res, next) => {
   try {
     const data = await diagnosticService.submitSelfRating(req.params.attemptId, req.body?.ratings || {});
     res.json(apiResponse.success(data));
-  } catch (err) { next(err); }
+  } catch (err) {
+    if (err.message && err.message.startsWith('Could not assemble enough questions')) {
+      return res.status(503).json(apiResponse.error(err.message));
+    }
+    next(err);
+  }
 };
 
 const nextQuestion = async (req, res, next) => {

@@ -15,6 +15,7 @@ const { normalize } = require('./competencyNormalizer');
 
 const FLOOR_QUESTIONS_PER_COMPETENCY = 3;
 const DEFAULT_POOL_SIZE = 24;
+const MIN_VIABLE_POOL_SIZE = 6;
 
 // Difficulty distribution per self-rating, expressed as proportions
 // over the per-competency allocation.
@@ -47,50 +48,74 @@ function calculatePoolAllocation(competencies, totalPoolSize = DEFAULT_POOL_SIZE
 }
 
 /**
- * Calls gpt-4o-mini to generate a question pool covering the given allocation.
- * Returns a flat array of questions with competency/difficulty tags. Returns
- * empty array on any failure (caller falls back to bank-only path).
+ * Makes one LLM call for a single competency's sub-allocation, retrying once
+ * on any failure (including JSON parse errors). Returns validated questions or [].
  */
-async function generatePoolFromLLM(allocation, { objective } = {}) {
-  if (!allocation?.length) return [];
-
+async function _llmCallForOneCompetency(subAllocation, { objective } = {}) {
   const userPayload = {
     objective: objective || null,
-    allocation: allocation.map(a => ({
+    allocation: subAllocation.map(a => ({
       competency: a.name,
       easy: a.easy, medium: a.medium, hard: a.hard,
     })),
   };
 
-  try {
-    const resp = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      temperature: 0.4,
-      max_tokens: 3000,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: quizGenerationService.DIAGNOSTIC_QUIZ_SYSTEM_PROMPT },
-        { role: 'user', content: JSON.stringify(userPayload) },
-      ],
-    });
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const resp = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        temperature: 0.4,
+        max_tokens: 2500,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: quizGenerationService.DIAGNOSTIC_QUIZ_SYSTEM_PROMPT },
+          { role: 'user', content: JSON.stringify(userPayload) },
+        ],
+      });
 
-    const raw = resp?.choices?.[0]?.message?.content;
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed?.questions)) return [];
-
-    // Light validation; drop bad rows silently
-    return parsed.questions.filter(q =>
-      q && typeof q.competency === 'string'
-      && ['easy', 'medium', 'hard'].includes(q.difficulty)
-      && typeof q.questionText === 'string'
-      && Array.isArray(q.options) && q.options.length === 4
-      && ['A', 'B', 'C', 'D'].includes(q.correctAnswer)
-    );
-  } catch (err) {
-    console.warn('[diagnosticPoolService] generatePoolFromLLM failed:', err.message);
-    return [];
+      const raw = resp?.choices?.[0]?.message?.content;
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed?.questions)) {
+        // Light validation; drop bad rows silently
+        return parsed.questions.filter(q =>
+          q && typeof q.competency === 'string'
+          && ['easy', 'medium', 'hard'].includes(q.difficulty)
+          && typeof q.questionText === 'string'
+          && Array.isArray(q.options) && q.options.length === 4
+          && ['A', 'B', 'C', 'D'].includes(q.correctAnswer)
+        );
+      }
+    } catch (err) {
+      console.warn(`[diagnosticPoolService] competency='${subAllocation[0]?.name}' attempt ${attempt} failed: ${err.message}`);
+    }
   }
+  return [];
+}
+
+/**
+ * Calls gpt-4o-mini to generate a question pool covering the given allocation.
+ * Splits into one LLM call per competency so responses stay small and truncation-
+ * resistant. Calls run in parallel; a single competency failure does not kill others.
+ * Returns a flat array of questions with competency/difficulty tags.
+ */
+async function generatePoolFromLLM(allocation, ctx = {}) {
+  if (!allocation?.length) return [];
+
+  // Group allocation entries by competency name (entries should already be one per
+  // competency, but group defensively in case caller merges rows).
+  const byCompetency = new Map();
+  for (const row of allocation) {
+    if (!byCompetency.has(row.name)) byCompetency.set(row.name, []);
+    byCompetency.get(row.name).push(row);
+  }
+
+  // One LLM call per competency, run in parallel
+  const perCompetencyResults = await Promise.all(
+    Array.from(byCompetency.values()).map(subAlloc => _llmCallForOneCompetency(subAlloc, ctx)),
+  );
+
+  return perCompetencyResults.flat();
 }
 
 /**
@@ -173,6 +198,10 @@ async function assemblePool(allocation, ctx = {}) {
     }
   }
 
+  if (out.length < MIN_VIABLE_POOL_SIZE) {
+    throw new Error('Could not assemble enough questions; please try again.');
+  }
+
   return out;
 }
 
@@ -181,9 +210,11 @@ module.exports = {
   _internal: {
     calculatePoolAllocation,
     generatePoolFromLLM,
+    _llmCallForOneCompetency,
     lookupFromBank,
     persistToBank,
     FLOOR_QUESTIONS_PER_COMPETENCY,
     DIFFICULTY_MIX,
+    MIN_VIABLE_POOL_SIZE,
   },
 };
