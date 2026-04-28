@@ -49,6 +49,7 @@ app.use('/api/v1/objectives', require('./routes/objectives'));
 app.use('/api/v1/creator', require('./routes/creator'));
 app.use('/api/v1/content', require('./routes/content'));
 app.use('/api/v1/progress', require('./routes/progress'));
+app.use('/api/v1/diagnostic', require('./routes/diagnostic'));
 app.use('/api/v1/user-inferences', require('./routes/userInferences'));
 app.use('/api/v1/quizzes', require('./routes/quizzes'));
 app.use('/api/v1/knowledge', require('./routes/knowledge'));
