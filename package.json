@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "workers": "node src/workers/index.js",
     "migrate:youtube-to-s3": "node scripts/migrateYoutubeToS3.js",
-    "seed:content": "node scripts/seedContent.js"
+    "seed:content": "node scripts/seedContent.js",
+    "test": "node scripts/run-tests.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

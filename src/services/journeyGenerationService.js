@@ -11,7 +11,11 @@ Return valid JSON with:
 - phases: Array of { name, type (foundation/building/strengthening/mastery/revision), order, durationDays, objectives: [string], focusTopics: [string] }
 - weeklyPlans: Array of { weekNumber (int), phaseIndex (int), goals: [string], dailyAssignments: [{day (int 1-7 where 1=Monday 7=Sunday), topics: [string], estimatedTime (minutes int)}] }
 - milestones: Array of { title, type (topic_completion/score_target/streak/phase_completion), targetCriteria: {targetScore (int), targetTopic (string)}, scheduledWeek (int) }
-IMPORTANT: "day" in dailyAssignments MUST be an integer 1-7, NOT a day name string.`;
+IMPORTANT: "day" in dailyAssignments MUST be an integer 1-7, NOT a day name string.
+If diagnosticData is present, USE the per-competency assessed band to:
+- Mark topics with band 'proficient' or 'expert' as "review only" (1-2 lessons max).
+- Allocate extra time to topics with band 'novice' or 'familiar'.
+- Order weeks by band ascending (weakest first) within the constraint of prerequisites.`;
 
 const DAY_NAME_MAP = {
   monday: 1, tuesday: 2, wednesday: 3, thursday: 4,
@@ -50,7 +54,7 @@ class JourneyGenerationService {
     return 1;
   }
 
-  async generateJourney(userId, objectiveId) {
+  async generateJourney(userId, objectiveId, { diagnosticData } = {}) {
     const objective = await UserObjective.findById(objectiveId);
     if (!objective) throw new Error('Objective not found');
 
@@ -76,23 +80,33 @@ class JourneyGenerationService {
       return !mastery || mastery.score < 70;
     });
 
+    const promptData = {
+      objectiveType: objective.objectiveType,
+      specifics: objective.specifics,
+      timeline: objective.timeline,
+      currentLevel: objective.currentLevel,
+      weeklyHours: objective.weeklyCommitHours,
+      learningStyle: objective.preferredLearningStyle,
+      gapTopics,
+      strengths: profile?.strengths || [],
+      weaknesses: profile?.weaknesses || [],
+      availableContentCount: availableContent.length,
+      topicsAvailable: [...new Set(availableContent.flatMap(c => c.topics))],
+    };
+
+    if (diagnosticData) {
+      // Day-1 diagnostic data: per-competency assessed band + score from the user's
+      // proficiency check. The LLM is told to start the plan FROM these levels,
+      // not from scratch. Topics where the user is already strong (band ≥ proficient)
+      // get marked "review only"; weak topics get extra time.
+      promptData.diagnosticData = diagnosticData;
+    }
+
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         { role: 'system', content: JOURNEY_SYSTEM_PROMPT },
-        { role: 'user', content: JSON.stringify({
-          objectiveType: objective.objectiveType,
-          specifics: objective.specifics,
-          timeline: objective.timeline,
-          currentLevel: objective.currentLevel,
-          weeklyHours: objective.weeklyCommitHours,
-          learningStyle: objective.preferredLearningStyle,
-          gapTopics,
-          strengths: profile?.strengths || [],
-          weaknesses: profile?.weaknesses || [],
-          availableContentCount: availableContent.length,
-          topicsAvailable: [...new Set(availableContent.flatMap(c => c.topics))],
-        })},
+        { role: 'user', content: JSON.stringify(promptData) },
       ],
       response_format: { type: 'json_object' },
       temperature: 0.5,
@@ -143,4 +157,18 @@ class JourneyGenerationService {
   }
 }
 
-module.exports = new JourneyGenerationService();
+const instance = new JourneyGenerationService();
+
+/**
+ * regenerateForUser — shim called by diagnosticService after finishAttempt.
+ * Looks up the user's active objective and re-generates the journey with
+ * diagnosticData injected so the LLM can personalise from assessed bands.
+ */
+instance.regenerateForUser = async function regenerateForUser(userId, { diagnosticData } = {}) {
+  const UserObjectiveModel = require('../models/UserObjective');
+  const objective = await UserObjectiveModel.findOne({ userId, status: 'active', isPrimary: true }).lean();
+  if (!objective) return null;
+  return instance.generateJourney(userId, objective._id, { diagnosticData });
+};
+
+module.exports = instance;
