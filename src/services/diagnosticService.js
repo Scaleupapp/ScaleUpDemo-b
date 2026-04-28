@@ -12,6 +12,7 @@
 
 const mongoose = require('mongoose');
 const telemetry = require('./diagnosticTelemetryService');
+const userContextService = require('./userContextService');
 const DiagnosticAttempt = require('../models/DiagnosticAttempt');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 const ConceptMastery = require('../models/ConceptMastery');
@@ -259,6 +260,25 @@ async function _seedConceptMastery(attempt) {
   }
 }
 
+/**
+ * Build the E1 synthesis screen payload for an existing user. Reformats
+ * userContextService output into a UI-friendly shape with stable keys.
+ */
+async function getSynthesis(userId) {
+  const ctx = await userContextService.getUserContext(userId);
+  return {
+    weakest:           ctx.weakTopics?.slice(0, 3) || [],
+    strongest:         ctx.strongTopics?.slice(0, 2) || [],
+    recurringConfusion: ctx.misconceptions?.[0] || null,
+    cognitive:         ctx.cognitiveTraits?.[0] || null,
+    objective:         ctx.objective || null,
+    activitySummary: {
+      totalQuizzesTaken:   ctx.profile?.totalQuizzesTaken ?? 0,
+      totalTopicsCovered:  ctx.profile?.totalTopicsCovered ?? 0,
+    },
+  };
+}
+
 async function abandon(attemptId) {
   const attempt = await DiagnosticAttempt.findById(attemptId);
   if (!attempt) throw new Error('attempt not found');
@@ -296,5 +316,6 @@ module.exports = {
   submitAnswer,
   finishAttempt,
   abandon,
+  getSynthesis,
   _internal: { _decideFlowType },
 };

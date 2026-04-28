@@ -57,6 +57,13 @@ const abandon = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const synthesis = async (req, res, next) => {
+  try {
+    const data = await diagnosticService.getSynthesis(req.user.userId);
+    res.json(apiResponse.success(data));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  _gateOrPass, start, submitSelfRating, nextQuestion, submitAnswer, finish, abandon,
+  _gateOrPass, start, submitSelfRating, nextQuestion, submitAnswer, finish, abandon, synthesis,
 };

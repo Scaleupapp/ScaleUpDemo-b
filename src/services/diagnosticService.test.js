@@ -313,6 +313,32 @@ test('finishAttempt triggers plan regeneration with diagnosticData', async () =>
   assert.ok(planCalled.opts?.diagnosticData?.sql);
 });
 
+test('getSynthesis returns userContextService output formatted for E1', async () => {
+  const ucsPath = require.resolve('./userContextService');
+  require.cache[ucsPath] = {
+    exports: {
+      getUserContext: async () => ({
+        weakTopics: [{ topic: 'system design', score: 42 }],
+        strongTopics: [{ topic: 'stats', score: 78 }],
+        misconceptions: [{ tag: 'reverses_conditional', count: 6, topics: ['bayes','medical'], explanation: 'Confuses P(A|B) with P(B|A).' }],
+        cognitiveTraits: [{ kind: 'time_of_day', bestHourBlock: 'evening', lift: 14 }],
+        objective: { label: 'Senior PM', daysToTarget: 38 },
+        profile: { totalQuizzesTaken: 47, totalTopicsCovered: 8 },
+      }),
+      summarize: () => 'mock summary',
+    },
+    loaded: true, id: ucsPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  const out = await svc.getSynthesis(new (require('mongoose')).Types.ObjectId());
+  assert.ok(out.weakest);
+  assert.strictEqual(out.weakest[0].topic, 'system design');
+  assert.ok(out.strongest);
+  assert.ok(out.recurringConfusion);
+  assert.ok(out.cognitive);
+});
+
 test('abandon at 70%+ auto-processes the partial set as completed', async () => {
   const dapath = require.resolve('../models/DiagnosticAttempt');
   let saved = null;

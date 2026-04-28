@@ -5,6 +5,7 @@ const auth = require('../middleware/auth');
 router.use(ctrl._gateOrPass);
 router.use(auth);
 
+router.get('/synthesis', ctrl.synthesis);
 router.post('/start', ctrl.start);
 router.post('/:attemptId/self-rating', ctrl.submitSelfRating);
 router.get('/:attemptId/next-question', ctrl.nextQuestion);
