@@ -194,6 +194,19 @@ async function finishAttempt(attemptId) {
     console.warn('[diagnosticService] ConceptMastery seed failed:', err.message),
   );
 
+  // Trigger plan regeneration with diagnostic data injected.
+  // Best-effort — don't block the response if the journey service is busy.
+  try {
+    const journeyService = require('./journeyGenerationService');
+    if (typeof journeyService.regenerateForUser === 'function') {
+      const diagnosticData = {};
+      for (const [k, v] of attempt.results.entries()) diagnosticData[k] = v;
+      await journeyService.regenerateForUser(attempt.userId, { diagnosticData });
+    }
+  } catch (err) {
+    console.warn('[diagnosticService] plan regenerate failed:', err.message);
+  }
+
   return _resultsObjectFromAttempt(attempt);
 }
 

@@ -275,6 +275,44 @@ test('abandon at <30% completion drops the data', async () => {
   assert.strictEqual(saved.abandonStrategy, 'dropped');
 });
 
+test('finishAttempt triggers plan regeneration with diagnosticData', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const attempt = {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    status: 'in_progress',
+    selfRatings: new Map([['sql', 'novice']]),
+    answers: [{ competency: 'sql', difficulty: 'easy', isCorrect: true }, { competency: 'sql', difficulty: 'easy', isCorrect: true }],
+    results: new Map(),
+    save: async () => {},
+  };
+  require.cache[dapath] = {
+    exports: { findById: async () => attempt },
+    loaded: true, id: dapath,
+  };
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  require.cache[kpPath] = {
+    exports: { findOne: async () => null },
+    loaded: true, id: kpPath,
+  };
+  const cmPath = require.resolve('../models/ConceptMastery');
+  require.cache[cmPath] = {
+    exports: { findOneAndUpdate: async () => null },
+    loaded: true, id: cmPath,
+  };
+  let planCalled = null;
+  const planPath = require.resolve('./journeyGenerationService');
+  require.cache[planPath] = {
+    exports: { regenerateForUser: async (uid, opts) => { planCalled = { uid, opts }; } },
+    loaded: true, id: planPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  await svc.finishAttempt(attempt._id);
+  assert.ok(planCalled, 'plan regeneration should have been triggered');
+  assert.ok(planCalled.opts?.diagnosticData?.sql);
+});
+
 test('abandon at 70%+ auto-processes the partial set as completed', async () => {
   const dapath = require.resolve('../models/DiagnosticAttempt');
   let saved = null;
