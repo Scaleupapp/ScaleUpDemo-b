@@ -415,3 +415,62 @@ test('abandon at 70%+ auto-processes the partial set as completed', async () => 
   // 70%+ → process as if completed
   assert.strictEqual(saved.status, 'completed');
 });
+
+test('startAttempt rejects retake within 30 days of a completed attempt', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const recentCompleted = {
+    completedAt: new Date(Date.now() - 5 * 86400000), // 5 days ago
+    objectiveSnapshot: { _id: 'obj1' },
+  };
+  require.cache[dapath] = {
+    exports: function () {},
+    loaded: true, id: dapath,
+  };
+  require.cache[dapath].exports.findOne = async () => recentCompleted;
+  const objpath = require.resolve('../models/UserObjective');
+  require.cache[objpath] = {
+    exports: { findOne: () => ({ lean: async () => ({ _id: 'obj1', analysis: { competencies: [{ name: 'sql' }] } }) }) },
+    loaded: true, id: objpath,
+  };
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  require.cache[kpPath] = {
+    exports: { findOne: async () => null },
+    loaded: true, id: kpPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
+  assert.strictEqual(result, null);
+});
+
+test('startAttempt allows retake within 30d if objective changed', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const recentCompleted = {
+    completedAt: new Date(Date.now() - 5 * 86400000),
+    objectiveSnapshot: { _id: 'old-obj' },
+  };
+  let savedAttempt = null;
+  require.cache[dapath] = {
+    exports: function FakeDA(data) {
+      Object.assign(this, data);
+      this.save = async () => { savedAttempt = this; this._id = 'new'; return this; };
+    },
+    loaded: true, id: dapath,
+  };
+  require.cache[dapath].exports.findOne = async () => recentCompleted;
+  const objpath = require.resolve('../models/UserObjective');
+  require.cache[objpath] = {
+    exports: { findOne: () => ({ lean: async () => ({ _id: 'new-obj', analysis: { competencies: [{ name: 'sql' }] } }) }) },
+    loaded: true, id: objpath,
+  };
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  require.cache[kpPath] = {
+    exports: { findOne: async () => null },
+    loaded: true, id: kpPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
+  assert.ok(result);
+  assert.strictEqual(savedAttempt.objectiveSnapshot._id, 'new-obj');
+});

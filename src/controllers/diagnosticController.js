@@ -13,7 +13,7 @@ const start = async (req, res, next) => {
   try {
     const data = await diagnosticService.startAttempt(req.user.userId);
     if (!data) {
-      return res.status(409).json(apiResponse.error('Objective has no mapped competencies yet — try again in a minute.'));
+      return res.status(409).json(apiResponse.error('Cannot start a new diagnostic right now. Either your objective has no mapped competencies yet, or you completed one less than 30 days ago.'));
     }
     res.json(apiResponse.success(data));
   } catch (err) { next(err); }

@@ -53,6 +53,8 @@ function questionCapForCompetency(profile, competency) {
   return 2;                                               // Weak signal
 }
 
+const RETAKE_COOLDOWN_MS = 30 * 86400000;
+
 async function startAttempt(userId) {
   const [profile, objective] = await Promise.all([
     KnowledgeProfile.findOne({ userId }),
@@ -62,6 +64,22 @@ async function startAttempt(userId) {
   const competencies = objective?.analysis?.competencies || [];
   if (!competencies.length) return null; // caller routes to fallback (Edge 7)
 
+  // Retake cooldown: reject if a completed attempt exists within 30 days
+  // unless the user's objective has changed since that attempt.
+  const lastCompleted = await DiagnosticAttempt.findOne(
+    { userId, status: 'completed' },
+    null,
+    { sort: { completedAt: -1 } },
+  );
+
+  if (lastCompleted && lastCompleted.completedAt) {
+    const ageMs = Date.now() - new Date(lastCompleted.completedAt).getTime();
+    const sameObjective = String(lastCompleted.objectiveSnapshot?._id) === String(objective?._id);
+    if (ageMs < RETAKE_COOLDOWN_MS && sameObjective) {
+      return null;
+    }
+  }
+
   const flowType = _decideFlowType(profile);
 
   const attempt = new DiagnosticAttempt({
@@ -69,6 +87,7 @@ async function startAttempt(userId) {
     flowType,
     status: 'in_progress',
     startedAt: new Date(),
+    objectiveSnapshot: objective ? { _id: objective._id } : null,
   });
   await attempt.save();
   telemetry.logEvent('diagnostic.started', { userId: String(userId), flowType });

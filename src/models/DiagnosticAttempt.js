@@ -65,6 +65,11 @@ const diagnosticAttemptSchema = new mongoose.Schema({
     default: () => new Map(),
   },
 
+  // Snapshot of the user's active objective at attempt time (used for retake cooldown override)
+  objectiveSnapshot: {
+    _id: { type: mongoose.Schema.Types.ObjectId, ref: 'UserObjective' },
+  },
+
   // Telemetry
   cohort: { type: String }, // 'pre_diagnostic' | 'post_diagnostic_taken' | etc.
 }, { timestamps: true });
