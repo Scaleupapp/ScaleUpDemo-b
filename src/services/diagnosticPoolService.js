@@ -133,25 +133,32 @@ async function persistToBank(generatedQuestions) {
  * for whatever's missing, then persist the LLM-generated questions for next time.
  */
 async function assemblePool(allocation, ctx = {}) {
-  const out = [];
-  const stillNeeded = []; // allocation rows that need LLM top-up
-
+  // Build one cell per (competency, difficulty) and fetch all in parallel (I2)
+  const cells = [];
   for (const row of allocation) {
     for (const diff of ['easy', 'medium', 'hard']) {
       const want = row[diff] || 0;
       if (want === 0) continue;
-      const fromBank = await lookupFromBank(row.name, diff, want);
-      for (const q of fromBank) {
-        out.push({
-          ...q,
-          competency: row.name,
-          difficulty: diff,
-        });
-      }
-      const missing = want - fromBank.length;
-      if (missing > 0) {
-        stillNeeded.push({ name: row.name, [diff]: missing });
-      }
+      cells.push({ name: row.name, diff, want });
+    }
+  }
+
+  const cellResults = await Promise.all(
+    cells.map(cell => lookupFromBank(cell.name, cell.diff, cell.want)),
+  );
+
+  const out = [];
+  const stillNeeded = [];
+
+  for (let i = 0; i < cells.length; i++) {
+    const { name, diff, want } = cells[i];
+    const fromBank = cellResults[i];
+    for (const q of fromBank) {
+      out.push({ ...q, competency: name, difficulty: diff });
+    }
+    const missing = want - fromBank.length;
+    if (missing > 0) {
+      stillNeeded.push({ name, [diff]: missing });
     }
   }
 

@@ -163,6 +163,11 @@ async function nextQuestion(attemptId) {
   const attempt = await DiagnosticAttempt.findById(attemptId);
   if (!attempt) throw new Error('attempt not found');
 
+  // Batch-fetch all pool questions in one query (I1: avoid N+1 reads)
+  const poolQuestionIds = attempt.poolQuestionIds || [];
+  const poolDocs = await DiagnosticQuestionBank.find({ _id: { $in: poolQuestionIds } }).lean();
+  const poolMap = new Map(poolDocs.map(d => [String(d._id), d]));
+
   // Find the next competency to ask about — first one that hasn't converged
   const competencies = Array.from(attempt.selfRatings.keys());
   for (const comp of competencies) {
@@ -180,13 +185,14 @@ async function nextQuestion(attemptId) {
 
     // Find a pool question matching (competency, difficulty), not already used
     const usedIds = new Set(attempt.answers.map(a => String(a.questionId)));
-    for (const qid of attempt.poolQuestionIds) {
+    for (const qid of poolQuestionIds) {
       if (usedIds.has(String(qid))) continue;
-      const q = await DiagnosticQuestionBank.findById(qid);
+      const q = poolMap.get(String(qid));
       if (!q) continue;
       if (q.difficulty !== decision.nextDifficulty) continue;
       // We don't strictly require q.canonicalCompetency === comp — pool may have other competencies; keep moving if mismatch
       if (q.canonicalCompetency && q.canonicalCompetency !== comp) continue;
+      DiagnosticQuestionBank.updateOne({ _id: q._id }, { $inc: { timesUsed: 1 } }).catch(() => {});
       return {
         done: false,
         question: {
@@ -196,10 +202,11 @@ async function nextQuestion(attemptId) {
       };
     }
     // No matching question in pool — try any difficulty for this competency
-    for (const qid of attempt.poolQuestionIds) {
+    for (const qid of poolQuestionIds) {
       if (usedIds.has(String(qid))) continue;
-      const q = await DiagnosticQuestionBank.findById(qid);
+      const q = poolMap.get(String(qid));
       if (q && q.canonicalCompetency === comp) {
+        DiagnosticQuestionBank.updateOne({ _id: q._id }, { $inc: { timesUsed: 1 } }).catch(() => {});
         return {
           done: false,
           question: {
@@ -264,10 +271,15 @@ async function finishAttempt(attemptId) {
   attempt.completedAt = new Date();
   await attempt.save();
 
-  // Apply to KnowledgeProfile
-  await _applyToKnowledgeProfile(attempt).catch(err =>
-    console.warn('[diagnosticService] KnowledgeProfile update failed:', err.message),
-  );
+  // Apply to KnowledgeProfile; stamp idempotency checkpoint on success (I5)
+  await _applyToKnowledgeProfile(attempt)
+    .then(async () => {
+      attempt.appliedToProfileAt = new Date();
+      await attempt.save();
+    })
+    .catch(err =>
+      console.warn('[diagnosticService] KnowledgeProfile update failed:', err.message),
+    );
 
   // Seed ConceptMastery
   await _seedConceptMastery(attempt).catch(err =>
@@ -344,9 +356,29 @@ async function _seedConceptMastery(attempt) {
 /**
  * Build the E1 synthesis screen payload for an existing user. Reformats
  * userContextService output into a UI-friendly shape with stable keys.
+ * Also includes key fields from the most recent completed DiagnosticAttempt.
  */
 async function getSynthesis(userId) {
-  const ctx = await userContextService.getUserContext(userId);
+  const [ctx, lastAttempt] = await Promise.all([
+    userContextService.getUserContext(userId),
+    DiagnosticAttempt.findOne(
+      { userId, status: 'completed' },
+      null,
+      { sort: { completedAt: -1 } },
+    ),
+  ]);
+
+  // Derive strongest/weakest from the last attempt's results if available
+  let diagnosticStrongest = [];
+  let diagnosticWeakest = [];
+  if (lastAttempt?.results) {
+    const entries = Array.from(lastAttempt.results.entries())
+      .map(([comp, r]) => ({ competency: comp, score: r.score || 0, band: r.assessedBand }));
+    entries.sort((a, b) => b.score - a.score);
+    diagnosticStrongest = entries.slice(0, 3);
+    diagnosticWeakest = entries.slice(-3).reverse();
+  }
+
   return {
     weakest:           ctx.weakTopics?.slice(0, 3) || [],
     strongest:         ctx.strongTopics?.slice(0, 2) || [],
@@ -357,6 +389,13 @@ async function getSynthesis(userId) {
       totalQuizzesTaken:   ctx.profile?.totalQuizzesTaken ?? 0,
       totalTopicsCovered:  ctx.profile?.totalTopicsCovered ?? 0,
     },
+    lastDiagnostic: lastAttempt
+      ? {
+          completedAt:      lastAttempt.completedAt,
+          strongestTopics:  diagnosticStrongest,
+          weakestTopics:    diagnosticWeakest,
+        }
+      : null,
   };
 }
 

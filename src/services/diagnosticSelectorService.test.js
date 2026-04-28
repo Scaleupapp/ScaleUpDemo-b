@@ -86,3 +86,14 @@ test('selectNext: clamps at easy (cant go below easy)', () => {
   const decision = selectNext({ perf, questionsAsked: 1, selfRating: 'novice', currentDifficulty: 'easy', lastAnswer: { correct: false, fast: false } });
   assert.strictEqual(decision.nextDifficulty, 'easy');
 });
+
+test('selectNext: deterministic rng param produces deterministic output', () => {
+  const { selectNext } = require('./diagnosticSelectorService');
+  const perf = { easy: { correct: 0, wrong: 0 }, medium: { correct: 0, wrong: 0 }, hard: { correct: 0, wrong: 0 } };
+  // rng always returns 0.1 → familiar maps to 'easy' (0.1 < 0.5)
+  const rng = () => 0.1;
+  const d1 = selectNext({ perf, questionsAsked: 0, selfRating: 'familiar', currentDifficulty: undefined, lastAnswer: null, rng });
+  const d2 = selectNext({ perf, questionsAsked: 0, selfRating: 'familiar', currentDifficulty: undefined, lastAnswer: null, rng });
+  assert.strictEqual(d1.nextDifficulty, 'easy');
+  assert.strictEqual(d1.nextDifficulty, d2.nextDifficulty);
+});

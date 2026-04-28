@@ -76,6 +76,11 @@ const diagnosticAttemptSchema = new mongoose.Schema({
   // Telemetry
   cohort: { type: String }, // 'pre_diagnostic' | 'post_diagnostic_taken' | etc.
   confidence: { type: String, enum: ['high', 'medium', 'low'], default: 'high' },
+
+  // Idempotency checkpoint: set immediately after _applyToKnowledgeProfile succeeds.
+  // Allows future replay tooling to detect partially-applied attempts without
+  // re-running the profile update.
+  appliedToProfileAt: { type: Date, default: null },
 }, { timestamps: true });
 
 diagnosticAttemptSchema.index({ userId: 1, status: 1, startedAt: -1 });

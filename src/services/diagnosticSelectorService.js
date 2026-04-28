@@ -4,17 +4,17 @@
  * the running state and gets back a decision.
  */
 
-function initialDifficultyForRating(selfRating) {
+function initialDifficultyForRating(selfRating, rng = Math.random) {
   switch (selfRating) {
     case 'novice':
     case 'unsure':
       return 'easy';
     case 'familiar':
-      return Math.random() < 0.5 ? 'easy' : 'medium';
+      return rng() < 0.5 ? 'easy' : 'medium';
     case 'proficient':
       return 'medium';
     case 'expert':
-      return Math.random() < 0.5 ? 'medium' : 'hard';
+      return rng() < 0.5 ? 'medium' : 'hard';
     default:
       return 'medium';
   }
@@ -68,7 +68,7 @@ function _bumpDifficulty(current, direction) {
  *
  * Returns: { shouldStop: boolean, nextDifficulty: string | null }
  */
-function selectNext({ perf, questionsAsked, selfRating, currentDifficulty, lastAnswer }) {
+function selectNext({ perf, questionsAsked, selfRating, currentDifficulty, lastAnswer, rng = Math.random }) {
   // Stop after 3 questions regardless of performance
   if (questionsAsked >= MAX_QUESTIONS_PER_COMPETENCY) {
     return { shouldStop: true, nextDifficulty: null };
@@ -84,7 +84,7 @@ function selectNext({ perf, questionsAsked, selfRating, currentDifficulty, lastA
 
   // First question for this competency
   if (questionsAsked === 0 || !lastAnswer) {
-    return { shouldStop: false, nextDifficulty: initialDifficultyForRating(selfRating) };
+    return { shouldStop: false, nextDifficulty: initialDifficultyForRating(selfRating, rng) };
   }
 
   // Subsequent: adjust based on last answer

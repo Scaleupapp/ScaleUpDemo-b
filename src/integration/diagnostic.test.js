@@ -53,22 +53,27 @@ test('diagnostic happy-path: start → self-rate → answer all → finish', asy
   };
 
   const bankPath = require.resolve('../models/DiagnosticQuestionBank');
+  const fakeBankDocs = [
+    { _id: 'q1', canonicalCompetency: 'sql', difficulty: 'easy', questionText: 'q1', options: [
+      { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
+      { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
+    ], correctAnswer: 'A' },
+    { _id: 'q2', canonicalCompetency: 'sql', difficulty: 'easy', questionText: 'q2', options: [
+      { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
+      { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
+    ], correctAnswer: 'A' },
+  ];
   require.cache[bankPath] = {
     exports: {
-      find: () => ({
-        sort: () => ({
-          limit: () => ({ lean: async () => [
-            { _id: 'q1', canonicalCompetency: 'sql', difficulty: 'easy', questionText: 'q1', options: [
-              { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
-              { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
-            ], correctAnswer: 'A' },
-            { _id: 'q2', canonicalCompetency: 'sql', difficulty: 'easy', questionText: 'q2', options: [
-              { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
-              { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
-            ], correctAnswer: 'A' },
-          ] }),
-        }),
-      }),
+      find: () => {
+        // Support both .lean() (batch fetch in nextQuestion) and .sort().limit().lean() (lookupFromBank)
+        const chainable = {
+          lean: async () => fakeBankDocs,
+          sort: () => chainable,
+          limit: () => chainable,
+        };
+        return chainable;
+      },
       findById: async (id) => ({
         _id: id, canonicalCompetency: 'sql', difficulty: 'easy',
         questionText: id, options: [
@@ -76,6 +81,7 @@ test('diagnostic happy-path: start → self-rate → answer all → finish', asy
           { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
         ], correctAnswer: 'A',
       }),
+      updateOne: async () => {},
       insertMany: async (d) => d,
     },
     loaded: true, id: bankPath,

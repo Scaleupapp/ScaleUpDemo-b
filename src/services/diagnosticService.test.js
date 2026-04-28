@@ -135,7 +135,11 @@ test('nextQuestion returns done:true when all competencies converged', async () 
   };
   const bankPath = require.resolve('../models/DiagnosticQuestionBank');
   require.cache[bankPath] = {
-    exports: { findById: async (id) => ({ _id: id, difficulty: 'easy' }) },
+    exports: {
+      find: (query) => ({ lean: async () => ['q1', 'q2', 'q3'].map(id => ({ _id: id, difficulty: 'easy', canonicalCompetency: 'sql' })) }),
+      findById: async (id) => ({ _id: id, difficulty: 'easy' }),
+      updateOne: async () => {},
+    },
     loaded: true, id: bankPath,
   };
   delete require.cache[require.resolve('./diagnosticService')];
@@ -158,13 +162,16 @@ test('nextQuestion picks an unused pool question of the right difficulty', async
     loaded: true, id: dapath,
   };
   const bankPath = require.resolve('../models/DiagnosticQuestionBank');
+  const fakeDocs = [
+    { _id: 'q-easy',   difficulty: 'easy',   questionText: 'q', options: [], correctAnswer: 'A', canonicalCompetency: 'sql' },
+    { _id: 'q-medium', difficulty: 'medium', questionText: 'q', options: [], correctAnswer: 'A', canonicalCompetency: 'sql' },
+    { _id: 'q-hard',   difficulty: 'hard',   questionText: 'q', options: [], correctAnswer: 'A', canonicalCompetency: 'sql' },
+  ];
   require.cache[bankPath] = {
     exports: {
-      findById: async (id) => ({
-        _id: id,
-        difficulty: id.includes('easy') ? 'easy' : id.includes('medium') ? 'medium' : 'hard',
-        questionText: 'q', options: [], correctAnswer: 'A', canonicalCompetency: 'sql',
-      }),
+      find: (query) => ({ lean: async () => fakeDocs }),
+      findById: async (id) => fakeDocs.find(d => d._id === id) || null,
+      updateOne: async () => {},
     },
     loaded: true, id: bankPath,
   };
@@ -330,6 +337,13 @@ test('getSynthesis returns userContextService output formatted for E1', async ()
     },
     loaded: true, id: ucsPath,
   };
+  // Ensure DiagnosticAttempt.findOne is available for getSynthesis's last-attempt query
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  require.cache[dapath] = {
+    exports: function FakeDA() {},
+    loaded: true, id: dapath,
+  };
+  require.cache[dapath].exports.findOne = async () => null;
   delete require.cache[require.resolve('./diagnosticService')];
   const svc = require('./diagnosticService');
   const out = await svc.getSynthesis(new (require('mongoose')).Types.ObjectId());
@@ -338,6 +352,8 @@ test('getSynthesis returns userContextService output formatted for E1', async ()
   assert.ok(out.strongest);
   assert.ok(out.recurringConfusion);
   assert.ok(out.cognitive);
+  // lastDiagnostic should be null when no completed attempt exists
+  assert.strictEqual(out.lastDiagnostic, null);
 });
 
 test('existing-user flow: strong competency gets 0 questions', async () => {
