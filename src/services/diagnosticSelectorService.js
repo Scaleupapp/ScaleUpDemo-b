@@ -46,10 +46,65 @@ function deriveBand(perf) {
   return 'novice';
 }
 
+const MAX_QUESTIONS_PER_COMPETENCY = 3;
+const DIFFICULTY_LADDER = ['easy', 'medium', 'hard'];
+
+function _bumpDifficulty(current, direction) {
+  const i = DIFFICULTY_LADDER.indexOf(current);
+  const next = i + (direction === 'up' ? 1 : -1);
+  return DIFFICULTY_LADDER[Math.max(0, Math.min(DIFFICULTY_LADDER.length - 1, next))];
+}
+
+/**
+ * Decide whether to stop and (if not) what difficulty the next question
+ * should be. Caller drives the whole loop; this function is stateless.
+ *
+ * Inputs:
+ *   perf: { easy: {correct, wrong}, medium: {...}, hard: {...} }
+ *   questionsAsked: number of questions asked for this competency so far
+ *   selfRating: 'novice' | 'familiar' | 'proficient' | 'expert' | 'unsure'
+ *   currentDifficulty: difficulty of the most recent question
+ *   lastAnswer: { correct: boolean, fast: boolean } (optional — null on first call)
+ *
+ * Returns: { shouldStop: boolean, nextDifficulty: string | null }
+ */
+function selectNext({ perf, questionsAsked, selfRating, currentDifficulty, lastAnswer }) {
+  // Stop after 3 questions regardless of performance
+  if (questionsAsked >= MAX_QUESTIONS_PER_COMPETENCY) {
+    return { shouldStop: true, nextDifficulty: null };
+  }
+
+  // Stop early if signal converged: 2+ correct or 2+ wrong at same level
+  for (const diff of DIFFICULTY_LADDER) {
+    const p = perf[diff] || { correct: 0, wrong: 0 };
+    if (p.correct >= 2 || p.wrong >= 2) {
+      return { shouldStop: true, nextDifficulty: null };
+    }
+  }
+
+  // First question for this competency
+  if (questionsAsked === 0 || !lastAnswer) {
+    return { shouldStop: false, nextDifficulty: initialDifficultyForRating(selfRating) };
+  }
+
+  // Subsequent: adjust based on last answer
+  if (lastAnswer.correct && lastAnswer.fast) {
+    return { shouldStop: false, nextDifficulty: _bumpDifficulty(currentDifficulty, 'up') };
+  }
+  if (lastAnswer.correct && !lastAnswer.fast) {
+    return { shouldStop: false, nextDifficulty: currentDifficulty };
+  }
+  // Wrong
+  return { shouldStop: false, nextDifficulty: _bumpDifficulty(currentDifficulty, 'down') };
+}
+
 module.exports = {
+  selectNext,
   _internal: {
     initialDifficultyForRating,
     bandToScore,
     deriveBand,
+    MAX_QUESTIONS_PER_COMPETENCY,
+    DIFFICULTY_LADDER,
   },
 };
