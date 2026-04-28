@@ -86,6 +86,6 @@ When `FEATURE_DAY1_DIAGNOSTIC` is unset or `false`, all routes return 404 with `
 
 Emitted via `diagnosticTelemetryService`:
 - `diagnostic.started` — `{ userId, flowType }`
-- `diagnostic.self_rating_submitted` — `{ attemptId, cohort }` where cohort summarizes rating distribution
-- `diagnostic.finished` — `{ attemptId, durationMs, confidence }`
-- `diagnostic.abandoned` — `{ attemptId, branch: 'drop' | 'partial' | 'auto_finish', progressPct }`
+- `diagnostic.self_rating_submitted` — `{ attemptId }`
+- `diagnostic.finished` — `{ userId, questionsAnswered }`
+- `diagnostic.abandoned` — `{ userId, strategy: 'dropped', pct }` (only emitted for the `<30%` drop path; the partial and auto-finish paths delegate to `finishAttempt`)

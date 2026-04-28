@@ -539,7 +539,7 @@ test('startAttempt abandons prior in_progress attempts of the same user', async 
     const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
     assert.ok(result);
     assert.ok(updateManyArgs, 'updateMany should have been called');
-    assert.deepStrictEqual(updateManyArgs.filter.status, { $in: ['in_progress', 'awaiting_self_rating'] });
+    assert.deepStrictEqual(updateManyArgs.filter.status, { $in: ['in_progress'] });
     assert.strictEqual(updateManyArgs.update.$set.status, 'abandoned');
   } finally {
     if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
@@ -669,6 +669,55 @@ test('finishAttempt sets confidence:medium when avg time 5-12s', async () => {
     if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
     if (orig.kp) require.cache[kpPath] = orig.kp; else delete require.cache[kpPath];
     if (orig.cm) require.cache[cmPath] = orig.cm; else delete require.cache[cmPath];
+    if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
+  }
+});
+
+test('startAttempt persists objectiveSnapshot.label from objective.specifics.examName', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const objpath = require.resolve('../models/UserObjective');
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  const svcPath = require.resolve('./diagnosticService');
+  const orig = {
+    da: require.cache[dapath],
+    obj: require.cache[objpath],
+    kp: require.cache[kpPath],
+    svc: require.cache[svcPath],
+  };
+  try {
+    let savedAttempt = null;
+    require.cache[dapath] = {
+      exports: function FakeDA(data) {
+        Object.assign(this, data);
+        this.save = async () => { savedAttempt = this; this._id = new mongoose.Types.ObjectId(); return this; };
+      },
+      loaded: true, id: dapath,
+    };
+    require.cache[dapath].exports.findOne = async () => null;
+    require.cache[dapath].exports.updateMany = async () => ({ modifiedCount: 0 });
+    require.cache[objpath] = {
+      exports: {
+        findOne: () => ({
+          lean: async () => ({
+            _id: 'exam-obj',
+            objectiveType: 'exam_preparation',
+            specifics: { examName: 'GATE 2026' },
+            analysis: { competencies: [{ name: 'sql' }] },
+          }),
+        }),
+      },
+      loaded: true, id: objpath,
+    };
+    require.cache[kpPath] = { exports: { findOne: async () => null }, loaded: true, id: kpPath };
+    delete require.cache[svcPath];
+    const svc = require(svcPath);
+    await svc.startAttempt(new mongoose.Types.ObjectId());
+    assert.ok(savedAttempt, 'attempt should have been saved');
+    assert.strictEqual(savedAttempt.objectiveSnapshot.label, 'GATE 2026');
+  } finally {
+    if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
+    if (orig.obj) require.cache[objpath] = orig.obj; else delete require.cache[objpath];
+    if (orig.kp) require.cache[kpPath] = orig.kp; else delete require.cache[kpPath];
     if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
   }
 });

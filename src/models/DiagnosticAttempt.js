@@ -66,9 +66,11 @@ const diagnosticAttemptSchema = new mongoose.Schema({
   },
 
   // Snapshot of the user's primary objective at attempt creation; used by the
-  // retake cooldown to detect objective changes (Edge 6).
+  // retake cooldown to detect objective changes (Edge 6), and by submitSelfRating
+  // to pass the objective label to the pool assembler.
   objectiveSnapshot: {
     _id: { type: mongoose.Schema.Types.ObjectId, ref: 'UserObjective' },
+    label: { type: String, default: null },
   },
 
   // Telemetry
@@ -78,13 +80,13 @@ const diagnosticAttemptSchema = new mongoose.Schema({
 
 diagnosticAttemptSchema.index({ userId: 1, status: 1, startedAt: -1 });
 diagnosticAttemptSchema.index({ userId: 1, status: 1, completedAt: -1 });
-// At-most-one active attempt per user (in_progress + awaiting_self_rating);
+// At-most-one active attempt per user (in_progress only);
 // startAttempt abandons priors before creating a new one.
 diagnosticAttemptSchema.index(
   { userId: 1 },
   {
     unique: true,
-    partialFilterExpression: { status: { $in: ['in_progress', 'awaiting_self_rating'] } },
+    partialFilterExpression: { status: 'in_progress' },
     name: 'one_active_attempt_per_user',
   },
 );

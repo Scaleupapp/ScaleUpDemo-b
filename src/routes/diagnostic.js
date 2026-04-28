@@ -2,8 +2,8 @@ const router = require('express').Router();
 const ctrl = require('../controllers/diagnosticController');
 const auth = require('../middleware/auth');
 
-router.use(ctrl._gateOrPass);
 router.use(auth);
+router.use(ctrl._gateOrPass);
 
 router.get('/synthesis', ctrl.synthesis);
 router.post('/start', ctrl.start);

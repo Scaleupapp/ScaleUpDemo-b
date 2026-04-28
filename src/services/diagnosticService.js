@@ -25,7 +25,7 @@ const RATING_TO_NUM = { novice: 0, familiar: 1, proficient: 2, expert: 3, unsure
 
 const CONFIDENCE_LOW_THRESHOLD_S = 5;
 const CONFIDENCE_MEDIUM_THRESHOLD_S = 12;
-const ACTIVE_ATTEMPT_STATUSES = ['in_progress', 'awaiting_self_rating'];
+const ACTIVE_ATTEMPT_STATUSES = ['in_progress'];
 
 /**
  * Decide flow type based on whether the user has any prior platform activity.
@@ -96,12 +96,18 @@ async function startAttempt(userId) {
 
   const flowType = _decideFlowType(profile);
 
+  const objectiveLabel = objective
+    ? (objective.specifics?.examName || objective.objectiveType || null)
+    : null;
+
   const attempt = new DiagnosticAttempt({
     userId,
     flowType,
     status: 'in_progress',
     startedAt: new Date(),
-    objectiveSnapshot: objective ? { _id: objective._id } : null,
+    objectiveSnapshot: objective
+      ? { _id: objective._id, label: objectiveLabel }
+      : null,
   });
   await attempt.save();
   telemetry.logEvent('diagnostic.started', { userId: String(userId), flowType });
@@ -134,7 +140,7 @@ async function submitSelfRating(attemptId, ratings) {
     .map(([name, selfRating]) => ({ name, selfRating }));
   const allocation = diagnosticPoolService._internal.calculatePoolAllocation(competencies);
   const pool = await diagnosticPoolService.assemblePool(allocation, {
-    objective: attempt.objectiveLabel || null,
+    objective: attempt.objectiveSnapshot?.label || null,
   });
   attempt.poolQuestionIds = pool.map(q => q._id).filter(Boolean);
   await attempt.save();
@@ -295,10 +301,15 @@ async function _applyToKnowledgeProfile(attempt) {
   const kp = await KnowledgeProfile.findOne({ userId: attempt.userId });
   if (!kp) return;
   const now = new Date();
+  const objectiveId = attempt.objectiveSnapshot?._id || null;
   for (const [comp, res] of attempt.results.entries()) {
-    let entry = kp.topicMastery.find(t => t.topic === comp);
+    // Scope match to (topic, objectiveId) so users with multiple objectives
+    // don't have mastery for one objective overwritten by another.
+    let entry = kp.topicMastery.find(
+      t => t.topic === comp && String(t.objectiveId || '') === String(objectiveId || ''),
+    );
     if (!entry) {
-      entry = { topic: comp, scoreHistory: [] };
+      entry = { topic: comp, objectiveId, scoreHistory: [] };
       kp.topicMastery.push(entry);
     }
     entry.score = res.score;
