@@ -13,10 +13,13 @@
 const mongoose = require('mongoose');
 const DiagnosticAttempt = require('../models/DiagnosticAttempt');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
+const ConceptMastery = require('../models/ConceptMastery');
 const UserObjective = require('../models/UserObjective');
 const diagnosticPoolService = require('./diagnosticPoolService');
 const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
 const selector = require('./diagnosticSelectorService');
+
+const RATING_TO_NUM = { novice: 0, familiar: 1, proficient: 2, expert: 3, unsure: 0 };
 
 /**
  * Decide flow type based on whether the user has any prior platform activity.
@@ -158,10 +161,92 @@ async function submitAnswer(attemptId, questionId, selectedAnswer, timeTaken) {
   return { ack: true };
 }
 
+async function finishAttempt(attemptId) {
+  const attempt = await DiagnosticAttempt.findById(attemptId);
+  if (!attempt) throw new Error('attempt not found');
+  if (attempt.status === 'completed') {
+    return _resultsObjectFromAttempt(attempt);
+  }
+
+  // Compute per-competency results
+  for (const comp of attempt.selfRatings.keys()) {
+    const perf = _perfForCompetency(attempt.answers, comp);
+    const band = selector._internal.deriveBand(perf);
+    const score = selector._internal.bandToScore(band);
+    const selfRatingNum = RATING_TO_NUM[attempt.selfRatings.get(comp)] ?? 0;
+    const assessedNum = RATING_TO_NUM[band];
+    const calibrationDelta = selfRatingNum - assessedNum; // positive = over-confident
+    const questionsAsked = attempt.answers.filter(a => a.competency === comp).length;
+    attempt.results.set(comp, { assessedBand: band, score, calibrationDelta, questionsAsked });
+  }
+
+  attempt.status = 'completed';
+  attempt.completedAt = new Date();
+  await attempt.save();
+
+  // Apply to KnowledgeProfile
+  await _applyToKnowledgeProfile(attempt).catch(err =>
+    console.warn('[diagnosticService] KnowledgeProfile update failed:', err.message),
+  );
+
+  // Seed ConceptMastery
+  await _seedConceptMastery(attempt).catch(err =>
+    console.warn('[diagnosticService] ConceptMastery seed failed:', err.message),
+  );
+
+  return _resultsObjectFromAttempt(attempt);
+}
+
+function _resultsObjectFromAttempt(attempt) {
+  const obj = {};
+  for (const [k, v] of attempt.results.entries()) obj[k] = v;
+  return { results: obj, status: attempt.status };
+}
+
+async function _applyToKnowledgeProfile(attempt) {
+  const kp = await KnowledgeProfile.findOne({ userId: attempt.userId });
+  if (!kp) return;
+  const now = new Date();
+  for (const [comp, res] of attempt.results.entries()) {
+    let entry = kp.topicMastery.find(t => t.topic === comp);
+    if (!entry) {
+      entry = { topic: comp, scoreHistory: [] };
+      kp.topicMastery.push(entry);
+    }
+    entry.score = res.score;
+    entry.lastAssessedAt = now;
+    entry.selfRating = attempt.selfRatings.get(comp);
+    entry.calibrationAtBaseline = { delta: res.calibrationDelta, capturedAt: now };
+  }
+  await kp.save();
+}
+
+async function _seedConceptMastery(attempt) {
+  // Best-effort: each competency gets one ConceptMastery row seeded with the
+  // assessed score; spaced-repetition takes over from here on subsequent quizzes.
+  const now = new Date();
+  for (const [comp, res] of attempt.results.entries()) {
+    const stability = res.score >= 70 ? 7 : res.score >= 50 ? 3 : 1;
+    await ConceptMastery.findOneAndUpdate(
+      { userId: attempt.userId, concept: comp },
+      {
+        $setOnInsert: {
+          userId: attempt.userId, concept: comp,
+          stability, difficulty: 5.0, reps: 1, lapses: 0,
+          lastReviewedAt: now,
+          nextReviewAt: new Date(now.getTime() + stability * 86400000),
+        },
+      },
+      { upsert: true, new: true },
+    );
+  }
+}
+
 module.exports = {
   startAttempt,
   submitSelfRating,
   nextQuestion,
   submitAnswer,
+  finishAttempt,
   _internal: { _decideFlowType },
 };

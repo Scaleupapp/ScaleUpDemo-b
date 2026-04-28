@@ -205,3 +205,51 @@ test('submitAnswer marks correctness and stores the answer', async () => {
   assert.strictEqual(saved.answers[0].selectedAnswer, 'B');
   assert.strictEqual(saved.answers[0].competency, 'sql');
 });
+
+test('finishAttempt computes per-competency results and updates attempt status', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const attemptId = new mongoose.Types.ObjectId();
+  let saved = null;
+  const attempt = {
+    _id: attemptId, status: 'in_progress',
+    userId: new mongoose.Types.ObjectId(),
+    selfRatings: new Map([['sql', 'familiar']]),
+    answers: [
+      { competency: 'sql', difficulty: 'medium', isCorrect: true, timeTaken: 10 },
+      { competency: 'sql', difficulty: 'medium', isCorrect: true, timeTaken: 10 },
+    ],
+    results: new Map(),
+    save: async function () { saved = this; },
+  };
+  require.cache[dapath] = {
+    exports: { findById: async () => attempt },
+    loaded: true, id: dapath,
+  };
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  let kpSave = null;
+  const kp = {
+    userId: attempt.userId, topicMastery: [],
+    save: async function () { kpSave = this; },
+  };
+  require.cache[kpPath] = {
+    exports: { findOne: async () => kp },
+    loaded: true, id: kpPath,
+  };
+  const cmPath = require.resolve('../models/ConceptMastery');
+  require.cache[cmPath] = {
+    exports: { findOneAndUpdate: async () => null },
+    loaded: true, id: cmPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  const result = await svc.finishAttempt(attemptId);
+
+  assert.strictEqual(saved.status, 'completed');
+  assert.ok(saved.completedAt);
+  assert.strictEqual(saved.results.get('sql').assessedBand, 'proficient');
+  assert.strictEqual(kpSave.topicMastery[0].topic, 'sql');
+  assert.strictEqual(kpSave.topicMastery[0].selfRating, 'familiar');
+  // calibrationDelta: familiar→1, proficient→2, delta = 1 (under-rated by 1 band)
+  assert.strictEqual(kpSave.topicMastery[0].calibrationAtBaseline.delta, -1); // self < assessed
+  assert.ok(result.results.sql);
+});
