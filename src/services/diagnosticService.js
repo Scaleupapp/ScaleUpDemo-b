@@ -32,6 +32,27 @@ function _decideFlowType(profile) {
   return 'new_user';
 }
 
+/**
+ * For existing-user flow: how many questions to ask about a competency given
+ * existing KnowledgeProfile signal. See spec §4 Screen E4.
+ */
+function questionCapForCompetency(profile, competency) {
+  const tm = profile?.topicMastery?.find(t => (t.topic || '').toLowerCase() === competency.toLowerCase());
+  if (!tm) return 3; // Never seen → full scope
+  const attempts = tm.quizzesTaken || 0;
+  if (attempts === 0) return 3;
+  // Score variance: stdev of recent scoreHistory
+  const scores = (tm.scoreHistory || []).map(h => h.score || 0).slice(-5);
+  let variance = 0;
+  if (scores.length >= 2) {
+    const mean = scores.reduce((s, v) => s + v, 0) / scores.length;
+    variance = Math.sqrt(scores.reduce((s, v) => s + (v - mean) ** 2, 0) / scores.length);
+  }
+  if (attempts >= 5 && variance < 15) return 0;          // Strong, stable signal
+  if (attempts >= 2 || variance >= 15) return 1;          // Some signal, disambiguate
+  return 2;                                               // Weak signal
+}
+
 async function startAttempt(userId) {
   const [profile, objective] = await Promise.all([
     KnowledgeProfile.findOne({ userId }),
@@ -52,10 +73,17 @@ async function startAttempt(userId) {
   await attempt.save();
   telemetry.logEvent('diagnostic.started', { userId: String(userId), flowType });
 
+  let competenciesToAssess = competencies.map(c => ({ name: c.name, questionCap: 3 }));
+  if (flowType === 'existing_user_tune' && profile) {
+    competenciesToAssess = competenciesToAssess
+      .map(c => ({ ...c, questionCap: questionCapForCompetency(profile, c.name) }))
+      .filter(c => c.questionCap > 0);
+  }
+
   return {
     attemptId: attempt._id,
     flowType,
-    competenciesToAssess: competencies.map(c => ({ name: c.name })),
+    competenciesToAssess,
   };
 }
 
@@ -317,5 +345,5 @@ module.exports = {
   finishAttempt,
   abandon,
   getSynthesis,
-  _internal: { _decideFlowType },
+  _internal: { _decideFlowType, questionCapForCompetency },
 };

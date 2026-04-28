@@ -339,6 +339,47 @@ test('getSynthesis returns userContextService output formatted for E1', async ()
   assert.ok(out.cognitive);
 });
 
+test('existing-user flow: strong competency gets 0 questions', async () => {
+  const { _internal } = require('./diagnosticService');
+  const profile = {
+    totalQuizzesTaken: 10,
+    topicMastery: [
+      { topic: 'sql', score: 80, quizzesTaken: 6, scoreHistory: Array.from({length: 6}, () => ({ score: 80 })) },
+    ],
+  };
+  const cap = _internal.questionCapForCompetency(profile, 'sql');
+  assert.strictEqual(cap, 0);
+});
+
+test('existing-user flow: medium-signal competency gets 1 question', async () => {
+  const { _internal } = require('./diagnosticService');
+  const profile = {
+    totalQuizzesTaken: 5,
+    topicMastery: [
+      { topic: 'sql', score: 70, quizzesTaken: 3, scoreHistory: [{ score: 60 }, { score: 80 }, { score: 70 }] },
+    ],
+  };
+  const cap = _internal.questionCapForCompetency(profile, 'sql');
+  assert.strictEqual(cap, 1);
+});
+
+test('existing-user flow: weak-signal competency gets full 2-3 questions', async () => {
+  const { _internal } = require('./diagnosticService');
+  const profile = {
+    totalQuizzesTaken: 1,
+    topicMastery: [{ topic: 'sql', score: 50, quizzesTaken: 1, scoreHistory: [{ score: 50 }] }],
+  };
+  const cap = _internal.questionCapForCompetency(profile, 'sql');
+  assert.ok(cap >= 2 && cap <= 3);
+});
+
+test('existing-user flow: never-touched competency gets full 2-3', async () => {
+  const { _internal } = require('./diagnosticService');
+  const profile = { totalQuizzesTaken: 0, topicMastery: [] };
+  const cap = _internal.questionCapForCompetency(profile, 'sql');
+  assert.ok(cap >= 2 && cap <= 3);
+});
+
 test('abandon at 70%+ auto-processes the partial set as completed', async () => {
   const dapath = require.resolve('../models/DiagnosticAttempt');
   let saved = null;
