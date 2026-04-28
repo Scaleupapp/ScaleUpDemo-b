@@ -242,11 +242,41 @@ async function _seedConceptMastery(attempt) {
   }
 }
 
+async function abandon(attemptId) {
+  const attempt = await DiagnosticAttempt.findById(attemptId);
+  if (!attempt) throw new Error('attempt not found');
+  if (attempt.status === 'completed' || attempt.status === 'abandoned') return { status: attempt.status };
+
+  const total = attempt.poolQuestionIds.length || 1;
+  const answered = attempt.answers.length;
+  const pct = answered / total;
+
+  if (pct >= 0.7) {
+    // High completion — process as if finished
+    return finishAttempt(attemptId);
+  }
+  if (pct >= 0.3) {
+    // Mid-completion — caller (via UI) chooses; here we mark abandoned with
+    // partial_processed strategy and call finishAttempt to lock in what we have.
+    attempt.abandonStrategy = 'partial_processed';
+    attempt.abandonedAt = new Date();
+    await attempt.save();
+    return finishAttempt(attemptId);
+  }
+  // <30% — drop
+  attempt.status = 'abandoned';
+  attempt.abandonStrategy = 'dropped';
+  attempt.abandonedAt = new Date();
+  await attempt.save();
+  return { status: 'abandoned', abandonStrategy: 'dropped' };
+}
+
 module.exports = {
   startAttempt,
   submitSelfRating,
   nextQuestion,
   submitAnswer,
   finishAttempt,
+  abandon,
   _internal: { _decideFlowType },
 };

@@ -253,3 +253,60 @@ test('finishAttempt computes per-competency results and updates attempt status',
   assert.strictEqual(kpSave.topicMastery[0].calibrationAtBaseline.delta, -1); // self < assessed
   assert.ok(result.results.sql);
 });
+
+test('abandon at <30% completion drops the data', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  let saved = null;
+  const attempt = {
+    _id: new mongoose.Types.ObjectId(),
+    selfRatings: new Map([['sql', 'novice'], ['design', 'novice']]),
+    answers: [{ competency: 'sql', isCorrect: true }], // 1/8 ≈ 12.5%
+    poolQuestionIds: new Array(8).fill(0),
+    save: async function () { saved = this; },
+  };
+  require.cache[dapath] = {
+    exports: { findById: async () => attempt },
+    loaded: true, id: dapath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  await svc.abandon(attempt._id);
+  assert.strictEqual(saved.status, 'abandoned');
+  assert.strictEqual(saved.abandonStrategy, 'dropped');
+});
+
+test('abandon at 70%+ auto-processes the partial set as completed', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  let saved = null;
+  const attempt = {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    selfRatings: new Map([['sql', 'familiar']]),
+    answers: [
+      { competency: 'sql', difficulty: 'medium', isCorrect: true, timeTaken: 10 },
+      { competency: 'sql', difficulty: 'medium', isCorrect: true, timeTaken: 10 },
+    ],
+    results: new Map(),
+    poolQuestionIds: ['q1', 'q2'], // 2/2 = 100%
+    save: async function () { saved = this; },
+  };
+  require.cache[dapath] = {
+    exports: { findById: async () => attempt },
+    loaded: true, id: dapath,
+  };
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  require.cache[kpPath] = {
+    exports: { findOne: async () => null },
+    loaded: true, id: kpPath,
+  };
+  const cmPath = require.resolve('../models/ConceptMastery');
+  require.cache[cmPath] = {
+    exports: { findOneAndUpdate: async () => null },
+    loaded: true, id: cmPath,
+  };
+  delete require.cache[require.resolve('./diagnosticService')];
+  const svc = require('./diagnosticService');
+  await svc.abandon(attempt._id);
+  // 70%+ → process as if completed
+  assert.strictEqual(saved.status, 'completed');
+});
