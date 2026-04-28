@@ -127,13 +127,56 @@ async function persistToBank(generatedQuestions) {
   return DiagnosticQuestionBank.insertMany(docs);
 }
 
+/**
+ * Public entry point: produce a pool that satisfies the allocation.
+ * Strategy: try bank first per (competency, difficulty), fall back to LLM
+ * for whatever's missing, then persist the LLM-generated questions for next time.
+ */
+async function assemblePool(allocation, ctx = {}) {
+  const out = [];
+  const stillNeeded = []; // allocation rows that need LLM top-up
+
+  for (const row of allocation) {
+    for (const diff of ['easy', 'medium', 'hard']) {
+      const want = row[diff] || 0;
+      if (want === 0) continue;
+      const fromBank = await lookupFromBank(row.name, diff, want);
+      for (const q of fromBank) {
+        out.push({
+          ...q,
+          competency: row.name,
+          difficulty: diff,
+        });
+      }
+      const missing = want - fromBank.length;
+      if (missing > 0) {
+        stillNeeded.push({ name: row.name, [diff]: missing });
+      }
+    }
+  }
+
+  if (stillNeeded.length > 0) {
+    const generated = await generatePoolFromLLM(stillNeeded, ctx);
+    out.push(...generated);
+    // Persist for next time
+    if (generated.length > 0) {
+      await persistToBank(generated).catch(err =>
+        console.warn('[diagnosticPoolService] persistToBank failed:', err.message),
+      );
+    }
+  }
+
+  return out;
+}
+
 module.exports = {
+  assemblePool,
   _internal: {
     calculatePoolAllocation,
-    FLOOR_QUESTIONS_PER_COMPETENCY,
-    DIFFICULTY_MIX,
     generatePoolFromLLM,
     lookupFromBank,
     persistToBank,
+    FLOOR_QUESTIONS_PER_COMPETENCY,
+    DIFFICULTY_MIX,
   },
 };

@@ -156,3 +156,71 @@ test('persistToBank writes new questions with normalized canonical competency', 
   assert.strictEqual(captured[0].canonicalCompetency, 'database joins');
   assert.deepStrictEqual(captured[0].rawCompetencyAliases, ['SQL Joins']);
 });
+
+test('assemblePool fills from bank when bank has enough', async () => {
+  const modelPath = require.resolve('../models/DiagnosticQuestionBank');
+  const docs = (n, comp, diff) => Array.from({ length: n }, (_, i) => ({
+    _id: `${comp}-${diff}-${i}`, canonicalCompetency: comp, difficulty: diff,
+    questionText: `q${i}`, options: [
+      { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
+      { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
+    ], correctAnswer: 'A',
+  }));
+  require.cache[modelPath] = {
+    exports: {
+      find: (q) => ({
+        sort: () => ({
+          limit: (n) => ({
+            lean: async () => docs(Math.min(n, 10), q.canonicalCompetency, q.difficulty),
+          }),
+        }),
+      }),
+      insertMany: async (d) => d,
+    },
+    loaded: true, id: modelPath,
+  };
+  // openai stub to fail loud — we should NOT call it when bank is sufficient
+  const openaiPath = require.resolve('../config/openai');
+  let openaiCalls = 0;
+  require.cache[openaiPath] = {
+    exports: { chat: { completions: { create: async () => { openaiCalls++; throw new Error('should not be called'); } } } },
+    loaded: true, id: openaiPath,
+  };
+  delete require.cache[require.resolve('./diagnosticPoolService')];
+  const { assemblePool } = require('./diagnosticPoolService');
+
+  const allocation = [{ name: 'sql', easy: 2, medium: 2, hard: 2 }];
+  const out = await assemblePool(allocation, { objective: 'x' });
+  assert.strictEqual(out.length, 6);
+  assert.strictEqual(openaiCalls, 0, 'should not call LLM when bank is sufficient');
+});
+
+test('assemblePool falls back to LLM when bank is empty', async () => {
+  const modelPath = require.resolve('../models/DiagnosticQuestionBank');
+  require.cache[modelPath] = {
+    exports: {
+      find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }),
+      insertMany: async (d) => d,
+    },
+    loaded: true, id: modelPath,
+  };
+  const openaiPath = require.resolve('../config/openai');
+  require.cache[openaiPath] = {
+    exports: { chat: { completions: { create: async () => ({ choices: [{ message: { content: JSON.stringify({
+      questions: Array.from({ length: 6 }, (_, i) => ({
+        competency: 'sql', difficulty: ['easy', 'medium', 'hard'][i % 3],
+        questionText: `q${i}`, options: [
+          { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
+          { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
+        ], correctAnswer: 'A',
+      })),
+    }) } }] }) } } },
+    loaded: true, id: openaiPath,
+  };
+  delete require.cache[require.resolve('./diagnosticPoolService')];
+  const { assemblePool } = require('./diagnosticPoolService');
+
+  const allocation = [{ name: 'sql', easy: 2, medium: 2, hard: 2 }];
+  const out = await assemblePool(allocation, { objective: 'x' });
+  assert.strictEqual(out.length, 6);
+});
