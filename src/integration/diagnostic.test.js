@@ -29,6 +29,7 @@ test('diagnostic happy-path: start → self-rate → answer all → finish', asy
   };
   require.cache[dapath].exports.findById = async () => createdAttempt;
   require.cache[dapath].exports.findOne = async () => null;
+  require.cache[dapath].exports.updateMany = async () => ({ modifiedCount: 0 });
 
   const kpPath = require.resolve('../models/KnowledgeProfile');
   require.cache[kpPath] = {

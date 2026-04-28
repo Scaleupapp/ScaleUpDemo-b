@@ -14,6 +14,7 @@ function setupStubs({ existingProfile = null } = {}) {
   };
   // Helpers attached to the constructor
   require.cache[dapath].exports.findOne = async () => null;
+  require.cache[dapath].exports.updateMany = async () => ({ modifiedCount: 0 });
 
   const kppath = require.resolve('../models/KnowledgeProfile');
   require.cache[kppath] = {
@@ -418,59 +419,171 @@ test('abandon at 70%+ auto-processes the partial set as completed', async () => 
 
 test('startAttempt rejects retake within 30 days of a completed attempt', async () => {
   const dapath = require.resolve('../models/DiagnosticAttempt');
-  const recentCompleted = {
-    completedAt: new Date(Date.now() - 5 * 86400000), // 5 days ago
-    objectiveSnapshot: { _id: 'obj1' },
-  };
-  require.cache[dapath] = {
-    exports: function () {},
-    loaded: true, id: dapath,
-  };
-  require.cache[dapath].exports.findOne = async () => recentCompleted;
   const objpath = require.resolve('../models/UserObjective');
-  require.cache[objpath] = {
-    exports: { findOne: () => ({ lean: async () => ({ _id: 'obj1', analysis: { competencies: [{ name: 'sql' }] } }) }) },
-    loaded: true, id: objpath,
-  };
   const kpPath = require.resolve('../models/KnowledgeProfile');
-  require.cache[kpPath] = {
-    exports: { findOne: async () => null },
-    loaded: true, id: kpPath,
+  const svcPath = require.resolve('./diagnosticService');
+  const orig = {
+    da: require.cache[dapath],
+    obj: require.cache[objpath],
+    kp: require.cache[kpPath],
+    svc: require.cache[svcPath],
   };
-  delete require.cache[require.resolve('./diagnosticService')];
-  const svc = require('./diagnosticService');
-  const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
-  assert.strictEqual(result, null);
+  try {
+    const recentCompleted = {
+      completedAt: new Date(Date.now() - 5 * 86400000), // 5 days ago
+      objectiveSnapshot: { _id: 'obj1' },
+    };
+    require.cache[dapath] = {
+      exports: function () {},
+      loaded: true, id: dapath,
+    };
+    require.cache[dapath].exports.findOne = async () => recentCompleted;
+    require.cache[dapath].exports.updateMany = async () => ({ modifiedCount: 0 });
+    require.cache[objpath] = {
+      exports: { findOne: () => ({ lean: async () => ({ _id: 'obj1', analysis: { competencies: [{ name: 'sql' }] } }) }) },
+      loaded: true, id: objpath,
+    };
+    require.cache[kpPath] = {
+      exports: { findOne: async () => null },
+      loaded: true, id: kpPath,
+    };
+    delete require.cache[svcPath];
+    const svc = require(svcPath);
+    const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
+    assert.strictEqual(result, null);
+  } finally {
+    if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
+    if (orig.obj) require.cache[objpath] = orig.obj; else delete require.cache[objpath];
+    if (orig.kp) require.cache[kpPath] = orig.kp; else delete require.cache[kpPath];
+    if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
+  }
 });
 
 test('startAttempt allows retake within 30d if objective changed', async () => {
   const dapath = require.resolve('../models/DiagnosticAttempt');
-  const recentCompleted = {
-    completedAt: new Date(Date.now() - 5 * 86400000),
-    objectiveSnapshot: { _id: 'old-obj' },
-  };
-  let savedAttempt = null;
-  require.cache[dapath] = {
-    exports: function FakeDA(data) {
-      Object.assign(this, data);
-      this.save = async () => { savedAttempt = this; this._id = 'new'; return this; };
-    },
-    loaded: true, id: dapath,
-  };
-  require.cache[dapath].exports.findOne = async () => recentCompleted;
   const objpath = require.resolve('../models/UserObjective');
-  require.cache[objpath] = {
-    exports: { findOne: () => ({ lean: async () => ({ _id: 'new-obj', analysis: { competencies: [{ name: 'sql' }] } }) }) },
-    loaded: true, id: objpath,
-  };
   const kpPath = require.resolve('../models/KnowledgeProfile');
-  require.cache[kpPath] = {
-    exports: { findOne: async () => null },
-    loaded: true, id: kpPath,
+  const svcPath = require.resolve('./diagnosticService');
+  const orig = {
+    da: require.cache[dapath],
+    obj: require.cache[objpath],
+    kp: require.cache[kpPath],
+    svc: require.cache[svcPath],
   };
-  delete require.cache[require.resolve('./diagnosticService')];
-  const svc = require('./diagnosticService');
-  const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
-  assert.ok(result);
-  assert.strictEqual(savedAttempt.objectiveSnapshot._id, 'new-obj');
+  try {
+    const recentCompleted = {
+      completedAt: new Date(Date.now() - 5 * 86400000),
+      objectiveSnapshot: { _id: 'old-obj' },
+    };
+    let savedAttempt = null;
+    require.cache[dapath] = {
+      exports: function FakeDA(data) {
+        Object.assign(this, data);
+        this.save = async () => { savedAttempt = this; this._id = 'new'; return this; };
+      },
+      loaded: true, id: dapath,
+    };
+    require.cache[dapath].exports.findOne = async () => recentCompleted;
+    require.cache[dapath].exports.updateMany = async () => ({ modifiedCount: 0 });
+    require.cache[objpath] = {
+      exports: { findOne: () => ({ lean: async () => ({ _id: 'new-obj', analysis: { competencies: [{ name: 'sql' }] } }) }) },
+      loaded: true, id: objpath,
+    };
+    require.cache[kpPath] = {
+      exports: { findOne: async () => null },
+      loaded: true, id: kpPath,
+    };
+    delete require.cache[svcPath];
+    const svc = require(svcPath);
+    const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
+    assert.ok(result);
+    assert.strictEqual(savedAttempt.objectiveSnapshot._id, 'new-obj');
+  } finally {
+    if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
+    if (orig.obj) require.cache[objpath] = orig.obj; else delete require.cache[objpath];
+    if (orig.kp) require.cache[kpPath] = orig.kp; else delete require.cache[kpPath];
+    if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
+  }
+});
+
+test('startAttempt abandons prior in_progress attempts of the same user', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const objpath = require.resolve('../models/UserObjective');
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  const svcPath = require.resolve('./diagnosticService');
+  const orig = {
+    da: require.cache[dapath], obj: require.cache[objpath],
+    kp: require.cache[kpPath], svc: require.cache[svcPath],
+  };
+  try {
+    let updateManyArgs = null;
+    require.cache[dapath] = {
+      exports: function FakeDA(data) {
+        Object.assign(this, data);
+        this.save = async () => { this._id = 'new'; return this; };
+      },
+      loaded: true, id: dapath,
+    };
+    require.cache[dapath].exports.findOne = async () => null; // no prior completed
+    require.cache[dapath].exports.updateMany = async (filter, update) => {
+      updateManyArgs = { filter, update };
+      return { modifiedCount: 1 };
+    };
+    require.cache[objpath] = {
+      exports: { findOne: () => ({ lean: async () => ({ _id: 'obj1', analysis: { competencies: [{ name: 'sql' }] } }) }) },
+      loaded: true, id: objpath,
+    };
+    require.cache[kpPath] = { exports: { findOne: async () => null }, loaded: true, id: kpPath };
+    delete require.cache[svcPath];
+    const svc = require(svcPath);
+    const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
+    assert.ok(result);
+    assert.ok(updateManyArgs, 'updateMany should have been called');
+    assert.deepStrictEqual(updateManyArgs.filter.status, { $in: ['in_progress', 'awaiting_self_rating'] });
+    assert.strictEqual(updateManyArgs.update.$set.status, 'abandoned');
+  } finally {
+    if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
+    if (orig.obj) require.cache[objpath] = orig.obj; else delete require.cache[objpath];
+    if (orig.kp) require.cache[kpPath] = orig.kp; else delete require.cache[kpPath];
+    if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
+  }
+});
+
+test('startAttempt does not block when prior attempt has null objectiveSnapshot', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  const objpath = require.resolve('../models/UserObjective');
+  const kpPath = require.resolve('../models/KnowledgeProfile');
+  const svcPath = require.resolve('./diagnosticService');
+  const orig = {
+    da: require.cache[dapath], obj: require.cache[objpath],
+    kp: require.cache[kpPath], svc: require.cache[svcPath],
+  };
+  try {
+    require.cache[dapath] = {
+      exports: function FakeDA(data) {
+        Object.assign(this, data);
+        this.save = async () => { this._id = 'new'; return this; };
+      },
+      loaded: true, id: dapath,
+    };
+    require.cache[dapath].exports.findOne = async () => ({
+      completedAt: new Date(Date.now() - 5 * 86400000),
+      objectiveSnapshot: null, // legacy attempt without snapshot
+    });
+    require.cache[dapath].exports.updateMany = async () => ({ modifiedCount: 0 });
+    require.cache[objpath] = {
+      exports: { findOne: () => ({ lean: async () => ({ _id: 'obj1', analysis: { competencies: [{ name: 'sql' }] } }) }) },
+      loaded: true, id: objpath,
+    };
+    require.cache[kpPath] = { exports: { findOne: async () => null }, loaded: true, id: kpPath };
+    delete require.cache[svcPath];
+    const svc = require(svcPath);
+    const result = await svc.startAttempt(new (require('mongoose')).Types.ObjectId());
+    assert.ok(result, 'should not block when prior snapshot is null');
+  } finally {
+    if (orig.da) require.cache[dapath] = orig.da; else delete require.cache[dapath];
+    if (orig.obj) require.cache[objpath] = orig.obj; else delete require.cache[objpath];
+    if (orig.kp) require.cache[kpPath] = orig.kp; else delete require.cache[kpPath];
+    if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
+  }
 });

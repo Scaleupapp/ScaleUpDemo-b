@@ -75,5 +75,14 @@ const diagnosticAttemptSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 diagnosticAttemptSchema.index({ userId: 1, status: 1, startedAt: -1 });
+diagnosticAttemptSchema.index({ userId: 1, status: 1, completedAt: -1 });
+diagnosticAttemptSchema.index(
+  { userId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $in: ['in_progress', 'awaiting_self_rating'] } },
+    name: 'one_active_attempt_per_user',
+  },
+);
 
 module.exports = mongoose.model('DiagnosticAttempt', diagnosticAttemptSchema);

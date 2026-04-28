@@ -74,11 +74,21 @@ async function startAttempt(userId) {
 
   if (lastCompleted && lastCompleted.completedAt) {
     const ageMs = Date.now() - new Date(lastCompleted.completedAt).getTime();
-    const sameObjective = String(lastCompleted.objectiveSnapshot?._id) === String(objective?._id);
+    const lastObjId = lastCompleted.objectiveSnapshot?._id;
+    const currObjId = objective?._id;
+    const sameObjective = !!lastObjId && !!currObjId && String(lastObjId) === String(currObjId);
     if (ageMs < RETAKE_COOLDOWN_MS && sameObjective) {
       return null;
     }
   }
+
+  // Abandon any prior in-progress / awaiting_self_rating attempts before creating a new one.
+  // This keeps the partial unique index (one_active_attempt_per_user) clean and makes the
+  // user's intent to start fresh explicit.
+  await DiagnosticAttempt.updateMany(
+    { userId, status: { $in: ['in_progress', 'awaiting_self_rating'] } },
+    { $set: { status: 'abandoned', abandonedAt: new Date() } },
+  );
 
   const flowType = _decideFlowType(profile);
 
