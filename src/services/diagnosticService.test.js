@@ -73,6 +73,24 @@ test('startAttempt creates an existing_user_tune attempt when KnowledgeProfile h
   assert.strictEqual(result.flowType, 'existing_user_tune');
 });
 
+test('startAttempt: 4 prior quizzes is below threshold → new_user flow', async () => {
+  const { svc } = setupStubs({
+    existingProfile: { totalQuizzesTaken: 4, topicMastery: [] },
+  });
+  const result = await svc.startAttempt(new mongoose.Types.ObjectId());
+  assert.strictEqual(result.flowType, 'new_user');
+});
+
+test('startAttempt: 5 prior quizzes is at threshold → existing_user_tune flow', async () => {
+  const { svc } = setupStubs({
+    existingProfile: { totalQuizzesTaken: 5, topicMastery: [
+      { topic: 'sql', score: 80, quizzesTaken: 5, scoreHistory: Array.from({length: 5}, () => ({ score: 80 })) },
+    ] },
+  });
+  const result = await svc.startAttempt(new mongoose.Types.ObjectId());
+  assert.strictEqual(result.flowType, 'existing_user_tune');
+});
+
 test('startAttempt returns null when objective has no competencies (caller falls back)', async () => {
   const objpath = require.resolve('../models/UserObjective');
   require.cache[objpath] = {

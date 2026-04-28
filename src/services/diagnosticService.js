@@ -28,11 +28,16 @@ const CONFIDENCE_MEDIUM_THRESHOLD_S = 12;
 const ACTIVE_ATTEMPT_STATUSES = ['in_progress'];
 
 /**
- * Decide flow type based on whether the user has any prior platform activity.
- * Threshold: any completed quiz attempt → existing-user flow.
+ * Decide flow type based on prior platform activity.
+ * 5+ completed quizzes = enough signal to scope existing-user flow meaningfully;
+ * fewer means treat as new and run the full diagnostic.
  */
+const EXISTING_USER_QUIZ_THRESHOLD = 5;
+
 function _decideFlowType(profile) {
-  if (profile && (profile.totalQuizzesTaken || 0) >= 1) return 'existing_user_tune';
+  if (profile && (profile.totalQuizzesTaken || 0) >= EXISTING_USER_QUIZ_THRESHOLD) {
+    return 'existing_user_tune';
+  }
   return 'new_user';
 }
 
