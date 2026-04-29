@@ -201,8 +201,8 @@ async function nextQuestion(attemptId) {
       return {
         done: false,
         question: {
-          id: q._id, competency: comp, difficulty: q.difficulty,
-          questionText: q.questionText,
+          _id: q._id, competency: comp, difficulty: q.difficulty,
+          prompt: q.questionText,
           options: (q.options || []).map(o => ({ key: o.label || o.key, text: o.text })),
         },
       };
@@ -216,9 +216,9 @@ async function nextQuestion(attemptId) {
         return {
           done: false,
           question: {
-            id: q._id, competency: comp, difficulty: q.difficulty,
-            questionText: q.questionText,
-          options: (q.options || []).map(o => ({ key: o.label || o.key, text: o.text })),
+            _id: q._id, competency: comp, difficulty: q.difficulty,
+            prompt: q.questionText,
+            options: (q.options || []).map(o => ({ key: o.label || o.key, text: o.text })),
           },
         };
       }
