@@ -14,7 +14,7 @@ const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
 const { normalize } = require('./competencyNormalizer');
 
 const FLOOR_QUESTIONS_PER_COMPETENCY = 3;
-const DEFAULT_POOL_SIZE = 24;
+const DEFAULT_POOL_SIZE = 12;
 const MIN_VIABLE_POOL_SIZE = 3;
 
 // Difficulty distribution per self-rating, expressed as proportions
@@ -85,7 +85,47 @@ async function _llmCallForOneCompetency(subAllocation, { objective } = {}) {
         model: 'gpt-4o-mini',
         temperature: 0.4,
         max_tokens: 2500,
-        response_format: { type: 'json_object' },
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'diagnostic_questions',
+            strict: true,
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['questions'],
+              properties: {
+                questions: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['competency', 'difficulty', 'questionText', 'options', 'correctAnswer', 'explanation'],
+                    properties: {
+                      competency: { type: 'string' },
+                      difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+                      questionText: { type: 'string' },
+                      options: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          additionalProperties: false,
+                          required: ['key', 'text'],
+                          properties: {
+                            key: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
+                            text: { type: 'string' },
+                          },
+                        },
+                      },
+                      correctAnswer: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
+                      explanation: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         messages: [
           { role: 'system', content: quizGenerationService.DIAGNOSTIC_QUIZ_SYSTEM_PROMPT },
           { role: 'user', content: JSON.stringify(userPayload) },
