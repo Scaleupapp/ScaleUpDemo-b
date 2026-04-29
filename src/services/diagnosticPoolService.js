@@ -110,9 +110,9 @@ async function _llmCallForOneCompetency(subAllocation, { objective } = {}) {
                         items: {
                           type: 'object',
                           additionalProperties: false,
-                          required: ['key', 'text'],
+                          required: ['label', 'text'],
                           properties: {
-                            key: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
+                            label: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
                             text: { type: 'string' },
                           },
                         },

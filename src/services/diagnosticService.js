@@ -202,7 +202,8 @@ async function nextQuestion(attemptId) {
         done: false,
         question: {
           id: q._id, competency: comp, difficulty: q.difficulty,
-          questionText: q.questionText, options: q.options,
+          questionText: q.questionText,
+          options: (q.options || []).map(o => ({ key: o.label || o.key, text: o.text })),
         },
       };
     }
@@ -216,7 +217,8 @@ async function nextQuestion(attemptId) {
           done: false,
           question: {
             id: q._id, competency: comp, difficulty: q.difficulty,
-            questionText: q.questionText, options: q.options,
+            questionText: q.questionText,
+          options: (q.options || []).map(o => ({ key: o.label || o.key, text: o.text })),
           },
         };
       }
