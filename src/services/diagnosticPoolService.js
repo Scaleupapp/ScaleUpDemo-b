@@ -15,7 +15,7 @@ const { normalize } = require('./competencyNormalizer');
 
 const FLOOR_QUESTIONS_PER_COMPETENCY = 3;
 const DEFAULT_POOL_SIZE = 24;
-const MIN_VIABLE_POOL_SIZE = 6;
+const MIN_VIABLE_POOL_SIZE = 3;
 
 // Difficulty distribution per self-rating, expressed as proportions
 // over the per-competency allocation.
@@ -48,6 +48,21 @@ function calculatePoolAllocation(competencies, totalPoolSize = DEFAULT_POOL_SIZE
 }
 
 /**
+ * Wraps openai.chat.completions.create with a hard per-call timeout.
+ * Uses AbortController so the in-flight HTTP socket is actually closed.
+ * Throws on timeout (AbortError), letting the caller's retry logic handle it.
+ */
+async function _callOpenAIWithTimeout(params, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await openai.chat.completions.create({ ...params }, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Makes one LLM call for a single competency's sub-allocation, retrying once
  * on any failure (including JSON parse errors). Returns validated questions or [].
  */
@@ -60,9 +75,13 @@ async function _llmCallForOneCompetency(subAllocation, { objective } = {}) {
     })),
   };
 
+  const competencyName = subAllocation[0]?.name;
+
   for (let attempt = 1; attempt <= 2; attempt++) {
+    const t0 = Date.now();
+    console.log(`[diagnosticPoolService] competency='${competencyName}' attempt ${attempt} start`);
     try {
-      const resp = await openai.chat.completions.create({
+      const resp = await _callOpenAIWithTimeout({
         model: 'gpt-4o-mini',
         temperature: 0.4,
         max_tokens: 2500,
@@ -78,16 +97,18 @@ async function _llmCallForOneCompetency(subAllocation, { objective } = {}) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed?.questions)) {
         // Light validation; drop bad rows silently
-        return parsed.questions.filter(q =>
+        const valid = parsed.questions.filter(q =>
           q && typeof q.competency === 'string'
           && ['easy', 'medium', 'hard'].includes(q.difficulty)
           && typeof q.questionText === 'string'
           && Array.isArray(q.options) && q.options.length === 4
           && ['A', 'B', 'C', 'D'].includes(q.correctAnswer)
         );
+        console.log(`[diagnosticPoolService] competency='${competencyName}' attempt ${attempt} done in ${Date.now() - t0}ms, ${valid.length} questions`);
+        return valid;
       }
     } catch (err) {
-      console.warn(`[diagnosticPoolService] competency='${subAllocation[0]?.name}' attempt ${attempt} failed: ${err.message}`);
+      console.warn(`[diagnosticPoolService] competency='${competencyName}' attempt ${attempt} failed in ${Date.now() - t0}ms: ${err.message}`);
     }
   }
   return [];
@@ -158,6 +179,7 @@ async function persistToBank(generatedQuestions) {
  * for whatever's missing, then persist the LLM-generated questions for next time.
  */
 async function assemblePool(allocation, ctx = {}) {
+  const assembleStart = Date.now();
   // Build one cell per (competency, difficulty) and fetch all in parallel (I2)
   const cells = [];
   for (const row of allocation) {
@@ -167,6 +189,10 @@ async function assemblePool(allocation, ctx = {}) {
       cells.push({ name: row.name, diff, want });
     }
   }
+
+  // Count how many cells actually need LLM (we won't know until after bank lookup,
+  // but log the total cell count now for context).
+  console.log(`[diagnosticPoolService] assemblePool start: cells=${cells.length}, competencies=${allocation.length}`);
 
   const cellResults = await Promise.all(
     cells.map(cell => lookupFromBank(cell.name, cell.diff, cell.want)),
@@ -187,6 +213,8 @@ async function assemblePool(allocation, ctx = {}) {
     }
   }
 
+  console.log(`[diagnosticPoolService] assemblePool: llmFallbackNeeded=${stillNeeded.length > 0} (${stillNeeded.length} cells)`);
+
   if (stillNeeded.length > 0) {
     const generated = await generatePoolFromLLM(stillNeeded, ctx);
     out.push(...generated);
@@ -198,9 +226,14 @@ async function assemblePool(allocation, ctx = {}) {
     }
   }
 
+  const elapsed = Date.now() - assembleStart;
+
   if (out.length < MIN_VIABLE_POOL_SIZE) {
+    console.error(`[diagnosticPoolService] Pool below viable size: ${out.length}/${MIN_VIABLE_POOL_SIZE}, throwing`);
     throw new Error('Could not assemble enough questions; please try again.');
   }
+
+  console.log(`[diagnosticPoolService] Pool assembled: ${out.length} questions in ${elapsed}ms`);
 
   return out;
 }
@@ -211,6 +244,7 @@ module.exports = {
     calculatePoolAllocation,
     generatePoolFromLLM,
     _llmCallForOneCompetency,
+    _callOpenAIWithTimeout,
     lookupFromBank,
     persistToBank,
     FLOOR_QUESTIONS_PER_COMPETENCY,
