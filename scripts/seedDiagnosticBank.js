@@ -4,14 +4,14 @@
  *
  * Usage: node scripts/seedDiagnosticBank.js
  *
- * Generates 8 easy + 8 medium + 8 hard questions per competency (24 per competency,
- * 384 total across 16 competencies) and persists them to the bank so live users
- * hit cache instead of triggering on-demand LLM calls.
+ * Strategy: small per-call batches (4 questions each) so every call fits inside
+ * the 12s LLM timeout. 16 competencies × 3 difficulties × 2 batches = 96 calls.
+ * Processed in parallel groups of 6 to balance OpenAI rate limits and runtime.
  *
- * Skips any competency that already has >= 24 active questions in the bank.
- * Safe to re-run — idempotent per competency.
+ * Idempotent — counts existing bank entries per (competency, difficulty) and
+ * only fills what's missing.
  *
- * Run this on the EC2 instance after deploying the updated diagnosticPoolService.
+ * Run on EC2 after deploying updated diagnosticPoolService.
  */
 
 require('dotenv').config();
@@ -41,36 +41,80 @@ const COMPETENCIES = [
   'Distributed Systems',
 ];
 
-const QUESTIONS_PER_DIFFICULTY = 8; // 8 easy + 8 medium + 8 hard = 24 per competency = 384 total
+const DIFFICULTIES = ['easy', 'medium', 'hard'];
+const QUESTIONS_PER_BATCH = 4;
+const BATCHES_PER_DIFFICULTY = 2;     // 4 × 2 = 8 questions per (comp, difficulty)
+const TARGET_PER_DIFFICULTY = QUESTIONS_PER_BATCH * BATCHES_PER_DIFFICULTY;
+const PARALLEL_BATCH_SIZE = 6;        // how many sub-calls to run in parallel
+
+function buildSubAllocation(comp, difficulty, count) {
+  return [{
+    name: comp,
+    easy:   difficulty === 'easy'   ? count : 0,
+    medium: difficulty === 'medium' ? count : 0,
+    hard:   difficulty === 'hard'   ? count : 0,
+  }];
+}
+
+async function processOne({ comp, difficulty, idx }) {
+  const t0 = Date.now();
+  const allocation = buildSubAllocation(comp, difficulty, QUESTIONS_PER_BATCH);
+  try {
+    const generated = await diagnosticPoolService._internal.generatePoolFromLLM(
+      allocation,
+      { objective: comp },
+    );
+    if (generated.length > 0) {
+      await diagnosticPoolService._internal.persistToBank(generated);
+    }
+    console.log(`  [${idx}] ${comp} / ${difficulty} batch: ${generated.length} questions in ${Date.now() - t0}ms`);
+    return generated.length;
+  } catch (err) {
+    console.error(`  [${idx}] ${comp} / ${difficulty} batch FAILED in ${Date.now() - t0}ms: ${err.message}`);
+    return 0;
+  }
+}
 
 async function main() {
   await mongoose.connect(process.env.MONGODB_URI);
   console.log('[seedDiagnosticBank] connected');
 
+  // Build the work queue, skipping (comp, difficulty) pairs that are already full.
+  const work = [];
+  let idx = 0;
   for (const comp of COMPETENCIES) {
     const canonical = normalize(comp);
-    const existing = await DiagnosticQuestionBank.countDocuments({ canonicalCompetency: canonical, status: 'active' });
-    if (existing >= QUESTIONS_PER_DIFFICULTY * 3) {
-      console.log(`[seedDiagnosticBank] ${comp}: ${existing} already, skipping`);
-      continue;
-    }
-
-    const allocation = [{ name: comp, easy: QUESTIONS_PER_DIFFICULTY, medium: QUESTIONS_PER_DIFFICULTY, hard: QUESTIONS_PER_DIFFICULTY }];
-    console.log(`[seedDiagnosticBank] ${comp}: generating ${QUESTIONS_PER_DIFFICULTY * 3} questions...`);
-    try {
-      const generated = await diagnosticPoolService._internal.generatePoolFromLLM(allocation, { objective: comp });
-      console.log(`[seedDiagnosticBank] ${comp}: got ${generated.length} questions`);
-      if (generated.length > 0) {
-        await diagnosticPoolService._internal.persistToBank(generated);
-        console.log(`[seedDiagnosticBank] ${comp}: persisted ${generated.length} questions`);
+    for (const difficulty of DIFFICULTIES) {
+      const existing = await DiagnosticQuestionBank.countDocuments({
+        canonicalCompetency: canonical,
+        difficulty,
+        status: 'active',
+      });
+      const missing = Math.max(0, TARGET_PER_DIFFICULTY - existing);
+      const batchesNeeded = Math.ceil(missing / QUESTIONS_PER_BATCH);
+      if (batchesNeeded === 0) {
+        console.log(`[seedDiagnosticBank] ${comp} / ${difficulty}: ${existing} ≥ ${TARGET_PER_DIFFICULTY}, skipping`);
+        continue;
       }
-    } catch (err) {
-      console.error(`[seedDiagnosticBank] ${comp}: failed`, err.message);
+      for (let b = 0; b < batchesNeeded; b++) {
+        work.push({ comp, difficulty, idx: ++idx });
+      }
     }
   }
 
+  console.log(`[seedDiagnosticBank] ${work.length} sub-calls queued, processing ${PARALLEL_BATCH_SIZE} in parallel`);
+  const overallStart = Date.now();
+  let totalAdded = 0;
+
+  for (let i = 0; i < work.length; i += PARALLEL_BATCH_SIZE) {
+    const slice = work.slice(i, i + PARALLEL_BATCH_SIZE);
+    console.log(`[seedDiagnosticBank] batch ${Math.floor(i / PARALLEL_BATCH_SIZE) + 1}/${Math.ceil(work.length / PARALLEL_BATCH_SIZE)}…`);
+    const results = await Promise.all(slice.map(processOne));
+    totalAdded += results.reduce((s, n) => s + n, 0);
+  }
+
+  console.log(`[seedDiagnosticBank] done — added ${totalAdded} questions in ${Math.round((Date.now() - overallStart) / 1000)}s`);
   await mongoose.disconnect();
-  console.log('[seedDiagnosticBank] done');
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
