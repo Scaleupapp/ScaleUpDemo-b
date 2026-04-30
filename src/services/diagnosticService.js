@@ -20,6 +20,7 @@ const UserObjective = require('../models/UserObjective');
 const diagnosticPoolService = require('./diagnosticPoolService');
 const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
 const selector = require('./diagnosticSelectorService');
+const { normalize } = require('./competencyNormalizer');
 
 const RATING_TO_NUM = { novice: 0, familiar: 1, proficient: 2, expert: 3, unsure: 0 };
 
@@ -189,6 +190,8 @@ async function nextQuestion(attemptId) {
     });
     if (decision.shouldStop) continue;
 
+    const compCanonical = normalize(comp);
+
     // Find a pool question matching (competency, difficulty), not already used
     const usedIds = new Set(attempt.answers.map(a => String(a.questionId)));
     for (const qid of poolQuestionIds) {
@@ -196,8 +199,8 @@ async function nextQuestion(attemptId) {
       const q = poolMap.get(String(qid));
       if (!q) continue;
       if (q.difficulty !== decision.nextDifficulty) continue;
-      // We don't strictly require q.canonicalCompetency === comp — pool may have other competencies; keep moving if mismatch
-      if (q.canonicalCompetency && q.canonicalCompetency !== comp) continue;
+      // Normalize both sides — bank stores canonical, attempt has raw competency name.
+      if (q.canonicalCompetency && q.canonicalCompetency !== compCanonical) continue;
       DiagnosticQuestionBank.updateOne({ _id: q._id }, { $inc: { timesUsed: 1 } }).catch(() => {});
       return {
         done: false,
@@ -212,7 +215,7 @@ async function nextQuestion(attemptId) {
     for (const qid of poolQuestionIds) {
       if (usedIds.has(String(qid))) continue;
       const q = poolMap.get(String(qid));
-      if (q && q.canonicalCompetency === comp) {
+      if (q && q.canonicalCompetency === compCanonical) {
         DiagnosticQuestionBank.updateOne({ _id: q._id }, { $inc: { timesUsed: 1 } }).catch(() => {});
         return {
           done: false,
