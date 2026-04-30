@@ -62,7 +62,8 @@ function questionCapForCompetency(profile, competency) {
   return 2;                                               // Weak signal
 }
 
-const RETAKE_COOLDOWN_MS = 30 * 86400000;
+const RETAKE_COOLDOWN_DAYS = Number(process.env.DIAGNOSTIC_RETAKE_COOLDOWN_DAYS ?? 30);
+const RETAKE_COOLDOWN_MS = RETAKE_COOLDOWN_DAYS * 86400000;
 
 async function startAttempt(userId) {
   const [profile, objective] = await Promise.all([
