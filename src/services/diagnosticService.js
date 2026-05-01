@@ -237,10 +237,18 @@ async function submitAnswer(attemptId, questionId, selectedAnswer, timeTaken) {
   const q = await DiagnosticQuestionBank.findById(questionId);
   if (!q) throw new Error('question not found');
 
+  // Store competency under the same name selfRatings is keyed by (raw user-facing
+  // form like "Product Metrics & Analytics"), so per-competency filters in
+  // nextQuestion/finishAttempt match. Bank stores canonical; reverse-lookup here.
+  const selfRatingsKeys = attempt.selfRatings ? Array.from(attempt.selfRatings.keys()) : [];
+  const rawCompetency =
+    selfRatingsKeys.find(k => normalize(k) === q.canonicalCompetency)
+    || q.canonicalCompetency;
+
   const isCorrect = q.correctAnswer === selectedAnswer;
   attempt.answers.push({
     questionId,
-    competency: q.canonicalCompetency,
+    competency: rawCompetency,
     difficulty: q.difficulty,
     selectedAnswer,
     isCorrect,
