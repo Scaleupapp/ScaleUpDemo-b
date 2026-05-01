@@ -277,7 +277,11 @@ test('finishAttempt computes per-competency results and updates attempt status',
   assert.strictEqual(kpSave.topicMastery[0].selfRating, 'familiar');
   // calibrationDelta: familiar→1, proficient→2, delta = 1 (under-rated by 1 band)
   assert.strictEqual(kpSave.topicMastery[0].calibrationAtBaseline.delta, -1); // self < assessed
-  assert.ok(result.results.sql);
+  assert.ok(Array.isArray(result.results), 'results should be an array');
+  const sqlResult = result.results.find(r => r.competency === 'sql');
+  assert.ok(sqlResult, 'sql result should exist');
+  assert.strictEqual(sqlResult.band, 'proficient');
+  assert.strictEqual(typeof result.attemptId, 'string');
 });
 
 test('abandon at <30% completion drops the data', async () => {

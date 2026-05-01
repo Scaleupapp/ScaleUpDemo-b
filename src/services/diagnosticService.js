@@ -323,9 +323,23 @@ async function finishAttempt(attemptId) {
 }
 
 function _resultsObjectFromAttempt(attempt) {
-  const obj = {};
-  for (const [k, v] of attempt.results.entries()) obj[k] = v;
-  return { results: obj, status: attempt.status };
+  // Wire shape required by iOS/RN clients:
+  //   { attemptId, status, results: [ { competency, band, score, calibrationDelta, questionsAsked } ] }
+  const results = [];
+  for (const [comp, v] of attempt.results.entries()) {
+    results.push({
+      competency: comp,
+      band: v.assessedBand,
+      score: v.score,
+      calibrationDelta: v.calibrationDelta,
+      questionsAsked: v.questionsAsked,
+    });
+  }
+  return {
+    attemptId: String(attempt._id),
+    status: attempt.status,
+    results,
+  };
 }
 
 async function _applyToKnowledgeProfile(attempt) {

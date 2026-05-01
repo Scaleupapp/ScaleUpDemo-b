@@ -130,7 +130,9 @@ test('diagnostic happy-path: start → self-rate → answer all → finish', asy
 
   const result = await svc.finishAttempt(start.attemptId);
   assert.strictEqual(result.status, 'completed');
-  assert.ok(result.results.sql);
+  assert.ok(Array.isArray(result.results), 'results should be an array');
+  const sql = result.results.find(r => r.competency === 'sql');
+  assert.ok(sql, 'sql result should exist');
   // Two correct at easy → familiar (not novice)
-  assert.strictEqual(result.results.sql.assessedBand, 'familiar');
+  assert.strictEqual(sql.band, 'familiar');
 });
