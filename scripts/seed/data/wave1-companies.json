@@ -1,0 +1,842 @@
+[
+  {
+    "name": "Google",
+    "normalizedName": "google",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "System design depth (L4+) covering global-scale infrastructure",
+      "Googleyness behavioural framework",
+      "Coding rigor — 2 hard LeetCode-style rounds",
+      "Cross-functional collaboration emphasis"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.5,
+      "data-structures-algorithms": 1.4,
+      "behavioural": 1.2,
+      "ai-augmented-engineering": 1.1
+    },
+    "examplesContext": "You are a SWE at Google India working on Search infrastructure, Cloud, or Android, dealing with global-scale systems and Indian regulatory context (DPDP) for India-region products.",
+    "source": "curated"
+  },
+  {
+    "name": "Microsoft",
+    "normalizedName": "microsoft",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round on Azure-style distributed systems problems",
+      "System design with availability/SLA framing",
+      "Growth-mindset behavioural questions",
+      "Cross-team partnership scenarios"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.3,
+      "cloud-deployment": 1.4,
+      "behavioural": 1.2
+    },
+    "examplesContext": "You are an engineer at Microsoft IDC (Hyderabad/Bengaluru) working on Azure, M365, or GitHub Copilot, balancing global product surface with India-region compliance.",
+    "source": "curated"
+  },
+  {
+    "name": "Amazon",
+    "normalizedName": "amazon",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Leadership Principles — every behavioural answer mapped to one of the 16 LPs",
+      "Bar Raiser round with deep dive on Customer Obsession and Ownership",
+      "System design for high-throughput retail and AWS services",
+      "Coding rounds with focus on correctness and edge cases"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.5,
+      "data-structures-algorithms": 1.4,
+      "behavioural": 1.6,
+      "leadership-principles": 1.7
+    },
+    "examplesContext": "You are an SDE at Amazon India working on Amazon.in retail, Prime Video, or AWS India services, framing every story around Leadership Principles like Customer Obsession and Ownership.",
+    "source": "curated"
+  },
+  {
+    "name": "Meta",
+    "normalizedName": "meta",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding ninja rounds — 2 mediums in 45 minutes",
+      "Product architecture round (News Feed, Reels-style scale)",
+      "Behavioural with focus on Move Fast and impact ownership",
+      "Jedi (cross-functional) round for senior levels"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.5,
+      "data-structures-algorithms": 1.5,
+      "behavioural": 1.2,
+      "product-sense": 1.3
+    },
+    "examplesContext": "You are an engineer at Meta India working on Instagram, WhatsApp Business, or Reality Labs research, navigating India-specific WhatsApp regulatory norms and global-scale infra.",
+    "source": "curated"
+  },
+  {
+    "name": "Apple",
+    "normalizedName": "apple",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Domain-deep technical rounds — hardware/software co-design or platform internals",
+      "Detail-oriented coding with strong systems fundamentals",
+      "Secrecy and ownership behavioural framing",
+      "Cross-functional collaboration with design and hardware"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.3,
+      "data-structures-algorithms": 1.4,
+      "operating-systems": 1.4,
+      "behavioural": 1.1
+    },
+    "examplesContext": "You are an engineer at Apple India (Hyderabad maps/services or Bengaluru engineering) working on Maps, Siri, or platform services with attention to detail and secrecy norms.",
+    "source": "curated"
+  },
+  {
+    "name": "NVIDIA",
+    "normalizedName": "nvidia",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "CUDA / GPU programming fundamentals",
+      "Systems-level coding (C++ memory, parallelism)",
+      "ML systems and inference optimization scenarios",
+      "Behavioural with technical depth bias"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.3,
+      "data-structures-algorithms": 1.3,
+      "ml-systems": 1.5,
+      "operating-systems": 1.4
+    },
+    "examplesContext": "You are an engineer at NVIDIA Bengaluru/Pune working on GPU drivers, CUDA libraries, or NeMo/AI inference, with India scaling AI workloads for enterprise customers.",
+    "source": "curated"
+  },
+  {
+    "name": "Adobe",
+    "normalizedName": "adobe",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round emphasising clean OO design",
+      "System design for creative cloud / document workflows",
+      "Behavioural focused on craft and customer empathy",
+      "Bar-raiser with senior IC for principle-engineer levels"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.3,
+      "data-structures-algorithms": 1.2,
+      "object-oriented-design": 1.3,
+      "behavioural": 1.1
+    },
+    "examplesContext": "You are an engineer at Adobe Noida/Bengaluru working on Creative Cloud, Acrobat, or Experience Cloud, building AI-assisted creative tools for India and global users.",
+    "source": "curated"
+  },
+  {
+    "name": "Salesforce",
+    "normalizedName": "salesforce",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Apex / multi-tenant SaaS coding scenarios",
+      "System design with multi-tenancy and metadata-driven architecture",
+      "Trust-and-Ohana culture behavioural framing",
+      "Cross-cloud integration round"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.2,
+      "api-design": 1.3,
+      "behavioural": 1.1
+    },
+    "examplesContext": "You are an engineer at Salesforce India (Hyderabad/Bengaluru) building on the Lightning Platform, Data Cloud, or Einstein, designing multi-tenant features for Indian enterprise customers.",
+    "source": "curated"
+  },
+  {
+    "name": "Oracle",
+    "normalizedName": "oracle",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "DBMS internals and SQL optimization deep dive",
+      "Coding rounds with strong OS/networking fundamentals",
+      "System design — OCI cloud services, distributed databases",
+      "Behavioural with on-call ownership framing"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.3,
+      "database-systems": 1.5,
+      "data-structures-algorithms": 1.2,
+      "cloud-deployment": 1.3
+    },
+    "examplesContext": "You are an engineer at Oracle India (Bengaluru/Hyderabad) working on OCI, Autonomous Database, or Fusion apps, with deep DB internals and India-region cloud sovereignty considerations.",
+    "source": "curated"
+  },
+  {
+    "name": "IBM",
+    "normalizedName": "ibm",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Cognitive/AI coding scenarios on watsonx",
+      "Hybrid cloud system design with Red Hat OpenShift",
+      "Consulting-style behavioural with client-impact framing",
+      "Domain depth — mainframe, AI, or cloud"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.3,
+      "cloud-deployment": 1.4,
+      "data-structures-algorithms": 1.1,
+      "ai-product-strategy": 1.2
+    },
+    "examplesContext": "You are an engineer/consultant at IBM India (Bengaluru/Pune) working on watsonx, Red Hat OpenShift, or hybrid-cloud client engagements with BFSI customers.",
+    "source": "curated"
+  },
+  {
+    "name": "Intel",
+    "normalizedName": "intel",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Computer architecture and low-level systems coding",
+      "C/C++ with memory and concurrency depth",
+      "Performance/power tradeoff scenarios",
+      "Behavioural with technical ownership framing"
+    ],
+    "topicWeightOverrides": {
+      "computer-architecture": 1.5,
+      "operating-systems": 1.4,
+      "data-structures-algorithms": 1.2,
+      "system-design": 1.2
+    },
+    "examplesContext": "You are an engineer at Intel India (Bengaluru) working on chip validation, drivers, oneAPI, or AI acceleration, with focus on performance/power tradeoffs.",
+    "source": "curated"
+  },
+  {
+    "name": "Qualcomm",
+    "normalizedName": "qualcomm",
+    "industry": "Big Tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Embedded systems and RTOS coding",
+      "Wireless/modem domain knowledge for relevant roles",
+      "C/C++ with hardware-software interface depth",
+      "Behavioural with execution-under-constraint framing"
+    ],
+    "topicWeightOverrides": {
+      "embedded-systems": 1.5,
+      "computer-architecture": 1.3,
+      "operating-systems": 1.4,
+      "data-structures-algorithms": 1.2
+    },
+    "examplesContext": "You are an engineer at Qualcomm India (Bengaluru/Hyderabad/Chennai) working on Snapdragon SoCs, modem firmware, or AI accelerators powering Indian smartphones.",
+    "source": "curated"
+  },
+  {
+    "name": "Flipkart",
+    "normalizedName": "flipkart",
+    "industry": "E-commerce",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding (medium-hard) with focus on scale and concurrency",
+      "System design — Big Billion Days scale, catalog, supply chain",
+      "Machine coding round (LLD) for senior roles",
+      "Behavioural — ownership of customer outcomes, Bharat-first thinking"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.5,
+      "low-level-design": 1.5,
+      "data-structures-algorithms": 1.3,
+      "behavioural": 1.1
+    },
+    "examplesContext": "You are an engineer at Flipkart Bengaluru working on catalog, search, supply chain, or BBD-scale traffic for Tier-2/3 Bharat shoppers, with Walmart-stack collaboration.",
+    "source": "curated"
+  },
+  {
+    "name": "Zomato",
+    "normalizedName": "zomato",
+    "industry": "Food-tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round with practical, real-world problem framing",
+      "System design — hyperlocal delivery, ETA prediction, Hyperpure logistics",
+      "Product-sense for product/PM-eng hybrid roles",
+      "Behavioural — speed, ownership, customer obsession"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.2,
+      "product-sense": 1.3,
+      "low-level-design": 1.3
+    },
+    "examplesContext": "You are an engineer at Zomato Gurugram working on food delivery dispatch, Hyperpure B2B supply, or Blinkit quick-commerce, optimising for sub-15-min hyperlocal delivery in Indian cities.",
+    "source": "curated"
+  },
+  {
+    "name": "Swiggy",
+    "normalizedName": "swiggy",
+    "industry": "Food-tech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "DSA round (medium) with real-world problem context",
+      "System design — Instamart 10-min delivery, dispatch optimisation",
+      "Machine coding for SDE-2/3 roles",
+      "Behavioural — bias for action, customer empathy"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.3,
+      "low-level-design": 1.4,
+      "behavioural": 1.1
+    },
+    "examplesContext": "You are an engineer at Swiggy Bengaluru working on Instamart, Dineout, or food delivery, balancing rider economics with sub-30-min delivery SLAs across Tier-1 Indian cities.",
+    "source": "curated"
+  },
+  {
+    "name": "Razorpay",
+    "normalizedName": "razorpay",
+    "industry": "Fintech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "API design depth — payments domain",
+      "System design with regulatory constraints (RBI 2FA, settlement timelines)",
+      "Coding (medium) — practical, not LeetCode-puzzle",
+      "Behavioural — small-team, high-ownership culture"
+    ],
+    "topicWeightOverrides": {
+      "api-design": 1.6,
+      "system-design": 1.4,
+      "rbi-compliance": 1.5,
+      "data-structures-algorithms": 0.9
+    },
+    "examplesContext": "You are a backend engineer at Razorpay Bengaluru handling UPI flows, Razorpay Capital underwriting, or merchant onboarding, with deep RBI regulatory context.",
+    "source": "curated"
+  },
+  {
+    "name": "CRED",
+    "normalizedName": "cred",
+    "industry": "Fintech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding rounds emphasising clean idiomatic code",
+      "System design with focus on premium UX and reliability",
+      "Design-sensibility for engineering roles (UI fidelity matters)",
+      "Behavioural — craft, taste, product obsession"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.3,
+      "frontend-development": 1.3,
+      "behavioural": 1.2
+    },
+    "examplesContext": "You are an engineer at CRED Bengaluru working on credit-card payments, CRED Pay merchant network, or CRED Mint, building for affluent Indian millennials with extreme craft standards.",
+    "source": "curated"
+  },
+  {
+    "name": "PhonePe",
+    "normalizedName": "phonepe",
+    "industry": "Fintech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round with strong Java/Go fundamentals",
+      "System design — UPI scale (10B+ tx/month), idempotency, distributed transactions",
+      "Low-level design / machine coding round",
+      "Behavioural — ownership, scale-of-impact framing"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.6,
+      "distributed-systems": 1.5,
+      "data-structures-algorithms": 1.3,
+      "rbi-compliance": 1.3
+    },
+    "examplesContext": "You are an engineer at PhonePe Bengaluru handling UPI transactions at 10B+/month scale, insurance/wealth products, or merchant payments across India's deepest fintech rail.",
+    "source": "curated"
+  },
+  {
+    "name": "Paytm",
+    "normalizedName": "paytm",
+    "industry": "Fintech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round with backend-systems flavour",
+      "System design — payments, ticketing, marketplace",
+      "Behavioural — fast execution, regulatory awareness post-PPBL",
+      "Domain knowledge of UPI / wallets / lending"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.2,
+      "api-design": 1.3,
+      "rbi-compliance": 1.4
+    },
+    "examplesContext": "You are an engineer at Paytm Noida working on payments, Paytm Money, or merchant offerings, navigating the post-PPBL regulatory landscape and India's UPI ecosystem.",
+    "source": "curated"
+  },
+  {
+    "name": "Meesho",
+    "normalizedName": "meesho",
+    "industry": "E-commerce",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "DSA round (medium) with real e-commerce framing",
+      "System design — zero-commission marketplace, social-commerce flows",
+      "LLD/machine coding for senior roles",
+      "Behavioural — Bharat-first user empathy, frugal ownership"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "low-level-design": 1.4,
+      "data-structures-algorithms": 1.3,
+      "behavioural": 1.1
+    },
+    "examplesContext": "You are an engineer at Meesho Bengaluru building for Tier-3+ Bharat resellers and shoppers, optimising for low-data devices, vernacular UX, and zero-commission unit economics.",
+    "source": "curated"
+  },
+  {
+    "name": "Postman",
+    "normalizedName": "postman",
+    "industry": "Developer Tools",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "API design and REST/GraphQL deep dive",
+      "Coding round with focus on developer-tool ergonomics",
+      "System design — collections, sync, workspaces at scale",
+      "Behavioural — developer empathy, OSS engagement"
+    ],
+    "topicWeightOverrides": {
+      "api-design": 1.6,
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.2,
+      "developer-experience": 1.4
+    },
+    "examplesContext": "You are an engineer at Postman Bengaluru working on the API platform, AI agents, or workspace collaboration, building for 30M+ developers worldwide with India HQ.",
+    "source": "curated"
+  },
+  {
+    "name": "Freshworks",
+    "normalizedName": "freshworks",
+    "industry": "SaaS",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round with multi-tenant SaaS framing",
+      "System design — CRM/helpdesk at SMB scale",
+      "LLD round for senior engineers",
+      "Behavioural — global SaaS execution from Chennai"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.2,
+      "low-level-design": 1.3,
+      "saas-architecture": 1.4
+    },
+    "examplesContext": "You are an engineer at Freshworks Chennai building Freshdesk, Freshsales, or Freshchat for SMB customers globally, with multi-tenant SaaS architecture and Indian engineering culture.",
+    "source": "curated"
+  },
+  {
+    "name": "Zerodha",
+    "normalizedName": "zerodha",
+    "industry": "Fintech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Strong fundamentals — OS, networks, databases (no DSA grinding)",
+      "Real-world coding with focus on simplicity",
+      "System design — broker matching engines, low-latency feeds",
+      "Behavioural — frugality, long-term thinking, no-funding ethos"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "operating-systems": 1.3,
+      "database-systems": 1.3,
+      "data-structures-algorithms": 1.0
+    },
+    "examplesContext": "You are an engineer at Zerodha Bengaluru working on Kite trading platform, Console, or Coin, with deep SEBI compliance context and a culture of profitability over growth.",
+    "source": "curated"
+  },
+  {
+    "name": "Nykaa",
+    "normalizedName": "nykaa",
+    "industry": "E-commerce",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round (medium) with retail/inventory framing",
+      "System design — beauty marketplace, omni-channel inventory",
+      "Behavioural — customer obsession, brand-craft sensitivity",
+      "Domain depth for personalisation/recommendation roles"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.3,
+      "data-structures-algorithms": 1.2,
+      "recommendation-systems": 1.3,
+      "behavioural": 1.1
+    },
+    "examplesContext": "You are an engineer at Nykaa Mumbai/Bengaluru building beauty/fashion e-commerce, offline-online inventory sync, or personalisation for Indian women shoppers.",
+    "source": "curated"
+  },
+  {
+    "name": "Lenskart",
+    "normalizedName": "lenskart",
+    "industry": "E-commerce",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round with practical retail problem framing",
+      "System design — omnichannel retail, AR try-on, supply chain",
+      "LLD round for backend roles",
+      "Behavioural — customer obsession and operational excellence"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.3,
+      "data-structures-algorithms": 1.2,
+      "low-level-design": 1.3,
+      "computer-vision": 1.2
+    },
+    "examplesContext": "You are an engineer at Lenskart Gurugram/Bengaluru working on the eyewear marketplace, AR try-on, or 1500+ store omnichannel sync across India and SE Asia.",
+    "source": "curated"
+  },
+  {
+    "name": "Dream11",
+    "normalizedName": "dream11",
+    "industry": "Gaming / Fantasy Sports",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round (medium-hard) with concurrency emphasis",
+      "System design — IPL-final scale traffic, real-time scoring, leaderboards",
+      "Low-level design with focus on transaction integrity",
+      "Behavioural — high-stakes ownership, on-call culture"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.6,
+      "distributed-systems": 1.5,
+      "data-structures-algorithms": 1.3,
+      "concurrency": 1.4
+    },
+    "examplesContext": "You are an engineer at Dream11 Mumbai handling IPL-final-scale concurrency (10M+ users in minutes), real-time scoring, and contest payouts under tight regulatory scrutiny.",
+    "source": "curated"
+  },
+  {
+    "name": "Ola",
+    "normalizedName": "ola",
+    "industry": "Mobility",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round with location/geo problem framing",
+      "System design — ride matching, surge pricing, ETA prediction",
+      "Behavioural — fast iteration, hyperlocal scale",
+      "Domain depth for Krutrim/EV/maps roles"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.5,
+      "data-structures-algorithms": 1.3,
+      "geo-systems": 1.4,
+      "behavioural": 1.1
+    },
+    "examplesContext": "You are an engineer at Ola Bengaluru working on cabs, Ola Electric, or Ola Maps, with hyperlocal scale across 250+ Indian cities and India-built mapping/AI stack.",
+    "source": "curated"
+  },
+  {
+    "name": "Groww",
+    "normalizedName": "groww",
+    "industry": "Fintech",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Coding round (medium) with fintech framing",
+      "System design — order management, MF investing, broking platform",
+      "Low-level design for backend and mobile roles",
+      "Behavioural — ownership, customer-first design"
+    ],
+    "topicWeightOverrides": {
+      "system-design": 1.4,
+      "data-structures-algorithms": 1.3,
+      "low-level-design": 1.3,
+      "rbi-compliance": 1.2
+    },
+    "examplesContext": "You are an engineer at Groww Bengaluru building stock broking, mutual funds, or UPI-based investing for first-time Indian investors with SEBI compliance discipline.",
+    "source": "curated"
+  },
+  {
+    "name": "McKinsey & Company",
+    "normalizedName": "mckinsey",
+    "industry": "Consulting",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Case interview — market sizing, profitability, market entry",
+      "Personal Experience Interview (PEI) — leadership, drive, personal impact",
+      "MECE structuring and hypothesis-driven problem solving",
+      "Sanity-check with mental math under time pressure"
+    ],
+    "topicWeightOverrides": {
+      "case-interview": 1.7,
+      "structured-thinking": 1.6,
+      "personal-experience-interview": 1.5,
+      "mental-math": 1.3
+    },
+    "examplesContext": "You are an Associate at McKinsey Mumbai/Gurugram/Bengaluru on an India FMCG growth strategy, BFSI digital transformation, or public-sector engagement, structuring under MECE.",
+    "source": "curated"
+  },
+  {
+    "name": "Boston Consulting Group",
+    "normalizedName": "bcg",
+    "industry": "Consulting",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Case interview — heavy focus on creative, non-traditional cases",
+      "Behavioural with focus on impact and entrepreneurial flair",
+      "Written case (BCG Potential Test) for some pools",
+      "Mental math drills"
+    ],
+    "topicWeightOverrides": {
+      "case-interview": 1.7,
+      "structured-thinking": 1.5,
+      "behavioural": 1.3,
+      "mental-math": 1.3
+    },
+    "examplesContext": "You are an Associate at BCG Mumbai/Gurugram/Bengaluru on a private-equity due diligence, telco strategy, or India digital-public-infrastructure engagement.",
+    "source": "curated"
+  },
+  {
+    "name": "Bain & Company",
+    "normalizedName": "bain",
+    "industry": "Consulting",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Case interview — interviewer-led, results-oriented",
+      "Behavioural emphasising 'A Bainie never lets another Bainie fail' culture",
+      "Mental math and quick estimation",
+      "Strong fit assessment"
+    ],
+    "topicWeightOverrides": {
+      "case-interview": 1.7,
+      "structured-thinking": 1.5,
+      "behavioural": 1.4,
+      "mental-math": 1.3
+    },
+    "examplesContext": "You are an Associate Consultant at Bain Mumbai/Gurugram/Bengaluru on a PE-portfolio value-creation plan, India consumer turnaround, or BFSI cost transformation.",
+    "source": "curated"
+  },
+  {
+    "name": "Deloitte",
+    "normalizedName": "deloitte",
+    "industry": "Consulting",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Case + behavioural blend depending on service line (S&O, Consulting, Tech)",
+      "Behavioural — competency-based questions on impact, teamwork",
+      "Domain knowledge for specialised practices (audit, tax, tech)",
+      "Group exercise in some pools"
+    ],
+    "topicWeightOverrides": {
+      "case-interview": 1.4,
+      "behavioural": 1.4,
+      "structured-thinking": 1.3,
+      "domain-knowledge": 1.2
+    },
+    "examplesContext": "You are an Analyst at Deloitte India (Mumbai/Bengaluru/Gurugram) on a tech-implementation, S&O strategy, or risk-advisory engagement with an Indian BFSI client.",
+    "source": "curated"
+  },
+  {
+    "name": "KPMG",
+    "normalizedName": "kpmg",
+    "industry": "Consulting",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Behavioural — KPMG values (Integrity, Excellence, Courage)",
+      "Case study or domain-knowledge interview by service line",
+      "Partner round emphasising client-readiness",
+      "Technical depth for audit, tax, or risk roles"
+    ],
+    "topicWeightOverrides": {
+      "behavioural": 1.4,
+      "case-interview": 1.3,
+      "domain-knowledge": 1.3,
+      "structured-thinking": 1.2
+    },
+    "examplesContext": "You are an Analyst at KPMG India (Gurugram/Mumbai/Bengaluru) on a regulatory advisory, transactions, or tech-risk engagement with an Indian BFSI/manufacturing client.",
+    "source": "curated"
+  },
+  {
+    "name": "Goldman Sachs",
+    "normalizedName": "goldman-sachs",
+    "industry": "Investment Banking",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Hirevue / behavioural with strong 'why GS, why this division' framing",
+      "Technical — DCF, comparables, accounting (for IBD)",
+      "For Engineering: DSA + system design, but markets-domain lens",
+      "Superday with multiple back-to-back interviews"
+    ],
+    "topicWeightOverrides": {
+      "financial-modelling": 1.5,
+      "valuation": 1.5,
+      "behavioural": 1.3,
+      "data-structures-algorithms": 1.2
+    },
+    "examplesContext": "You are an Analyst at Goldman Sachs Bengaluru/Mumbai in IBD, Securities, or Engineering, working on cross-border M&A, India equities desk, or global trading platforms.",
+    "source": "curated"
+  },
+  {
+    "name": "JPMorgan Chase",
+    "normalizedName": "jpmorgan",
+    "industry": "Investment Banking",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Hirevue + Superday format",
+      "Technical — accounting, valuation, market awareness for IBD",
+      "For Engineering: coding + system design + behavioural",
+      "Strong 'why JPM' fit assessment"
+    ],
+    "topicWeightOverrides": {
+      "financial-modelling": 1.4,
+      "valuation": 1.4,
+      "data-structures-algorithms": 1.2,
+      "behavioural": 1.3
+    },
+    "examplesContext": "You are an Analyst at JPMorgan Mumbai/Bengaluru/Hyderabad in IBD, CIB, or Tech, working on India M&A, global markets, or in-house tech platforms for the firm.",
+    "source": "curated"
+  },
+  {
+    "name": "Morgan Stanley",
+    "normalizedName": "morgan-stanley",
+    "industry": "Investment Banking",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Behavioural emphasising integrity and team-first culture",
+      "Technical — finance, accounting, modelling for front-office",
+      "For Engineering: coding + system design + behavioural",
+      "Multi-round Superday"
+    ],
+    "topicWeightOverrides": {
+      "financial-modelling": 1.4,
+      "valuation": 1.4,
+      "data-structures-algorithms": 1.2,
+      "behavioural": 1.3
+    },
+    "examplesContext": "You are an Analyst at Morgan Stanley Mumbai/Bengaluru in IBD, Wealth Management Tech, or Institutional Securities working on India equity capital markets or global trading systems.",
+    "source": "curated"
+  },
+  {
+    "name": "HDFC Bank",
+    "normalizedName": "hdfc-bank",
+    "industry": "Banking",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Behavioural — customer obsession, integrity, sales orientation",
+      "Domain knowledge — banking products, retail/corporate lending",
+      "Case discussion for managerial roles",
+      "Aptitude + technical for tech/analytics roles"
+    ],
+    "topicWeightOverrides": {
+      "banking-domain": 1.5,
+      "behavioural": 1.4,
+      "case-interview": 1.2,
+      "rbi-compliance": 1.4
+    },
+    "examplesContext": "You are a banker/analyst at HDFC Bank (Mumbai HO or branches across India) in retail, corporate, or digital banking, with deep RBI compliance and India-customer context.",
+    "source": "curated"
+  },
+  {
+    "name": "ICICI Bank",
+    "normalizedName": "icici-bank",
+    "industry": "Banking",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Behavioural — leadership potential, target orientation",
+      "Domain — banking products, credit, treasury",
+      "Case/situational for managerial roles",
+      "Aptitude + technical for tech and digital roles"
+    ],
+    "topicWeightOverrides": {
+      "banking-domain": 1.5,
+      "behavioural": 1.4,
+      "case-interview": 1.2,
+      "rbi-compliance": 1.4
+    },
+    "examplesContext": "You are a banker/analyst at ICICI Bank (Mumbai HO, Hyderabad tech, or branches) in retail, corporate, or iMobile digital, with deep RBI compliance and India-customer context.",
+    "source": "curated"
+  },
+  {
+    "name": "OpenAI",
+    "normalizedName": "openai",
+    "industry": "AI Native",
+    "applicableObjectives": ["interview_preparation", "upskilling", "career_switch"],
+    "signatureInterviewElements": [
+      "Coding round with focus on systems and ML infrastructure",
+      "ML/research depth for research-engineer roles",
+      "System design — large-scale inference, RAG pipelines",
+      "Behavioural — mission alignment with safe, beneficial AGI"
+    ],
+    "topicWeightOverrides": {
+      "ml-systems": 1.6,
+      "system-design": 1.5,
+      "data-structures-algorithms": 1.3,
+      "ai-product-strategy": 1.4
+    },
+    "examplesContext": "You are an engineer at OpenAI (remote/SF) working on ChatGPT, GPT model training infra, or API platform, with India-region enterprise customers adopting GPT-class APIs.",
+    "source": "curated"
+  },
+  {
+    "name": "Anthropic",
+    "normalizedName": "anthropic",
+    "industry": "AI Native",
+    "applicableObjectives": ["interview_preparation", "upskilling", "career_switch"],
+    "signatureInterviewElements": [
+      "Coding round with focus on clean systems and safety considerations",
+      "ML/research depth for research roles",
+      "System design — Claude inference, Constitutional AI training pipelines",
+      "Behavioural — mission alignment with AI safety, careful execution"
+    ],
+    "topicWeightOverrides": {
+      "ml-systems": 1.6,
+      "system-design": 1.5,
+      "ai-safety": 1.5,
+      "data-structures-algorithms": 1.3
+    },
+    "examplesContext": "You are an engineer at Anthropic (remote/SF) working on Claude, model evaluation, or developer platform, supporting Indian enterprises and developers building safely with Claude APIs.",
+    "source": "curated"
+  },
+  {
+    "name": "Sarvam AI",
+    "normalizedName": "sarvam",
+    "industry": "AI Native",
+    "applicableObjectives": ["interview_preparation", "upskilling", "career_switch"],
+    "signatureInterviewElements": [
+      "ML systems coding with focus on Indian-language models",
+      "Research depth on multilingual / low-resource NLP",
+      "System design — Sarvam-1/2 inference, voice agents, telephony scale",
+      "Behavioural — India-first AI mission alignment"
+    ],
+    "topicWeightOverrides": {
+      "ml-systems": 1.6,
+      "nlp-multilingual": 1.6,
+      "system-design": 1.4,
+      "ai-product-strategy": 1.4
+    },
+    "examplesContext": "You are an engineer at Sarvam AI Bengaluru building India's sovereign LLM stack — Sarvam-2 base models, voice agents in 10+ Indic languages, and India-stack integrations like Bhashini.",
+    "source": "curated"
+  },
+  {
+    "name": "Krutrim",
+    "normalizedName": "krutrim",
+    "industry": "AI Native",
+    "applicableObjectives": ["interview_preparation", "upskilling", "career_switch"],
+    "signatureInterviewElements": [
+      "ML systems coding with focus on India-data training pipelines",
+      "Research depth for foundation-model roles",
+      "System design — Krutrim cloud, GPU scheduling, inference at scale",
+      "Behavioural — India sovereign AI mission and Ola-group execution speed"
+    ],
+    "topicWeightOverrides": {
+      "ml-systems": 1.6,
+      "system-design": 1.5,
+      "nlp-multilingual": 1.5,
+      "cloud-deployment": 1.4
+    },
+    "examplesContext": "You are an engineer at Krutrim Bengaluru building India's foundation-model stack — Krutrim base models, BharatBench evals, and Krutrim Cloud GPU infrastructure under Ola Group.",
+    "source": "curated"
+  }
+]

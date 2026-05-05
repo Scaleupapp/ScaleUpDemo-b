@@ -20,6 +20,14 @@ const userObjectiveSchema = new mongoose.Schema({
     fromDomain: { type: String, trim: true },
     toDomain: { type: String, trim: true },
   },
+  specificsCanonical: {
+    examName: { type: String, trim: true },
+    targetSkill: { type: String, trim: true },
+    targetRole: { type: String, trim: true },
+    targetCompany: { type: String, trim: true },
+    fromDomain: { type: String, trim: true },
+    toDomain: { type: String, trim: true },
+  },
 
   // --- When ---
   timeline: {
@@ -46,6 +54,15 @@ const userObjectiveSchema = new mongoose.Schema({
 
   // --- Topics ---
   topicsOfInterest: [{ type: String, lowercase: true, trim: true }],
+  topicSelfRatings: {
+    type: Map,
+    of: {
+      type: String,
+      enum: ['novice', 'familiar', 'proficient', 'expert'],
+    },
+    default: () => new Map(),
+  },
+  needsCalibration: { type: Boolean, default: false, index: true },
 
   // --- Status & Weighting ---
   status: { type: String, enum: ['active', 'paused', 'completed', 'abandoned'], default: 'active' },

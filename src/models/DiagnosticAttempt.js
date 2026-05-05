@@ -81,6 +81,31 @@ const diagnosticAttemptSchema = new mongoose.Schema({
   // Allows future replay tooling to detect partially-applied attempts without
   // re-running the profile update.
   appliedToProfileAt: { type: Date, default: null },
+
+  // --- Insights & plan handoff (spec §4.4) ---
+  insightsJson: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
+  planGenerationStatus: {
+    type: String,
+    enum: ['pending', 'generating', 'ready', 'failed'],
+    default: 'pending',
+    index: true,
+  },
+
+  // --- Attempt provenance (spec §3.5 / §4.4) ---
+  attemptType: {
+    type: String,
+    enum: ['initial', 'recalibration'],
+    default: 'initial',
+    index: true,
+  },
+  previousAttemptId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'DiagnosticAttempt',
+    default: null,
+  },
 }, { timestamps: true });
 
 diagnosticAttemptSchema.index({ userId: 1, status: 1, startedAt: -1 });

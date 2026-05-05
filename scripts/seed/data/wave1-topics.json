@@ -1,0 +1,1125 @@
+[
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::product-management",
+    "source": "curated",
+    "topics": [
+      { "name": "Product Strategy", "canonicalName": "product-strategy", "description": "Defining product vision, prioritising bets, and making strategic tradeoffs in fast-moving Indian markets like Razorpay or Zomato.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "User Research & Discovery", "canonicalName": "user-research", "description": "Customer interviews, jobs-to-be-done, and synthesising insights for Bharat and metro India users.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Roadmapping & Prioritisation", "canonicalName": "roadmapping", "description": "Quarterly planning, RICE/MoSCoW frameworks, and balancing tech debt with new bets.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Stakeholder Management", "canonicalName": "stakeholder-management", "description": "Aligning engineering, design, sales, and leadership across the product cycle.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Data-Driven Decisions", "canonicalName": "data-driven-decisions", "description": "Defining north-star metrics, instrumentation, A/B testing, and reading dashboards.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Execution & Delivery", "canonicalName": "execution-delivery", "description": "Sprint discipline, removing blockers, and shipping on time without burnout.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Cross-functional Leadership", "canonicalName": "cross-functional-leadership", "description": "Leading without authority and driving alignment across product, eng, and GTM teams.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI Product Strategy & Building with LLMs", "canonicalName": "ai-product-strategy", "description": "Designing AI features, picking models, building evals, and handling hallucinations in production.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::software-engineering",
+    "source": "curated",
+    "topics": [
+      { "name": "Data Structures & Algorithms", "canonicalName": "data-structures-algorithms", "description": "Arrays, trees, graphs, dynamic programming — the core of interview and on-the-job problem solving.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "System Design", "canonicalName": "system-design", "description": "Designing scalable systems like a Hotstar-style streaming backend or a Paytm payments flow.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Backend Development", "canonicalName": "backend-development", "description": "APIs, databases, authentication, and microservices in Node.js, Java, or Python stacks.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Frontend Development", "canonicalName": "frontend-development", "description": "React, state management, performance, and accessible UI for production web apps.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Testing & Code Quality", "canonicalName": "testing-code-quality", "description": "Unit tests, integration tests, code review discipline, and CI gates that prevent regressions.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Cloud & Deployment", "canonicalName": "cloud-deployment", "description": "AWS/GCP basics, containers, and shipping code safely to production.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Debugging & Observability", "canonicalName": "debugging-observability", "description": "Logs, metrics, traces, and root-causing production incidents under pressure.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI-Augmented Engineering", "canonicalName": "ai-augmented-engineering", "description": "Using Copilot/Claude effectively, prompt patterns, code review of AI output, and building LLM features.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::data-science",
+    "source": "curated",
+    "topics": [
+      { "name": "Statistics & Probability", "canonicalName": "statistics-probability", "description": "Distributions, hypothesis testing, confidence intervals — the foundation of every data role.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "SQL & Data Wrangling", "canonicalName": "sql-data-wrangling", "description": "Writing efficient SQL, joins, window functions, and cleaning messy real-world data.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Python for Data Science", "canonicalName": "python-data-science", "description": "Pandas, NumPy, scikit-learn, and writing reproducible notebooks for analysis.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Machine Learning Fundamentals", "canonicalName": "ml-fundamentals", "description": "Regression, classification, clustering, and avoiding common ML pitfalls like leakage.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "A/B Testing & Experimentation", "canonicalName": "ab-testing", "description": "Designing experiments, computing power, and reading results without fooling yourself.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Data Visualisation & Storytelling", "canonicalName": "data-viz-storytelling", "description": "Building dashboards in Tableau/PowerBI/Metabase and turning numbers into business actions.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "MLOps & Productionisation", "canonicalName": "mlops-productionisation", "description": "Model deployment, monitoring drift, retraining pipelines, and version control for ML.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "Generative AI & LLM Applications", "canonicalName": "genai-llm-applications", "description": "RAG, fine-tuning, evals, and shipping LLM-powered products responsibly.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::marketing",
+    "source": "curated",
+    "topics": [
+      { "name": "Brand Strategy & Positioning", "canonicalName": "brand-strategy", "description": "Defining a brand promise, audience, and category position for Indian consumer markets.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Performance Marketing", "canonicalName": "performance-marketing", "description": "Google Ads, Meta Ads, attribution, and squeezing CAC down for D2C brands.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Content & SEO", "canonicalName": "content-seo", "description": "Search intent, keyword strategy, content briefs, and ranking on Google in 2026.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Social Media & Community", "canonicalName": "social-community", "description": "Instagram, YouTube Shorts, LinkedIn organic growth, and creator partnerships.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Marketing Analytics", "canonicalName": "marketing-analytics", "description": "GA4, attribution models, cohort analysis, and proving marketing ROI to the CFO.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Email & Lifecycle Marketing", "canonicalName": "lifecycle-marketing", "description": "Drip campaigns, segmentation, retention loops on tools like CleverTap and MoEngage.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Go-to-Market & Launches", "canonicalName": "gtm-launches", "description": "Coordinating cross-functional launches and driving early traction for new products.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI in Marketing", "canonicalName": "ai-in-marketing", "description": "Using LLMs for copy, audience research, automated campaigns, and personalisation.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::design",
+    "source": "curated",
+    "topics": [
+      { "name": "User Research", "canonicalName": "user-research-design", "description": "Interviews, usability testing, and synthesising insights for Indian users across tier 1-3 cities.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Interaction Design", "canonicalName": "interaction-design", "description": "Information architecture, flows, and micro-interactions that feel native on mobile-first products.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Visual Design & Typography", "canonicalName": "visual-design-typography", "description": "Hierarchy, colour, typography, and brand expression in product UI.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Design Systems", "canonicalName": "design-systems", "description": "Building scalable component libraries, tokens, and contributor workflows in Figma.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Prototyping in Figma", "canonicalName": "figma-prototyping", "description": "Auto-layout, variables, components, and high-fidelity prototypes that feel real.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Accessibility & Inclusive Design", "canonicalName": "accessibility-inclusive", "description": "WCAG, vernacular content, low-bandwidth experiences, and designing for the next billion users.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Design Critique & Feedback", "canonicalName": "design-critique", "description": "Giving and receiving feedback, presenting work to PMs and engineers, defending decisions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI-Assisted Design", "canonicalName": "ai-assisted-design", "description": "Using Figma AI, Midjourney, and LLMs in research synthesis and design exploration.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::sales",
+    "source": "curated",
+    "topics": [
+      { "name": "Prospecting & Lead Generation", "canonicalName": "prospecting-lead-gen", "description": "Building target lists, cold outreach on LinkedIn, and qualifying inbound enquiries for SaaS deals.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Discovery & Qualification", "canonicalName": "discovery-qualification", "description": "BANT, MEDDIC, and asking the right questions to qualify enterprise buyers in India.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Solution Selling", "canonicalName": "solution-selling", "description": "Mapping pain to value, demoing product, and tailoring pitches for CXO audiences.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Negotiation & Closing", "canonicalName": "negotiation-closing", "description": "Handling pricing pushback, procurement cycles, and closing deals at month/quarter end.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "CRM & Pipeline Hygiene", "canonicalName": "crm-pipeline", "description": "Salesforce/HubSpot discipline, accurate forecasting, and pipeline reviews.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Account Management & Expansion", "canonicalName": "account-management", "description": "Quarterly business reviews, upsell/cross-sell, and reducing churn in SMB and enterprise accounts.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Sales Communication & Storytelling", "canonicalName": "sales-storytelling", "description": "Crafting compelling pitches, case studies, and ROI narratives that move buying committees.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI for Sales Productivity", "canonicalName": "ai-sales-productivity", "description": "Using LLMs for research, draft emails, call summaries, and pipeline intelligence.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::founder",
+    "source": "curated",
+    "topics": [
+      { "name": "Idea Validation & Customer Discovery", "canonicalName": "idea-validation", "description": "Problem-solution fit, talking to 30 customers, and killing bad ideas fast.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "MVP & Building Lean", "canonicalName": "mvp-lean", "description": "Scoping a thin slice, no-code stacks, and shipping in weeks not months.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Fundraising & Pitching", "canonicalName": "fundraising-pitching", "description": "Pitch decks, term sheets, valuation, and navigating Indian VCs from seed to Series A.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Hiring & Team Building", "canonicalName": "hiring-team-building", "description": "Hiring first 10 employees, ESOPs, and building culture before HR exists.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Unit Economics & Finance", "canonicalName": "unit-economics-finance", "description": "CAC, LTV, gross margin, runway — the numbers every founder must know cold.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Growth & Distribution", "canonicalName": "growth-distribution", "description": "Channel-product fit, organic loops, and the first paid channel that works.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Founder Operating Cadence", "canonicalName": "founder-operating-cadence", "description": "Weekly metrics reviews, OKRs, board updates, and managing your own time.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI-First Startup Building", "canonicalName": "ai-first-startup", "description": "Spotting AI moats, integrating LLMs into product, and competing in an AI-native market.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::hr-operations",
+    "source": "curated",
+    "topics": [
+      { "name": "Talent Acquisition", "canonicalName": "talent-acquisition", "description": "Sourcing on LinkedIn/Naukri, structured interviews, and closing offers in a competitive market.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Compensation & Benefits", "canonicalName": "compensation-benefits", "description": "Salary benchmarking, ESOPs, variable pay, and Indian tax-efficient structures.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Performance Management", "canonicalName": "performance-management", "description": "Goal setting, calibration, ratings, and difficult feedback conversations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Employee Engagement & Culture", "canonicalName": "engagement-culture", "description": "Pulse surveys, retention programs, and building culture in remote/hybrid Indian teams.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Learning & Development", "canonicalName": "learning-development", "description": "L&D strategy, leadership programs, and upskilling at scale across cohorts.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "HR Compliance & Labour Law", "canonicalName": "hr-compliance-labour", "description": "PF, ESI, gratuity, POSH compliance, and the new Indian labour codes.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "People Analytics", "canonicalName": "people-analytics", "description": "Attrition models, headcount planning, and using data to support people decisions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI in HR & Recruiting", "canonicalName": "ai-in-hr", "description": "AI screening, generative job descriptions, ethical considerations, and bias mitigation.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::finance-accounting",
+    "source": "curated",
+    "topics": [
+      { "name": "Financial Statements & Accounting", "canonicalName": "financial-statements", "description": "P&L, balance sheet, cash flow under Ind AS, and reading any company's filings.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Financial Modelling & Valuation", "canonicalName": "financial-modelling-valuation", "description": "DCF, comparables, three-statement models in Excel for Indian listed and private companies.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Corporate Finance", "canonicalName": "corporate-finance", "description": "Capital structure, M&A, and decisions on debt vs equity for Indian firms.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Indian Tax & GST", "canonicalName": "indian-tax-gst", "description": "Direct tax, GST, TDS, and compliance basics for businesses operating in India.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Audit & Internal Controls", "canonicalName": "audit-internal-controls", "description": "Internal audit, SOX-equivalent controls, and risk frameworks under Companies Act.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "FP&A & Budgeting", "canonicalName": "fpa-budgeting", "description": "Annual operating plans, variance analysis, and partnering with business teams.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Excel & Power BI", "canonicalName": "excel-powerbi-finance", "description": "Advanced Excel, Power Query, and finance dashboards for senior stakeholders.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI in Finance & Automation", "canonicalName": "ai-in-finance", "description": "LLMs for filings analysis, automation of close processes, and audit augmentation.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::consulting",
+    "source": "curated",
+    "topics": [
+      { "name": "Structured Problem Solving", "canonicalName": "structured-problem-solving", "description": "MECE, issue trees, hypothesis-driven thinking — the consulting toolkit.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Case Frameworks", "canonicalName": "case-frameworks", "description": "Profitability, market entry, M&A, and pricing cases used at MBB and Big 4.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Market Sizing & Estimation", "canonicalName": "market-sizing", "description": "Top-down vs bottom-up sizing for Indian markets like quick commerce or EVs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Excel & Quantitative Analysis", "canonicalName": "excel-quant-consulting", "description": "Building models, sensitivity analysis, and synthesising data into one chart.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Slide Writing & Storylining", "canonicalName": "slide-writing-storylining", "description": "Pyramid principle, action titles, and McKinsey-style decks that land with CXOs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Client Communication", "canonicalName": "client-communication", "description": "Status updates, difficult conversations, and managing senior client expectations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Industry Knowledge & Trends", "canonicalName": "industry-trends-consulting", "description": "Tracking Indian sector trends — BFSI, retail, healthcare — to advise clients credibly.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI in Consulting Workflows", "canonicalName": "ai-in-consulting", "description": "Using LLMs for research synthesis, deck drafting, and rapid analysis.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::customer-success",
+    "source": "curated",
+    "topics": [
+      { "name": "Customer Onboarding", "canonicalName": "customer-onboarding", "description": "First 30/60/90 days, time-to-value, and onboarding playbooks for SaaS customers.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Account Health & Renewals", "canonicalName": "account-health-renewals", "description": "Health scores, churn signals, and proactive renewal motions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Expansion & Upsell", "canonicalName": "expansion-upsell", "description": "Identifying expansion moments, partnering with sales, and growing NRR.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Customer Communication", "canonicalName": "customer-communication-cs", "description": "QBRs, escalations, and turning unhappy customers into champions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Product Knowledge & Enablement", "canonicalName": "product-knowledge-cs", "description": "Deep product mastery and enabling customers to self-serve via training and docs.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Customer Data & CSM Tools", "canonicalName": "cs-tools-data", "description": "Gainsight/Totango, usage analytics, and instrumentation for customer insights.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Voice of Customer & Feedback Loops", "canonicalName": "voc-feedback-loops", "description": "NPS, CSAT, and channelling customer feedback into product roadmap.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI in Customer Success", "canonicalName": "ai-in-cs", "description": "Generative responses, churn prediction models, and AI-powered support copilots.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "upskilling",
+    "targetKey": "upskilling::devops-platform",
+    "source": "curated",
+    "topics": [
+      { "name": "Linux & Networking", "canonicalName": "linux-networking", "description": "Shell, systemd, TCP/IP, DNS, and the Unix fundamentals every platform engineer needs.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "CI/CD Pipelines", "canonicalName": "cicd-pipelines", "description": "GitHub Actions, GitLab CI, build-test-deploy automation, and safe rollouts.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Containers & Kubernetes", "canonicalName": "containers-kubernetes", "description": "Docker, Kubernetes basics, Helm, and running production workloads.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "AWS / GCP Cloud", "canonicalName": "aws-gcp-cloud", "description": "Core compute, storage, networking, IAM, and the cloud services Indian startups actually use.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Infrastructure as Code", "canonicalName": "infra-as-code", "description": "Terraform, CDK, and managing infra changes the same way you manage code.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Observability & SRE", "canonicalName": "observability-sre", "description": "Prometheus, Grafana, Datadog, SLOs, and on-call discipline.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Security & Secrets", "canonicalName": "security-secrets", "description": "IAM, secrets management, vulnerability scanning, and the basics of cloud security posture.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "AI for Platform Engineering", "canonicalName": "ai-for-platform", "description": "AI ops, anomaly detection, LLM copilots for incidents, and AI-assisted infra workflows.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::software-engineer::faang",
+    "source": "curated",
+    "topics": [
+      { "name": "Hard DSA Patterns", "canonicalName": "hard-dsa-patterns", "description": "Graphs, DP, segment trees, tries — the patterns FAANG loves at the LP4-L5 bar.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "System Design (L5/L6)", "canonicalName": "system-design-faang", "description": "Designing globally-distributed systems like a feed, ride-hailing, or messaging at FAANG scale.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Object-Oriented & Low-Level Design", "canonicalName": "lld-faang", "description": "Designing classes, interfaces, and small systems like parking lots, splitwise, or rate limiters.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Behavioural & Leadership Principles", "canonicalName": "behavioural-lp-faang", "description": "Amazon LPs, Google Googleyness, STAR responses tailored to the FAANG bar.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Coding Speed & Communication", "canonicalName": "coding-communication-faang", "description": "Talking through code, edge cases, complexity analysis under interview pressure.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Concurrency & OS Fundamentals", "canonicalName": "concurrency-os-faang", "description": "Threads, locks, deadlocks, scheduling, memory — concepts that come up in deep dives.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI-Augmented Coding for Interviews", "canonicalName": "ai-coding-interviews", "description": "When and how to mention AI tools, AI eval/system rounds, and FAANG's AI-first hiring shifts.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::software-engineer::top-startups",
+    "source": "curated",
+    "topics": [
+      { "name": "DSA Essentials", "canonicalName": "dsa-essentials-startup", "description": "Arrays, strings, trees, graphs — the patterns asked at top Indian startups.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Practical System Design", "canonicalName": "practical-system-design", "description": "Designing systems like UPI flows, Razorpay payments, Zerodha order matching.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Full-Stack Project Walkthroughs", "canonicalName": "fullstack-projects", "description": "Talking through your projects, decisions, tradeoffs, and lessons learned.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Database & SQL Deep Dive", "canonicalName": "database-sql-deep", "description": "Indexing, joins, query plans, transactions — what early-stage startups actually grill on.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Behavioural — Ownership & Hustle", "canonicalName": "behavioural-startup", "description": "Stories about ownership, ambiguity, and shipping fast in a small team.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Take-home Assignments", "canonicalName": "take-home-assignments", "description": "Scoping, code quality, README, and trade-off documentation in 24-48 hr take-homes.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI-Augmented Coding for Interviews", "canonicalName": "ai-coding-interviews-startup", "description": "Talking credibly about AI tooling and AI features you've shipped.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::software-engineer::indian-unicorns",
+    "source": "curated",
+    "topics": [
+      { "name": "DSA & Coding Rounds", "canonicalName": "dsa-coding-unicorns", "description": "Medium-hard problems on HackerEarth/Codility format used by Flipkart, Swiggy, Zomato.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Scalable System Design", "canonicalName": "scalable-system-design-unicorns", "description": "Designing for crores of users — feed, search, cart, notifications at Indian scale.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Low-Level Design", "canonicalName": "lld-unicorns", "description": "Class diagrams and OO design for cab dispatch, food order tracking, payment routing.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Hiring Manager Round", "canonicalName": "hiring-manager-round", "description": "Project deep dives, team fit, and goals discussion with the hiring engineering manager.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Behavioural & Culture Fit", "canonicalName": "behavioural-unicorns", "description": "Stories about collaboration, conflict, and impact tailored to Indian unicorn culture.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Tech Stack-Specific Depth", "canonicalName": "stack-depth-unicorns", "description": "Java/Spring, Node, React, or Go specifics depending on the team you're interviewing for.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI-Augmented Coding for Interviews", "canonicalName": "ai-coding-interviews-unicorns", "description": "Discussing AI tooling usage in your workflow without setting off red flags.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::software-engineer::mid-tier",
+    "source": "curated",
+    "topics": [
+      { "name": "Core DSA", "canonicalName": "core-dsa-mid", "description": "Easy-medium problems on arrays, strings, linked lists, trees — the bread and butter.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Java / Python Fundamentals", "canonicalName": "language-fundamentals-mid", "description": "Language internals, collections, exception handling, and OOP that mid-tier IT often quizzes on.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "SQL & DBMS", "canonicalName": "sql-dbms-mid", "description": "Joins, normalisation, indexes — straight from the textbook.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "OS & Networking Basics", "canonicalName": "os-networking-mid", "description": "Process vs thread, OSI model, TCP/UDP, common protocols — standard university topics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Project Discussion", "canonicalName": "project-discussion-mid", "description": "Walking through college or internship projects with clarity and confidence.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "HR & Communication Round", "canonicalName": "hr-round-mid", "description": "Why-this-company, strengths, weaknesses, and basic English communication assessment.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::product-manager::faang",
+    "source": "curated",
+    "topics": [
+      { "name": "Product Sense & Design", "canonicalName": "product-sense-design", "description": "'Design X for Y' questions — structured frameworks and creative thinking at FAANG bar.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Strategy & Analytical Cases", "canonicalName": "strategy-analytical-pm", "description": "Market entry, monetisation, and competitive strategy questions.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Estimation & Metrics", "canonicalName": "estimation-metrics-pm", "description": "Sizing markets, defining metrics, root-causing dips in product KPIs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Behavioural & Leadership Stories", "canonicalName": "behavioural-pm-faang", "description": "Influencing without authority, conflict resolution, ambiguity — STAR for PM.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Execution & Tradeoff Cases", "canonicalName": "execution-tradeoff-pm", "description": "How would you ship X by Y date, what would you cut, what data would you need.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Tech Depth for PM", "canonicalName": "tech-depth-pm", "description": "Just enough APIs, databases, ML to talk credibly with engineers in interviews.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI Product Cases", "canonicalName": "ai-product-cases-pm", "description": "Designing AI features end-to-end including evals, safety, and monetisation.", "baseDifficulty": "advanced", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::product-manager::top-startups",
+    "source": "curated",
+    "topics": [
+      { "name": "Founder-Level Product Sense", "canonicalName": "founder-product-sense", "description": "Talking about product gaps, opportunities, and 0-to-1 thinking that founders care about.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Growth & Metrics", "canonicalName": "growth-metrics-startup-pm", "description": "Activation, retention, virality — the metrics startups live and die by.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Execution & Speed", "canonicalName": "execution-speed-pm", "description": "How you ship weekly, work with 1-2 engineers, and prove things with experiments.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Domain Knowledge", "canonicalName": "domain-knowledge-startup-pm", "description": "Knowing the industry deeply — fintech, healthtech, edtech specifics for the startup you're joining.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Scrappy User Research", "canonicalName": "scrappy-user-research-pm", "description": "Talking to users without a research team — UPI cases, WhatsApp interviews, quick surveys.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Technical Fluency", "canonicalName": "tech-fluency-startup-pm", "description": "Reading APIs, basic SQL, no-code stacks, and AI building blocks at MVP scale.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI Product Cases", "canonicalName": "ai-product-cases-startup-pm", "description": "Designing AI-first products with evals and shipping in weeks not months.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::product-manager::indian-unicorns",
+    "source": "curated",
+    "topics": [
+      { "name": "Product Case — India Context", "canonicalName": "product-case-india", "description": "Designing for tier 2/3 users, vernacular, low data, and offline-first patterns.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Metrics & Funnel Cases", "canonicalName": "metrics-funnel-pm", "description": "Cart abandonment, repeat-rate, GMV — funnels and unit economics for Indian commerce/fintech.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Stakeholder & Cross-functional", "canonicalName": "stakeholder-cf-pm-unicorn", "description": "Working with growth, ops, category, and tech teams in a 3000-person org.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Estimation & Market Sizing", "canonicalName": "estimation-india-pm", "description": "Sizing TAM for quick commerce, EVs, B2B SaaS in the Indian market.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Execution & Roadmap Cases", "canonicalName": "execution-roadmap-pm-unicorn", "description": "Quarterly roadmap, prioritisation, and stakeholder alignment cases.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Behavioural & Culture Fit", "canonicalName": "behavioural-pm-unicorn", "description": "Conflict, ambiguity, ownership stories tuned to Indian unicorn cultures.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI Product Cases", "canonicalName": "ai-product-cases-unicorn-pm", "description": "Designing AI features in the Indian context — voice, vernacular, and trust signals.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::product-manager::mid-tier",
+    "source": "curated",
+    "topics": [
+      { "name": "PM Fundamentals", "canonicalName": "pm-fundamentals-mid", "description": "What is a PM, the role, lifecycle, and basic frameworks like SWOT and 4Ps.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Product Case Basics", "canonicalName": "product-case-basics-mid", "description": "Walk-through of common product design and improvement cases for entry roles.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Estimation Basics", "canonicalName": "estimation-basics-mid", "description": "Simple market sizing — top-down approach with clean assumptions.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "SQL & Data Basics for PM", "canonicalName": "sql-data-basics-pm-mid", "description": "Basic SQL and data interpretation — joins, group by, simple metrics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Behavioural & HR Round", "canonicalName": "behavioural-hr-pm-mid", "description": "Why PM, why this company, project walkthroughs from internships and college.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Resume & Project Walkthroughs", "canonicalName": "resume-projects-pm-mid", "description": "Talking about side projects, internships, and case competitions credibly.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::data-scientist::faang",
+    "source": "curated",
+    "topics": [
+      { "name": "ML & Statistics Deep Dive", "canonicalName": "ml-stats-deep-faang", "description": "Bias-variance, regularisation, MLE, common ML algorithms in depth at FAANG bar.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "SQL & Coding", "canonicalName": "sql-coding-ds-faang", "description": "Hard SQL window functions, Python data manipulation, and algorithmic problems.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "A/B Testing & Causal Inference", "canonicalName": "ab-testing-causal-faang", "description": "Designing experiments, computing power, and counterfactual reasoning at FAANG scale.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Product Sense for DS", "canonicalName": "product-sense-ds", "description": "Defining metrics for products, root-causing engagement drops, sizing impact.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "ML System Design", "canonicalName": "ml-system-design-faang", "description": "Designing recommendation, ranking, fraud-detection systems end-to-end.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Behavioural & Leadership Principles", "canonicalName": "behavioural-ds-faang", "description": "Stories of impact, ambiguity, and influence — FAANG LP-aligned.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "GenAI & LLM Concepts for DS", "canonicalName": "genai-ds-faang", "description": "Embeddings, RAG, eval frameworks, and the AI questions FAANG now asks DS candidates.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::data-scientist::top-startups",
+    "source": "curated",
+    "topics": [
+      { "name": "Practical ML & Modelling", "canonicalName": "practical-ml-startup", "description": "Building a model from messy data, picking algorithms, and explaining tradeoffs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "SQL & Python", "canonicalName": "sql-python-ds-startup", "description": "Query writing, pandas wrangling, and shipping analyses end-to-end.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Experimentation & Metrics", "canonicalName": "experimentation-metrics-startup", "description": "Running A/B tests in a small startup, defining north stars, instrumentation gaps.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Business Problem Framing", "canonicalName": "business-framing-ds", "description": "Translating fuzzy founder questions into a concrete data problem.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Stakeholder Communication", "canonicalName": "stakeholder-comm-ds", "description": "Explaining models to non-technical founders and operators with clarity.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "GenAI Application Design", "canonicalName": "genai-application-startup", "description": "Embeddings, RAG, fine-tuning, and shipping LLM features in a startup setting.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::data-scientist::indian-unicorns",
+    "source": "curated",
+    "topics": [
+      { "name": "ML Fundamentals", "canonicalName": "ml-fundamentals-unicorn", "description": "Linear/logistic regression, trees, ensembles, and classic ML asked at Flipkart, Swiggy, etc.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "SQL & Case Studies", "canonicalName": "sql-cases-unicorn-ds", "description": "Hard SQL plus end-to-end case studies on demand forecasting, churn, fraud.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Statistics & Probability", "canonicalName": "stats-probability-unicorn-ds", "description": "Distributions, hypothesis tests, and probability puzzles.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Recommendation & Ranking Systems", "canonicalName": "recsys-ranking", "description": "Collaborative filtering, content-based, learning-to-rank — common at Indian unicorns.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Business Cases for India Markets", "canonicalName": "business-cases-india-ds", "description": "Pricing, supply-demand, fraud detection at Indian commerce/fintech scale.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "GenAI for Indian Products", "canonicalName": "genai-india-ds", "description": "Vernacular embeddings, evals, RAG patterns for Indian-language data.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::designer::faang",
+    "source": "curated",
+    "topics": [
+      { "name": "Portfolio Walkthrough (Senior)", "canonicalName": "portfolio-walkthrough-faang", "description": "Telling 2-3 case studies with depth on process, decisions, and impact at FAANG bar.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Whiteboard Design Challenge", "canonicalName": "whiteboard-design", "description": "Designing a feature live in 45 mins — framing, sketching, and articulating choices.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "App Critique & Visual Eye", "canonicalName": "app-critique", "description": "Critiquing existing products with structure, identifying issues, and proposing fixes.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Cross-functional Collaboration", "canonicalName": "cf-collaboration-design", "description": "Working with PMs, engineers, researchers — stories of influence and trade-offs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Behavioural & Leadership Principles", "canonicalName": "behavioural-design-faang", "description": "STAR responses on conflict, ambiguity, and design leadership.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "AI in Design Workflows", "canonicalName": "ai-design-faang", "description": "Talking about AI tools used, AI feature design, and ethical considerations.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::designer::top-startups",
+    "source": "curated",
+    "topics": [
+      { "name": "0-to-1 Case Studies", "canonicalName": "zero-to-one-cases", "description": "Telling stories about defining a new product surface from scratch.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Live Design Exercise", "canonicalName": "live-design-exercise", "description": "Designing a small flow on the spot with the founder watching.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Visual Craft & Polish", "canonicalName": "visual-craft", "description": "Showing high-craft work — typography, spacing, motion, micro-interactions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Product Sense", "canonicalName": "product-sense-design-startup", "description": "Talking about why decisions were made — business goals, user goals, tradeoffs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Working With Engineers", "canonicalName": "design-eng-collab-startup", "description": "Handing off designs, working in Figma+code, design systems contribution.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "AI in Design Workflows", "canonicalName": "ai-design-startup", "description": "Using Figma AI, Midjourney for concepts, and shipping AI features in design.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::designer::indian-unicorns",
+    "source": "curated",
+    "topics": [
+      { "name": "Portfolio Case Studies", "canonicalName": "portfolio-cases-unicorn", "description": "2-3 deep case studies with India-context — vernacular, low-data, tier 2/3 users.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Design Challenge", "canonicalName": "design-challenge-unicorn", "description": "Take-home or onsite design exercise on a real problem at Indian scale.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Design Systems Knowledge", "canonicalName": "design-systems-unicorn", "description": "Talking about contributing to or maintaining a design system at scale.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Cross-functional Stories", "canonicalName": "cf-stories-design-unicorn", "description": "Conflict with PM, engineering pushback, and how you drove alignment.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Research & Validation", "canonicalName": "research-validation-design", "description": "Talking about user testing, vernacular research, and how you validate decisions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "AI in Design Workflows", "canonicalName": "ai-design-unicorn", "description": "AI features in design, AI tools in your workflow, ethical design considerations.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::consultant::mbb",
+    "source": "curated",
+    "topics": [
+      { "name": "Case Interview Frameworks", "canonicalName": "case-frameworks-mbb", "description": "Profitability, market entry, M&A, growth strategy — the MBB case canon.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Market Sizing & Estimation", "canonicalName": "market-sizing-mbb", "description": "Top-down and bottom-up sizing for any Indian market in 5 minutes.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Maths & Mental Calculation", "canonicalName": "maths-mental-mbb", "description": "Quick percentages, ratios, and clean arithmetic under interview pressure.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "PEI / Behavioural Stories", "canonicalName": "pei-behavioural-mbb", "description": "Personal experience interviews — leadership, drive, impact stories.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Synthesis & Recommendation", "canonicalName": "synthesis-recommendation-mbb", "description": "Pulling threads together into a clear answer with supporting rationale.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Industry Awareness — India", "canonicalName": "industry-awareness-india-mbb", "description": "Tracking Indian sectors — BFSI, retail, energy, healthcare — for case context.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "interview_preparation",
+    "targetKey": "interview_preparation::consultant::big4",
+    "source": "curated",
+    "topics": [
+      { "name": "Case Interview Basics", "canonicalName": "case-basics-big4", "description": "Common case types and structured frameworks for Big 4 advisory and consulting.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Domain Knowledge — Tax / Audit / Strategy", "canonicalName": "domain-big4", "description": "Function-specific basics depending on the service line you're applying to.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Excel & Quantitative", "canonicalName": "excel-quant-big4", "description": "Excel speed, formulas, and basic quantitative case work.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Behavioural & Fit", "canonicalName": "behavioural-big4", "description": "Why consulting, why Big 4, and stories about teamwork and ownership.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Communication & Presentation", "canonicalName": "communication-big4", "description": "Articulating thought process clearly with structure under pressure.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "India Business Context", "canonicalName": "india-business-big4", "description": "GST, Ind AS, Indian regulations, and recent business news for case context.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::jee-main",
+    "source": "curated",
+    "topics": [
+      { "name": "Physics — Mechanics", "canonicalName": "jee-physics-mechanics", "description": "Kinematics, NLM, work-energy, rotational motion — the highest-weight Physics block.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Physics — Electromagnetism", "canonicalName": "jee-physics-em", "description": "Electrostatics, current, magnetism, EMI, AC — heavy in JEE Main and JEE Advanced.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Physics — Modern & Optics", "canonicalName": "jee-physics-modern-optics", "description": "Optics, dual nature, atoms, nuclei, semiconductors — quick-scoring chapters.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Chemistry — Physical", "canonicalName": "jee-chemistry-physical", "description": "Thermodynamics, equilibrium, electrochemistry, kinetics — formula-driven scoring.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Chemistry — Inorganic", "canonicalName": "jee-chemistry-inorganic", "description": "Periodic table, p/d/f-block, coordination compounds — high recall, NCERT-heavy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Chemistry — Organic", "canonicalName": "jee-chemistry-organic", "description": "GOC, hydrocarbons, oxygen-/nitrogen-containing compounds, biomolecules.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Maths — Calculus", "canonicalName": "jee-maths-calculus", "description": "Limits, continuity, differentiation, integration — the largest Maths block in JEE.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "Maths — Algebra & Coordinate Geometry", "canonicalName": "jee-maths-algebra-coord", "description": "Quadratics, sequences, complex numbers, conic sections, vectors, 3D.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::neet-ug",
+    "source": "curated",
+    "topics": [
+      { "name": "Botany — Plant Physiology & Diversity", "canonicalName": "neet-botany-physiology-diversity", "description": "Plant kingdom, anatomy, physiology — high-recall NCERT-anchored topics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Botany — Genetics & Ecology", "canonicalName": "neet-botany-genetics-ecology", "description": "Heredity, evolution, ecology, environmental issues — heavy weightage chapters.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Zoology — Human Physiology", "canonicalName": "neet-zoology-human-physiology", "description": "Digestion, respiration, circulation, neural & endocrine systems — biggest block.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Zoology — Reproduction & Biotechnology", "canonicalName": "neet-zoology-reproduction-biotech", "description": "Reproduction, biotechnology principles & applications, biology and human welfare.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Physics — Mechanics & Thermodynamics", "canonicalName": "neet-physics-mech-thermo", "description": "Kinematics, NLM, work-energy, thermodynamics — NCERT-level depth.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Physics — Electromagnetism & Modern", "canonicalName": "neet-physics-em-modern", "description": "Current, magnetism, EMI, optics, modern physics — formula-heavy scoring.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Chemistry — Physical & Inorganic", "canonicalName": "neet-chem-phys-inorganic", "description": "Mole concept, thermodynamics, equilibrium, periodic properties, p/d-block.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "Chemistry — Organic & Biomolecules", "canonicalName": "neet-chem-organic-biomol", "description": "GOC, named reactions, biomolecules, polymers, chemistry in everyday life.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cuet-ug",
+    "source": "curated",
+    "topics": [
+      { "name": "General Test — Quantitative Aptitude", "canonicalName": "cuet-gt-quant", "description": "Arithmetic, percentages, profit-loss, ratio, time-speed-distance for the GT section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "General Test — Logical Reasoning", "canonicalName": "cuet-gt-reasoning", "description": "Series, blood relations, syllogisms, coding-decoding for the GT section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "General Test — General Knowledge & Current Affairs", "canonicalName": "cuet-gt-gk-ca", "description": "Static GK, history, polity, geography, and recent news.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "English — Reading Comprehension", "canonicalName": "cuet-english-rc", "description": "Reading passages, inference questions, vocabulary in context.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "English — Grammar & Vocabulary", "canonicalName": "cuet-english-grammar", "description": "Tenses, prepositions, articles, synonyms, antonyms, idioms.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Domain Subject — Core Concepts", "canonicalName": "cuet-domain-core", "description": "Core NCERT class 12 concepts of your chosen domain subject (e.g. Accountancy, Economics, History).", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Domain Subject — Application Questions", "canonicalName": "cuet-domain-application", "description": "Case-based, assertion-reason, and application-style questions on your domain subject.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::upsc-cse-prelims",
+    "source": "curated",
+    "topics": [
+      { "name": "Indian Polity & Governance", "canonicalName": "upsc-polity-governance", "description": "Constitution, Parliament, judiciary, federalism, recent amendments and SC judgments.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Indian History & Culture", "canonicalName": "upsc-history-culture", "description": "Ancient, medieval, modern India, freedom struggle, art and culture.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Geography — India & World", "canonicalName": "upsc-geography", "description": "Physical, human, economic geography of India plus world geography fundamentals.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Economy & Indian Economic Survey", "canonicalName": "upsc-economy", "description": "Macro basics, Budget, Economic Survey, banking, fiscal-monetary policy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Environment & Ecology", "canonicalName": "upsc-environment", "description": "Biodiversity, climate change, pollution, conservation, environmental conventions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Science & Technology", "canonicalName": "upsc-sci-tech", "description": "ISRO, defence, biotech, IT — current developments framed for prelims MCQs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Current Affairs (Past 12-18 Months)", "canonicalName": "upsc-current-affairs", "description": "Schemes, reports, indices, international relations, Indian and world events.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "CSAT — Comprehension & Reasoning", "canonicalName": "upsc-csat", "description": "Reading comprehension, basic numeracy, logical reasoning for the qualifying CSAT paper.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cat",
+    "source": "curated",
+    "topics": [
+      { "name": "Quantitative Aptitude — Arithmetic", "canonicalName": "cat-quant-arithmetic", "description": "Percentages, ratios, averages, time-speed-distance, profit-loss — biggest QA block.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Quantitative Aptitude — Algebra & Numbers", "canonicalName": "cat-quant-algebra", "description": "Equations, inequalities, functions, number systems for CAT QA.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Quantitative Aptitude — Geometry & Mensuration", "canonicalName": "cat-quant-geometry", "description": "Triangles, circles, mensuration, coordinate geometry — moderate weightage.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "DI/LR — Data Interpretation", "canonicalName": "cat-di", "description": "Tables, graphs, caselets, data sufficiency — tricky non-routine sets in CAT.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "DI/LR — Logical Reasoning", "canonicalName": "cat-lr", "description": "Arrangements, puzzles, set-based reasoning, games — major CAT differentiator.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "VARC — Reading Comprehension", "canonicalName": "cat-varc-rc", "description": "Long passages, inference, tone, primary purpose questions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "VARC — Para Jumbles & Summary", "canonicalName": "cat-varc-para", "description": "Para-jumbles, para-completion, odd-one-out, summary questions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::ssc-cgl",
+    "source": "curated",
+    "topics": [
+      { "name": "Quantitative Aptitude", "canonicalName": "ssc-cgl-quant", "description": "Arithmetic, algebra, geometry, mensuration, trigonometry, DI for SSC CGL.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "General Intelligence & Reasoning", "canonicalName": "ssc-cgl-reasoning", "description": "Series, analogies, classification, coding-decoding, syllogisms, paper folding.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "English Language & Comprehension", "canonicalName": "ssc-cgl-english", "description": "Grammar, error spotting, vocabulary, RC — key Tier 1 and Tier 2 topics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Awareness — History & Polity", "canonicalName": "ssc-cgl-ga-history-polity", "description": "Indian history, freedom struggle, Constitution and polity for static GK.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "General Awareness — Geography & Economy", "canonicalName": "ssc-cgl-ga-geo-eco", "description": "Indian and world geography, economy basics, schemes, current affairs.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "General Awareness — Science & Current Affairs", "canonicalName": "ssc-cgl-ga-sci-ca", "description": "Basic science, recent events, awards, sports, books-authors.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::ibps-po",
+    "source": "curated",
+    "topics": [
+      { "name": "Quantitative Aptitude", "canonicalName": "ibps-po-quant", "description": "Number series, simplification, DI, arithmetic, time-speed-distance for IBPS PO.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Reasoning Ability", "canonicalName": "ibps-po-reasoning", "description": "Puzzles, seating arrangements, syllogisms, inequalities, coding-decoding.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "English Language", "canonicalName": "ibps-po-english", "description": "RC, cloze, error spotting, para-jumbles for the English section.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Banking & Financial Awareness", "canonicalName": "ibps-po-banking-finance", "description": "RBI, banking products, NPAs, monetary policy, recent banking developments.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Computer Awareness", "canonicalName": "ibps-po-computer", "description": "Basics of hardware, software, MS Office, networking, internet.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Current Affairs (Past 6 Months)", "canonicalName": "ibps-po-current-affairs", "description": "National and international news, awards, schemes, summits, sports.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::gate-cse",
+    "source": "curated",
+    "topics": [
+      { "name": "Engineering Mathematics", "canonicalName": "gate-cse-engg-maths", "description": "Linear algebra, calculus, probability, discrete maths — high-weightage in GATE CSE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Algorithms & Data Structures", "canonicalName": "gate-cse-algo-ds", "description": "Sorting, searching, graphs, trees, DP, complexity analysis.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Operating Systems", "canonicalName": "gate-cse-os", "description": "Processes, threads, scheduling, synchronisation, memory management, file systems.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Database Management Systems", "canonicalName": "gate-cse-dbms", "description": "ER, normalisation, SQL, transactions, concurrency control.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Computer Networks", "canonicalName": "gate-cse-cn", "description": "OSI/TCP-IP, routing, IP addressing, transport layer, application protocols.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Theory of Computation & Compiler Design", "canonicalName": "gate-cse-toc-compiler", "description": "Automata, regular/CFL languages, parsing, syntax-directed translation.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "Digital Logic & Computer Architecture", "canonicalName": "gate-cse-digital-arch", "description": "Boolean algebra, sequential circuits, pipelining, cache, addressing modes.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 7 },
+      { "name": "Aptitude (General + Technical)", "canonicalName": "gate-cse-aptitude", "description": "Verbal ability, numerical aptitude, and basic technical questions in GA section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 8 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::it-services-engineer::product-manager",
+    "source": "curated",
+    "topics": [
+      { "name": "Product Sense & Frameworks", "canonicalName": "switch-product-sense", "description": "Product thinking — moving from execution to defining the why behind features.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "User Research Basics", "canonicalName": "switch-user-research", "description": "Talking to users, synthesising insights, and writing first PRDs.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Metrics & Data Literacy for PM", "canonicalName": "switch-metrics-pm", "description": "SQL basics, defining metrics, and reading product analytics tools.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Stakeholder & Cross-functional Working", "canonicalName": "switch-stakeholder-pm", "description": "Influencing engineers, designers, and business teams without a manager title.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Resume & Story Repositioning", "canonicalName": "switch-resume-pm", "description": "Reframing IT services experience as product impact for hiring managers.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Side-Project & Portfolio Building", "canonicalName": "switch-side-project-pm", "description": "Shipping a small product end-to-end to prove product chops.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI Product Fundamentals", "canonicalName": "switch-ai-product", "description": "Building basic AI product instincts to compete with native PMs in the AI era.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::software-engineer::engineering-manager",
+    "source": "curated",
+    "topics": [
+      { "name": "People Management Fundamentals", "canonicalName": "em-people-management", "description": "1:1s, feedback, growth conversations, and the basics of managing humans.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Hiring & Building Teams", "canonicalName": "em-hiring", "description": "Sourcing, structured interviews, debriefs, and building diverse teams.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Performance Management", "canonicalName": "em-performance", "description": "Goal setting, performance ratings, PIPs, and tough conversations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Project & Delivery Management", "canonicalName": "em-delivery", "description": "Roadmap planning, dependency mgmt, and shipping reliably across teams.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Technical Leadership", "canonicalName": "em-tech-leadership", "description": "Maintaining tech depth, architecture reviews, and being a credible tech leader.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Stakeholder & Upward Management", "canonicalName": "em-upward", "description": "Communicating with directors, partnering with PM, and managing your manager.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI in Engineering Leadership", "canonicalName": "em-ai-leadership", "description": "Setting AI productivity bars, evaluating AI tools for the team, AI policy decisions.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::investment-banking-analyst::product-manager",
+    "source": "curated",
+    "topics": [
+      { "name": "Product Thinking & User Empathy", "canonicalName": "ib-pm-product-thinking", "description": "Shifting from deal mindset to user-first thinking and product judgement.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Tech Fluency for PM", "canonicalName": "ib-pm-tech-fluency", "description": "APIs, databases, modern web stacks — enough to talk credibly with engineers.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Product Metrics & Experimentation", "canonicalName": "ib-pm-metrics", "description": "Beyond Excel — using SQL, GA4, Mixpanel for product decisions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Roadmapping & Prioritisation", "canonicalName": "ib-pm-roadmap", "description": "Frameworks like RICE/MoSCoW and translating strategy into roadmap.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Resume & Story Repositioning", "canonicalName": "ib-pm-resume", "description": "Reframing IB analyst experience — modelling, client work — for product hiring.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Domain — Fintech / SaaS Products", "canonicalName": "ib-pm-fintech-saas", "description": "Building product knowledge in fintech or SaaS — natural homes for ex-IB PMs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI Product Fundamentals", "canonicalName": "ib-pm-ai-product", "description": "Designing AI features and understanding LLM economics from a PM lens.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::mechanical-engineer::software-engineer",
+    "source": "curated",
+    "topics": [
+      { "name": "Programming Fundamentals", "canonicalName": "mech-swe-programming", "description": "Variables, loops, functions, OOP in Python or Java — the foundation for SWE.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Data Structures & Algorithms", "canonicalName": "mech-swe-dsa", "description": "Arrays, strings, trees, graphs — the patterns interviews focus on.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Web Development Basics", "canonicalName": "mech-swe-web", "description": "HTML/CSS, JavaScript, React, and a backend with Node or Spring Boot.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Databases & SQL", "canonicalName": "mech-swe-db", "description": "Relational basics, schema design, queries, and ORMs.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Git, Linux & Tooling", "canonicalName": "mech-swe-tooling", "description": "Git workflows, command line, code editors, and developer hygiene.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Building Portfolio Projects", "canonicalName": "mech-swe-portfolio", "description": "Shipping 2-3 deployed projects on GitHub that prove you can code.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI-Augmented Coding", "canonicalName": "mech-swe-ai-coding", "description": "Using Copilot/Claude effectively while still building fundamentals.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::marketing-analyst::data-scientist",
+    "source": "curated",
+    "topics": [
+      { "name": "Statistics for DS", "canonicalName": "ma-ds-stats", "description": "Distributions, hypothesis testing, regression — beyond Excel-only thinking.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Python & Pandas", "canonicalName": "ma-ds-python-pandas", "description": "Pandas, NumPy, plotting, and reproducible analysis notebooks.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "SQL Deep Dive", "canonicalName": "ma-ds-sql-deep", "description": "Window functions, CTEs, query optimisation beyond basic GA-export joins.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Machine Learning Basics", "canonicalName": "ma-ds-ml-basics", "description": "Regression, classification, clustering, and the ML lifecycle.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Experimentation & Causal Inference", "canonicalName": "ma-ds-experimentation", "description": "Designing A/B tests, controlling for confounds, and reading lift correctly.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Storytelling with Data", "canonicalName": "ma-ds-storytelling", "description": "Translating models into business actions — the bridge from analyst to scientist.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "GenAI for Data Science", "canonicalName": "ma-ds-genai", "description": "Using LLMs in EDA, document analysis, and as embedding-powered features.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::marketing::product-marketing-manager",
+    "source": "curated",
+    "topics": [
+      { "name": "Positioning & Messaging", "canonicalName": "pmm-positioning", "description": "April Dunford-style positioning frameworks and message hierarchies.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Buyer & Customer Research", "canonicalName": "pmm-buyer-research", "description": "Win-loss, jobs-to-be-done, and persona research for B2B/B2C products.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Go-to-Market Planning", "canonicalName": "pmm-gtm", "description": "Cross-functional GTM motions for launches and net-new product lines.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Sales Enablement", "canonicalName": "pmm-sales-enablement", "description": "Decks, battle cards, ROI calculators, and partnering with sales reps.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Product Launches & Lifecycle", "canonicalName": "pmm-launches", "description": "Launch tiers, comms plans, and post-launch metrics for SaaS.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Competitive Intelligence", "canonicalName": "pmm-competitive-intel", "description": "Tracking competitors, win-loss programs, and crafting differentiation narratives.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::consulting::product-management",
+    "source": "curated",
+    "topics": [
+      { "name": "Tech Fluency", "canonicalName": "consulting-pm-tech", "description": "APIs, databases, modern stacks — the gap consultants most need to close.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Product Discovery & User Research", "canonicalName": "consulting-pm-discovery", "description": "Customer interviews, JTBD — moving from client interviews to user-first.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Product Metrics & Data", "canonicalName": "consulting-pm-metrics", "description": "Defining north stars, instrumentation, A/B testing fundamentals.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Roadmapping & Prioritisation", "canonicalName": "consulting-pm-roadmap", "description": "Quarterly roadmaps, RICE/MoSCoW, and saying no with data.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Stakeholder Mgmt — Inside-Out", "canonicalName": "consulting-pm-stakeholder", "description": "Influencing engineers and designers — different from external client mgmt.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Working Inside a Product Org", "canonicalName": "consulting-pm-inside-org", "description": "Sprint cadence, agile rituals, design partnerships — life beyond decks.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 },
+      { "name": "AI Product Strategy", "canonicalName": "consulting-pm-ai-strategy", "description": "Designing AI features, evals, and AI roadmap considerations.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 7 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::government-job::corporate",
+    "source": "curated",
+    "topics": [
+      { "name": "Resume & LinkedIn Repositioning", "canonicalName": "govt-corp-resume", "description": "Translating govt job titles and KRAs into corporate-friendly language.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Corporate Communication", "canonicalName": "govt-corp-comms", "description": "Email etiquette, status updates, and meeting hygiene in private companies.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Excel & Data Tools", "canonicalName": "govt-corp-excel", "description": "Pivot tables, lookups, basic dashboards — the tools every corporate role uses.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Project Management Basics", "canonicalName": "govt-corp-pm", "description": "Sprints, OKRs, RACI, and modern project rituals beyond government file movement.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Domain Knowledge for Target Industry", "canonicalName": "govt-corp-domain", "description": "Building working knowledge of the industry you're switching into.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Interview Prep — Behavioural & Functional", "canonicalName": "govt-corp-interview", "description": "STAR responses and functional questions for the target corporate role.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::teacher::corporate-l-and-d",
+    "source": "curated",
+    "topics": [
+      { "name": "Adult Learning & Instructional Design", "canonicalName": "ld-instructional-design", "description": "ADDIE, Kirkpatrick, and how adults learn vs school students.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Learning Tech & LMS", "canonicalName": "ld-learning-tech", "description": "LMS platforms (Cornerstone, Workday Learning), authoring tools, SCORM/xAPI.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Stakeholder Mgmt with Business", "canonicalName": "ld-stakeholder", "description": "Partnering with HR business partners and function heads on training needs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Program Design & Facilitation", "canonicalName": "ld-program-facilitation", "description": "Designing leadership programs and facilitating workshops for managers.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Measurement & Impact", "canonicalName": "ld-measurement", "description": "Measuring training impact beyond attendance and smile sheets.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Resume & Story Repositioning", "canonicalName": "ld-resume", "description": "Translating teaching experience into corporate L&D language.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::ca::investment-banking",
+    "source": "curated",
+    "topics": [
+      { "name": "Financial Modelling", "canonicalName": "ca-ib-modelling", "description": "Three-statement, DCF, LBO, M&A models — the IB analyst's daily job.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Valuation Methods", "canonicalName": "ca-ib-valuation", "description": "DCF, comparables, precedent transactions tailored for Indian markets.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Pitchbook & Deck Building", "canonicalName": "ca-ib-pitchbooks", "description": "Industry overviews, company profiles, and clean IB-style decks.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Industry Knowledge", "canonicalName": "ca-ib-industry", "description": "Sector deep dives — fintech, consumer, healthcare, infra — relevant to Indian deal flow.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Excel & PowerPoint Mastery", "canonicalName": "ca-ib-excel-ppt", "description": "Speed, shortcuts, formatting standards expected in IB.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Behavioural & Fit Interviews", "canonicalName": "ca-ib-behavioural", "description": "Why IB, why this firm, deal walkthroughs and behavioural answers for IB recruiting.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrostatics & Capacitance", "canonicalName": "cbse12-physics-electrostatics", "description": "Coulomb's law, electric field/potential, Gauss's law, capacitors — first major unit.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Current Electricity", "canonicalName": "cbse12-physics-current", "description": "Ohm's law, Kirchhoff's laws, Wheatstone bridge, potentiometer — high weightage.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Magnetism & EMI", "canonicalName": "cbse12-physics-magnetism-emi", "description": "Magnetic fields, Biot-Savart, Faraday's law, Lenz's law, AC circuits.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Optics — Ray & Wave", "canonicalName": "cbse12-physics-optics", "description": "Reflection, refraction, lenses, interference, diffraction, polarisation.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Modern Physics", "canonicalName": "cbse12-physics-modern", "description": "Photoelectric effect, atoms (Bohr model), nuclei, radioactivity.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Semiconductor Electronics", "canonicalName": "cbse12-physics-semiconductors", "description": "p-n junctions, diodes, transistors, logic gates — the final unit.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Solutions & Electrochemistry", "canonicalName": "cbse12-chem-solutions-electrochem", "description": "Concentration units, Raoult's law, conductance, EMF, Nernst equation.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Chemical Kinetics", "canonicalName": "cbse12-chem-kinetics", "description": "Rate laws, integrated rate equations, Arrhenius equation.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "p-Block, d-Block & f-Block", "canonicalName": "cbse12-chem-pdf-blocks", "description": "Group properties, important compounds, transition metals, lanthanides/actinides.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Coordination Compounds", "canonicalName": "cbse12-chem-coord", "description": "Werner's theory, IUPAC nomenclature, isomerism, bonding theories.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Organic — Haloalkanes to Amines", "canonicalName": "cbse12-chem-organic-1", "description": "Haloalkanes/arenes, alcohols, phenols, ethers, aldehydes, ketones, acids, amines.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Biomolecules & Polymers", "canonicalName": "cbse12-chem-biomol-polymers", "description": "Carbohydrates, proteins, vitamins, nucleic acids, polymers and their classifications.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Relations, Functions & ITF", "canonicalName": "cbse12-maths-relations-functions", "description": "Types of relations, composition, inverse, inverse trigonometric functions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Matrices & Determinants", "canonicalName": "cbse12-maths-matrices-determinants", "description": "Matrix operations, determinants, adjoint, inverse, system of equations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Continuity & Differentiability", "canonicalName": "cbse12-maths-continuity-diff", "description": "Continuity, differentiation rules, applications of derivatives.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Integrals & Applications", "canonicalName": "cbse12-maths-integrals", "description": "Indefinite, definite integrals, area under curves.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Differential Equations & Vectors", "canonicalName": "cbse12-maths-de-vectors", "description": "Order, degree, solving DEs; vector algebra and 3D geometry.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Probability & Linear Programming", "canonicalName": "cbse12-maths-probability-lp", "description": "Conditional probability, Bayes', random variables; LPP and graphical method.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction in Plants & Animals", "canonicalName": "cbse12-bio-reproduction", "description": "Sexual reproduction in flowering plants, human reproduction, reproductive health.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics & Evolution", "canonicalName": "cbse12-bio-genetics-evolution", "description": "Mendel's laws, molecular basis of inheritance, evolution.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Biology in Human Welfare", "canonicalName": "cbse12-bio-human-welfare", "description": "Human health and disease, microbes in human welfare.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biotechnology — Principles & Applications", "canonicalName": "cbse12-bio-biotech", "description": "Recombinant DNA technology, applications in medicine and agriculture.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Ecology & Environment", "canonicalName": "cbse12-bio-ecology-env", "description": "Organisms and populations, ecosystems, biodiversity, environmental issues.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::12::accountancy",
+    "source": "curated",
+    "topics": [
+      { "name": "Partnership Accounts — Fundamentals", "canonicalName": "cbse12-acc-partnership-fund", "description": "Partnership deed, P&L appropriation account, capital accounts.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Reconstitution of Partnership", "canonicalName": "cbse12-acc-reconstitution", "description": "Admission, retirement, death of a partner; goodwill treatment.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Dissolution of Partnership", "canonicalName": "cbse12-acc-dissolution", "description": "Dissolution accounting, realisation account, partner settlement.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Company Accounts — Share Capital", "canonicalName": "cbse12-acc-share-capital", "description": "Issue, forfeiture, reissue of shares; calls in arrears/advance.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Company Accounts — Debentures", "canonicalName": "cbse12-acc-debentures", "description": "Issue and redemption of debentures, interest accounting.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Financial Statement Analysis", "canonicalName": "cbse12-acc-fsa", "description": "Comparative & common-size statements, ratio analysis, cash flow statement.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::12::business-studies",
+    "source": "curated",
+    "topics": [
+      { "name": "Principles & Functions of Management", "canonicalName": "cbse12-bst-mgmt-principles", "description": "Nature of management, principles (Fayol, Taylor), functions of management.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Business Environment & Planning", "canonicalName": "cbse12-bst-env-planning", "description": "Business environment dimensions, planning process and types.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Organising, Staffing & Directing", "canonicalName": "cbse12-bst-org-staff-direct", "description": "Organisation structures, staffing process, motivation, leadership, communication.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Controlling & Financial Mgmt", "canonicalName": "cbse12-bst-control-finmgmt", "description": "Controlling process, financial management, capital structure decisions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Marketing Management", "canonicalName": "cbse12-bst-marketing", "description": "Marketing concepts, marketing mix (4Ps), product, price, place, promotion.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Consumer Protection & Financial Markets", "canonicalName": "cbse12-bst-consumer-finmarkets", "description": "Consumer rights, redressal, money market, capital market, SEBI.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::12::economics",
+    "source": "curated",
+    "topics": [
+      { "name": "Microeconomics — Consumer & Demand", "canonicalName": "cbse12-eco-micro-consumer", "description": "Consumer's equilibrium, demand, elasticity of demand.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Microeconomics — Producer & Supply", "canonicalName": "cbse12-eco-micro-producer", "description": "Production function, costs, revenue, supply, producer's equilibrium.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Forms of Market & Price Determination", "canonicalName": "cbse12-eco-market", "description": "Perfect competition, monopoly, oligopoly, price determination.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Macro — National Income & Money", "canonicalName": "cbse12-eco-macro-income-money", "description": "National income aggregates, money, banking, money supply.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Macro — Income Determination & Govt Budget", "canonicalName": "cbse12-eco-macro-income-budget", "description": "Aggregate demand, supply, income determination, government budget, fiscal policy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Balance of Payments & Foreign Exchange", "canonicalName": "cbse12-eco-bop-fx", "description": "BoP components, exchange rate determination, current/capital account.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::12::computer-science",
+    "source": "curated",
+    "topics": [
+      { "name": "Python Programming", "canonicalName": "cbse12-cs-python", "description": "Python basics, control flow, functions, strings, lists, tuples, dictionaries.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "File Handling & Exceptions", "canonicalName": "cbse12-cs-file-exceptions", "description": "Text and binary files, CSV files, exception handling in Python.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Data Structures — Stacks & Queues", "canonicalName": "cbse12-cs-ds", "description": "Stack and queue implementation in Python, applications.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Computer Networks", "canonicalName": "cbse12-cs-networks", "description": "Network types, topologies, transmission media, network devices, protocols.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Database Management & SQL", "canonicalName": "cbse12-cs-dbms-sql", "description": "Relational DB concepts, SQL DDL/DML, joins, Python-MySQL connectivity.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Society, Law & Ethics in Computing", "canonicalName": "cbse12-cs-ethics", "description": "Cyber safety, IPR, IT Act, e-waste, digital footprint.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Kinematics & Laws of Motion", "canonicalName": "cbse11-physics-kinematics-nlm", "description": "1D/2D motion, projectile motion, Newton's laws, friction.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy & Rotational Motion", "canonicalName": "cbse11-physics-work-energy-rotation", "description": "Work-energy theorem, conservation of energy, rotational dynamics, torque.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Gravitation & Mechanics of Solids/Fluids", "canonicalName": "cbse11-physics-gravitation-fluids", "description": "Gravitational law, Kepler's laws, elasticity, fluid statics, surface tension.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Thermodynamics & Kinetic Theory", "canonicalName": "cbse11-physics-thermo-kt", "description": "Laws of thermodynamics, heat engines, kinetic theory of gases.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Oscillations & Waves", "canonicalName": "cbse11-physics-osc-waves", "description": "SHM, damped/forced oscillations, wave motion, sound waves, beats.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::11::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Atomic Structure & Periodicity", "canonicalName": "cbse11-chem-atomic-periodic", "description": "Quantum numbers, orbitals, periodic trends in properties.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Chemical Bonding & States of Matter", "canonicalName": "cbse11-chem-bonding-states", "description": "Ionic, covalent bonding, VSEPR, hybridisation, gases, liquids, solids.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Thermodynamics & Equilibrium", "canonicalName": "cbse11-chem-thermo-equilibrium", "description": "Enthalpy, entropy, Gibbs energy, chemical and ionic equilibrium.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Redox, s-Block & p-Block (Group 13-14)", "canonicalName": "cbse11-chem-redox-sblock-pblock", "description": "Redox reactions, hydrogen, alkali/alkaline earth metals, boron and carbon families.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Organic Chemistry — Basics & Hydrocarbons", "canonicalName": "cbse11-chem-organic-hydrocarbons", "description": "GOC, isomerism, alkanes, alkenes, alkynes, aromatic hydrocarbons.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::11::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Sets, Relations & Functions", "canonicalName": "cbse11-maths-sets-relations", "description": "Sets, types of relations, functions, types of functions.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Trigonometry & Complex Numbers", "canonicalName": "cbse11-maths-trig-complex", "description": "Trigonometric functions, identities, complex numbers, quadratic equations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Sequences, Series & Permutations-Combinations", "canonicalName": "cbse11-maths-seq-pnc", "description": "AP, GP, binomial theorem, permutations and combinations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Coordinate Geometry & Conic Sections", "canonicalName": "cbse11-maths-coord-conics", "description": "Straight lines, circles, parabolas, ellipses, hyperbolas, 3D introduction.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Calculus Introduction & Statistics", "canonicalName": "cbse11-maths-calculus-stats", "description": "Limits, derivatives, mathematical reasoning, statistics, probability.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::cbse::11::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Diversity in the Living World", "canonicalName": "cbse11-bio-diversity", "description": "Classification, kingdoms — Monera, Protista, Fungi, Plantae, Animalia.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Structural Organisation in Plants & Animals", "canonicalName": "cbse11-bio-structural-org", "description": "Morphology, anatomy of flowering plants, animal tissues, cockroach.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Cell Structure & Function", "canonicalName": "cbse11-bio-cell", "description": "Cell theory, prokaryotic vs eukaryotic, biomolecules, cell cycle, division.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Plant Physiology", "canonicalName": "cbse11-bio-plant-physio", "description": "Transport, mineral nutrition, photosynthesis, respiration, growth.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Human Physiology", "canonicalName": "cbse11-bio-human-physio", "description": "Digestion, breathing, circulation, excretion, locomotion, neural and chemical coordination.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::icse::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrostatics & Current Electricity", "canonicalName": "icse12-physics-electro", "description": "Coulomb's law, capacitance, Ohm's law, Kirchhoff's laws, Wheatstone bridge.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Magnetism & Electromagnetic Induction", "canonicalName": "icse12-physics-mag-emi", "description": "Magnetic effects of current, EMI, AC circuits.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Wave Optics & Ray Optics", "canonicalName": "icse12-physics-optics", "description": "Reflection, refraction, lenses, interference, diffraction, polarisation.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Modern Physics & Atomic Physics", "canonicalName": "icse12-physics-modern", "description": "Photoelectric effect, atomic models, X-rays, nuclei, radioactivity.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Electronics & Communication", "canonicalName": "icse12-physics-electronics", "description": "Semiconductors, diodes, transistors, basics of communication systems.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::icse::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Solid State, Solutions & Electrochemistry", "canonicalName": "icse12-chem-solid-sol-elec", "description": "Solids, colligative properties, conductance, EMF, batteries, corrosion.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Kinetics & Surface Chemistry", "canonicalName": "icse12-chem-kinetics-surface", "description": "Rate laws, Arrhenius, catalysis, colloids, adsorption.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Inorganic — p, d & f Blocks", "canonicalName": "icse12-chem-pdf-blocks", "description": "Group 15-18 elements, transition metals, lanthanides, actinides.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Coordination Compounds & Organic Halides", "canonicalName": "icse12-chem-coord-halides", "description": "Werner's theory, isomerism, haloalkanes, haloarenes.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Alcohols to Biomolecules", "canonicalName": "icse12-chem-alcohol-biomol", "description": "Alcohols, phenols, aldehydes, acids, amines, biomolecules, polymers.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::icse::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Relations, Functions & ITF", "canonicalName": "icse12-maths-relations", "description": "Relations, functions, inverse trigonometric functions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Matrices, Determinants & Linear Equations", "canonicalName": "icse12-maths-matrices", "description": "Matrix algebra, determinants, system of linear equations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Calculus — Differentiation & Integration", "canonicalName": "icse12-maths-calculus", "description": "Continuity, differentiation, applications, definite and indefinite integrals.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Vectors, 3D Geometry & DEs", "canonicalName": "icse12-maths-vectors-de", "description": "Vector algebra, 3D geometry, differential equations.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Probability & Statistics", "canonicalName": "icse12-maths-prob-stats", "description": "Conditional probability, Bayes', random variables, regression.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::icse::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction in Organisms", "canonicalName": "icse12-bio-reproduction", "description": "Asexual and sexual reproduction in plants, human reproduction, reproductive health.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics & Molecular Biology", "canonicalName": "icse12-bio-genetics", "description": "Mendelian inheritance, molecular basis of inheritance, evolution.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Biology in Human Welfare", "canonicalName": "icse12-bio-human-welfare", "description": "Human health and disease, immunology, microbes in human welfare.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biotechnology & Applications", "canonicalName": "icse12-bio-biotech", "description": "Recombinant DNA technology, applications in agriculture and medicine.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Ecology & Environment", "canonicalName": "icse12-bio-ecology", "description": "Populations, ecosystems, biodiversity, environmental issues.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::icse::12::commerce",
+    "source": "curated",
+    "topics": [
+      { "name": "Principles of Commerce & Business Org", "canonicalName": "icse12-commerce-principles-org", "description": "Forms of business organisation, sole proprietorship, partnership, companies, MNCs.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Capital, Trade & Credit", "canonicalName": "icse12-commerce-capital-trade", "description": "Sources of finance, fixed and working capital, internal and international trade.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Marketing & Advertising", "canonicalName": "icse12-commerce-marketing-ads", "description": "Marketing concepts, marketing mix, advertising, branding, consumer protection.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Insurance, Banking & E-Commerce", "canonicalName": "icse12-commerce-banking-ecom", "description": "Banking system, insurance principles, e-commerce models in India.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Indian Economy & Recent Trends", "canonicalName": "icse12-commerce-economy", "description": "Indian economic environment, GST, demonetisation, digital India initiatives.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::undergrad::computer-science",
+    "source": "curated",
+    "topics": [
+      { "name": "Programming & DSA", "canonicalName": "ug-cs-programming-dsa", "description": "Programming in C/C++/Python/Java, data structures, algorithms.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Operating Systems & Computer Networks", "canonicalName": "ug-cs-os-cn", "description": "OS concepts, scheduling, memory mgmt, OSI/TCP-IP, routing.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "DBMS & SQL", "canonicalName": "ug-cs-dbms-sql", "description": "ER modelling, normalisation, SQL, transactions, indexing.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Software Engineering & OOP", "canonicalName": "ug-cs-se-oop", "description": "OOP principles, design patterns, SDLC, agile, version control.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Theory of Computation & Compilers", "canonicalName": "ug-cs-toc-compilers", "description": "Automata, regular and context-free languages, parsing.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "AI/ML Fundamentals", "canonicalName": "ug-cs-ai-ml", "description": "Search, knowledge representation, supervised/unsupervised learning.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::undergrad::electrical-engineering",
+    "source": "curated",
+    "topics": [
+      { "name": "Circuit Analysis", "canonicalName": "ug-ee-circuits", "description": "DC/AC circuits, network theorems, transient and steady state analysis.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Electromagnetic Theory & Fields", "canonicalName": "ug-ee-em-theory", "description": "Vector calculus, Maxwell's equations, EM waves, transmission lines.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Electrical Machines & Power Systems", "canonicalName": "ug-ee-machines-power", "description": "DC/AC machines, transformers, power generation, transmission, distribution.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Control Systems & Signals", "canonicalName": "ug-ee-control-signals", "description": "Control theory, transfer functions, signals and systems, transforms.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Power Electronics & Drives", "canonicalName": "ug-ee-power-electronics", "description": "Diodes, BJTs, MOSFETs, converters, inverters, motor drives.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Digital Electronics & Microprocessors", "canonicalName": "ug-ee-digital-micro", "description": "Boolean algebra, combinational and sequential circuits, microprocessor basics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::undergrad::mechanical-engineering",
+    "source": "curated",
+    "topics": [
+      { "name": "Engineering Mechanics & Strength of Materials", "canonicalName": "ug-mech-mechanics-som", "description": "Statics, dynamics, stress, strain, bending, torsion.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Thermodynamics & Heat Transfer", "canonicalName": "ug-mech-thermo-ht", "description": "Laws of thermodynamics, cycles, conduction, convection, radiation.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Fluid Mechanics & Hydraulics", "canonicalName": "ug-mech-fluid", "description": "Fluid statics and dynamics, Bernoulli's equation, pumps, turbines.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Manufacturing & Materials", "canonicalName": "ug-mech-mfg-materials", "description": "Casting, forming, joining, machining, material science.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Theory of Machines & Design", "canonicalName": "ug-mech-tom-design", "description": "Mechanisms, gears, dynamics of machines, machine design.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Industrial Engineering & Operations", "canonicalName": "ug-mech-ie-ops", "description": "Production planning, inventory control, quality, plant layout.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::undergrad::commerce",
+    "source": "curated",
+    "topics": [
+      { "name": "Financial Accounting", "canonicalName": "ug-commerce-fin-acc", "description": "Accounting principles, journal, ledger, trial balance, final accounts.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Cost & Management Accounting", "canonicalName": "ug-commerce-cost-mgmt-acc", "description": "Cost classification, costing methods, budgeting, variance analysis.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Business Economics", "canonicalName": "ug-commerce-business-eco", "description": "Microeconomics for managers, demand-supply, market structures.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Business Law & GST", "canonicalName": "ug-commerce-law-gst", "description": "Indian Contract Act, Companies Act basics, GST framework.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Corporate Finance & Banking", "canonicalName": "ug-commerce-fin-banking", "description": "Time value of money, capital budgeting, banking system, NBFCs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Marketing & E-Commerce", "canonicalName": "ug-commerce-marketing-ecom", "description": "Marketing mix, consumer behaviour, e-commerce in India.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::tech",
+    "source": "curated",
+    "topics": [
+      { "name": "How the Internet Works", "canonicalName": "casual-tech-internet", "description": "DNS, browsers, servers — what happens when you type a URL.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "AI & Large Language Models", "canonicalName": "casual-tech-ai-llm", "description": "What ChatGPT/Claude are, how they work at a high level, what they can and can't do.", "baseDifficulty": "foundational", "isFutureProofing": true, "sortOrder": 2 },
+      { "name": "Cybersecurity for Everyone", "canonicalName": "casual-tech-cybersecurity", "description": "Phishing, password hygiene, 2FA, and protecting your digital life.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "How Smartphones & Apps Work", "canonicalName": "casual-tech-smartphones", "description": "OS, apps, push notifications, location, and how UPI works under the hood.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Cloud Computing Basics", "canonicalName": "casual-tech-cloud", "description": "AWS, Azure, GCP — what 'the cloud' really is and why every company uses it.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Indian Tech Industry & Startup Stories", "canonicalName": "casual-tech-india-startups", "description": "Stories of Flipkart, Razorpay, Zomato — how they were built, lessons learned.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::business",
+    "source": "curated",
+    "topics": [
+      { "name": "Business Models & Strategy", "canonicalName": "casual-biz-models", "description": "Subscription, marketplace, freemium — how companies make money.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Reading Indian Companies' Financials", "canonicalName": "casual-biz-financials", "description": "P&L basics, revenue vs profit, and what to look for in a quarterly report.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Marketing & Branding", "canonicalName": "casual-biz-marketing", "description": "How brands like Maggi, boAt, Amul build memorable presence in Indian minds.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Negotiation & Persuasion", "canonicalName": "casual-biz-negotiation", "description": "Anchoring, BATNA, and getting better outcomes in everyday conversations.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Indian Business Case Studies", "canonicalName": "casual-biz-india-cases", "description": "Stories of Tata, Reliance, Infosys, Patanjali — strategy and growth.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Entrepreneurship Basics", "canonicalName": "casual-biz-entrepreneurship", "description": "Idea-to-market, customer discovery, and what every founder should know first.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::history",
+    "source": "curated",
+    "topics": [
+      { "name": "Ancient India", "canonicalName": "casual-history-ancient-india", "description": "Indus Valley, Vedic period, Mauryas, Guptas — the foundations of Indian civilisation.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Medieval India", "canonicalName": "casual-history-medieval-india", "description": "Delhi Sultanate, Mughals, Vijayanagara, Marathas — the second great phase.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Modern India & Freedom Struggle", "canonicalName": "casual-history-modern-india", "description": "Colonial period, 1857, Gandhi, Nehru, partition, and the road to independence.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "World History — Big Picture", "canonicalName": "casual-history-world-bigpicture", "description": "Major civilisations, world wars, cold war, and the shape of today's world.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Indian Art, Architecture & Heritage", "canonicalName": "casual-history-art-architecture", "description": "Temples, paintings, dances, music traditions across India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Post-Independence India", "canonicalName": "casual-history-post-1947", "description": "Wars, economic reforms 1991, key political shifts, India's rise to today.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::science",
+    "source": "curated",
+    "topics": [
+      { "name": "Physics — How the Universe Works", "canonicalName": "casual-science-physics", "description": "Gravity, light, electricity, quantum basics — the rules behind everything.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Biology & The Human Body", "canonicalName": "casual-science-biology", "description": "How cells, organs, immune system, brain work — biology of being human.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Space & Astronomy", "canonicalName": "casual-science-space", "description": "Solar system, stars, galaxies, ISRO and Indian space achievements.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Earth Science & Climate", "canonicalName": "casual-science-earth-climate", "description": "Plate tectonics, weather, climate change, monsoons in India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Chemistry in Everyday Life", "canonicalName": "casual-science-chemistry-everyday", "description": "What's in your food, soap, plastic, batteries — chemistry made everyday.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "How Vaccines & Modern Medicine Work", "canonicalName": "casual-science-medicine", "description": "Vaccines, antibiotics, mRNA — how modern medicine saves lives.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::philosophy",
+    "source": "curated",
+    "topics": [
+      { "name": "Indian Philosophy — Vedanta & Yoga", "canonicalName": "casual-phil-indian-vedanta-yoga", "description": "Upanishads, Vedanta schools, Yoga sutras — Indian thought traditions.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Buddhism & Jainism", "canonicalName": "casual-phil-buddhism-jainism", "description": "Four Noble Truths, eightfold path, ahimsa, key teachings and impact.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Western Philosophy — Greeks to Modern", "canonicalName": "casual-phil-western", "description": "Socrates, Plato, Aristotle through to Kant, Nietzsche, and modern thinkers.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Ethics & Moral Philosophy", "canonicalName": "casual-phil-ethics", "description": "Right and wrong — utilitarianism, deontology, virtue ethics with examples.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Stoicism for Modern Life", "canonicalName": "casual-phil-stoicism", "description": "Marcus Aurelius, Epictetus — practical wisdom for today's stress.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Bhagavad Gita as Philosophy", "canonicalName": "casual-phil-gita", "description": "Karma, dharma, the three yogas — Gita's teachings as life philosophy.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::wellness",
+    "source": "curated",
+    "topics": [
+      { "name": "Sleep Science & Recovery", "canonicalName": "casual-wellness-sleep", "description": "Sleep stages, circadian rhythm, and habits for better rest.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Nutrition Basics", "canonicalName": "casual-wellness-nutrition", "description": "Macros, micros, Indian diet patterns, and reading food labels.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Mental Health & Stress", "canonicalName": "casual-wellness-mental-health", "description": "Anxiety, burnout, therapy, and managing stress in modern Indian life.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Exercise & Movement", "canonicalName": "casual-wellness-exercise", "description": "Strength, cardio, flexibility, and building a sustainable routine.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Meditation & Mindfulness", "canonicalName": "casual-wellness-meditation", "description": "Breath, focus, and how mindfulness changes the brain.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Ayurveda & Indian Wellness Traditions", "canonicalName": "casual-wellness-ayurveda", "description": "Doshas, dinacharya, herbs, and Ayurvedic principles for daily health.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::languages",
+    "source": "curated",
+    "topics": [
+      { "name": "How Languages Work — Linguistics Basics", "canonicalName": "casual-lang-linguistics", "description": "Phonetics, grammar, syntax — what's universal across all human languages.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Indian Language Families", "canonicalName": "casual-lang-india-families", "description": "Indo-Aryan, Dravidian, Sino-Tibetan — the language families of India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Sanskrit & Classical Heritage", "canonicalName": "casual-lang-sanskrit", "description": "Sanskrit's structure, key texts, influence on Indian languages.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Learning a New Language — Strategies", "canonicalName": "casual-lang-learning-strategies", "description": "Spaced repetition, immersion, and effective adult language learning.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "English Vocabulary & Idioms", "canonicalName": "casual-lang-english-vocab", "description": "Building a powerful English vocabulary with idioms, roots, and usage.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::personal-finance",
+    "source": "curated",
+    "topics": [
+      { "name": "Budgeting & Saving", "canonicalName": "casual-finance-budget-save", "description": "50-30-20 rule, tracking expenses, building an emergency fund.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Investing in Mutual Funds & SIPs", "canonicalName": "casual-finance-mf-sip", "description": "How SIPs work, types of mutual funds, picking the right one.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Stock Market for Beginners", "canonicalName": "casual-finance-stocks", "description": "How stocks work, NSE/BSE basics, demat accounts, simple frameworks.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Income Tax in India", "canonicalName": "casual-finance-income-tax", "description": "Old vs new regime, deductions, ITR filing, capital gains taxation.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Insurance & Protection", "canonicalName": "casual-finance-insurance", "description": "Term life, health insurance, picking the right cover for your family.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Real Estate, Gold & Crypto", "canonicalName": "casual-finance-realestate-gold-crypto", "description": "Indian context: real estate, sovereign gold bonds, crypto risks.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::productivity",
+    "source": "curated",
+    "topics": [
+      { "name": "Time Management Systems", "canonicalName": "casual-prod-time-mgmt", "description": "Time blocking, Eisenhower matrix, Pomodoro — pick what fits you.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Note-taking & Knowledge Management", "canonicalName": "casual-prod-notes-pkm", "description": "Zettelkasten, Notion, Obsidian — building a second brain.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Habits & Behaviour Change", "canonicalName": "casual-prod-habits", "description": "Atomic habits, habit stacking, and making good behaviours stick.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Deep Work & Focus", "canonicalName": "casual-prod-deep-work", "description": "Cal Newport's deep work, eliminating distractions, focus rituals.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Goal Setting & Reviews", "canonicalName": "casual-prod-goals-reviews", "description": "OKRs for personal life, weekly/monthly reviews, annual planning.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "AI Tools for Productivity", "canonicalName": "casual-prod-ai-tools", "description": "Using ChatGPT/Claude, Notion AI, automations to save hours every week.", "baseDifficulty": "foundational", "isFutureProofing": true, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::arts",
+    "source": "curated",
+    "topics": [
+      { "name": "Indian Classical Music — Hindustani & Carnatic", "canonicalName": "casual-arts-classical-music", "description": "Ragas, talas, gharanas, key composers and contemporary maestros.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Indian Cinema — Bollywood & Beyond", "canonicalName": "casual-arts-indian-cinema", "description": "History of Hindi cinema, regional powerhouses, the OTT era.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Visual Arts — Painting & Sculpture", "canonicalName": "casual-arts-visual", "description": "Madhubani, Tanjore, Pichwai, modern Indian art and the Bengal school.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Literature & Poetry", "canonicalName": "casual-arts-literature", "description": "Tagore, Premchand, Manto, contemporary Indian English fiction.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Dance Forms of India", "canonicalName": "casual-arts-dance", "description": "Bharatanatyam, Kathak, Odissi, Kathakali, Manipuri — and modern fusions.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Photography & Visual Storytelling", "canonicalName": "casual-arts-photography", "description": "Composition, light, narrative — photography from phones to DSLR.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::indian-culture",
+    "source": "curated",
+    "topics": [
+      { "name": "Festivals of India", "canonicalName": "casual-culture-festivals", "description": "Diwali, Holi, Onam, Pongal, Eid, Christmas — origins, traditions, regional variations.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Indian Food & Regional Cuisines", "canonicalName": "casual-culture-food-cuisines", "description": "Punjabi, Bengali, South Indian, Awadhi — what makes each cuisine distinct.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Hindu Mythology — Ramayana & Mahabharata", "canonicalName": "casual-culture-mythology", "description": "Key stories, characters, philosophical themes from the great epics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Indian Heritage Sites & Architecture", "canonicalName": "casual-culture-heritage", "description": "Hampi, Khajuraho, Konark, Mughal architecture — India through stone.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Indian Spirituality & Religions", "canonicalName": "casual-culture-spirituality-religions", "description": "Hinduism, Islam, Sikhism, Christianity, Buddhism, Jainism — coexistence in India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 },
+      { "name": "Languages & Literature of India", "canonicalName": "casual-culture-languages-lit", "description": "22 scheduled languages, literary traditions across Tamil, Bengali, Hindi, Urdu.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "casual_learning",
+    "targetKey": "casual_learning::current-affairs",
+    "source": "curated",
+    "topics": [
+      { "name": "Indian Politics & Polity", "canonicalName": "casual-current-india-polity", "description": "Parliament, elections, key bills, Supreme Court judgments shaping India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Indian Economy & Schemes", "canonicalName": "casual-current-india-economy", "description": "Budget highlights, inflation, GST, government schemes (PM Mudra, MGNREGA).", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "International Relations — India's Place", "canonicalName": "casual-current-ir-india", "description": "G20, QUAD, BRICS, India-China, India-US, neighbourhood relations.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Geopolitics & Global Affairs", "canonicalName": "casual-current-geopolitics", "description": "Major world events, conflicts, climate negotiations, global tech regulation.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Science, Tech & AI in the News", "canonicalName": "casual-current-science-tech-ai", "description": "Major scientific breakthroughs, AI policy, Indian space missions.", "baseDifficulty": "foundational", "isFutureProofing": true, "sortOrder": 5 },
+      { "name": "Sports, Awards & Culture", "canonicalName": "casual-current-sports-awards", "description": "Cricket, Olympics, national/international awards, cultural events.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 6 }
+    ]
+  },
+  {
+    "objectiveType": "networking",
+    "targetKey": "networking::mentor-finding",
+    "source": "curated",
+    "topics": [
+      { "name": "Defining What You Need from a Mentor", "canonicalName": "network-mentor-need", "description": "Clarity on goals, role, time commitment before reaching out.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Identifying Potential Mentors", "canonicalName": "network-mentor-identify", "description": "LinkedIn search, industry forums, ScaleUp/communities to find mentors.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Cold Outreach That Works", "canonicalName": "network-mentor-outreach", "description": "Writing a respectful, specific cold message that gets a reply.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Building a Mentor Relationship", "canonicalName": "network-mentor-build-relationship", "description": "Cadence, agendas, gratitude, and earning continued time.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Asking Better Questions", "canonicalName": "network-mentor-questions", "description": "Specific questions over vague ones, prep, and applying advice.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "networking",
+    "targetKey": "networking::peer-building",
+    "source": "curated",
+    "topics": [
+      { "name": "Finding Your Tribe", "canonicalName": "network-peer-tribe", "description": "Communities, Slack/Discord groups, local meetups for peers in your stage.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Showing Up Consistently", "canonicalName": "network-peer-consistency", "description": "Why frequency beats intensity in peer networks.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Giving Before Asking", "canonicalName": "network-peer-give-first", "description": "Helping peers, sharing knowledge, and building reciprocity over time.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Hosting Casual Events", "canonicalName": "network-peer-host-events", "description": "Coffee chats, dinners, walking meets — easy ways to deepen peer ties.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Online Peer Learning", "canonicalName": "network-peer-online-learning", "description": "Cohort programs, learn-in-public, building peers around shared goals.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "networking",
+    "targetKey": "networking::hiring-network",
+    "source": "curated",
+    "topics": [
+      { "name": "Optimising Your LinkedIn Profile", "canonicalName": "network-hiring-linkedin", "description": "Headline, banner, about, experience — making recruiters reach out.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Strategic Connection Building", "canonicalName": "network-hiring-connections", "description": "Who to connect with, personalised invites, and warm introductions.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Asking for Referrals", "canonicalName": "network-hiring-referrals", "description": "How to ask for a referral without being awkward, and the exact templates.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Recruiter Conversations", "canonicalName": "network-hiring-recruiters", "description": "Working with internal and agency recruiters, what to say and what to ask.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Building a Personal Brand for Hiring", "canonicalName": "network-hiring-personal-brand", "description": "Posting, speaking, contributing — making opportunities come to you.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "networking",
+    "targetKey": "networking::founder-investor",
+    "source": "curated",
+    "topics": [
+      { "name": "Mapping the Indian VC Ecosystem", "canonicalName": "network-fi-vc-ecosystem", "description": "Tier-wise investors — angels, micro-VCs, big VCs in India and their thesis.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Warm Intros vs Cold Outreach", "canonicalName": "network-fi-intros-outreach", "description": "Why warm intros work better and how to engineer them ethically.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Building Investor Updates", "canonicalName": "network-fi-updates", "description": "Monthly investor updates that keep your network engaged before you raise.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Pitching & First Meetings", "canonicalName": "network-fi-pitching", "description": "Pitch deck essentials, first-meeting do's and don'ts with investors.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Founder Communities & Demo Days", "canonicalName": "network-fi-founder-communities", "description": "YC, Antler, Sequoia Surge, accelerators — getting in and getting value.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "networking",
+    "targetKey": "networking::community-presence",
+    "source": "curated",
+    "topics": [
+      { "name": "Choosing Your Platforms", "canonicalName": "network-community-platforms", "description": "LinkedIn, Twitter/X, YouTube, Substack — pick the right one for your audience.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Building a Content Cadence", "canonicalName": "network-community-cadence", "description": "Weekly schedule, batching, and content systems that survive busy weeks.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Crafting Posts That Resonate", "canonicalName": "network-community-posts", "description": "Hooks, structure, story — writing posts that get engagement.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Engaging Your Community", "canonicalName": "network-community-engagement", "description": "Replying, DMing, hosting AMAs — turning followers into a true community.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Speaking & Public Events", "canonicalName": "network-community-speaking", "description": "Getting on podcasts, panels, conferences — leveraging stage presence.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  }
+]

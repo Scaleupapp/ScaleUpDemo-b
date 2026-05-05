@@ -17,9 +17,10 @@ const fs = require('fs');
 const ROOT = path.resolve(__dirname, '..');
 const FILE_TIMEOUT_MS = 30_000; // 30 s per file
 
-// Discover all test files under src/
+// Discover all test files under given directories
 function findTestFiles(dir) {
   const results = [];
+  if (!fs.existsSync(dir)) return results;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -31,10 +32,14 @@ function findTestFiles(dir) {
   return results.sort();
 }
 
-const testFiles = findTestFiles(path.join(ROOT, 'src'));
+const testFiles = [
+  ...findTestFiles(path.join(ROOT, 'src')),
+  ...findTestFiles(path.join(ROOT, 'scripts', 'seed')),
+  ...findTestFiles(path.join(ROOT, 'scripts', 'migrate')),
+];
 
 if (testFiles.length === 0) {
-  console.error('No test files found under src/');
+  console.error('No test files found under src/, scripts/seed/, or scripts/migrate/');
   process.exit(1);
 }
 

@@ -1,5 +1,11 @@
 const onboardingService = require('../services/onboardingService');
 const apiResponse = require('../utils/apiResponse');
+const TopicTaxonomy = require('../models/TopicTaxonomy');
+const UserObjective = require('../models/UserObjective');
+const User = require('../models/User');
+const { normalizeSpecifics } = require('../services/diagnostic/specificsNormalizationService');
+
+const REQUIRED_FIELDS = ['objectiveType', 'timeline', 'currentLevel', 'weeklyCommitHours', 'topicsOfInterest', 'topicSelfRatings'];
 
 const getOnboardingStatus = async (req, res, next) => {
   try { res.json(apiResponse.success(await onboardingService.getOnboardingStatus(req.user.userId))); } catch (err) { next(err); }
@@ -19,8 +25,117 @@ const updatePreferences = async (req, res, next) => {
 const updateInterests = async (req, res, next) => {
   try { res.json(apiResponse.success(await onboardingService.updateInterests(req.user.userId, req.body))); } catch (err) { next(err); }
 };
-const completeOnboarding = async (req, res, next) => {
-  try { res.json(apiResponse.success(await onboardingService.completeOnboarding(req.user.userId), 'Onboarding complete')); } catch (err) { next(err); }
+const completeOnboarding = async function completeOnboarding(req, res) {
+  const userId = req.user && req.user._id;
+  if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+  const body = req.body || {};
+  const missing = REQUIRED_FIELDS.filter((f) => body[f] === undefined || body[f] === null);
+  if (missing.length) {
+    return res.status(400).json({ error: 'missing fields', fields: missing });
+  }
+
+  // Best-effort normalization. Service has its own internal fallback, but we still
+  // wrap in try/catch as belt-and-braces: nothing should block onboarding completion.
+  let specificsCanonical = {};
+  try {
+    specificsCanonical = await normalizeSpecifics({
+      objectiveType: body.objectiveType,
+      specifics: body.specifics || {},
+    });
+  } catch (err) {
+    console.warn('[onboarding.complete] normalization threw, continuing without canonical specifics:', err.message);
+    specificsCanonical = body.specifics || {};
+  }
+
+  const $set = {
+    userId,
+    objectiveType: body.objectiveType,
+    timeline: body.timeline,
+    currentLevel: body.currentLevel,
+    weeklyCommitHours: body.weeklyCommitHours,
+    topicsOfInterest: body.topicsOfInterest,
+    topicSelfRatings: body.topicSelfRatings,
+    specifics: body.specifics || {},
+    specificsCanonical,
+    needsCalibration: false, // freshly onboarded user has self-ratings
+    isPrimary: true,
+    status: 'active',
+  };
+  if (body.preferredLearningStyle) $set.preferredLearningStyle = body.preferredLearningStyle;
+  if (body.targetDate) $set.targetDate = body.targetDate;
+
+  const saved = await UserObjective.findOneAndUpdate(
+    { userId, isPrimary: true },
+    { $set },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+
+  // Mark User as onboarded so the app advances past the onboarding flow.
+  // Best-effort: don't fail the response if this somehow errors.
+  try {
+    await User.findByIdAndUpdate(userId, {
+      onboardingComplete: true,
+      onboardingStep: 5,
+    });
+  } catch (err) {
+    console.warn('[onboarding.complete] failed to flip User flags:', err.message);
+  }
+
+  return res.status(200).json({ userObjectiveId: saved._id });
 };
 
-module.exports = { getOnboardingStatus, updateProfile, updateBackground, setObjective, updatePreferences, updateInterests, completeOnboarding };
+// Build a deterministic taxonomy lookup key.
+// Mirrors Plan 1's targetKey convention: '<objectiveType>::<slug>'.
+function buildTargetKey(objectiveType, specifics, targetCompany) {
+  const slugify = (s) => String(s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  const parts = [];
+  if (specifics) {
+    if (specifics.examName) parts.push(slugify(specifics.examName));
+    else if (specifics.targetSkill) parts.push(slugify(specifics.targetSkill));
+    else if (specifics.targetRole) parts.push(slugify(specifics.targetRole));
+    else if (specifics.toDomain) parts.push(slugify(specifics.toDomain));
+  }
+  if (targetCompany) parts.push(slugify(targetCompany));
+  const tail = parts.filter(Boolean).join('-') || 'general';
+  return `${objectiveType}::${tail}`;
+}
+
+const suggestTopics = async function suggestTopics(req, res) {
+  const { objectiveType, specifics = {}, targetCompany } = req.body || {};
+  if (!objectiveType) {
+    return res.status(400).json({ error: 'objectiveType required' });
+  }
+  const targetKey = buildTargetKey(objectiveType, specifics, targetCompany);
+  const entry = await TopicTaxonomy.findOne({ objectiveType, targetKey });
+  if (!entry) {
+    // NOTE: Plan 3a will extend this to trigger realtime LLM generation here.
+    return res.status(404).json({
+      code: 'TAXONOMY_MISSING',
+      message: 'No taxonomy entry yet for this objective + specifics. LLM generation arrives in Plan 3a.',
+      targetKey,
+    });
+  }
+  return res.status(200).json({
+    targetKey,
+    source: entry.source,
+    topics: entry.topics,
+  });
+};
+
+module.exports = {
+  getOnboardingStatus,
+  updateProfile,
+  updateBackground,
+  setObjective,
+  updatePreferences,
+  updateInterests,
+  completeOnboarding,
+  suggestTopics,
+  _buildTargetKey: buildTargetKey,
+};

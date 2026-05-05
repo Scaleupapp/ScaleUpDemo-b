@@ -33,6 +33,25 @@ const diagnosticQuestionBankSchema = new mongoose.Schema({
   timesUsed:   { type: Number, default: 0 },
   discrimination: { type: Number, default: null }, // v2 — populated by future analytics job
   status: { type: String, enum: ['active', 'retired', 'pending_review'], default: 'active' },
+
+  verificationStatus: {
+    type: String,
+    enum: ['pending', 'auto_verified', 'human_verified', 'flagged_for_review', 'rejected'],
+    default: 'pending',
+    index: true,
+  },
+  validatorScore: { type: Number, min: 0, max: 100 },
+  validatorCritique: { type: String },
+  humanReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  humanReviewedAt: { type: Date },
+  humanReviewNotes: { type: String },
+  generationSource: {
+    type: String,
+    enum: ['curated', 'seed_batch', 'llm_realtime', 'syllabus_derived'],
+    default: 'seed_batch',
+  },
+  sourceContext: { type: mongoose.Schema.Types.ObjectId },
+  isAnchor: { type: Boolean, default: false, index: true },
 }, { timestamps: true });
 
 diagnosticQuestionBankSchema.index({ canonicalCompetency: 1, difficulty: 1, status: 1, timesUsed: 1 });
