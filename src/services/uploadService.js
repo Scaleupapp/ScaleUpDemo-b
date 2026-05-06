@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { generateUploadURL, initiateMultipartUpload, getPartUploadURL, completeMultipartUpload, abortMultipartUpload } = require('../config/s3');
+const { generateUploadURL, initiateMultipartUpload, getPartUploadURL, completeMultipartUpload, abortMultipartUpload, uploadBuffer } = require('../config/s3');
 const Content = require('../models/Content');
 const { contentProcessingQueue, whisperTranscriptionQueue } = require('../config/queue');
 const ApiError = require('../utils/apiError');
@@ -108,6 +108,14 @@ class UploadService {
       await contentProcessingQueue.add('process', { contentId: content._id.toString() });
     }
     return content;
+  }
+
+  // Upload a raw audio buffer (e.g. diagnostic voice answer) to S3.
+  // Returns { s3Key, url }.
+  async uploadAudioBuffer(buffer, { contentType = 'audio/m4a', keyPrefix = 'voice' } = {}) {
+    const key = `${keyPrefix}/${Date.now()}-${crypto.randomBytes(8).toString('hex')}.m4a`;
+    const url = await uploadBuffer(key, buffer, contentType);
+    return { s3Key: key, url };
   }
 }
 

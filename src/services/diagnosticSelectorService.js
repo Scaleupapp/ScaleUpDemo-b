@@ -98,8 +98,80 @@ function selectNext({ perf, questionsAsked, selfRating, currentDifficulty, lastA
   return { shouldStop: false, nextDifficulty: _bumpDifficulty(currentDifficulty, 'down') };
 }
 
+// ---------------------------------------------------------------------------
+// Path C question selection (Plan 3a) — per-topic question planning based on
+// the user's self-rating. Coexists with the v1 adaptive selector above; the
+// orchestrator (diagnosticService) will switch to these helpers in Task 8.
+// ---------------------------------------------------------------------------
+
+const PLAN_BY_RATING = {
+  novice: [
+    { difficulty: 'easy', requiresScenario: false },
+    { difficulty: 'easy', requiresScenario: false },
+  ],
+  familiar: [
+    { difficulty: 'easy', requiresScenario: false },
+    { difficulty: 'medium', requiresScenario: false },
+    { difficulty: 'hard', requiresScenario: false },
+  ],
+  proficient: [
+    { difficulty: 'medium', requiresScenario: false },
+    { difficulty: 'hard', requiresScenario: false },
+    { difficulty: 'hard', requiresScenario: false },
+  ],
+  expert: [
+    { difficulty: 'hard', requiresScenario: false },
+    { difficulty: 'hard', requiresScenario: true },
+    { difficulty: 'hard', requiresScenario: true },
+  ],
+};
+
+function questionPlanForTopic(canonicalTopic, rating) {
+  const tmpl = PLAN_BY_RATING[rating];
+  if (!tmpl) throw new Error(`Unknown rating: ${rating}`);
+  return tmpl.map(p => ({ canonicalTopic, ...p }));
+}
+
+function totalQuestionsForAttempt(ratingsMap) {
+  let total = 0;
+  const iter = ratingsMap instanceof Map
+    ? ratingsMap.values()
+    : Object.values(ratingsMap || {});
+  for (const rating of iter) {
+    total += (PLAN_BY_RATING[rating] || []).length;
+  }
+  return total;
+}
+
+function bumpDifficultyBand(d) {
+  if (d === 'easy') return 'medium';
+  if (d === 'medium') return 'hard';
+  return d;
+}
+
+function applyCompanyWeights(plan, weights) {
+  if (!plan || plan.length === 0) return plan;
+  if (!weights || (!(weights instanceof Map) && typeof weights !== 'object')) return plan;
+  const get = (key) => weights instanceof Map ? weights.get(key) : weights[key];
+  const weight = get(plan[0]?.canonicalTopic);
+  if (weight == null) return plan;
+  if (weight >= 1.5) {
+    // Bump self-rated band by one — represented by upgrading easy→medium, medium→hard
+    return plan.map(p => ({ ...p, difficulty: bumpDifficultyBand(p.difficulty) }));
+  }
+  if (weight <= 0.5) {
+    // Drop one question (minimum 1)
+    if (plan.length > 1) return plan.slice(0, -1);
+  }
+  return plan;
+}
+
 module.exports = {
   selectNext,
+  questionPlanForTopic,
+  totalQuestionsForAttempt,
+  applyCompanyWeights,
+  PLAN_BY_RATING,
   _internal: {
     initialDifficultyForRating,
     bandToScore,
@@ -108,3 +180,25 @@ module.exports = {
     DIFFICULTY_LADDER,
   },
 };
+
+// ---------------------------------------------------------------------------
+// Per-objective-type variations (Plan 3a Task 2)
+// ---------------------------------------------------------------------------
+
+const VOICE_ELIGIBLE_KEYWORDS = {
+  interview_preparation: ['behavioral', 'storytelling', 'situational', 'leadership-stories'],
+  upskilling: ['stakeholder', 'leadership', 'cross-functional', 'communication', 'negotiation'],
+  career_switch: ['stakeholder', 'leadership', 'transition-storytelling'],
+};
+
+function voiceEligibleTopics(objectiveType, canonicalTopics) {
+  const keywords = VOICE_ELIGIBLE_KEYWORDS[objectiveType] || [];
+  return canonicalTopics.filter((t) => keywords.some((k) => t.includes(k)));
+}
+
+function isStrictTimerObjective(objectiveType) {
+  return objectiveType === 'exam_preparation';
+}
+
+module.exports.voiceEligibleTopics = voiceEligibleTopics;
+module.exports.isStrictTimerObjective = isStrictTimerObjective;

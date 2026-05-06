@@ -66,7 +66,7 @@ function questionCapForCompetency(profile, competency) {
 const RETAKE_COOLDOWN_DAYS = Number(process.env.DIAGNOSTIC_RETAKE_COOLDOWN_DAYS ?? 30);
 const RETAKE_COOLDOWN_MS = RETAKE_COOLDOWN_DAYS * 86400000;
 
-async function startAttempt(userId) {
+async function startAttemptV1(userId) {
   const [profile, objective] = await Promise.all([
     KnowledgeProfile.findOne({ userId }),
     UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
@@ -166,7 +166,7 @@ function _perfForCompetency(answers, competency) {
   }, {});
 }
 
-async function nextQuestion(attemptId) {
+async function nextQuestionV1(attemptId) {
   const attempt = await DiagnosticAttempt.findById(attemptId);
   if (!attempt) throw new Error('attempt not found');
 
@@ -231,7 +231,7 @@ async function nextQuestion(attemptId) {
   return { done: true };
 }
 
-async function submitAnswer(attemptId, questionId, selectedAnswer, timeTaken) {
+async function submitAnswerV1(attemptId, questionId, selectedAnswer, timeTaken) {
   const attempt = await DiagnosticAttempt.findById(attemptId);
   if (!attempt) throw new Error('attempt not found');
   const q = await DiagnosticQuestionBank.findById(questionId);
@@ -258,7 +258,7 @@ async function submitAnswer(attemptId, questionId, selectedAnswer, timeTaken) {
   return { ack: true };
 }
 
-async function finishAttempt(attemptId) {
+async function finishAttemptV1(attemptId) {
   const attempt = await DiagnosticAttempt.findById(attemptId);
   if (!attempt) throw new Error('attempt not found');
   if (attempt.status === 'completed') {
@@ -462,6 +462,345 @@ async function abandon(attemptId) {
   return { status: 'abandoned', abandonStrategy: 'dropped' };
 }
 
+// ---------------------------------------------------------------------------
+// V2 path (Plan 3a Task 8): taxonomy-driven, canonical-name-throughout.
+// Gated on FEATURE_DAY1_DIAGNOSTIC_V2 === 'true'. V1 above is preserved.
+// ---------------------------------------------------------------------------
+
+// Lazy require so the v1 path doesn't pay any load-time cost when V2 is off.
+function _getTaxonomyHelpers() {
+  return require('./diagnostic/topicTaxonomyService');
+}
+function _getSelectorPlan() {
+  return require('./diagnosticSelectorService');
+}
+function _getTopicTaxonomyModel() {
+  return require('../models/TopicTaxonomy');
+}
+
+// In-memory cache of pool snapshots keyed by attemptId. The DiagnosticAttempt
+// schema only stores `poolQuestionIds` (refs); v2 needs the *full* question
+// docs (with canonicalCompetency, correctAnswer) on every nextQuestion /
+// submitAnswer call. Keeping a snapshot in-memory avoids refactoring the
+// schema during Plan 3a. Production uses sticky sessions; if that changes,
+// rehydrate from DiagnosticQuestionBank by id.
+const _v2PoolCache = new Map(); // attemptId(string) -> [questionDoc, ...]
+
+function _snapshotKey(attempt) {
+  return String(attempt._id);
+}
+
+async function startAttemptV2(userId) {
+  const { canonicalize, buildTargetKey } = _getTaxonomyHelpers();
+  const { totalQuestionsForAttempt } = _getSelectorPlan();
+
+  const objective = await UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean()
+    || await UserObjective.findOne({ userId, status: 'active' }).lean();
+  if (!objective) return null;
+
+  // Canonicalize topicSelfRatings keys (display names → canonical).
+  const ratingsRaw = objective.topicSelfRatings || new Map();
+  const ratingsIter = ratingsRaw instanceof Map
+    ? Array.from(ratingsRaw.entries())
+    : Object.entries(ratingsRaw);
+  const canonicalRatings = new Map();
+  for (const [name, rating] of ratingsIter) {
+    if (!rating) continue;
+    canonicalRatings.set(canonicalize(name), rating);
+  }
+  if (canonicalRatings.size === 0) return null; // caller falls back
+
+  const targetKey = buildTargetKey(
+    objective.objectiveType,
+    objective.specificsCanonical || objective.specifics || {},
+  );
+
+  // Abandon any prior in-progress attempts (mirrors v1 invariant).
+  await DiagnosticAttempt.updateMany(
+    { userId, status: { $in: ACTIVE_ATTEMPT_STATUSES } },
+    { $set: { status: 'abandoned', abandonedAt: new Date() } },
+  );
+
+  const totalEstimated = totalQuestionsForAttempt(canonicalRatings);
+
+  const objectiveLabel = objective.specifics?.examName
+    || objective.specifics?.targetSkill
+    || objective.specifics?.targetRole
+    || objective.objectiveType
+    || null;
+
+  const attempt = new DiagnosticAttempt({
+    userId,
+    flowType: 'new_user',
+    status: 'in_progress',
+    startedAt: new Date(),
+    selfRatings: canonicalRatings, // canonical keys throughout
+    objectiveSnapshot: {
+      _id: objective._id,
+      label: objectiveLabel,
+    },
+    attemptType: 'initial',
+    planGenerationStatus: 'pending',
+  });
+  await attempt.save();
+
+  // Stash targetKey + objectiveType on the in-memory snapshot meta so
+  // subsequent calls don't have to re-derive (and so this works even if the
+  // schema doesn't have a targetKey field).
+  _v2PoolCache.set(_snapshotKey(attempt), { _meta: { targetKey, objectiveType: objective.objectiveType } });
+
+  telemetry.logEvent('diagnostic.started', { userId: String(userId), flowType: 'new_user', v2: true });
+
+  return {
+    attemptId: attempt._id,
+    flowType: 'new_user',
+    totalEstimatedQuestions: totalEstimated,
+    estimatedDurationSec: totalEstimated * 30,
+    // Mirror v1's competenciesToAssess so callers that read it still work.
+    competenciesToAssess: Array.from(canonicalRatings.keys()).map(c => ({ name: c, questionCap: 3 })),
+  };
+}
+
+async function _ensureV2Pool(attempt) {
+  const key = _snapshotKey(attempt);
+  const cached = _v2PoolCache.get(key);
+  if (cached && Array.isArray(cached.questions) && cached.questions.length > 0) {
+    return cached;
+  }
+
+  // Re-derive meta if the cache was lost (e.g., process restart).
+  let meta = cached?._meta;
+  if (!meta) {
+    const { buildTargetKey, canonicalize } = _getTaxonomyHelpers();
+    const objId = attempt.objectiveSnapshot?._id;
+    let objectiveType = null;
+    let targetKey = null;
+    if (objId) {
+      const obj = await UserObjective.findById(objId).lean();
+      if (obj) {
+        objectiveType = obj.objectiveType;
+        targetKey = buildTargetKey(obj.objectiveType, obj.specificsCanonical || obj.specifics || {});
+      }
+    }
+    meta = { targetKey, objectiveType };
+  }
+
+  // Build topicsWithRatings from the attempt's stored canonical selfRatings.
+  const ratingsMap = attempt.selfRatings instanceof Map
+    ? attempt.selfRatings
+    : new Map(Object.entries(attempt.selfRatings || {}));
+  const topicsWithRatings = Array.from(ratingsMap.entries()).map(([canonicalName, rating]) => ({
+    canonicalName,
+    rating,
+  }));
+
+  const { assemblePool } = diagnosticPoolService;
+  const { questions } = await assemblePool({
+    objectiveType: meta.objectiveType,
+    targetKey: meta.targetKey,
+    topicsWithRatings,
+    userId: attempt.userId,
+  });
+
+  // Persist refs so other surfaces (abandon %, schema clients) keep working.
+  attempt.poolQuestionIds = questions.map(q => q._id).filter(Boolean);
+  await attempt.save();
+
+  const entry = { _meta: meta, questions };
+  _v2PoolCache.set(key, entry);
+  return entry;
+}
+
+async function nextQuestionV2(attemptId) {
+  const attempt = await DiagnosticAttempt.findById(attemptId);
+  if (!attempt) throw new Error('attempt not found');
+
+  const pool = await _ensureV2Pool(attempt);
+  const questions = pool.questions || [];
+
+  const answeredIds = new Set((attempt.answers || []).map(a => String(a.questionId)));
+  const remaining = questions.filter(q => !answeredIds.has(String(q._id)));
+
+  if (remaining.length === 0) {
+    return {
+      done: true,
+      progress: { current: attempt.answers.length, total: questions.length },
+    };
+  }
+
+  const next = remaining[0];
+  // Best-effort usage tracking; mirrors v1.
+  DiagnosticQuestionBank.updateOne({ _id: next._id }, { $inc: { timesUsed: 1 } }).catch(() => {});
+
+  // Map canonical → display name for the wire.
+  let displayName = next.canonicalCompetency;
+  try {
+    const Taxonomy = _getTopicTaxonomyModel();
+    const tax = await Taxonomy.findOne({
+      objectiveType: pool._meta?.objectiveType,
+      targetKey: pool._meta?.targetKey,
+    }).lean();
+    const t = (tax?.topics || []).find(x => x.canonicalName === next.canonicalCompetency);
+    if (t?.name) displayName = t.name;
+  } catch (_) { /* fall back to canonical */ }
+
+  return {
+    done: false,
+    question: {
+      _id: next._id,
+      competency: displayName,
+      canonicalCompetency: next.canonicalCompetency,
+      difficulty: next.difficulty,
+      prompt: next.questionText,
+      options: (next.options || []).map(o => ({ key: o.label || o.key, text: o.text })),
+      type: next.requiresVoice ? 'voice' : 'mcq',
+    },
+    progress: { current: attempt.answers.length + 1, total: questions.length },
+  };
+}
+
+async function submitAnswerV2(attemptId, questionId, selectedAnswer, timeTaken) {
+  const attempt = await DiagnosticAttempt.findById(attemptId);
+  if (!attempt) throw new Error('attempt not found');
+
+  // Look up the question in the pool snapshot first (has canonicalCompetency).
+  // Fall back to a DB read if the snapshot is gone.
+  const pool = _v2PoolCache.get(_snapshotKey(attempt));
+  let q = (pool?.questions || []).find(x => String(x._id) === String(questionId));
+  if (!q) {
+    q = await DiagnosticQuestionBank.findById(questionId).lean();
+  }
+  if (!q) throw new Error('question not found');
+
+  const isCorrect = q.correctAnswer === selectedAnswer;
+
+  attempt.answers.push({
+    questionId,
+    competency: q.canonicalCompetency || '', // canonical throughout v2
+    difficulty: q.difficulty,
+    selectedAnswer,
+    isCorrect,
+    timeTaken: timeTaken || 0,
+  });
+  await attempt.save();
+  return { ack: true };
+}
+
+async function finishAttemptV2(attemptId) {
+  const attempt = await DiagnosticAttempt.findById(attemptId);
+  if (!attempt) throw new Error('attempt not found');
+  if (attempt.status === 'completed') {
+    return _resultsObjectFromAttemptV2(attempt);
+  }
+
+  const ratingsMap = attempt.selfRatings instanceof Map
+    ? attempt.selfRatings
+    : new Map(Object.entries(attempt.selfRatings || {}));
+
+  // Aggregate by canonicalCompetency (stored on answer.competency in v2).
+  const byCanonical = new Map();
+  for (const ans of attempt.answers || []) {
+    const c = ans.competency;
+    if (!c) continue;
+    if (!byCanonical.has(c)) byCanonical.set(c, { correct: 0, total: 0 });
+    const stats = byCanonical.get(c);
+    stats.total += 1;
+    if (ans.isCorrect) stats.correct += 1;
+  }
+
+  // Resolve display names from TopicTaxonomy.
+  const pool = _v2PoolCache.get(_snapshotKey(attempt));
+  let displayByCanonical = new Map();
+  try {
+    const Taxonomy = _getTopicTaxonomyModel();
+    const { buildTargetKey } = _getTaxonomyHelpers();
+    let objectiveType = pool?._meta?.objectiveType;
+    let targetKey = pool?._meta?.targetKey;
+    if ((!objectiveType || !targetKey) && attempt.objectiveSnapshot?._id) {
+      const obj = await UserObjective.findById(attempt.objectiveSnapshot._id).lean();
+      if (obj) {
+        objectiveType = obj.objectiveType;
+        targetKey = buildTargetKey(obj.objectiveType, obj.specificsCanonical || obj.specifics || {});
+      }
+    }
+    const tax = await Taxonomy.findOne({ objectiveType, targetKey }).lean();
+    for (const t of (tax?.topics || [])) {
+      displayByCanonical.set(t.canonicalName, t.name);
+    }
+  } catch (_) { /* fall back to canonical */ }
+
+  // Persist results into the schema's results Map (keyed by canonical for v2).
+  for (const [canonical, stats] of byCanonical.entries()) {
+    const score = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
+    const band = score < 30 ? 'novice'
+      : score < 55 ? 'familiar'
+      : score < 80 ? 'proficient'
+      : 'expert';
+    const ratingMidpoint = { novice: 15, familiar: 42, proficient: 67, expert: 90 }[ratingsMap.get(canonical)] ?? 50;
+    attempt.results.set(canonical, {
+      assessedBand: band,
+      score,
+      calibrationDelta: score - ratingMidpoint,
+      questionsAsked: stats.total,
+    });
+  }
+
+  attempt.status = 'completed';
+  attempt.completedAt = new Date();
+  attempt.planGenerationStatus = 'pending';
+  await attempt.save();
+
+  telemetry.logEvent('diagnostic.finished', {
+    userId: String(attempt.userId),
+    questionsAnswered: attempt.answers.length,
+    v2: true,
+  });
+
+  return _resultsObjectFromAttemptV2(attempt, displayByCanonical);
+}
+
+function _resultsObjectFromAttemptV2(attempt, displayByCanonical = new Map()) {
+  const results = [];
+  for (const [canonical, v] of attempt.results.entries()) {
+    results.push({
+      competency: displayByCanonical.get(canonical) || canonical,
+      canonicalCompetency: canonical,
+      band: v.assessedBand,
+      score: v.score,
+      calibrationDelta: v.calibrationDelta,
+      questionsAsked: v.questionsAsked,
+    });
+  }
+  return {
+    attemptId: String(attempt._id),
+    status: attempt.status,
+    results,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Public dispatchers — feature-flag routing between V1 (default) and V2.
+// ---------------------------------------------------------------------------
+
+function _useV2() {
+  return process.env.FEATURE_DAY1_DIAGNOSTIC_V2 === 'true';
+}
+
+async function startAttempt(userId) {
+  return _useV2() ? startAttemptV2(userId) : startAttemptV1(userId);
+}
+async function nextQuestion(attemptId) {
+  return _useV2() ? nextQuestionV2(attemptId) : nextQuestionV1(attemptId);
+}
+async function submitAnswer(attemptId, questionId, selectedAnswer, timeTaken) {
+  return _useV2()
+    ? submitAnswerV2(attemptId, questionId, selectedAnswer, timeTaken)
+    : submitAnswerV1(attemptId, questionId, selectedAnswer, timeTaken);
+}
+async function finishAttempt(attemptId) {
+  return _useV2() ? finishAttemptV2(attemptId) : finishAttemptV1(attemptId);
+}
+
 module.exports = {
   startAttempt,
   submitSelfRating,
@@ -470,5 +809,14 @@ module.exports = {
   finishAttempt,
   abandon,
   getSynthesis,
-  _internal: { _decideFlowType, questionCapForCompetency },
+  _internal: {
+    _decideFlowType,
+    questionCapForCompetency,
+    // V2 internals exposed for testing
+    startAttemptV2,
+    nextQuestionV2,
+    submitAnswerV2,
+    finishAttemptV2,
+    _v2PoolCache,
+  },
 };

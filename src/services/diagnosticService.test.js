@@ -759,3 +759,207 @@ test('startAttempt persists objectiveSnapshot.label from objective.specifics.exa
     if (orig.svc) require.cache[svcPath] = orig.svc; else delete require.cache[svcPath];
   }
 });
+
+// ---------------------------------------------------------------------------
+// V2 happy path (Plan 3a Task 8) — feature-flag dispatched orchestration.
+// ---------------------------------------------------------------------------
+test('V2: startAttempt → nextQuestion → submitAnswer → finishAttempt with canonical names', async () => {
+  const userId = new mongoose.Types.ObjectId();
+  const attemptId = new mongoose.Types.ObjectId();
+  const qId = new mongoose.Types.ObjectId();
+
+  let savedAttempt = null;
+  function FakeDA(data) {
+    Object.assign(this, data);
+    if (!this._id) this._id = attemptId;
+    if (data.selfRatings && !(data.selfRatings instanceof Map)) {
+      this.selfRatings = new Map(Object.entries(data.selfRatings));
+    }
+    this.answers = this.answers || [];
+    this.results = this.results || new Map();
+    this.poolQuestionIds = this.poolQuestionIds || [];
+    this.save = async () => { savedAttempt = this; return this; };
+  }
+  FakeDA.findById = async (id) => savedAttempt && String(savedAttempt._id) === String(id) ? savedAttempt : null;
+  FakeDA.findOne = async () => null;
+  FakeDA.updateMany = async () => ({ modifiedCount: 0 });
+
+  const FakeUO = {
+    findOne(q) {
+      const isPrimaryQuery = q && q.isPrimary === true;
+      return { lean: async () => isPrimaryQuery ? null : ({
+        _id: 'obj-v2',
+        objectiveType: 'upskilling',
+        topicSelfRatings: new Map([['Product Strategy', 'familiar']]),
+        specificsCanonical: { targetSkill: 'Product Management' },
+        specifics: { targetSkill: 'Product Management' },
+      }) };
+    },
+    findById: (id) => ({ lean: async () => ({
+      _id: id,
+      objectiveType: 'upskilling',
+      specificsCanonical: { targetSkill: 'Product Management' },
+      specifics: { targetSkill: 'Product Management' },
+    }) }),
+  };
+
+  const FakeKP = { findOne: async () => null };
+
+  const FakeBank = {
+    findById: (id) => ({ lean: async () => ({
+      _id: id,
+      canonicalCompetency: 'product-strategy',
+      difficulty: 'medium',
+      questionText: 'Q?',
+      options: [{ label: 'A', text: 'a' }, { label: 'B', text: 'b' }],
+      correctAnswer: 'A',
+    }) }),
+    updateOne: async () => ({ acknowledged: true }),
+    find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }),
+  };
+
+  const FakeTax = {
+    findOne: () => ({ lean: async () => ({
+      objectiveType: 'upskilling',
+      targetKey: 'upskilling::product-management',
+      topics: [{ name: 'Product Strategy', canonicalName: 'product-strategy' }],
+    }) }),
+  };
+
+  const FakePool = {
+    assemblePool: async () => ({
+      questions: [{
+        _id: qId,
+        canonicalCompetency: 'product-strategy',
+        difficulty: 'medium',
+        questionText: 'What is product strategy?',
+        options: [{ label: 'A', text: 'a' }, { label: 'B', text: 'b' }],
+        correctAnswer: 'A',
+        requiresVoice: false,
+      }],
+    }),
+    _internal: { calculatePoolAllocation: () => [] },
+  };
+
+  const dapath2 = require.resolve('../models/DiagnosticAttempt');
+  const objpath2 = require.resolve('../models/UserObjective');
+  const kppath2 = require.resolve('../models/KnowledgeProfile');
+  const bankpath2 = require.resolve('../models/DiagnosticQuestionBank');
+  const taxpath2 = require.resolve('../models/TopicTaxonomy');
+  const poolpath2 = require.resolve('./diagnosticPoolService');
+  const svcpath2 = require.resolve('./diagnosticService');
+  const orig2 = {
+    da: require.cache[dapath2], obj: require.cache[objpath2], kp: require.cache[kppath2],
+    bank: require.cache[bankpath2], tax: require.cache[taxpath2], pool: require.cache[poolpath2],
+    svc: require.cache[svcpath2], flag: process.env.FEATURE_DAY1_DIAGNOSTIC_V2,
+  };
+  process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = 'true';
+  require.cache[dapath2]   = { exports: FakeDA, loaded: true, id: dapath2 };
+  require.cache[objpath2]  = { exports: FakeUO, loaded: true, id: objpath2 };
+  require.cache[kppath2]   = { exports: FakeKP, loaded: true, id: kppath2 };
+  require.cache[bankpath2] = { exports: FakeBank, loaded: true, id: bankpath2 };
+  require.cache[taxpath2]  = { exports: FakeTax, loaded: true, id: taxpath2 };
+  require.cache[poolpath2] = { exports: FakePool, loaded: true, id: poolpath2 };
+  delete require.cache[svcpath2];
+
+  try {
+    const svc = require(svcpath2);
+
+    const start = await svc.startAttempt(userId);
+    assert.ok(start, 'startAttempt should return a result');
+    assert.strictEqual(start.flowType, 'new_user');
+    assert.ok(start.totalEstimatedQuestions > 0, 'totalEstimatedQuestions should be positive');
+    assert.ok(savedAttempt.selfRatings.has('product-strategy'), 'canonical key should be set');
+
+    const next = await svc.nextQuestion(savedAttempt._id);
+    assert.strictEqual(next.done, false);
+    assert.strictEqual(String(next.question._id), String(qId));
+    assert.strictEqual(next.question.canonicalCompetency, 'product-strategy');
+    assert.strictEqual(next.question.competency, 'Product Strategy', 'display name from taxonomy');
+
+    const ack = await svc.submitAnswer(savedAttempt._id, qId, 'A', 7);
+    assert.strictEqual(ack.ack, true);
+    assert.strictEqual(savedAttempt.answers.length, 1);
+    assert.strictEqual(savedAttempt.answers[0].competency, 'product-strategy', 'canonical stored on answer');
+    assert.strictEqual(savedAttempt.answers[0].isCorrect, true);
+
+    const next2 = await svc.nextQuestion(savedAttempt._id);
+    assert.strictEqual(next2.done, true);
+
+    const final = await svc.finishAttempt(savedAttempt._id);
+    assert.strictEqual(final.status, 'completed');
+    assert.strictEqual(final.results.length, 1);
+    assert.strictEqual(final.results[0].canonicalCompetency, 'product-strategy');
+    assert.strictEqual(final.results[0].competency, 'Product Strategy', 'display name on result');
+    assert.strictEqual(final.results[0].score, 100, '1/1 correct → score 100');
+    assert.strictEqual(final.results[0].band, 'expert');
+    assert.strictEqual(savedAttempt.planGenerationStatus, 'pending');
+  } finally {
+    if (orig2.da)   require.cache[dapath2]   = orig2.da;   else delete require.cache[dapath2];
+    if (orig2.obj)  require.cache[objpath2]  = orig2.obj;  else delete require.cache[objpath2];
+    if (orig2.kp)   require.cache[kppath2]   = orig2.kp;   else delete require.cache[kppath2];
+    if (orig2.bank) require.cache[bankpath2] = orig2.bank; else delete require.cache[bankpath2];
+    if (orig2.tax)  require.cache[taxpath2]  = orig2.tax;  else delete require.cache[taxpath2];
+    if (orig2.pool) require.cache[poolpath2] = orig2.pool; else delete require.cache[poolpath2];
+    if (orig2.svc)  require.cache[svcpath2]  = orig2.svc;  else delete require.cache[svcpath2];
+    if (orig2.flag === undefined) delete process.env.FEATURE_DAY1_DIAGNOSTIC_V2;
+    else process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = orig2.flag;
+  }
+});
+
+test('V2: feature flag off → V1 path preserved', async () => {
+  const origFlag = process.env.FEATURE_DAY1_DIAGNOSTIC_V2;
+  delete process.env.FEATURE_DAY1_DIAGNOSTIC_V2;
+  try {
+    const dapath3 = require.resolve('../models/DiagnosticAttempt');
+    const kppath3 = require.resolve('../models/KnowledgeProfile');
+    const objpath3 = require.resolve('../models/UserObjective');
+    const poolPath3 = require.resolve('./diagnosticPoolService');
+    const svcPath3 = require.resolve('./diagnosticService');
+    const origCache = {
+      da: require.cache[dapath3], kp: require.cache[kppath3], obj: require.cache[objpath3],
+      pool: require.cache[poolPath3], svc: require.cache[svcPath3],
+    };
+
+    require.cache[dapath3] = {
+      exports: function FakeDA(data) {
+        Object.assign(this, data);
+        this.save = async () => { this._id = new mongoose.Types.ObjectId(); return this; };
+      },
+      loaded: true, id: dapath3,
+    };
+    require.cache[dapath3].exports.findOne = async () => null;
+    require.cache[dapath3].exports.updateMany = async () => ({ modifiedCount: 0 });
+    require.cache[kppath3] = { exports: { findOne: async () => null }, loaded: true, id: kppath3 };
+    require.cache[objpath3] = {
+      exports: { findOne: () => ({ lean: async () => ({
+        _id: 'obj1',
+        objectiveType: 'interview_preparation',
+        analysis: { competencies: [{ name: 'sql' }] },
+      }) }) },
+      loaded: true, id: objpath3,
+    };
+    require.cache[poolPath3] = {
+      exports: { assemblePool: async () => [], _internal: { calculatePoolAllocation: () => [] } },
+      loaded: true, id: poolPath3,
+    };
+    delete require.cache[svcPath3];
+
+    try {
+      const svc = require('./diagnosticService');
+      const result = await svc.startAttempt(new mongoose.Types.ObjectId());
+      assert.ok(result, 'V1 path should still produce a result');
+      assert.strictEqual(result.flowType, 'new_user');
+      assert.strictEqual(result.totalEstimatedQuestions, undefined, 'V2-specific field absent on V1 path');
+    } finally {
+      if (origCache.da)   require.cache[dapath3]   = origCache.da;   else delete require.cache[dapath3];
+      if (origCache.kp)   require.cache[kppath3]   = origCache.kp;   else delete require.cache[kppath3];
+      if (origCache.obj)  require.cache[objpath3]  = origCache.obj;  else delete require.cache[objpath3];
+      if (origCache.pool) require.cache[poolPath3] = origCache.pool; else delete require.cache[poolPath3];
+      if (origCache.svc)  require.cache[svcPath3]  = origCache.svc;  else delete require.cache[svcPath3];
+    }
+  } finally {
+    if (origFlag === undefined) delete process.env.FEATURE_DAY1_DIAGNOSTIC_V2;
+    else process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = origFlag;
+  }
+});

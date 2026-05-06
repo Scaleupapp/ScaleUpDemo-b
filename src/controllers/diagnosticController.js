@@ -69,6 +69,31 @@ const synthesis = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const { processVoiceAnswer } = require('../services/diagnostic/voiceAnswerService');
+const uploadService = require('../services/uploadService');
+
+async function uploadVoiceAnswer(req, res) {
+  try {
+    const { questionText, canonicalCompetency } = req.body;
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+    const upload = await uploadService.uploadAudioBuffer(req.file.buffer);
+    const result = await processVoiceAnswer({
+      audioBuffer: req.file.buffer,
+      questionText,
+      canonicalCompetency,
+    });
+    return res.json({
+      audioUrl: upload.url,
+      ...result,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
+
 module.exports = {
   _gateOrPass, start, submitSelfRating, nextQuestion, submitAnswer, finish, abandon, synthesis,
+  uploadVoiceAnswer,
 };

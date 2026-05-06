@@ -13,6 +13,28 @@ const quizGenerationService = require('./quizGenerationService');
 const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
 const { normalize } = require('./competencyNormalizer');
 
+// Lazy-required taxonomy + selector + realtime generator. These pull in heavier
+// graph (mongoose models etc.); requiring them lazily lets test code stub the
+// modules via require.cache before the new code path is exercised.
+let TopicTaxonomy;
+let _selectorService;
+let _realtimeService;
+function _getTopicTaxonomy() {
+  if (!TopicTaxonomy) TopicTaxonomy = require('../models/TopicTaxonomy');
+  return TopicTaxonomy;
+}
+function _getSelector() {
+  if (!_selectorService) _selectorService = require('./diagnosticSelectorService');
+  return _selectorService;
+}
+function _getRealtime() {
+  if (!_realtimeService) _realtimeService = require('./diagnostic/realtimeQuestionGenerationService');
+  return _realtimeService;
+}
+
+let mixpanel; // optional injected tracker
+function setMixpanel(mp) { mixpanel = mp; }
+
 const FLOOR_QUESTIONS_PER_COMPETENCY = 3;
 const DEFAULT_POOL_SIZE = 12;
 const MIN_VIABLE_POOL_SIZE = 3;
@@ -214,11 +236,101 @@ async function persistToBank(generatedQuestions) {
 }
 
 /**
+ * Taxonomy-driven pool assembly (Plan 3a).
+ *
+ * Signature: { objectiveType, targetKey, topicsWithRatings, companyWeights, userId }
+ *   - Looks up TopicTaxonomy by (objectiveType, targetKey) — throws if missing
+ *   - For each {canonicalName, rating}: builds a question plan via questionPlanForTopic()
+ *     and (optionally) bumps via applyCompanyWeights()
+ *   - For each (canonicalCompetency, difficulty) slot: queries QuestionBank
+ *     filtered by verificationStatus, falls back to realtime generateOnDemand()
+ *     if there aren't enough cached questions
+ *   - Returns { questions: [...] }
+ *
+ * Mixpanel injection (optional): caller can wire `setMixpanel(mp)` to receive
+ * `topic_taxonomy_lookup_miss` and `question_bank_lookup_miss` events.
+ */
+async function _assemblePoolFromTaxonomy({ objectiveType, targetKey, topicsWithRatings, companyWeights, userId }) {
+  const Taxonomy = _getTopicTaxonomy();
+  const taxonomy = await Taxonomy.findOne({ objectiveType, targetKey }).lean();
+  if (!taxonomy) {
+    if (mixpanel) mixpanel.track('topic_taxonomy_lookup_miss', { canonicalTarget: targetKey, userId });
+    throw new Error(`Topic taxonomy missing for ${targetKey}`);
+  }
+
+  const topicByCanonical = new Map(taxonomy.topics.map(t => [t.canonicalName, t]));
+  const { questionPlanForTopic, applyCompanyWeights } = _getSelector();
+  const { generateOnDemand } = _getRealtime();
+
+  const allQuestions = [];
+  for (const { canonicalName, rating } of topicsWithRatings) {
+    const topicDoc = topicByCanonical.get(canonicalName);
+    if (!topicDoc) continue;
+
+    let plan = questionPlanForTopic(canonicalName, rating);
+    if (companyWeights) plan = applyCompanyWeights(plan, companyWeights);
+
+    const byDifficulty = plan.reduce((m, p) => {
+      m[p.difficulty] = (m[p.difficulty] || 0) + 1;
+      return m;
+    }, {});
+
+    for (const [difficulty, count] of Object.entries(byDifficulty)) {
+      const existing = await DiagnosticQuestionBank.find({
+        canonicalCompetency: canonicalName,
+        difficulty,
+        verificationStatus: { $in: ['auto_verified', 'human_verified', 'pending'] },
+      })
+        .sort({ verificationStatus: 1, validatorScore: -1 })
+        .limit(count)
+        .lean();
+
+      if (existing.length >= count) {
+        allQuestions.push(...existing.slice(0, count));
+      } else {
+        const need = count - existing.length;
+        if (mixpanel) mixpanel.track('question_bank_lookup_miss', {
+          canonicalTarget: targetKey,
+          canonicalCompetency: canonicalName,
+          difficulty,
+          missing: need,
+          userId,
+        });
+        try {
+          const generated = await generateOnDemand({
+            topic: topicDoc,
+            targetKey,
+            difficulty,
+            count: need,
+          });
+          allQuestions.push(...existing, ...generated);
+        } catch (e) {
+          allQuestions.push(...existing);
+        }
+      }
+    }
+  }
+
+  return { questions: allQuestions };
+}
+
+/**
  * Public entry point: produce a pool that satisfies the allocation.
  * Strategy: try bank first per (competency, difficulty), fall back to LLM
  * for whatever's missing, then persist the LLM-generated questions for next time.
+ *
+ * Dispatches based on first-arg shape:
+ *   - Array → legacy v1 (allocation, ctx)
+ *   - Object with .objectiveType → Plan 3a taxonomy-driven path
  */
-async function assemblePool(allocation, ctx = {}) {
+async function assemblePool(allocationOrOptions, ctx = {}) {
+  if (allocationOrOptions && !Array.isArray(allocationOrOptions) && allocationOrOptions.objectiveType) {
+    return _assemblePoolFromTaxonomy(allocationOrOptions);
+  }
+  return _assemblePoolV1(allocationOrOptions, ctx);
+}
+
+async function _assemblePoolV1(allocation, ctx = {}) {
   const assembleStart = Date.now();
   // Build one cell per (competency, difficulty) and fetch all in parallel (I2)
   const cells = [];
@@ -280,6 +392,7 @@ async function assemblePool(allocation, ctx = {}) {
 
 module.exports = {
   assemblePool,
+  setMixpanel,
   _internal: {
     calculatePoolAllocation,
     generatePoolFromLLM,

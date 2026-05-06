@@ -97,3 +97,114 @@ test('selectNext: deterministic rng param produces deterministic output', () => 
   assert.strictEqual(d1.nextDifficulty, 'easy');
   assert.strictEqual(d1.nextDifficulty, d2.nextDifficulty);
 });
+
+// ---------------------------------------------------------------------------
+// Path C question planning (Plan 3a, Task 1)
+// ---------------------------------------------------------------------------
+
+const { questionPlanForTopic, totalQuestionsForAttempt, applyCompanyWeights } = require('./diagnosticSelectorService');
+
+test('questionPlanForTopic: novice → 2 easy', () => {
+  const plan = questionPlanForTopic('product-strategy', 'novice');
+  assert.strictEqual(plan.length, 2);
+  for (const q of plan) assert.strictEqual(q.difficulty, 'easy');
+});
+
+test('questionPlanForTopic: familiar → 1 easy + 1 medium + 1 hard', () => {
+  const plan = questionPlanForTopic('product-strategy', 'familiar');
+  assert.strictEqual(plan.length, 3);
+  const counts = plan.reduce((m, q) => { m[q.difficulty] = (m[q.difficulty] || 0) + 1; return m; }, {});
+  assert.strictEqual(counts.easy, 1);
+  assert.strictEqual(counts.medium, 1);
+  assert.strictEqual(counts.hard, 1);
+});
+
+test('questionPlanForTopic: proficient → 1 medium + 2 hard', () => {
+  const plan = questionPlanForTopic('x', 'proficient');
+  assert.strictEqual(plan.length, 3);
+  const counts = plan.reduce((m, q) => { m[q.difficulty] = (m[q.difficulty] || 0) + 1; return m; }, {});
+  assert.strictEqual(counts.medium, 1);
+  assert.strictEqual(counts.hard, 2);
+});
+
+test('questionPlanForTopic: expert → 3 hard with scenario flag', () => {
+  const plan = questionPlanForTopic('x', 'expert');
+  assert.strictEqual(plan.length, 3);
+  for (const q of plan) {
+    assert.strictEqual(q.difficulty, 'hard');
+  }
+  assert.ok(plan.some(q => q.requiresScenario), 'at least one expert question should require scenario');
+});
+
+test('totalQuestionsForAttempt: sums per-topic plans', () => {
+  const ratings = new Map([
+    ['product-strategy', 'familiar'],
+    ['user-research', 'novice'],
+    ['roadmapping', 'proficient'],
+  ]);
+  const total = totalQuestionsForAttempt(ratings);
+  // familiar=3 + novice=2 + proficient=3 = 8
+  assert.strictEqual(total, 8);
+});
+
+test('questionPlanForTopic: each entry carries canonicalTopic', () => {
+  const plan = questionPlanForTopic('user-research', 'familiar');
+  for (const q of plan) {
+    assert.strictEqual(q.canonicalTopic, 'user-research');
+  }
+});
+
+test('questionPlanForTopic: throws on unknown rating', () => {
+  assert.throws(() => questionPlanForTopic('x', 'wizard'), /Unknown rating/);
+});
+
+test('applyCompanyWeights: high weight (>=1.5) bumps difficulty band', () => {
+  const plan = questionPlanForTopic('product-strategy', 'familiar'); // easy/medium/hard
+  const weighted = applyCompanyWeights(plan, { 'product-strategy': 2.0 });
+  // easy → medium, medium → hard, hard stays hard
+  assert.strictEqual(weighted[0].difficulty, 'medium');
+  assert.strictEqual(weighted[1].difficulty, 'hard');
+  assert.strictEqual(weighted[2].difficulty, 'hard');
+});
+
+test('applyCompanyWeights: low weight (<=0.5) drops one question', () => {
+  const plan = questionPlanForTopic('product-strategy', 'familiar'); // 3 entries
+  const weighted = applyCompanyWeights(plan, new Map([['product-strategy', 0.3]]));
+  assert.strictEqual(weighted.length, 2);
+});
+
+test('applyCompanyWeights: missing weight is a noop', () => {
+  const plan = questionPlanForTopic('product-strategy', 'novice');
+  const weighted = applyCompanyWeights(plan, { 'other-topic': 2.0 });
+  assert.deepStrictEqual(weighted, plan);
+});
+
+test('voiceEligibleTopics: interview_prep includes behavioral', () => {
+  delete require.cache[require.resolve('./diagnosticSelectorService')];
+  const { voiceEligibleTopics } = require('./diagnosticSelectorService');
+  const eligible = voiceEligibleTopics('interview_preparation', ['behavioral', 'system-design']);
+  assert.ok(eligible.includes('behavioral'));
+  assert.ok(!eligible.includes('system-design'));
+});
+
+test('voiceEligibleTopics: upskilling includes stakeholder/leadership topics', () => {
+  delete require.cache[require.resolve('./diagnosticSelectorService')];
+  const { voiceEligibleTopics } = require('./diagnosticSelectorService');
+  const eligible = voiceEligibleTopics('upskilling', ['stakeholder-management', 'cross-functional-leadership', 'sql-fundamentals']);
+  assert.ok(eligible.includes('stakeholder-management'));
+  assert.ok(eligible.includes('cross-functional-leadership'));
+  assert.ok(!eligible.includes('sql-fundamentals'));
+});
+
+test('voiceEligibleTopics: exam_preparation returns empty', () => {
+  delete require.cache[require.resolve('./diagnosticSelectorService')];
+  const { voiceEligibleTopics } = require('./diagnosticSelectorService');
+  assert.deepStrictEqual(voiceEligibleTopics('exam_preparation', ['quant', 'verbal']), []);
+});
+
+test('isStrictTimerObjective: true for exam_preparation, false for others', () => {
+  delete require.cache[require.resolve('./diagnosticSelectorService')];
+  const { isStrictTimerObjective } = require('./diagnosticSelectorService');
+  assert.strictEqual(isStrictTimerObjective('exam_preparation'), true);
+  assert.strictEqual(isStrictTimerObjective('upskilling'), false);
+});

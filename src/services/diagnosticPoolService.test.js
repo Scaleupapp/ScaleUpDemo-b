@@ -328,6 +328,92 @@ test('_llmCallForOneCompetency aborts when openai is slow', async () => {
   assert.ok(elapsed < 500, `abort should happen within 500ms; took ${elapsed}ms`);
 }, { timeout: 5000 });
 
+test('assemblePool (taxonomy variant): returns existing easy + triggers realtime gen for missing hard', async () => {
+  const mongoose = require('mongoose');
+  const realtimePath = require.resolve('./diagnostic/realtimeQuestionGenerationService');
+  const realtimeCalls = [];
+  require.cache[realtimePath] = {
+    exports: {
+      generateOnDemand: async (args) => {
+        realtimeCalls.push(args);
+        return [{
+          _id: new mongoose.Types.ObjectId(),
+          canonicalCompetency: args.topic.canonicalName,
+          difficulty: args.difficulty,
+          questionText: 'Generated Q',
+          options: [
+            { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
+            { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
+          ],
+          correctAnswer: 'A',
+          verificationStatus: 'auto_verified',
+          generationSource: 'llm_realtime',
+        }];
+      },
+    },
+    loaded: true, id: realtimePath,
+  };
+
+  const qbPath = require.resolve('../models/DiagnosticQuestionBank');
+  require.cache[qbPath] = {
+    exports: {
+      find: (filter) => ({
+        sort: () => ({
+          limit: () => ({
+            lean: async () => {
+              if (filter.difficulty === 'easy') {
+                return [{
+                  _id: new mongoose.Types.ObjectId(),
+                  canonicalCompetency: filter.canonicalCompetency,
+                  difficulty: 'easy',
+                  questionText: 'Existing Q',
+                  options: [
+                    { label: 'A', text: 'a' }, { label: 'B', text: 'b' },
+                    { label: 'C', text: 'c' }, { label: 'D', text: 'd' },
+                  ],
+                  correctAnswer: 'A',
+                }];
+              }
+              return [];
+            },
+          }),
+        }),
+      }),
+    },
+    loaded: true, id: qbPath,
+  };
+
+  const taxPath = require.resolve('../models/TopicTaxonomy');
+  require.cache[taxPath] = {
+    exports: {
+      findOne: () => ({ lean: async () => ({
+        objectiveType: 'upskilling',
+        targetKey: 'upskilling::product-management',
+        topics: [
+          { name: 'Product Strategy', canonicalName: 'product-strategy', description: 'd', baseDifficulty: 'intermediate', sortOrder: 1 },
+        ],
+      }) }),
+    },
+    loaded: true, id: taxPath,
+  };
+
+  delete require.cache[require.resolve('./diagnosticPoolService')];
+  const { assemblePool } = require('./diagnosticPoolService');
+
+  realtimeCalls.length = 0;
+  const result = await assemblePool({
+    objectiveType: 'upskilling',
+    targetKey: 'upskilling::product-management',
+    topicsWithRatings: [
+      { canonicalName: 'product-strategy', rating: 'familiar' },
+    ],
+  });
+  assert.ok(result.questions.length >= 2, 'should have questions');
+  assert.ok(realtimeCalls.length >= 1, 'should have triggered realtime gen for missing slot');
+  assert.ok(realtimeCalls.some(c => c.difficulty === 'medium' || c.difficulty === 'hard'),
+    'realtime gen should have been called for medium or hard');
+});
+
 test('assemblePool throws when total pool < MIN_VIABLE_POOL_SIZE', async () => {
   // Bank is empty and LLM returns nothing → pool is empty → should throw.
   const modelPath = require.resolve('../models/DiagnosticQuestionBank');
