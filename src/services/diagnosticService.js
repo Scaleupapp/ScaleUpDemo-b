@@ -12,6 +12,7 @@
 
 const mongoose = require('mongoose');
 const telemetry = require('./diagnosticTelemetryService');
+const { planGenerationQueue } = require('../config/queue');
 const userContextService = require('./userContextService');
 const DiagnosticAttempt = require('../models/DiagnosticAttempt');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
@@ -22,6 +23,8 @@ const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
 const selector = require('./diagnosticSelectorService');
 const { normalize } = require('./competencyNormalizer');
 const calibration = require('../utils/calibration');
+// recalibrationEligibilityService is lazy-required inside startRecalibration
+// so tests can stub it via require.cache without a module re-load.
 
 const RATING_TO_NUM = { novice: 0, familiar: 1, proficient: 2, expert: 3, unsure: 0 };
 
@@ -758,6 +761,16 @@ async function finishAttemptV2(attemptId) {
   attempt.planGenerationStatus = 'pending';
   await attempt.save();
 
+  // Persist re-calibration growth before insights/plan so it's available in results.
+  if (attempt.attemptType === 'recalibration') {
+    try {
+      const recalibrationResultsService = require('./diagnostic/recalibrationResultsService');
+      await recalibrationResultsService.persistGrowth(attempt._id);
+    } catch (err) {
+      console.warn('[diagnosticService] recalibration growth computation failed:', err.message);
+    }
+  }
+
   telemetry.logEvent('diagnostic.finished', {
     userId: String(attempt.userId),
     questionsAnswered: attempt.answers.length,
@@ -812,6 +825,20 @@ async function finishAttemptV2(attemptId) {
     latencyMs: attempt.insightsLatencyMs,
   });
 
+  try {
+    await DiagnosticAttempt.updateOne(
+      { _id: attempt._id },
+      { $set: { planGenerationStatus: 'generating' } }
+    );
+    await planGenerationQueue.add(
+      'generate',
+      { attemptId: String(attempt._id) },
+      { attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: 50 }
+    );
+  } catch (err) {
+    console.warn('[diagnosticService] failed to enqueue plan generation:', err.message);
+  }
+
   return _resultsObjectFromAttemptV2(attempt, displayByCanonical);
 }
 
@@ -849,6 +876,56 @@ function _missedDifficultiesFor(answers, comp) {
 }
 
 // ---------------------------------------------------------------------------
+// Re-calibration flow (Plan 4 Task 9)
+// ---------------------------------------------------------------------------
+
+async function startRecalibration(userId, opts = {}) {
+  const recalibrationEligibilityService = require('./diagnostic/recalibrationEligibilityService');
+  const eligibility = await recalibrationEligibilityService.computeEligibility(userId, {
+    userFlaggedTopics: opts.userFlaggedTopics || [],
+  });
+  if (!eligibility.eligible) {
+    throw Object.assign(new Error('Not eligible for re-calibration'), { code: 'NOT_ELIGIBLE', meta: eligibility });
+  }
+
+  const previousAttempt = await DiagnosticAttempt.findById(eligibility.previousAttemptId).lean();
+  const objectiveId = previousAttempt?.objectiveSnapshot?._id;
+  const objective = await UserObjective.findById(objectiveId).lean();
+
+  // Lazy require so tests can stub via require.cache
+  const diagnosticSelectorService = require('./diagnosticSelectorService');
+  const pool = await diagnosticSelectorService.selectQuestions({
+    userId,
+    objective,
+    onlyTopics: eligibility.eligibleTopics,
+    questionsPerTopicCap: 2,
+    skipAnchorBoost: true,
+  });
+
+  const attempt = await DiagnosticAttempt.create({
+    userId,
+    flowType: 'recalibration',
+    attemptType: 'recalibration',
+    previousAttemptId: eligibility.previousAttemptId,
+    poolQuestionIds: pool.map(q => q._id),
+    selfRatings: previousAttempt?.selfRatings || new Map(),
+    objectiveSnapshot: {
+      _id: objectiveId,
+      label: objective?.specifics?.targetRole || objective?.objectiveType,
+    },
+    status: 'in_progress',
+    planGenerationStatus: 'pending',
+  });
+
+  return {
+    attemptId: attempt._id,
+    totalEstimatedQuestions: pool.length,
+    estimatedDurationSec: pool.length * 25,
+    flowType: 'recalibration',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Public dispatchers — feature-flag routing between V1 (default) and V2.
 // ---------------------------------------------------------------------------
 
@@ -879,6 +956,7 @@ module.exports = {
   finishAttempt,
   abandon,
   getSynthesis,
+  startRecalibration,
   _internal: {
     _decideFlowType,
     questionCapForCompetency,

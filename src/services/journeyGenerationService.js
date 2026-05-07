@@ -164,6 +164,59 @@ const instance = new JourneyGenerationService();
  * Looks up the user's active objective and re-generates the journey with
  * diagnosticData injected so the LLM can personalise from assessed bands.
  */
+/**
+ * generateFromPlan — new entrypoint that consumes a Plan document rather than
+ * calling the LLM. Aggregates per-topic hours from weeklySchedule, fetches
+ * top-200 published content matching plan topics, and maps each topic to its
+ * top 3 matching items by aiData.qualityScore.
+ */
+instance.generateFromPlan = async function generateFromPlan(planId) {
+  const Plan = require('../models/Plan');
+  const plan = await Plan.findById(planId).lean();
+  if (!plan) throw new Error('Plan not found');
+
+  // Aggregate per-topic hours across all weeks
+  const topicHoursMap = {};
+  for (const week of plan.weeklySchedule || []) {
+    for (const alloc of week.allocations || []) {
+      const t = alloc.topicCanonicalName;
+      topicHoursMap[t] = (topicHoursMap[t] || 0) + alloc.hours;
+    }
+  }
+  const planTopics = Object.keys(topicHoursMap);
+
+  const availableContent = await Content.find({
+    status: 'published',
+    $or: [
+      { topics: { $in: planTopics } },
+      { domain: { $in: planTopics } },
+    ],
+  })
+    .sort({ 'aiData.qualityScore': -1 })
+    .limit(200)
+    .select('_id title topics domain')
+    .lean();
+
+  // Map each plan topic to top 3 matching content items
+  const journeyContent = planTopics.map(topic => {
+    const matches = availableContent
+      .filter(c => (c.topics || []).includes(topic) || c.domain === topic)
+      .slice(0, 3);
+    return {
+      topicCanonicalName: topic,
+      allocatedHours: topicHoursMap[topic],
+      contentItems: matches.map(c => ({ _id: c._id, title: c.title })),
+    };
+  });
+
+  return {
+    planId: String(plan._id),
+    objectiveId: String(plan.objectiveId),
+    weeklySchedule: plan.weeklySchedule,
+    journeyContent,
+  };
+};
+
 instance.regenerateForUser = async function regenerateForUser(userId, { diagnosticData } = {}) {
   const UserObjectiveModel = require('../models/UserObjective');
   const objective = await UserObjectiveModel.findOne({ userId, status: 'active', isPrimary: true }).lean();

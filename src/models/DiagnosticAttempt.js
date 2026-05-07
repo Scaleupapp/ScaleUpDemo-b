@@ -30,7 +30,7 @@ const competencyResultSchema = new mongoose.Schema({
 
 const diagnosticAttemptSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  flowType: { type: String, enum: ['new_user', 'existing_user_tune'], required: true },
+  flowType: { type: String, enum: ['new_user', 'existing_user_tune', 'recalibration'], required: true },
 
   status: {
     type: String,
@@ -104,6 +104,31 @@ const diagnosticAttemptSchema = new mongoose.Schema({
     enum: ['pending', 'generating', 'ready', 'failed'],
     default: 'pending',
     index: true,
+  },
+  planId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Plan',
+    default: null,
+  },
+
+  // --- Re-calibration growth results (spec §3.5 / Plan 4 Task 10) ---
+  recalibrationGrowth: {
+    growthBars: [{
+      canonicalName: String,
+      oldScore: Number,
+      newScore: Number,
+      delta: Number,
+      oldBand: String,
+      newBand: String,
+      bandShift: String,
+    }],
+    biggestJump: {
+      canonicalName: { type: String, default: null },
+      delta: { type: Number, default: null },
+      bandShift: { type: String, default: null },
+    },
+    newGaps: [String],
+    summary: { type: String, default: null },
   },
 
   // --- Attempt provenance (spec §3.5 / §4.4) ---

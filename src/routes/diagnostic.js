@@ -21,6 +21,10 @@ router.post('/:attemptId/finish', ctrl.finish);
 router.get('/:attemptId/results', ctrl.getResults);
 router.post('/:attemptId/abandon', ctrl.abandon);
 
+// Re-calibration (Plan 4 Tasks 8–9)
+router.get('/recalibration/eligible', ctrl.getRecalibrationEligibility);
+router.post('/recalibration/start', ctrl.startRecalibration);
+
 // Voice answer upload (Phase 3a Task 7)
 router.post('/voice/upload', voiceUpload.single('audio'), ctrl.uploadVoiceAnswer);
 

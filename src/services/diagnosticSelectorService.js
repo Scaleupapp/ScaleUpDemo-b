@@ -202,3 +202,38 @@ function isStrictTimerObjective(objectiveType) {
 
 module.exports.voiceEligibleTopics = voiceEligibleTopics;
 module.exports.isStrictTimerObjective = isStrictTimerObjective;
+
+// ---------------------------------------------------------------------------
+// Re-calibration question selection (Plan 4 Task 9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Select a pool of questions for a re-calibration attempt.
+ * Filters the DiagnosticQuestionBank to topics in onlyTopics,
+ * caps at questionsPerTopicCap per topic.
+ *
+ * @param {Object} opts
+ * @param {String|ObjectId} opts.userId
+ * @param {Object|null} opts.objective
+ * @param {String[]} opts.onlyTopics - canonical topic names
+ * @param {Number} opts.questionsPerTopicCap
+ * @param {Boolean} opts.skipAnchorBoost
+ * @returns {Object[]} array of question documents
+ */
+async function selectQuestions({ userId, objective, onlyTopics = [], questionsPerTopicCap = 2 }) {
+  const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
+
+  const questions = [];
+  for (const topic of onlyTopics) {
+    const pool = await DiagnosticQuestionBank.find({
+      canonicalCompetency: topic,
+      isActive: { $ne: false },
+    })
+      .limit(questionsPerTopicCap)
+      .lean();
+    questions.push(...pool);
+  }
+  return questions;
+}
+
+module.exports.selectQuestions = selectQuestions;

@@ -4,6 +4,7 @@ const apiResponse = require('../utils/apiResponse');
 const DiagnosticAttempt = require('../models/DiagnosticAttempt');
 const TopicTaxonomy = require('../models/TopicTaxonomy');
 const topicTaxonomyService = require('../services/diagnostic/topicTaxonomyService');
+const recalibrationEligibilityService = require('../services/diagnostic/recalibrationEligibilityService');
 
 function _gateOrPass(req, res, next) {
   if (!featureFlags.day1Diagnostic) {
@@ -137,21 +138,51 @@ async function getResults(req, res) {
 
     const planStatus = attempt.appliedToProfileAt ? 'queued' : 'pending';
 
-    return res.status(200).json({
+    const responseBody = {
       attemptId:      String(attempt._id),
       status:         attempt.status,
       insightsStatus: attempt.insightsStatus || 'pending',
       insights:       attempt.insightsJson || null,
       planStatus,
       results,
-    });
+    };
+
+    if (attempt.attemptType === 'recalibration') {
+      responseBody.recalibrationGrowth = attempt.recalibrationGrowth || null;
+      responseBody.previousAttemptId = attempt.previousAttemptId;
+    }
+
+    return res.status(200).json(responseBody);
   } catch (err) {
     console.error('[diagnosticController.getResults]', err);
     return res.status(500).json({ error: 'internal_error' });
   }
 }
 
+const getRecalibrationEligibility = async (req, res) => {
+  try {
+    const out = await recalibrationEligibilityService.computeEligibility(req.user.userId, {
+      userFlaggedTopics: req.query.flagged ? String(req.query.flagged).split(',') : [],
+    });
+    res.status(200).json(out);
+  } catch (err) {
+    res.status(500).json({ error: 'internal_error', message: err.message });
+  }
+};
+
+const startRecalibration = async (req, res) => {
+  try {
+    const out = await diagnosticService.startRecalibration(req.user.userId, {
+      userFlaggedTopics: req.body?.flaggedTopics || [],
+    });
+    res.status(200).json(out);
+  } catch (err) {
+    if (err.code === 'NOT_ELIGIBLE') return res.status(409).json({ message: err.message, meta: err.meta });
+    res.status(500).json({ error: 'internal_error', message: err.message });
+  }
+};
+
 module.exports = {
   _gateOrPass, start, submitSelfRating, nextQuestion, submitAnswer, finish, abandon, synthesis,
-  uploadVoiceAnswer, getResults,
+  uploadVoiceAnswer, getResults, getRecalibrationEligibility, startRecalibration,
 };

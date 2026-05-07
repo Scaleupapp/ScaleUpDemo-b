@@ -15,6 +15,7 @@ const processOCR = require('./ocrProcessor');
 const generateFlashcards = require('./flashcardGenerator');
 const generateAudioSummary = require('./audioSummaryGenerator');
 const evaluateInterview = require('./interviewEvaluator');
+const planGenerationWorker = require('./planGenerationWorker');
 const { startCronJobs } = require('./cronJobs');
 require('./competitionWorker');
 
@@ -31,6 +32,7 @@ function startWorkers() {
   new Worker('flashcardGeneration', generateFlashcards, { connection, concurrency: 2 });
   new Worker('audioSummaryGeneration', generateAudioSummary, { connection, concurrency: 1 });
   new Worker('interviewEvaluation', evaluateInterview, { connection, concurrency: 2 });
+  new Worker('planGeneration', planGenerationWorker.processJob, { connection, concurrency: 4 });
 
   startCronJobs();
 

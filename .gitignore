@@ -11,3 +11,6 @@ coverage/
 *-player-script.js
 PRODUCT_ANALYSIS.md
 data/colleges.json
+
+# Training signal exports (Plan 4 Task 14 — generated at runtime)
+docs/training-signals/*.json

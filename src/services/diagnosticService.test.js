@@ -2,6 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert');
 const mongoose = require('mongoose');
 
+// Stub planGenerationQueue at module level so every diagnosticService reload
+// gets a no-op queue instead of a live Redis connection.
+const queuePath = require.resolve('../config/queue');
+require.cache[queuePath] = {
+  exports: { planGenerationQueue: { add: async () => ({}) } },
+  loaded: true, id: queuePath,
+};
+
 function setupStubs({ existingProfile = null } = {}) {
   const dapath = require.resolve('../models/DiagnosticAttempt');
   let saved = null;
@@ -42,6 +50,13 @@ function setupStubs({ existingProfile = null } = {}) {
       _internal: { calculatePoolAllocation: () => [] },
     },
     loaded: true, id: poolPath,
+  };
+
+  // Stub queue so diagnosticService loads without a live Redis connection
+  const queuePath = require.resolve('../config/queue');
+  require.cache[queuePath] = {
+    exports: { planGenerationQueue: { add: async () => ({}) } },
+    loaded: true, id: queuePath,
   };
 
   delete require.cache[require.resolve('./diagnosticService')];

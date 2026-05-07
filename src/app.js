@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -50,6 +51,7 @@ app.use('/api/v1/creator', require('./routes/creator'));
 app.use('/api/v1/content', require('./routes/content'));
 app.use('/api/v1/progress', require('./routes/progress'));
 app.use('/api/v1/diagnostic', require('./routes/diagnostic'));
+app.use('/api/v1/plan', require('./routes/plan'));
 app.use('/api/v1/user-inferences', require('./routes/userInferences'));
 app.use('/api/v1/quizzes', require('./routes/quizzes'));
 app.use('/api/v1/knowledge', require('./routes/knowledge'));
@@ -61,6 +63,10 @@ app.use('/api/v1/learning-paths', require('./routes/learningPaths'));
 app.use('/api/v1/youtube', require('./routes/youtube'));
 app.use('/api/v1/recommendations', require('./routes/recommendations'));
 app.use('/api/v1/admin', require('./routes/admin'));
+app.use('/admin/diagnostic-questions', require('./routes/diagnosticAdmin'));
+// Admin dashboard static files — served at /admin/{file} so HTML's /admin/dashboard.css
+// and /admin/dashboard.js root-relative hrefs resolve correctly.
+app.use('/admin', express.static(path.join(__dirname, 'admin')));
 app.use('/api/v1/tutor', require('./routes/aiTutor'));
 app.use('/api/v1/notifications', require('./routes/notifications'));
 app.use('/api/v1/competition', require('./routes/competition'));

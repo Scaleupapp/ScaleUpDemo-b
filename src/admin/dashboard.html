@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScaleUp — Admin Question Review</title>
+  <link rel="stylesheet" href="/admin/dashboard.css" />
+</head>
+<body>
+  <header>
+    <h1>ScaleUp Admin — Diagnostic Question Review</h1>
+    <div class="stats-bar" id="stats-bar">Loading stats…</div>
+  </header>
+
+  <section class="auth-section">
+    <label for="jwt-input">Admin JWT</label>
+    <input type="password" id="jwt-input" placeholder="Paste your Bearer token here" />
+    <button id="load-btn">Load queue</button>
+  </section>
+
+  <section class="filters">
+    <label>Page:
+      <input type="number" id="page-input" value="1" min="1" style="width:60px" />
+    </label>
+    <label>Per page:
+      <select id="limit-input">
+        <option value="10">10</option>
+        <option value="20" selected>20</option>
+        <option value="50">50</option>
+      </select>
+    </label>
+  </section>
+
+  <main id="queue-container">
+    <p class="placeholder">Enter your JWT and click "Load queue" to begin.</p>
+  </main>
+
+  <!-- Edit modal -->
+  <div id="edit-modal" class="modal hidden">
+    <div class="modal-box">
+      <h2>Edit Question</h2>
+      <input type="hidden" id="edit-id" />
+      <label>Question text
+        <textarea id="edit-text" rows="4"></textarea>
+      </label>
+      <label>Correct answer
+        <select id="edit-correct">
+          <option>A</option><option>B</option><option>C</option><option>D</option>
+        </select>
+      </label>
+      <label>Reason / notes
+        <input type="text" id="edit-reason" placeholder="Why are you editing?" />
+      </label>
+      <div class="modal-actions">
+        <button id="edit-save-btn">Save edit</button>
+        <button id="edit-cancel-btn" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/admin/dashboard.js"></script>
+</body>
+</html>

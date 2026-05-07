@@ -93,6 +93,23 @@ class EmailService {
       `,
     });
   }
+
+  async sendAdminQuestionDigest(email, { queueDepth, estimatedMinutes, dashboardUrl }) {
+    await this.transporter.sendMail({
+      from: this.from,
+      to: email,
+      subject: `ScaleUp Admin — ${queueDepth} question${queueDepth !== 1 ? 's' : ''} awaiting review`,
+      html: `
+        <h2>Weekly Diagnostic Question Review</h2>
+        <p>There ${queueDepth === 1 ? 'is' : 'are'} <strong>${queueDepth}</strong> question${queueDepth !== 1 ? 's' : ''} flagged for review in the admin queue.</p>
+        <p>Estimated review time: <strong>~${estimatedMinutes} minutes</strong> (at 90 seconds per question).</p>
+        <p style="margin-top:24px;">
+          <a href="${dashboardUrl}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Open dashboard</a>
+        </p>
+        <p style="margin-top:16px;font-size:0.875rem;color:#888;">Reply to this email if you have any questions.</p>
+      `,
+    });
+  }
 }
 
 module.exports = new EmailService();

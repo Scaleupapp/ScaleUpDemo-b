@@ -69,6 +69,18 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 10. Re-calibration Offer — Daily 4:00 AM IST (22:30 UTC previous day)
+  cronQueue.add('recalibrationOffer', {}, {
+    repeat: { pattern: '30 22 * * *' },
+    removeOnComplete: true,
+  });
+
+  // 11. Admin Question Digest — Monday 09:00 IST (03:30 UTC Monday)
+  cronQueue.add('adminQuestionDigest', {}, {
+    repeat: { pattern: '30 3 * * 1' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -147,6 +159,12 @@ function startCronJobs() {
         break;
       case 'flashcardReviewReminder':
         await runFlashcardReviewReminder();
+        break;
+      case 'recalibrationOffer':
+        await require('./recalibrationOfferWorker').run();
+        break;
+      case 'adminQuestionDigest':
+        await require('./adminDigestWorker').run();
         break;
     }
   }, { connection });

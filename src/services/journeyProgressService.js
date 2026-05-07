@@ -368,6 +368,54 @@ class JourneyProgressService {
   }
 
   /**
+   * Estimate hours spent per topic on a plan since a given date.
+   * Uses plan weeklySchedule allocations as the denominator and ContentInteraction
+   * records as the signal. Returns a map of { canonicalTopicName: hoursSpent }.
+   *
+   * Non-fatal — callers should catch and treat a missing/zero result gracefully.
+   *
+   * @param {String} userId
+   * @param {String|ObjectId} planId
+   * @param {Date} sinceDate
+   * @returns {Object} { [canonicalName]: hoursSpent }
+   */
+  async getHoursSpentByTopic(userId, planId, sinceDate) {
+    const Plan = require('../models/Plan');
+    const ContentInteraction = require('../models/ContentInteraction');
+
+    const plan = await Plan.findById(planId).lean();
+    if (!plan) return {};
+
+    // Build a per-topic hours-planned map from weeklySchedule allocations
+    const hoursPlanned = {};
+    for (const week of plan.weeklySchedule || []) {
+      for (const alloc of week.allocations || []) {
+        const name = alloc.topicCanonicalName;
+        hoursPlanned[name] = (hoursPlanned[name] || 0) + (alloc.hours || 0);
+      }
+    }
+
+    // Approximate hours spent: count ContentInteraction events per topic since date
+    const since = sinceDate ? new Date(sinceDate) : new Date(0);
+    const interactions = await ContentInteraction.find({
+      userId,
+      createdAt: { $gte: since },
+    }).lean().catch(() => []);
+
+    // Map interactions to plan topics via canonicalTopic field (best-effort)
+    const hoursSpent = {};
+    for (const interaction of interactions) {
+      const topic = interaction.canonicalTopic || interaction.topic;
+      if (topic && hoursPlanned[topic] !== undefined) {
+        // Each interaction ≈ 0.25h (15 min avg content piece)
+        hoursSpent[topic] = (hoursSpent[topic] || 0) + 0.25;
+      }
+    }
+
+    return hoursSpent;
+  }
+
+  /**
    * Get a detailed content-level progress breakdown for the journey.
    * Returns how many individual content items are completed vs assigned.
    *

@@ -11,6 +11,30 @@ require.cache[openaiPath] = {
   loaded: true, id: openaiPath,
 };
 
+test('journeyGenerationService.generateFromPlan: maps plan topics to content', async () => {
+  const mongoose = require('mongoose');
+  const Plan = require('../models/Plan');
+  const Content = require('../models/Content');
+  Plan.findById = () => ({ lean: async () => ({
+    _id: new mongoose.Types.ObjectId(),
+    objectiveId: new mongoose.Types.ObjectId(),
+    weeklySchedule: [{
+      week: 1, weeklyGoal: 'g',
+      allocations: [{ topicCanonicalName: 'product-strategy', hours: 3, focusActivity: 'a' }],
+    }],
+  })});
+  Content.find = () => ({
+    sort: () => ({ limit: () => ({ select: () => ({ lean: async () => [
+      { _id: new mongoose.Types.ObjectId(), title: 'Strategy 101', topics: ['product-strategy'] },
+    ]})})}),
+  });
+  delete require.cache[require.resolve('./journeyGenerationService')];
+  const svc = require('./journeyGenerationService');
+  const out = await svc.generateFromPlan('any-id');
+  assert.strictEqual(out.journeyContent.length, 1);
+  assert.strictEqual(out.journeyContent[0].topicCanonicalName, 'product-strategy');
+});
+
 test('journey generation reads diagnosticData when provided (additive path)', () => {
   const svc = require('./journeyGenerationService');
 
