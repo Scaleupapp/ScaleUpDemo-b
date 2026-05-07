@@ -1,0 +1,90 @@
+[
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrostatics & Capacitors", "canonicalName": "electrostatics-msbshse-12", "description": "Coulomb's law, electric field, potential, and capacitor circuits for Maharashtra HSC Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Current Electricity & Kirchhoff's Laws", "canonicalName": "current-electricity-msbshse-12", "description": "Ohm's law, Wheatstone bridge, and circuit analysis for MSBSHSE Board Exam Paper I.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Optics — Ray & Wave", "canonicalName": "optics-msbshse-12", "description": "Refraction, lenses, interference, and diffraction — high-weightage optics for Maharashtra HSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Modern Physics & Semiconductor Devices", "canonicalName": "modern-physics-msbshse-12", "description": "Photoelectric effect, nuclear reactions, and p-n junction for HSC Paper II.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-msbshse-12", "description": "Galvanic cells, electrolysis, rate laws, and Arrhenius equation for Maharashtra HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Organic Chemistry — Halogen & Oxygen Compounds", "canonicalName": "organic-halogen-msbshse-12", "description": "Haloalkanes, alcohols, phenols, and ethers — numerically heavy organic for MSBSHSE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Coordination Chemistry & Biomolecules", "canonicalName": "coordination-biomol-msbshse-12", "description": "Werner's theory, IUPAC naming, carbohydrates, proteins, and enzymes for HSC Paper II.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Chemical Thermodynamics & Solutions", "canonicalName": "thermodynamics-msbshse-12", "description": "Hess's law, entropy, Gibbs energy, and colligative properties for MSBSHSE Board Exam.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Calculus — Integration & Differential Equations", "canonicalName": "calculus-integration-msbshse-12", "description": "Definite integrals, area under curves, and first-order ODEs for Maharashtra HSC Maths.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Linear Programming & Probability", "canonicalName": "linear-prog-msbshse-12", "description": "Graphical LPP, Bayes' theorem, and conditional probability for HSC Paper II.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Matrices, Determinants & Vectors", "canonicalName": "matrices-vectors-msbshse-12", "description": "Matrix algebra, Cramer's rule, and 3D vector operations for Maharashtra Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Conics & Three-Dimensional Geometry", "canonicalName": "conics-3d-msbshse-12", "description": "Parabola, ellipse, hyperbola, and line/plane equations for HSC Paper I.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tn-state-board::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrostatics", "canonicalName": "electrostatics-tn-12", "description": "Electric field intensity, potential, Gauss's law for Tamil Nadu HSC Physics Volume 1.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Magnetism & Electromagnetic Induction", "canonicalName": "magnetism-emi-tn-12", "description": "Magnetic field, Faraday's law, and AC circuits for TN State Board HSC Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Optics & Dual Nature", "canonicalName": "optics-dual-tn-12", "description": "Wave optics, particle nature of light, and de Broglie wavelength for TN Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Nuclear Physics & Semiconductor Electronics", "canonicalName": "nuclear-semi-tn-12", "description": "Radioactivity, nuclear fission/fusion, and logic gates for Tamil Nadu Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tn-state-board::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Metallurgy & p-Block Elements", "canonicalName": "metallurgy-pblock-tn-12", "description": "Occurrence, extraction, and properties of p-block elements for TN HSC Chemistry.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Organic Nitrogen Compounds & Biomolecules", "canonicalName": "nitrogen-biomol-tn-12", "description": "Amines, diazonium salts, carbohydrates, and nucleic acids for Tamil Nadu Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-tn-12", "description": "Nernst equation, rate expressions, and collision theory for TN State Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Coordination Chemistry & Transition Metals", "canonicalName": "coordination-tn-12", "description": "Crystal field theory, colour, and magnetic properties for TN HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kseeb::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electric Charges, Fields & Potentials", "canonicalName": "electric-fields-kseeb-12", "description": "Coulomb's law, Gauss's law, and electric potential energy for Karnataka PUC II Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Current Electricity & Magnetic Effects", "canonicalName": "current-magnetism-kseeb-12", "description": "Kirchhoff's laws, Biot-Savart, and Ampere's law for KSEEB/PUE Karnataka.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Ray Optics, Wave Optics & Atoms", "canonicalName": "optics-atoms-kseeb-12", "description": "Lenses, interference, Bohr model, and hydrogen spectrum for Karnataka PUC Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Semiconductors & Communication Systems", "canonicalName": "semicon-comm-kseeb-12", "description": "Diodes, transistors, logic gates, and modulation for KSEEB Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kseeb::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Relations, Functions & Inverse Trig", "canonicalName": "relations-invtrig-kseeb-12", "description": "Types of relations, bijective functions, and principal value branches for KSEEB PUC II Maths.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Matrices, Determinants & Continuity", "canonicalName": "matrices-continuity-kseeb-12", "description": "Matrix operations, cofactors, continuity, and differentiability for Karnataka Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Integrals, Differential Equations & Vectors", "canonicalName": "integrals-vectors-kseeb-12", "description": "Definite integrals, area between curves, and vector algebra for KSEEB Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "3D Geometry, Linear Programming & Probability", "canonicalName": "3d-lppdist-kseeb-12", "description": "Lines, planes, LPP, Bayes' theorem for Karnataka PUC II Mathematics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kseeb::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction in Organisms & Plants", "canonicalName": "reproduction-kseeb-12", "description": "Sexual and asexual reproduction, pollination, fertilisation for Karnataka Board Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics — Mendelian & Molecular", "canonicalName": "genetics-kseeb-12", "description": "Mendel's laws, DNA structure, replication, transcription, and translation for KSEEB.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Evolution & Human Health", "canonicalName": "evolution-health-kseeb-12", "description": "Darwinism, natural selection, immunity, and disease-causing organisms for Karnataka PUC II.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biotechnology & Ecology", "canonicalName": "biotech-ecology-kseeb-12", "description": "rDNA technology, transgenic organisms, ecosystem dynamics for KSEEB Class 12 Biology.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  }
+]

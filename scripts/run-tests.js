@@ -36,6 +36,7 @@ const testFiles = [
   ...findTestFiles(path.join(ROOT, 'src')),
   ...findTestFiles(path.join(ROOT, 'scripts', 'seed')),
   ...findTestFiles(path.join(ROOT, 'scripts', 'migrate')),
+  ...findTestFiles(path.join(ROOT, 'scripts', 'analytics')),
 ];
 
 if (testFiles.length === 0) {

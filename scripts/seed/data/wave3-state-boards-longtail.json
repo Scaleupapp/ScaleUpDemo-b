@@ -1,0 +1,90 @@
+[
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::up-board::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Ray Optics & Optical Instruments", "canonicalName": "ray-optics-up-12", "description": "Mirrors, lenses, microscope and telescope for UP Board Intermediate Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Current Electricity & Magnetism", "canonicalName": "current-magnetism-up-12", "description": "Ohm's law, Kirchhoff's rules, magnetic force, and Faraday's law for UP Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Semiconductor Devices & Communication", "canonicalName": "semicon-up-12", "description": "Diode, transistor, and basic communication systems for UP Board Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Dual Nature & Atoms & Nuclei", "canonicalName": "dual-atoms-up-12", "description": "Photoelectric effect, Bohr model, and nuclear reactions for UP Intermediate.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::rbse::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrostatics & Capacitors", "canonicalName": "electrostatics-rbse-12", "description": "Electric field, potential, and capacitors for Rajasthan Board of Secondary Education Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Electromagnetic Induction & Alternating Currents", "canonicalName": "emi-ac-rbse-12", "description": "Faraday's law, Lenz's law, and AC circuits for RBSE Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Wave Optics & Atoms", "canonicalName": "wave-optics-rbse-12", "description": "Interference, diffraction, and Bohr atomic model for RBSE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Electronic Devices", "canonicalName": "electronic-devices-rbse-12", "description": "p-n junction, transistor characteristics, and logic gates for RBSE Rajasthan.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::gseb::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electromagnetic Waves & Optics", "canonicalName": "em-waves-gseb-12", "description": "Nature of EM waves, reflection, refraction, and interference for Gujarat Board HSC Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Electrostatics & Current Electricity", "canonicalName": "electrostatics-current-gseb-12", "description": "Coulomb's law, electric potential, and Kirchhoff's laws for GSEB Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Semiconductor Electronics", "canonicalName": "semiconductor-gseb-12", "description": "p-n junction diode, transistor modes, and integrated circuits for Gujarat Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Nuclear Physics & Communication", "canonicalName": "nuclear-comm-gseb-12", "description": "Radioactivity, nuclear energy, and communication systems for GSEB HSC.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kerala-hse::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Dual Nature of Radiation & Matter", "canonicalName": "dual-nature-kerala-12", "description": "Photoelectric effect, de Broglie wavelength, and wave-particle duality for Kerala HSE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Atoms, Nuclei & Electronic Devices", "canonicalName": "atoms-nuclei-kerala-12", "description": "Rutherford and Bohr models, fission, fusion, and semiconductor devices for Kerala Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Electromagnetic Induction & AC", "canonicalName": "emi-kerala-12", "description": "Faraday's and Lenz's laws, AC generators, and transformer for Kerala HSE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Optics", "canonicalName": "optics-kerala-12", "description": "Refraction, total internal reflection, interference, and diffraction for Kerala Board Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::bieap::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrostatics", "canonicalName": "electrostatics-bieap-12", "description": "Electric charges, fields, and potentials for Andhra Pradesh Board of Intermediate Education Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Current Electricity & Magnetic Effects", "canonicalName": "current-mag-bieap-12", "description": "Drift velocity, Kirchhoff's laws, and Biot-Savart law for AP Intermediate Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Optics & Atoms", "canonicalName": "optics-atoms-bieap-12", "description": "Ray optics, wave optics, and atomic models for BIEAP Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Semiconductor Devices & Communication Systems", "canonicalName": "semicon-bieap-12", "description": "Junction diode, transistor, and communication systems for AP Board Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tsbie::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrostatics & Current Electricity", "canonicalName": "electrostatics-tsbie-12", "description": "Coulomb's law, Ohm's law, and Kirchhoff's circuit rules for Telangana State Board of Intermediate Education.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Magnetic Effects & Electromagnetic Induction", "canonicalName": "magnetism-emi-tsbie-12", "description": "Magnetic field due to current, Faraday's law, and self-inductance for TSBIE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Optics & Modern Physics", "canonicalName": "optics-modern-tsbie-12", "description": "Refraction, lenses, photoelectric effect, and nuclear physics for Telangana Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Semiconductor Electronics", "canonicalName": "semiconductor-tsbie-12", "description": "p-n junction, rectifiers, transistors, and logic gates for TSBIE Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::wbchse::12::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrostatics & Capacitance", "canonicalName": "electrostatics-wbchse-12", "description": "Electric field and potential, capacitors and dielectrics for West Bengal CHSE Class 12 Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Magnetic Field & Electromagnetic Induction", "canonicalName": "magnetism-wbchse-12", "description": "Ampere's law, Faraday's law, and mutual inductance for WBCHSE Higher Secondary Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Optics & Wave Optics", "canonicalName": "optics-wbchse-12", "description": "Refraction through prisms, Young's double slit, and polarisation for WB Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Modern Physics & Semiconductor Devices", "canonicalName": "modern-semicon-wbchse-12", "description": "Photoelectric effect, nuclear fission, and p-n junction for WBCHSE Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::gseb::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-gseb-12", "description": "Electrochemical cells, Nernst equation, rate laws, and Arrhenius equation for Gujarat HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "p-Block Elements & Coordination Chemistry", "canonicalName": "pblock-coord-gseb-12", "description": "Group 15-18 elements, Werner's theory, and crystal field theory for GSEB Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Organic Chemistry — Haloalkanes & Alcohols", "canonicalName": "organic-gseb-12", "description": "Substitution reactions, alcohols, phenols, and ethers for Gujarat Board HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biomolecules & Polymers", "canonicalName": "biomol-gseb-12", "description": "Carbohydrates, proteins, enzymes, and synthetic polymers for GSEB Class 12 Chemistry.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  }
+]

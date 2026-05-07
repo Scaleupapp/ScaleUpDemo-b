@@ -1,0 +1,90 @@
+[
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cfa-l2",
+    "source": "curated",
+    "topics": [
+      { "name": "Equity Valuation — DDM & Multiples", "canonicalName": "equity-valuation-cfa-l2", "description": "Dividend discount models, residual income, and EV/EBITDA multiples at CFA Level 2 depth.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Fixed Income — Term Structure & Credit", "canonicalName": "fixed-income-cfa-l2", "description": "Spot rates, forward rates, OAS, and credit risk models for CFA L2 Fixed Income.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Derivatives & Alternative Investments", "canonicalName": "derivatives-cfa-l2", "description": "Option pricing (BSM), swaps, and real estate/private equity fundamentals for CFA L2.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Financial Reporting Analysis — Advanced", "columnName": "fra-cfa-l2", "canonicalName": "fra-cfa-l2", "description": "Inter-corporate investments, pensions, and multinational operations for CFA L2 FRA.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cfa-l3",
+    "source": "curated",
+    "topics": [
+      { "name": "Portfolio Management — IPS & Asset Allocation", "canonicalName": "portfolio-ips-cfa-l3", "description": "Writing Investment Policy Statements and strategic asset allocation for CFA L3.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Fixed Income & Equity Portfolio Management", "canonicalName": "fi-equity-portfolio-cfa-l3", "description": "Duration management, liability-driven investing, and factor-based equity strategies for CFA L3.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Risk Management & Derivatives Applications", "canonicalName": "risk-deriv-cfa-l3", "description": "Tail risk, overlay strategies, and options for portfolio risk management at CFA L3.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Behavioural Finance & Private Wealth", "canonicalName": "behavioural-private-cfa-l3", "description": "Cognitive biases, individual investor mandates, and estate planning for CFA L3 afternoon exam.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::frm-part-1",
+    "source": "curated",
+    "topics": [
+      { "name": "Quantitative Analysis — VaR & Statistical Methods", "canonicalName": "quant-var-frm-1", "description": "Value-at-Risk calculations, expected shortfall, and regression for FRM Part 1.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Financial Markets & Products", "canonicalName": "markets-products-frm-1", "description": "Futures, forwards, swaps, and options mechanics for FRM Part 1.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Foundations of Risk Management", "canonicalName": "risk-foundations-frm-1", "description": "Risk types, CAPM, APT, and enterprise risk frameworks for FRM Part 1.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Valuation & Risk Models", "canonicalName": "valuation-risk-frm-1", "description": "Bond pricing, key rate durations, and simulation methods for FRM Part 1 Valuation.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::ibps-clerk",
+    "source": "curated",
+    "topics": [
+      { "name": "Quantitative Aptitude", "canonicalName": "quant-ibps-clerk", "description": "Arithmetic, simplification, data interpretation, and number series for IBPS Clerk Prelims.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Reasoning Ability", "canonicalName": "reasoning-ibps-clerk", "description": "Puzzles, seating arrangements, inequality, and syllogism for IBPS Clerk prelims and mains.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "English Language", "canonicalName": "english-ibps-clerk", "description": "Reading comprehension, error spotting, and cloze test for IBPS Clerk.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General/Financial Awareness", "canonicalName": "gfa-ibps-clerk", "description": "Banking awareness, current affairs, and static GK for IBPS Clerk Mains GA section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::rbi-grade-b",
+    "source": "curated",
+    "topics": [
+      { "name": "Economic & Social Issues", "canonicalName": "esi-rbi-grade-b", "description": "Indian economy, growth, monetary policy, and social sector issues for RBI Grade B Phase II.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Finance & Management", "canonicalName": "finance-mgmt-rbi-grade-b", "description": "Corporate finance, derivatives, and management principles for RBI Grade B Phase II FM.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "General Awareness — Banking & Economy", "canonicalName": "ga-rbi-grade-b", "description": "Current banking events, RBI circulars, and financial market updates for Phase I GA.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Quantitative Aptitude & Reasoning", "canonicalName": "quant-reasoning-rbi-grade-b", "description": "Data interpretation, analytical reasoning, and English for RBI Grade B Phase I.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::sebi-grade-a",
+    "source": "curated",
+    "topics": [
+      { "name": "Securities Law & SEBI Regulations", "canonicalName": "securities-law-sebi", "description": "SEBI Act, SCRA, Insider Trading Regulations, and Takeover Code for SEBI Grade A Phase II.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Capital Markets & Products", "canonicalName": "capital-markets-sebi", "description": "Equity, debt, derivatives, and mutual funds markets in India for SEBI Grade A.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Commerce & Accountancy", "canonicalName": "commerce-accountancy-sebi", "description": "Financial statements, accounting standards, and corporate finance for SEBI Grade A.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Awareness & Costing", "canonicalName": "ga-costing-sebi", "description": "Current securities market events and cost accounting fundamentals for SEBI Grade A.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::ca-final",
+    "source": "curated",
+    "topics": [
+      { "name": "Strategic Financial Management", "canonicalName": "sfm-ca-final", "description": "Capital budgeting, risk analysis, derivatives hedging, and international finance for CA Final SFM.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Advanced Auditing & Professional Ethics", "canonicalName": "audit-ca-final", "description": "SA series standards, forensic audit, and professional ethics for CA Final Audit.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Direct Tax Laws & International Taxation", "canonicalName": "direct-tax-ca-final", "description": "Transfer pricing, DTAA, MAT, and income computation for CA Final DT.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Indirect Tax Laws — GST & Customs", "canonicalName": "indirect-tax-ca-final", "description": "GST supply chain analysis, valuation, ITC eligibility, and customs for CA Final IDT.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::nabard-grade-a",
+    "source": "curated",
+    "topics": [
+      { "name": "Agriculture & Rural Development", "canonicalName": "agri-rural-nabard", "description": "Crop seasons, agricultural credit, rural development schemes, and NABARD mandates.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Economic & Social Issues", "canonicalName": "esi-nabard", "description": "Rural economy, poverty metrics, SHG-Bank linkage, and development finance for NABARD.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Quantitative Aptitude & Reasoning", "canonicalName": "quant-nabard", "description": "Data analysis, logical reasoning, and English for NABARD Grade A Phase I.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Finance & Management", "canonicalName": "finance-nabard", "description": "Financial management, banking regulations, and management principles for NABARD Grade A Phase II.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  }
+]

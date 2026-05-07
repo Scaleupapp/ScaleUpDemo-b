@@ -3,6 +3,19 @@
  * Strict "true" string match — any other value is false.
  * This keeps rollback to a single env var change.
  */
+
+const FLAGS = {
+  FEATURE_DAY1_DIAGNOSTIC: process.env.FEATURE_DAY1_DIAGNOSTIC === 'true',
+  FEATURE_DAY1_DIAGNOSTIC_V2: process.env.FEATURE_DAY1_DIAGNOSTIC_V2 === 'true',
+};
+
+function isEnabled(flag) {
+  return !!FLAGS[flag];
+}
+
 module.exports = {
-  day1Diagnostic: process.env.FEATURE_DAY1_DIAGNOSTIC === 'true',
+  // Legacy flat export — used by diagnosticController.js. Do not remove.
+  day1Diagnostic: FLAGS.FEATURE_DAY1_DIAGNOSTIC,
+  FLAGS,
+  isEnabled,
 };

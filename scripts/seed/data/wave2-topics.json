@@ -1,0 +1,112 @@
+[
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::xat",
+    "source": "curated",
+    "topics": [
+      { "name": "Verbal & Logical Ability", "canonicalName": "verbal-logical-ability", "description": "Reading comprehension, critical reasoning, and para-completion for XAT's high-difficulty verbal section.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Decision Making", "canonicalName": "decision-making", "description": "XAT's unique DM section — business scenarios, ethical dilemmas, and managerial trade-off questions.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Quantitative Ability & Data Interpretation", "canonicalName": "quant-di-xat", "description": "Quant and DI questions calibrated to XAT's harder difficulty vs CAT.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Knowledge", "canonicalName": "gk-xat", "description": "Current affairs, business GK, and static GK tested in XAT's separate GK section.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::nmat",
+    "source": "curated",
+    "topics": [
+      { "name": "Language Skills", "canonicalName": "language-skills-nmat", "description": "Vocabulary, reading comprehension, and language usage tested in NMAT's Language Skills section.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Quantitative Skills", "canonicalName": "quant-nmat", "description": "Arithmetic, algebra, and data sufficiency for NMAT — no negative marking, speed-focused.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Logical Reasoning", "canonicalName": "logical-reasoning-nmat", "description": "Analytical puzzles, deductive reasoning, and data interpretation sets for NMAT.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "NMAT Strategy & Sectional Timing", "canonicalName": "nmat-strategy", "description": "Order of sections, time allocation per section, and adaptive pacing for NMAT's fixed-time structure.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::jee-advanced",
+    "source": "curated",
+    "topics": [
+      { "name": "Physics — Mechanics & Waves", "canonicalName": "physics-mechanics-jeeadv", "description": "Kinematics, Newton's laws, SHM, waves — the high-weightage JEE-Advanced physics clusters.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Chemistry — Organic Synthesis", "canonicalName": "chemistry-organic-jeeadv", "description": "Named reactions, multi-step synthesis, and spectroscopic identification tested in JEE-Advanced Paper 2.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Mathematics — Calculus & Vectors", "canonicalName": "mathematics-calculus-jeeadv", "description": "Definite integration, differential equations, 3D geometry, and vectors for JEE-Advanced.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "JEE-Advanced Paper Pattern & Integer Type Questions", "canonicalName": "jeeadv-strategy", "description": "Integer-type, matrix match, and multiple-correct question types — marking scheme and risk strategy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::neet-pg",
+    "source": "curated",
+    "topics": [
+      { "name": "Medicine — High-Yield Clinical Topics", "canonicalName": "medicine-clinical-neetpg", "description": "Internal medicine case scenarios, recent pattern shifts, and must-know clinical vignettes for NEET-PG.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Surgery — Surgical Principles & Trauma", "canonicalName": "surgery-neetpg", "description": "Pre-op, peri-op, and trauma surgery questions frequently tested in NEET-PG.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Pathology & Microbiology", "canonicalName": "pathomicro-neetpg", "description": "Histopathology images, lab values, and micro-organism identification for NEET-PG high scorers.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "NEET-PG Recent Pattern & NBE Updates", "canonicalName": "neetpg-strategy", "description": "Shift from fact-recall to clinical reasoning post-2023 — updated focus areas by NBE notifications.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::bitsat",
+    "source": "curated",
+    "topics": [
+      { "name": "Physics — Electricity & Magnetism", "canonicalName": "physics-em-bitsat", "description": "Capacitors, electromagnetic induction, and alternating current — key BITSAT physics cluster.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Chemistry — Physical & Inorganic", "canonicalName": "chemistry-phyinorg-bitsat", "description": "Electrochemistry, coordination compounds, and chemical equilibrium for BITSAT.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Mathematics — Coordinate Geometry & Probability", "canonicalName": "mathematics-coordgeo-bitsat", "description": "Conics, straight lines, and probability — BITSAT's most-tested maths areas.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "English Proficiency & Logical Reasoning", "canonicalName": "english-lr-bitsat", "description": "BITSAT's unique English and LR sections — grammar, analogy, and figure classification.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::nda",
+    "source": "curated",
+    "topics": [
+      { "name": "Mathematics — NDA Syllabus", "canonicalName": "mathematics-nda", "description": "Algebra, matrices, calculus, and statistics at Class 12 level tested in NDA Paper 1.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "General Ability — Science", "canonicalName": "science-nda", "description": "Physics, Chemistry, and Biology fundamentals covered in NDA Paper 2 Part A.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "General Knowledge — History, Geography, Polity", "canonicalName": "gk-nda", "description": "Indian and world history, geography, and civics tested in NDA Paper 2 Part B.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "SSB Interview Readiness", "canonicalName": "ssb-nda", "description": "Personality tests, group tasks, and officer-like-qualities assessed at the Services Selection Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::snap",
+    "source": "curated",
+    "topics": [
+      { "name": "General English", "canonicalName": "english-snap", "description": "Reading comprehension and verbal ability for SNAP — moderate difficulty, time-pressured.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Analytical & Logical Reasoning", "canonicalName": "lr-snap", "description": "Puzzles, syllogisms, and coding-decoding for SNAP's reasoning section.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Quantitative, Data Interpretation & DS", "canonicalName": "quant-snap", "description": "Arithmetic and DI for SNAP — manageable quant, high accuracy focus.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "SNAP Strategy & Symbiosis GD-PI", "canonicalName": "snap-strategy", "description": "SNAP scoring strategy, Symbiosis group exercise, and personal interview preparation.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cmat",
+    "source": "curated",
+    "topics": [
+      { "name": "Logical Reasoning", "canonicalName": "lr-cmat", "description": "Critical reasoning, assumptions, and inferences for CMAT's LR section.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Language Comprehension", "canonicalName": "lc-cmat", "description": "Passages, vocabulary, and grammar for CMAT — NTA-style question framing.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Quantitative Techniques & DI", "canonicalName": "quant-cmat", "description": "Number systems, percentages, and DI for CMAT — foundational to intermediate range.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Awareness & Innovation", "canonicalName": "ga-cmat", "description": "Current events and CMAT's innovation & entrepreneurship section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::data-analyst::ml-engineer",
+    "source": "curated",
+    "topics": [
+      { "name": "Machine Learning Fundamentals for Analysts", "canonicalName": "ml-fundamentals-switch", "description": "Bridging the gap from analytical thinking to ML model-building — regression, trees, and evaluation metrics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Python & ML Frameworks (sklearn, PyTorch)", "canonicalName": "python-ml-frameworks", "description": "Moving from pandas-first workflows to sklearn pipelines and PyTorch model training loops.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "MLOps & Model Deployment", "canonicalName": "mlops-switch", "description": "Containerising models, serving with FastAPI/Triton, and monitoring drift in production.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "LLM Fine-Tuning & Prompt Engineering", "canonicalName": "llm-finetuning", "description": "RLHF, LoRA fine-tuning, and building eval frameworks — the emerging ML engineer stack in 2026.", "baseDifficulty": "advanced", "isFutureProofing": true, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::defense::corporate",
+    "source": "curated",
+    "topics": [
+      { "name": "Corporate Communication & Business Writing", "canonicalName": "corporate-communication", "description": "Translating defense-style brevity into corporate emails, decks, and stakeholder updates.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Leadership in Civilian Organisations", "canonicalName": "civilian-leadership", "description": "Leading without command authority — influence, coalition-building, and matrix structures in corporate India.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Finance & P&L Fundamentals", "canonicalName": "finance-fundamentals-switch", "description": "Reading balance sheets, understanding P&L, and working with finance teams — core corporate literacy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Personal Branding & LinkedIn for Veterans", "canonicalName": "personal-branding-veterans", "description": "Translating military achievements to civilian resume language and LinkedIn for ex-defence professionals.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  }
+]

@@ -94,6 +94,15 @@ class EmailService {
     });
   }
 
+  async sendDailyDigest(toEmail, body) {
+    await this.transporter.sendMail({
+      from: this.from,
+      to: toEmail,
+      subject: 'ScaleUp daily digest',
+      text: body,
+    });
+  }
+
   async sendAdminQuestionDigest(email, { queueDepth, estimatedMinutes, dashboardUrl }) {
     await this.transporter.sendMail({
       from: this.from,

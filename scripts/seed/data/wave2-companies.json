@@ -1,0 +1,102 @@
+[
+  {
+    "name": "Deutsche Bank India",
+    "normalizedName": "deutsche-bank-india",
+    "industry": "Global Investment Bank",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Structured finance and derivatives knowledge testing (rates, credit, FX)",
+      "Risk and compliance awareness — particularly post-2008 regulatory context",
+      "Behavioural round with emphasis on attention-to-detail and stakeholder communication",
+      "Technical case study for technology roles on transaction banking systems"
+    ],
+    "topicWeightOverrides": {
+      "fixed-income": 1.6,
+      "derivatives": 1.5,
+      "risk-management": 1.4,
+      "behavioural": 1.2
+    },
+    "examplesContext": "You are an analyst at Deutsche Bank India (Mumbai/Pune operations), working on Global Transaction Banking, Corporate Finance, or Technology division, with exposure to EMEA regulatory standards.",
+    "source": "curated"
+  },
+  {
+    "name": "Citi India",
+    "normalizedName": "citi-india",
+    "industry": "Global Investment Bank",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Product knowledge tests for sales & trading roles — FX, rates, and credit",
+      "Strong emphasis on client orientation and relationship-banking mindset",
+      "Case studies on treasury, transaction services, and institutional banking",
+      "Technical interviews for technology roles on core banking modernisation"
+    ],
+    "topicWeightOverrides": {
+      "capital-markets": 1.5,
+      "treasury-management": 1.4,
+      "behavioural": 1.3,
+      "financial-modelling": 1.2
+    },
+    "examplesContext": "You are an associate at Citi India (Mumbai), working in Institutional Clients Group, Treasury & Trade Solutions, or the India Technology Hub supporting global Citi systems.",
+    "source": "curated"
+  },
+  {
+    "name": "BlackRock India",
+    "normalizedName": "blackrock-india",
+    "industry": "Asset Management",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Aladdin platform knowledge and risk analytics depth expected for technology roles",
+      "Portfolio construction and factor-based investing for investment roles",
+      "Quantitative modelling case study — risk models, returns attribution",
+      "Behavioural emphasis on fiduciary mindset and long-term thinking"
+    ],
+    "topicWeightOverrides": {
+      "portfolio-management": 1.6,
+      "risk-analytics": 1.5,
+      "quantitative-finance": 1.5,
+      "behavioural": 1.2
+    },
+    "examplesContext": "You are an analyst at BlackRock India (Gurugram), working in the Aladdin product team, Risk & Quantitative Analysis, or Portfolio Management supporting global institutional mandates.",
+    "source": "curated"
+  },
+  {
+    "name": "Wells Fargo India",
+    "normalizedName": "wells-fargo-india",
+    "industry": "Global Bank (COE)",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "US banking regulatory knowledge (Dodd-Frank, Basel III) for risk and compliance roles",
+      "Technology COE interviews: Java, Python, and cloud-native banking systems",
+      "Data engineering and analytics: large-scale financial data pipelines",
+      "STAR-format behavioural questions emphasising risk-consciousness and ownership"
+    ],
+    "topicWeightOverrides": {
+      "banking-regulations": 1.5,
+      "data-engineering": 1.4,
+      "system-design": 1.3,
+      "behavioural": 1.3
+    },
+    "examplesContext": "You are an engineer or analyst at Wells Fargo India COE (Hyderabad/Chennai/Bengaluru), supporting US wholesale banking operations, risk systems, or enterprise technology.",
+    "source": "curated"
+  },
+  {
+    "name": "Bank of America India",
+    "normalizedName": "bofa-india",
+    "industry": "Global Investment Bank",
+    "applicableObjectives": ["interview_preparation", "upskilling"],
+    "signatureInterviewElements": [
+      "Markets and investment banking product knowledge for finance roles",
+      "Technology interviews: Python, Java, distributed systems for capital markets tech",
+      "Risk and compliance: knowing BofA's global risk framework and regulatory requirements",
+      "Behavioural emphasis on client centricity, collaboration, and responsible growth"
+    ],
+    "topicWeightOverrides": {
+      "investment-banking": 1.5,
+      "capital-markets": 1.4,
+      "system-design": 1.3,
+      "behavioural": 1.2
+    },
+    "examplesContext": "You are an analyst or engineer at Bank of America India (Mumbai/Hyderabad/Chennai), supporting Global Markets, Global Banking, or the India Technology COE.",
+    "source": "curated"
+  }
+]
