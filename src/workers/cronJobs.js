@@ -81,6 +81,18 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 12. Validator Backfill — Mondays 03:00 IST (21:30 UTC Sunday)
+  cronQueue.add('validatorBackfill', {}, {
+    repeat: { pattern: '30 21 * * 0' },
+    removeOnComplete: true,
+  });
+
+  // 13. Mixpanel Daily Digest — Daily 09:00 IST (03:30 UTC)
+  cronQueue.add('mixpanelDailyDigest', {}, {
+    repeat: { pattern: '30 3 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -165,6 +177,12 @@ function startCronJobs() {
         break;
       case 'adminQuestionDigest':
         await require('./adminDigestWorker').run();
+        break;
+      case 'validatorBackfill':
+        await require('./validatorBackfillWorker').runBackfill({ batchSize: 200 });
+        break;
+      case 'mixpanelDailyDigest':
+        await require('./mixpanelDailyDigestWorker').run();
         break;
     }
   }, { connection });

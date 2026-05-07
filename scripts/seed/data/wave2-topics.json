@@ -88,6 +88,195 @@
     ]
   },
   {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::mat",
+    "source": "curated",
+    "topics": [
+      { "name": "Mathematical Skills", "canonicalName": "math-skills-mat", "description": "Arithmetic, geometry, and data analysis for MAT's Mathematical Skills section.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Language Comprehension", "canonicalName": "language-comprehension-mat", "description": "Reading comprehension and verbal ability for MAT's Language Comprehension section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Data Analysis & Sufficiency", "canonicalName": "data-analysis-mat", "description": "Data interpretation, sufficiency questions, and graphs for MAT.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Intelligence & Critical Reasoning", "canonicalName": "intelligence-reasoning-mat", "description": "Verbal and non-verbal reasoning, analogies, and series for MAT.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "Indian & Global Environment", "canonicalName": "environment-mat", "description": "Business current affairs, economic policy, and global events tested in MAT's fifth section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::iift",
+    "source": "curated",
+    "topics": [
+      { "name": "Quantitative Analysis", "canonicalName": "quant-iift", "description": "High-difficulty arithmetic and algebra questions for IIFT's quantitative section.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Verbal Ability & Reading Comprehension", "canonicalName": "varc-iift", "description": "Dense RC passages and vocabulary-heavy verbal questions for IIFT.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Logical Reasoning & Data Interpretation", "canonicalName": "lrdi-iift", "description": "Complex puzzle sets and DI caselets for IIFT — higher difficulty than CAT.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Knowledge — International Trade & Economy", "canonicalName": "gk-iift", "description": "Trade policy, WTO, EXIM data, and global economics for IIFT's standalone GK section.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::tissnet",
+    "source": "curated",
+    "topics": [
+      { "name": "Social Sensitivity & Social Awareness", "canonicalName": "social-awareness-tissnet", "description": "Current events, social issues, and awareness of development sector topics for TISSNET.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "English Proficiency", "canonicalName": "english-tissnet", "description": "Grammar, vocabulary, and reading comprehension for TISSNET's English section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Mathematical & Logical Reasoning", "canonicalName": "math-lr-tissnet", "description": "Basic quantitative aptitude and logical reasoning for TISSNET.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "TISS GD & PI Preparation", "canonicalName": "tiss-gdpi", "description": "Group discussion topics, personal interview for TISS HRM and social work programmes.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::aiims-pg",
+    "source": "curated",
+    "topics": [
+      { "name": "Clinical Medicine & Case-Based Scenarios", "canonicalName": "clinical-medicine-aiimspg", "description": "Case vignettes in internal medicine, prioritised by AIIMS Delhi's past question patterns.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Surgery & Allied Specialties", "canonicalName": "surgery-aiimspg", "description": "General surgery, orthopaedics, and anaesthesia for AIIMS PG entrance.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Basic Sciences — Anatomy, Physiology, Biochemistry", "canonicalName": "basic-sciences-aiimspg", "description": "Applied anatomy and physiology questions at postgraduate entrance level.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "PSM & Recent Advances", "canonicalName": "psm-advances-aiimspg", "description": "Preventive and social medicine, recent national health programmes, and AIIMS-specific current affairs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::ini-cet",
+    "source": "curated",
+    "topics": [
+      { "name": "Medicine & Therapeutics", "canonicalName": "medicine-inicet", "description": "High-yield medicine topics and drug of choice questions for INI-CET.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Surgery, Obs & Gynae", "canonicalName": "surgery-obgyn-inicet", "description": "Surgical anatomy, operative procedures, and obstetrics for INI-CET entrance.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Pathology & Microbiology", "canonicalName": "patho-micro-inicet", "description": "Histological diagnosis and microbial identification for INI-CET.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Pharmacology & Forensic Medicine", "canonicalName": "pharma-forensic-inicet", "description": "Drug mechanisms, side effects, and medico-legal topics for INI-CET.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::fmge",
+    "source": "curated",
+    "topics": [
+      { "name": "Medicine & Paediatrics", "canonicalName": "medicine-paeds-fmge", "description": "Clinical medicine and paediatric cases for FMGE screening test for foreign medical graduates.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Surgery & Radiology", "canonicalName": "surgery-radio-fmge", "description": "General surgery principles and radiological diagnosis for FMGE.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Obstetrics, Gynaecology & PSM", "canonicalName": "obgyn-psm-fmge", "description": "Reproductive health and community medicine topics for FMGE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Basic Sciences Integration", "canonicalName": "basic-sciences-fmge", "description": "Anatomy, physiology, biochemistry, and pathology applied to clinical scenarios for FMGE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cds",
+    "source": "curated",
+    "topics": [
+      { "name": "Elementary Mathematics", "canonicalName": "mathematics-cds", "description": "Arithmetic, algebra, geometry, and trigonometry for CDS Paper I Mathematics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "English Language", "canonicalName": "english-cds", "description": "Reading comprehension, grammar, and sentence completion for CDS Paper II English.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "General Knowledge — Defence & Current Affairs", "canonicalName": "gk-defence-cds", "description": "History, geography, polity, and defence current affairs for CDS General Knowledge paper.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "SSB Interview & OLQ Development", "canonicalName": "ssb-cds", "description": "Officer-Like-Quality assessment, psychology tests, and group tasks at SSB for CDS candidates.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::afcat",
+    "source": "curated",
+    "topics": [
+      { "name": "General Awareness — Defence & Aviation", "canonicalName": "ga-aviation-afcat", "description": "Indian Air Force history, aviation fundamentals, and defence current affairs for AFCAT.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Verbal Ability & Reading Comprehension", "canonicalName": "verbal-afcat", "description": "English comprehension and vocabulary for AFCAT's Verbal Ability section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Numerical Ability", "canonicalName": "numerical-afcat", "description": "Speed-based arithmetic and data interpretation for AFCAT's numerical section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Reasoning & Military Aptitude", "canonicalName": "reasoning-afcat", "description": "Spatial, mechanical, and logical reasoning for AFCAT and AFSB interview.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::inet",
+    "source": "curated",
+    "topics": [
+      { "name": "Mathematics", "canonicalName": "mathematics-inet", "description": "Algebra, trigonometry, calculus, and statistics for Indian Navy Entrance Test.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Science — Physics & Chemistry", "canonicalName": "science-inet", "description": "Class 12-level physics and chemistry for INET Paper I.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "English Comprehension", "canonicalName": "english-inet", "description": "Reading comprehension, grammar, and vocabulary for INET's English section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Knowledge & Current Affairs", "canonicalName": "gk-inet", "description": "Naval history, current affairs, and general awareness for INET.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::viteee",
+    "source": "curated",
+    "topics": [
+      { "name": "Physics — Mechanics to Modern Physics", "canonicalName": "physics-viteee", "description": "Full Class 12 NCERT physics syllabus tested in VITEEE's physics section.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Chemistry — Organic & Physical", "canonicalName": "chemistry-viteee", "description": "Organic reactions and physical chemistry problems for VITEEE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Mathematics / Biology", "canonicalName": "math-bio-viteee", "description": "Mathematics for PCM stream or Biology for PCB stream in VITEEE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Aptitude & English", "canonicalName": "aptitude-english-viteee", "description": "Logical reasoning and basic English for VITEEE's aptitude and English sections.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::met",
+    "source": "curated",
+    "topics": [
+      { "name": "Physics", "canonicalName": "physics-met", "description": "Mechanics, thermodynamics, and modern physics for Manipal Entrance Test.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Chemistry", "canonicalName": "chemistry-met", "description": "Physical, organic, and inorganic chemistry for MET.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Mathematics / Biology", "canonicalName": "math-bio-met", "description": "Calculus and algebra for engineering stream, or Zoology and Botany for medical stream in MET.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "English & General Aptitude", "canonicalName": "english-aptitude-met", "description": "Grammar, vocabulary, and aptitude for MET's English and Aptitude section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::comedk",
+    "source": "curated",
+    "topics": [
+      { "name": "Physics — Class 11 & 12", "canonicalName": "physics-comedk", "description": "Full two-year physics syllabus for COMEDK UGET engineering entrance.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Chemistry — Class 11 & 12", "canonicalName": "chemistry-comedk", "description": "Organic, inorganic, and physical chemistry for COMEDK.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Mathematics — Class 11 & 12", "canonicalName": "mathematics-comedk", "description": "Calculus, algebra, coordinate geometry, and probability for COMEDK.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "COMEDK Strategy & Karnataka Seat Allocation", "canonicalName": "comedk-strategy", "description": "Cutoff trends, college-wise seat matrix, and Karnataka domicile rules for COMEDK.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::state-psc-uppsc",
+    "source": "curated",
+    "topics": [
+      { "name": "General Studies — History, Polity & Economy", "canonicalName": "gs-history-polity-uppsc", "description": "Indian and UP history, constitutional provisions, and economic development for UPPSC Prelims and Mains GS.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "General Studies — Geography & Environment", "canonicalName": "gs-geography-uppsc", "description": "Indian and world geography, ecology, and environment topics for UPPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "General Hindi & Essay", "canonicalName": "hindi-essay-uppsc", "description": "Hindi language proficiency and essay writing tested separately in UPPSC Mains.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "CSAT & Reasoning", "canonicalName": "csat-uppsc", "description": "Comprehension, basic numeracy, and decision-making for UPPSC Preliminary CSAT paper.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 },
+      { "name": "UP Specific GK & Current Affairs", "canonicalName": "up-specific-gk", "description": "Uttar Pradesh history, culture, industrial policy, and state-level current events for UPPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 5 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::state-psc-bpsc",
+    "source": "curated",
+    "topics": [
+      { "name": "General Studies — Indian History & Bihar History", "canonicalName": "gs-history-bpsc", "description": "Modern Indian history, Bihar's freedom struggle, and post-independence Bihar for BPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "General Studies — Geography, Polity & Economy", "canonicalName": "gs-geo-polity-bpsc", "description": "Physical and human geography, constitutional law, and Indian economy for BPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "General Science & Current Affairs", "canonicalName": "science-current-bpsc", "description": "Applied science basics and national/Bihar-specific current affairs for BPSC Prelims.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Hindi & Essay Writing", "canonicalName": "hindi-essay-bpsc", "description": "Hindi proficiency and argumentative essay for BPSC Mains.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::state-psc-mppsc",
+    "source": "curated",
+    "topics": [
+      { "name": "General Studies — History, Culture & Polity", "canonicalName": "gs-history-mppsc", "description": "Indian and Madhya Pradesh history, art and culture, and constitutional provisions for MPPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "General Studies — Science, Technology & Environment", "canonicalName": "gs-science-mppsc", "description": "Science and technology developments, environment, and MP-specific ecology for MPPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "General Hindi", "canonicalName": "hindi-mppsc", "description": "Hindi grammar, comprehension, and letter writing for MPPSC Mains.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "MP GK — Economy, Agriculture & Industries", "canonicalName": "mp-gk-economy", "description": "Madhya Pradesh economy, major industrial sectors, agricultural profile, and state schemes.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::state-psc-mpsc",
+    "source": "curated",
+    "topics": [
+      { "name": "General Studies — History & Geography", "canonicalName": "gs-history-geo-mpsc", "description": "Indian and Maharashtra history, physical and human geography for MPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "General Studies — Economy & Polity", "canonicalName": "gs-economy-mpsc", "description": "Indian economy, Maharashtra development, and constitutional provisions for MPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Marathi Language Proficiency", "canonicalName": "marathi-mpsc", "description": "Marathi grammar, reading comprehension, and language usage tested in MPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Current Affairs & Maharashtra Specific GK", "canonicalName": "maharashtra-gk-mpsc", "description": "Maharashtra geography, culture, governance schemes, and regional current events.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::state-psc-tnpsc",
+    "source": "curated",
+    "topics": [
+      { "name": "General Studies — History & Culture", "canonicalName": "gs-history-tnpsc", "description": "Tamilakam history, Dravidian culture, and Indian national movement for TNPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "General Studies — Science, Environment & Polity", "canonicalName": "gs-science-polity-tnpsc", "description": "Applied sciences, environmental issues, and Tamil Nadu governance for TNPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Tamil Language", "canonicalName": "tamil-tnpsc", "description": "Tamil grammar, literature, and comprehension — qualifying and scored paper in TNPSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Aptitude & Mental Ability", "canonicalName": "aptitude-tnpsc", "description": "Logical reasoning, basic numeracy, and mental ability for TNPSC Group 1/2/4.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
     "objectiveType": "career_switch",
     "targetKey": "career_switch::data-analyst::ml-engineer",
     "source": "curated",
@@ -107,6 +296,149 @@
       { "name": "Leadership in Civilian Organisations", "canonicalName": "civilian-leadership", "description": "Leading without command authority — influence, coalition-building, and matrix structures in corporate India.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Finance & P&L Fundamentals", "canonicalName": "finance-fundamentals-switch", "description": "Reading balance sheets, understanding P&L, and working with finance teams — core corporate literacy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "Personal Branding & LinkedIn for Veterans", "canonicalName": "personal-branding-veterans", "description": "Translating military achievements to civilian resume language and LinkedIn for ex-defence professionals.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::doctor::medtech-product",
+    "source": "curated",
+    "topics": [
+      { "name": "Medical Device Regulatory Pathways", "canonicalName": "medtech-regulatory", "description": "FDA 510(k), CE marking, CDSCO processes, and clinical evidence requirements for medical devices.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Product Management Fundamentals", "canonicalName": "product-management-basics", "description": "Discovery, roadmapping, prioritisation frameworks, and stakeholder management for first-time PMs.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Clinical Workflow Analysis & User Research", "canonicalName": "clinical-workflow-research", "description": "Translating clinical domain expertise into user personas, journey maps, and workflow pain-points.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Healthcare Data & Interoperability", "canonicalName": "health-data-interop", "description": "FHIR, HL7, EHR integration, and data privacy (HIPAA/DPDPA) for medtech product builders.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::sales::customer-success",
+    "source": "curated",
+    "topics": [
+      { "name": "Customer Success Methodology & Playbooks", "canonicalName": "cs-methodology", "description": "Onboarding, health scoring, QBRs, and renewal playbooks for B2B SaaS customer success roles.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Churn Analysis & Retention Strategy", "canonicalName": "churn-retention", "description": "Identifying churn signals, risk-tiering accounts, and designing retention interventions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Product Adoption & Value Realisation", "canonicalName": "product-adoption-cs", "description": "Driving feature adoption, measuring time-to-value, and communicating ROI to executive sponsors.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "CRM Tools & CS Platforms", "canonicalName": "cs-tooling", "description": "Salesforce, Gainsight, Totango, and data hygiene practices for customer success operations.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::customer-support::product-operations",
+    "source": "curated",
+    "topics": [
+      { "name": "Product Operations Fundamentals", "canonicalName": "product-ops-basics", "description": "Role scope, tooling, feedback loops between support, data, and product teams in product operations.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Data Analysis for Product Insights", "canonicalName": "data-analysis-prod-ops", "description": "SQL, dashboards, and funnel analysis to surface support patterns into product decisions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Process Design & Automation", "canonicalName": "process-automation-ops", "description": "Workflow design, Zapier/n8n automation, and SOPs for scaling product operations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Stakeholder Communication & Prioritisation", "canonicalName": "stakeholder-prioritisation", "description": "Translating support volume into impact-ranked feature requests and communicating to engineering.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::business-analyst::product-manager",
+    "source": "curated",
+    "topics": [
+      { "name": "Product Strategy & Vision Setting", "canonicalName": "product-strategy-vision", "description": "Defining product vision, OKRs, and communicating strategy to engineering and design teams.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Customer Discovery & User Research", "canonicalName": "customer-discovery", "description": "User interviews, JTBD framework, and synthesising insights into actionable product hypotheses.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Agile Execution & Backlog Management", "canonicalName": "agile-backlog-mgmt", "description": "Sprint planning, story writing, and prioritisation frameworks like RICE and MoSCoW.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Metrics, Growth & A/B Testing", "canonicalName": "metrics-growth-pm", "description": "North Star metrics, experiment design, and interpreting results for product decisions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::qa-engineer::sdet",
+    "source": "curated",
+    "topics": [
+      { "name": "Test Automation Frameworks", "canonicalName": "test-automation-frameworks", "description": "Selenium, Playwright, Cypress, and TestNG/pytest for building scalable automation suites.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "API & Contract Testing", "canonicalName": "api-contract-testing", "description": "REST API testing with Postman/RestAssured, and consumer-driven contract testing with Pact.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Performance & Load Testing", "canonicalName": "performance-load-testing", "description": "JMeter, k6, and Gatling for load testing — analysing P95/P99 latency and throughput.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "CI/CD & DevOps for SDETs", "canonicalName": "cicd-sdet", "description": "Jenkins, GitHub Actions, Docker, and integrating test suites into CI/CD pipelines.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::designer::design-manager",
+    "source": "curated",
+    "topics": [
+      { "name": "Design Leadership & Team Management", "canonicalName": "design-leadership", "description": "Managing IC designers, running crits, unblocking work, and growing design talent.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Cross-Functional Collaboration & Influence", "canonicalName": "design-cross-functional", "description": "Partnering with PM and engineering, advocating for design in roadmap discussions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Design Systems & Governance", "canonicalName": "design-systems-governance", "description": "Establishing and maintaining design systems, component libraries, and contribution models.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Strategic Thinking & OKR Alignment", "canonicalName": "design-strategy-okr", "description": "Connecting design work to business outcomes and communicating design ROI to leadership.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::founder::senior-ic",
+    "source": "curated",
+    "topics": [
+      { "name": "Deep Technical Craft & Specialisation", "canonicalName": "technical-craft-ic", "description": "Rebuilding depth in a specific technical domain after years of generalist founder work.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Navigating Corporate Hierarchy & Politics", "canonicalName": "corporate-hierarchy-ic", "description": "Working within structures, managing upward, and succeeding without formal authority.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Technical Interview Preparation", "canonicalName": "technical-interview-ic", "description": "DSA, system design, and coding interview patterns for senior IC roles at product companies.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Personal Brand as a Former Founder", "canonicalName": "founder-brand-ic", "description": "Positioning entrepreneurial experience as an asset for senior IC roles, not a liability.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::family-business::corporate",
+    "source": "curated",
+    "topics": [
+      { "name": "Professional Credentialing & MBA Positioning", "canonicalName": "credential-mba-corporate", "description": "Leveraging or obtaining formal credentials to bridge the credibility gap with corporate recruiters.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Corporate Finance & Accounting Literacy", "canonicalName": "corp-finance-literacy", "description": "Reading audited accounts, understanding EBITDA, and working with CFOs in large organisations.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Structured Management & Reporting", "canonicalName": "structured-management", "description": "MIS reporting, KPI dashboards, and structured decision-making in corporate governance frameworks.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Networking & Corporate Job Search", "canonicalName": "corp-networking-job-search", "description": "LinkedIn outreach, leveraging CA/MBA alumni networks, and interview preparation for lateral corporate hires.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::hr-generalist::people-analytics",
+    "source": "curated",
+    "topics": [
+      { "name": "People Analytics Fundamentals", "canonicalName": "people-analytics-basics", "description": "Workforce metrics, HR data architecture, and HRIS systems for aspiring people analytics professionals.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Data Analysis & Visualisation for HR", "canonicalName": "hr-data-analysis", "description": "Excel, Python, and Power BI applied to attrition modelling, engagement analysis, and headcount planning.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Predictive HR Modelling", "canonicalName": "predictive-hr-modelling", "description": "Regression and ML models for attrition prediction, performance forecasting, and talent risk scoring.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Storytelling with HR Data", "canonicalName": "hr-data-storytelling", "description": "Communicating workforce insights to C-suite, building dashboards, and driving evidence-based HR decisions.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::account-manager::strategy",
+    "source": "curated",
+    "topics": [
+      { "name": "Strategic Frameworks & Business Case Building", "canonicalName": "strategy-frameworks", "description": "Porter's Five Forces, BCG matrix, OKRs, and structuring business case presentations for strategy roles.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Consulting Problem-Solving Methodology", "canonicalName": "consulting-problem-solving", "description": "MECE structuring, issue trees, and hypothesis-first thinking for management consulting transitions.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Financial Modelling & Market Sizing", "canonicalName": "financial-modelling-strategy", "description": "DCF models, market sizing (TAM/SAM/SOM), and sensitivity analysis for strategy deliverables.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Executive Communication & Storytelling", "canonicalName": "executive-communication", "description": "Pyramid Principle, slide design, and boardroom-ready narrative for strategy professionals.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::journalist::content-strategy",
+    "source": "curated",
+    "topics": [
+      { "name": "Content Strategy Fundamentals", "canonicalName": "content-strategy-basics", "description": "Content audits, editorial calendars, audience personas, and distribution planning for brands.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "SEO & Content Performance Measurement", "canonicalName": "seo-content-performance", "description": "Keyword research, on-page SEO, Google Analytics, and measuring content ROI.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "B2B Content & Thought Leadership", "canonicalName": "b2b-content-leadership", "description": "Whitepapers, case studies, webinars, and LinkedIn content strategy for B2B brand building.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "AI-Assisted Content Production", "canonicalName": "ai-content-production", "description": "Using LLMs, image generation, and workflow automation to scale content operations.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::architect::ux-design",
+    "source": "curated",
+    "topics": [
+      { "name": "UX Research & User-Centred Design Principles", "canonicalName": "ux-research-principles", "description": "User interviews, usability testing, and translating spatial/architectural thinking into digital UX.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Interaction Design & Prototyping", "canonicalName": "interaction-design-prototyping", "description": "Wireframing, information architecture, and high-fidelity prototyping in Figma.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Visual Design Fundamentals for UX", "canonicalName": "visual-design-ux", "description": "Typography, colour theory, grid systems, and design systems adapted from architectural drawing principles.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Portfolio Building & UX Job Search", "canonicalName": "ux-portfolio-job-search", "description": "Creating a compelling UX portfolio, case study writing, and applying to UX roles in India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "career_switch",
+    "targetKey": "career_switch::lawyer::legal-tech-grc",
+    "source": "curated",
+    "topics": [
+      { "name": "GRC Frameworks & Compliance Programmes", "canonicalName": "grc-frameworks", "description": "ISO 27001, SOC 2, GDPR, DPDPA, and building compliance programmes for SaaS companies.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Legal Technology Landscape", "canonicalName": "legal-tech-landscape", "description": "Contract lifecycle management, eDiscovery, LegalOps tools, and AI in legal for GRC professionals.", "baseDifficulty": "intermediate", "isFutureProofing": true, "sortOrder": 2 },
+      { "name": "Risk Assessment & Governance Reporting", "canonicalName": "risk-governance-reporting", "description": "Risk matrices, control testing, and board-level governance reporting for corporate GRC roles.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Technical Vocabulary for Lawyers in Tech", "canonicalName": "tech-vocab-lawyers", "description": "APIs, cloud infrastructure, data flows, and security concepts needed to work with engineering teams.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   }
 ]

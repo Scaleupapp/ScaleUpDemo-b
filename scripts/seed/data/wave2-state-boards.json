@@ -34,6 +34,50 @@
   },
   {
     "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Kinematics & Laws of Motion", "canonicalName": "kinematics-msbshse-11", "description": "Equations of motion, Newton's laws, friction, and work-energy theorem for Maharashtra Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Thermodynamics & Properties of Matter", "canonicalName": "thermo-msbshse-11", "description": "Thermal expansion, specific heat, thermodynamic laws, and elasticity for HSC Std XI.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Gravitation & Oscillations", "canonicalName": "gravitation-osc-msbshse-11", "description": "Kepler's laws, escape velocity, SHM, and wave motion for Maharashtra Board Class 11.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Optics & Wave Optics — Introductory", "canonicalName": "optics-intro-msbshse-11", "description": "Reflection, refraction, lenses, and wave nature of light — foundation topics for Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::11::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Atomic Structure & Periodic Table", "canonicalName": "atomic-periodic-msbshse-11", "description": "Quantum numbers, electronic configuration, and periodic trends for Maharashtra HSC Class 11 Chemistry.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Chemical Bonding & States of Matter", "canonicalName": "bonding-states-msbshse-11", "description": "VSEPR, hybridisation, ideal gas laws, and liquids for MSBSHSE Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Redox Reactions & s-Block Elements", "canonicalName": "redox-sblock-msbshse-11", "description": "Oxidation states, balancing redox, and alkali/alkaline earth metal properties.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Basic Organic Chemistry", "canonicalName": "basic-organic-msbshse-11", "description": "IUPAC nomenclature, isomerism, and introductory organic reactions for HSC Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::12::accountancy",
+    "source": "curated",
+    "topics": [
+      { "name": "Partnership Accounts", "canonicalName": "partnership-msbshse-12", "description": "Admission, retirement, death of a partner, and dissolution of partnership firm for HSC Accountancy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Company Accounts & Share Capital", "canonicalName": "company-accounts-msbshse-12", "description": "Issue and forfeiture of shares, debentures, and financial statements for Maharashtra HSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Analysis of Financial Statements", "canonicalName": "financial-analysis-msbshse-12", "description": "Ratio analysis, comparative statements, and common-size statements for MSBSHSE Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Cash Flow Statements", "canonicalName": "cashflow-msbshse-12", "description": "Operating, investing, and financing activities in cash flow statement for Maharashtra HSC.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::12::economics",
+    "source": "curated",
+    "topics": [
+      { "name": "Macroeconomics — National Income & Inflation", "canonicalName": "macro-income-msbshse-12", "description": "GDP, GNP, price indices, and inflation concepts for Maharashtra HSC Economics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Money, Banking & Monetary Policy", "canonicalName": "money-banking-msbshse-12", "description": "RBI functions, credit creation, and monetary policy tools for MSBSHSE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Indian Economy & Economic Planning", "canonicalName": "indian-economy-msbshse-12", "description": "Five-year plans, economic reforms 1991, and current economic indicators for HSC.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Microeconomics — Demand, Supply & Market Structures", "canonicalName": "micro-msbshse-12", "description": "Elasticity, consumer surplus, and perfect competition vs monopoly for Maharashtra Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
     "targetKey": "academic_excellence::tn-state-board::12::physics",
     "source": "curated",
     "topics": [
@@ -52,6 +96,28 @@
       { "name": "Organic Nitrogen Compounds & Biomolecules", "canonicalName": "nitrogen-biomol-tn-12", "description": "Amines, diazonium salts, carbohydrates, and nucleic acids for Tamil Nadu Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-tn-12", "description": "Nernst equation, rate expressions, and collision theory for TN State Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "Coordination Chemistry & Transition Metals", "canonicalName": "coordination-tn-12", "description": "Crystal field theory, colour, and magnetic properties for TN HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tn-state-board::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Mechanics — Kinematics & Newton's Laws", "canonicalName": "mechanics-tn-11", "description": "Equations of motion, projectile motion, and Newton's laws for Tamil Nadu HSC Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy, Power & Rotation", "canonicalName": "work-energy-tn-11", "description": "Work-energy theorem, conservation of energy, torque, and moment of inertia for TN Class 11.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Thermodynamics & Properties of Matter", "canonicalName": "thermo-matter-tn-11", "description": "Laws of thermodynamics, specific heats, and elasticity for TN State Board Class 11.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Waves & Oscillations", "canonicalName": "waves-osc-tn-11", "description": "SHM, sound waves, and resonance for Tamil Nadu Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tn-state-board::12::accountancy",
+    "source": "curated",
+    "topics": [
+      { "name": "Accounts of Non-Profit Organisations", "canonicalName": "npo-accounts-tn-12", "description": "Receipts and payments, income and expenditure statements for Tamil Nadu HSC Accountancy.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Partnership Accounts & Reconstitution", "canonicalName": "partnership-tn-12", "description": "Admission, retirement, dissolution of firm for TN State Board Class 12 Accountancy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Company Accounts — Shares & Debentures", "canonicalName": "company-tn-12", "description": "Issue, allotment, forfeiture of shares and debenture redemption for TN HSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Financial Statement Analysis & Ratios", "canonicalName": "fsanalysis-tn-12", "description": "Common-size statements, trend analysis, and liquidity/profitability ratios for TN Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   },
   {
@@ -85,6 +151,94 @@
       { "name": "Genetics — Mendelian & Molecular", "canonicalName": "genetics-kseeb-12", "description": "Mendel's laws, DNA structure, replication, transcription, and translation for KSEEB.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Evolution & Human Health", "canonicalName": "evolution-health-kseeb-12", "description": "Darwinism, natural selection, immunity, and disease-causing organisms for Karnataka PUC II.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "Biotechnology & Ecology", "canonicalName": "biotech-ecology-kseeb-12", "description": "rDNA technology, transgenic organisms, ecosystem dynamics for KSEEB Class 12 Biology.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kseeb::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Units, Kinematics & Laws of Motion", "canonicalName": "kinematics-kseeb-11", "description": "Physical quantities, motion in 2D, Newton's laws, and circular motion for Karnataka PUC I Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy & Oscillations", "canonicalName": "work-energy-kseeb-11", "description": "Work-energy theorem, potential energy, and simple harmonic motion for KSEEB Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Thermodynamics & Kinetic Theory", "canonicalName": "thermo-kseeb-11", "description": "Laws of thermodynamics, specific heats, and kinetic theory of gases for Karnataka PUC I.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Gravitation & Properties of Bulk Matter", "canonicalName": "gravitation-kseeb-11", "description": "Gravitational force, escape velocity, elasticity, and fluid mechanics for KSEEB Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kseeb::12::accountancy",
+    "source": "curated",
+    "topics": [
+      { "name": "Accounting for Partnership Firms", "canonicalName": "partnership-kseeb-12", "description": "Goodwill valuation, admission, retirement, and dissolution for Karnataka PUC II Accountancy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Company Accounts — Shares & Debentures", "canonicalName": "company-kseeb-12", "description": "Issue, forfeiture and reissue of shares, debenture issue, and redemption for KSEEB.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Financial Statements of Companies", "canonicalName": "fin-statements-kseeb-12", "description": "Preparation of balance sheet and statement of profit and loss for companies for Karnataka Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Computerised Accounting & Cash Flow", "canonicalName": "comp-cashflow-kseeb-12", "description": "Tally ERP basics, database concepts, and cash flow statement for KSEEB Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::12::history",
+    "source": "curated",
+    "topics": [
+      { "name": "Renaissance, Reformation & Rise of Nationalism", "canonicalName": "renaissance-nationalism-msbshse-12", "description": "European Renaissance, Protestant Reformation, and emergence of nation-states for Maharashtra HSC History.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Industrial Revolution & Colonialism", "canonicalName": "industrial-colonialism-msbshse-12", "description": "British industrialisation, colonisation of Asia and Africa for MSBSHSE Board History.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "World Wars & Cold War", "canonicalName": "world-wars-msbshse-12", "description": "Causes and consequences of WWI, WWII, and Cold War politics for Maharashtra HSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Modern India & Maharashtra's Role", "canonicalName": "modern-india-msbshse-12", "description": "Indian independence movement, social reform in Maharashtra, and post-independence India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tn-state-board::12::economics",
+    "source": "curated",
+    "topics": [
+      { "name": "National Income & Macro Aggregates", "canonicalName": "national-income-tn-12", "description": "GDP, GNP, NNP computation methods, and circular flow of income for Tamil Nadu HSC Economics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Money, Banking & Public Finance", "canonicalName": "money-banking-tn-12", "description": "Functions of money, commercial banking, RBI, and fiscal policy for TN State Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Indian Economy — Agriculture & Industry", "canonicalName": "indian-economy-tn-12", "description": "Green revolution, land reforms, industrial policy, and liberalisation for Tamil Nadu HSC.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Microeconomics — Consumer Behaviour & Production", "canonicalName": "micro-tn-12", "description": "Utility theory, indifference curves, production functions, and cost analysis for TN Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kseeb::12::economics",
+    "source": "curated",
+    "topics": [
+      { "name": "Macroeconomics — Income Determination & Investment", "canonicalName": "macro-income-kseeb-12", "description": "Aggregate demand, multiplier effect, and Keynesian income determination for Karnataka PUC II Economics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Money & Banking", "canonicalName": "money-banking-kseeb-12", "description": "Money supply, credit creation, RBI monetary policy, and commercial banks for KSEEB.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Government Budget & Balance of Payments", "canonicalName": "budget-bop-kseeb-12", "description": "Union budget components, fiscal deficit, and trade/current account for Karnataka Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Development Experience of India & Karnataka", "canonicalName": "development-karnataka-12", "description": "Comparative development (India vs China vs Pakistan) and Karnataka economy for KSEEB.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::msbshse::12::political-science",
+    "source": "curated",
+    "topics": [
+      { "name": "Indian Constitution & Democratic Institutions", "canonicalName": "constitution-msbshse-12", "description": "Fundamental rights, directive principles, and federal structure for Maharashtra HSC Political Science.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Electoral Politics & Political Parties", "canonicalName": "electoral-politics-msbshse-12", "description": "Election commission, voting behaviour, and role of political parties in India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "International Relations & Foreign Policy", "canonicalName": "international-relations-msbshse-12", "description": "India's foreign policy, non-alignment, and contemporary international issues for HSC.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Maharashtra State Politics & Local Governance", "canonicalName": "maharashtra-politics-12", "description": "Maharashtra's political history, panchayati raj, and urban local bodies for MSBSHSE.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tn-state-board::12::history",
+    "source": "curated",
+    "topics": [
+      { "name": "Early Tamil History & Sangam Literature", "canonicalName": "early-tamil-history-tn-12", "description": "Sangam Age, Pallavas, Cholas, and Pandyas for Tamil Nadu Board History.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Medieval India & Vijayanagara Empire", "canonicalName": "medieval-india-tn-12", "description": "Delhi Sultanate, Mughal Empire, and Vijayanagara kingdom for TN State Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Colonial India & Freedom Struggle", "canonicalName": "colonial-freedom-tn-12", "description": "British rule, nationalist movement, and key events leading to independence for TN Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "World History — Wars & Decolonisation", "canonicalName": "world-history-tn-12", "description": "World wars, Cold War, and decolonisation of Asia and Africa for Tamil Nadu HSC.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kseeb::12::history",
+    "source": "curated",
+    "topics": [
+      { "name": "Early & Medieval Karnataka History", "canonicalName": "karnataka-history-kseeb-12", "description": "Kadambas, Gangas, Rashtrakutas, Hoysalas, and Vijayanagara for Karnataka PUC II History.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Modern Karnataka — Unification & Statehood", "canonicalName": "karnataka-unification-12", "description": "States reorganisation, Ekikarana movement, and Karnataka statehood for KSEEB Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "National Movement & Post-Independence India", "canonicalName": "national-movement-kseeb-12", "description": "Indian freedom struggle, partition, and post-independence political developments for Karnataka Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "World History — Revolutions & Cold War", "canonicalName": "world-history-kseeb-12", "description": "French Revolution, Russian Revolution, World Wars, and Cold War for KSEEB History.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   }
 ]

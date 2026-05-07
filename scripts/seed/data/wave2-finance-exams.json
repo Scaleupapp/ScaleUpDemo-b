@@ -7,7 +7,7 @@
       { "name": "Equity Valuation — DDM & Multiples", "canonicalName": "equity-valuation-cfa-l2", "description": "Dividend discount models, residual income, and EV/EBITDA multiples at CFA Level 2 depth.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
       { "name": "Fixed Income — Term Structure & Credit", "canonicalName": "fixed-income-cfa-l2", "description": "Spot rates, forward rates, OAS, and credit risk models for CFA L2 Fixed Income.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Derivatives & Alternative Investments", "canonicalName": "derivatives-cfa-l2", "description": "Option pricing (BSM), swaps, and real estate/private equity fundamentals for CFA L2.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
-      { "name": "Financial Reporting Analysis — Advanced", "columnName": "fra-cfa-l2", "canonicalName": "fra-cfa-l2", "description": "Inter-corporate investments, pensions, and multinational operations for CFA L2 FRA.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+      { "name": "Financial Reporting Analysis — Advanced", "canonicalName": "fra-cfa-l2", "description": "Inter-corporate investments, pensions, and multinational operations for CFA L2 FRA.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
     ]
   },
   {
@@ -34,6 +34,17 @@
   },
   {
     "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::frm-part-2",
+    "source": "curated",
+    "topics": [
+      { "name": "Market Risk Measurement & Management", "canonicalName": "market-risk-frm-2", "description": "Parametric VaR, historical simulation, stress testing, and FRTB for FRM Part 2.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Credit Risk — Counterparty & Structural Models", "canonicalName": "credit-risk-frm-2", "description": "Credit exposure, CVA, Merton model, and credit portfolio risk for FRM Part 2.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Operational Risk & Current Issues", "canonicalName": "op-risk-frm-2", "description": "Operational loss modelling, Basel III op-risk charge, and GARP top-of-mind risk issues.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Liquidity & Treasury Risk", "canonicalName": "liquidity-frm-2", "description": "Funding liquidity, LCR/NSFR, and intraday liquidity management for FRM Part 2.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
     "targetKey": "exam_preparation::ibps-clerk",
     "source": "curated",
     "topics": [
@@ -41,6 +52,17 @@
       { "name": "Reasoning Ability", "canonicalName": "reasoning-ibps-clerk", "description": "Puzzles, seating arrangements, inequality, and syllogism for IBPS Clerk prelims and mains.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "English Language", "canonicalName": "english-ibps-clerk", "description": "Reading comprehension, error spotting, and cloze test for IBPS Clerk.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "General/Financial Awareness", "canonicalName": "gfa-ibps-clerk", "description": "Banking awareness, current affairs, and static GK for IBPS Clerk Mains GA section.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::sbi-clerk",
+    "source": "curated",
+    "topics": [
+      { "name": "Quantitative Aptitude", "canonicalName": "quant-sbi-clerk", "description": "Number series, percentage, DI tables and charts for SBI Clerk Prelims and Mains.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Reasoning Ability", "canonicalName": "reasoning-sbi-clerk", "description": "Alphanumeric series, directions, coded inequalities, and blood relations for SBI Clerk.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "English Language", "canonicalName": "english-sbi-clerk", "description": "RC passages, sentence rearrangement, and para jumbles for SBI Clerk.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Awareness & Banking GK", "canonicalName": "ga-sbi-clerk", "description": "SBI history, banking terminology, RBI regulations, and current affairs for SBI Clerk Mains.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   },
   {
@@ -56,6 +78,17 @@
   },
   {
     "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::rbi-assistant",
+    "source": "curated",
+    "topics": [
+      { "name": "Quantitative Aptitude", "canonicalName": "quant-rbi-assistant", "description": "Arithmetic, simplification, and basic DI for RBI Assistant Prelims.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Reasoning Ability", "canonicalName": "reasoning-rbi-assistant", "description": "Puzzle sets, coding-decoding, and syllogism for RBI Assistant.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "English Language", "canonicalName": "english-rbi-assistant", "description": "Reading comprehension and fill-in-the-blanks for RBI Assistant.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "General Awareness & Banking Knowledge", "canonicalName": "ga-rbi-assistant", "description": "RBI functions, banking terms, and current affairs for RBI Assistant Mains.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
     "targetKey": "exam_preparation::sebi-grade-a",
     "source": "curated",
     "topics": [
@@ -63,6 +96,17 @@
       { "name": "Capital Markets & Products", "canonicalName": "capital-markets-sebi", "description": "Equity, debt, derivatives, and mutual funds markets in India for SEBI Grade A.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Commerce & Accountancy", "canonicalName": "commerce-accountancy-sebi", "description": "Financial statements, accounting standards, and corporate finance for SEBI Grade A.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "General Awareness & Costing", "canonicalName": "ga-costing-sebi", "description": "Current securities market events and cost accounting fundamentals for SEBI Grade A.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::lic-aao",
+    "source": "curated",
+    "topics": [
+      { "name": "Reasoning Ability & Computer Aptitude", "canonicalName": "reasoning-lic-aao", "description": "Verbal reasoning, input-output, and computer basics for LIC AAO Prelims.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Quantitative Aptitude", "canonicalName": "quant-lic-aao", "description": "Arithmetic, data interpretation, and speed maths for LIC AAO.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Insurance & Financial Market Awareness", "canonicalName": "insurance-ga-lic-aao", "description": "Life insurance principles, IRDAI regulations, and financial market awareness for LIC AAO Mains.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Professional Knowledge — Finance & Accounts", "canonicalName": "professional-knowledge-lic-aao", "description": "Financial accounting, auditing, and actuarial basics for LIC AAO Mains specialist track.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
     ]
   },
   {
@@ -78,6 +122,39 @@
   },
   {
     "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cma-foundation",
+    "source": "curated",
+    "topics": [
+      { "name": "Fundamentals of Accounting", "canonicalName": "accounting-cma-foundation", "description": "Basic accounting concepts, journal entries, trial balance, and final accounts for CMA Foundation.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Fundamentals of Economics & Management", "canonicalName": "economics-mgmt-cma-foundation", "description": "Microeconomic concepts, business organisation, and management principles for CMA Foundation.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Fundamentals of Laws & Ethics", "canonicalName": "laws-ethics-cma-foundation", "description": "Business law basics, contract act, and professional ethics for CMA Foundation paper.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Fundamentals of Business Mathematics & Statistics", "canonicalName": "math-stats-cma-foundation", "description": "Arithmetic, algebra, statistics, and basic probability for CMA Foundation.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cma-inter",
+    "source": "curated",
+    "topics": [
+      { "name": "Cost Accounting & Financial Management", "canonicalName": "cost-fm-cma-inter", "description": "Standard costing, variance analysis, marginal costing, and capital structure for CMA Inter.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Operations Management & Strategic Management", "canonicalName": "ops-strategy-cma-inter", "description": "Production planning, quality management, and corporate strategy for CMA Inter.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Company Accounts, Audit & Taxation", "canonicalName": "accounts-audit-tax-cma-inter", "description": "Company financial statements, audit procedures, and direct/indirect tax for CMA Inter.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Cost & Management Accounting — Advanced", "canonicalName": "cma-inter-advanced-cost", "description": "Activity-based costing, throughput accounting, and performance measurement for CMA Inter.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cma-final",
+    "source": "curated",
+    "topics": [
+      { "name": "Strategic Cost Management & Decision Making", "canonicalName": "strategic-cost-cma-final", "description": "Transfer pricing, life cycle costing, and strategic cost analysis for CMA Final.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Corporate Financial Reporting", "canonicalName": "corporate-reporting-cma-final", "description": "Consolidated financial statements, Ind AS, and valuation for CMA Final reporting.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Strategic Financial Management", "canonicalName": "sfm-cma-final", "description": "Portfolio management, derivatives, and mergers & acquisitions for CMA Final SFM.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Indirect Tax Laws & Direct Tax Laws", "canonicalName": "tax-laws-cma-final", "description": "GST advanced concepts, customs, and income tax for CMA Final Taxation paper.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
     "targetKey": "exam_preparation::nabard-grade-a",
     "source": "curated",
     "topics": [
@@ -85,6 +162,39 @@
       { "name": "Economic & Social Issues", "canonicalName": "esi-nabard", "description": "Rural economy, poverty metrics, SHG-Bank linkage, and development finance for NABARD.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Quantitative Aptitude & Reasoning", "canonicalName": "quant-nabard", "description": "Data analysis, logical reasoning, and English for NABARD Grade A Phase I.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "Finance & Management", "canonicalName": "finance-nabard", "description": "Financial management, banking regulations, and management principles for NABARD Grade A Phase II.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::acca",
+    "source": "curated",
+    "topics": [
+      { "name": "Financial Accounting & Reporting (FR)", "canonicalName": "financial-reporting-acca", "description": "IFRS standards, group accounts, and financial instruments for ACCA FR/SBR papers.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Taxation — UK & International", "canonicalName": "taxation-acca", "description": "UK income tax, corporation tax, VAT, and international tax principles for ACCA TX/ATX.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Audit & Assurance", "canonicalName": "audit-acca", "description": "Audit risk, evidence gathering, and audit reporting for ACCA AA/AAA papers.", "baseDifficulty": "advanced", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Performance Management & Strategy", "canonicalName": "performance-strategy-acca", "description": "Management accounting, strategic business analysis, and PM techniques for ACCA.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::cfp",
+    "source": "curated",
+    "topics": [
+      { "name": "Financial Planning & Investment Planning", "canonicalName": "investment-planning-cfp", "description": "Asset allocation, portfolio theory, and investment products for CFP certification.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Tax & Retirement Planning", "canonicalName": "tax-retirement-cfp", "description": "Income tax planning strategies, NPS, EPF, and retirement corpus calculation for CFP India.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Insurance & Estate Planning", "canonicalName": "insurance-estate-cfp", "description": "Life, health, and non-life insurance, and basic estate planning for CFP candidates.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Ethics & CFP Practice Standards", "canonicalName": "ethics-cfp", "description": "Fiduciary duty, FPSB Code of Ethics, and practice standards for CFP certification in India.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "exam_preparation",
+    "targetKey": "exam_preparation::nism-series",
+    "source": "curated",
+    "topics": [
+      { "name": "Securities Markets — Fundamentals", "canonicalName": "securities-markets-nism", "description": "Equity, debt, and derivatives market structure in India for NISM Series certification.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Mutual Fund Products & Distribution", "canonicalName": "mf-distribution-nism", "description": "Mutual fund types, NAV, exit loads, and distributor regulations for NISM Series V-A.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Derivatives — Futures & Options", "canonicalName": "derivatives-nism", "description": "F&O mechanics, payoff diagrams, and hedging strategies for NISM Series VIII.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "SEBI Regulations & Investor Protection", "canonicalName": "sebi-regulations-nism", "description": "SEBI investor grievance mechanisms, KYC norms, and AML/CFT compliance for NISM exams.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   }
 ]

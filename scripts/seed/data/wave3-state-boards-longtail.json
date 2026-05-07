@@ -12,6 +12,61 @@
   },
   {
     "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::up-board::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-up-12", "description": "Galvanic cells, rate laws, and Arrhenius equation for UP Board Intermediate Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Organic Chemistry — Carbonyl Compounds", "canonicalName": "organic-carbonyl-up-12", "description": "Aldehydes, ketones, carboxylic acids, and their reactions for UP Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "d & f Block Elements & Coordination Chemistry", "canonicalName": "dblock-coord-up-12", "description": "Transition metals, coordination compounds for UP Board Class 12 Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biomolecules, Polymers & Chemistry in Everyday Life", "canonicalName": "biomol-up-12", "description": "Carbohydrates, proteins, polymers, and drugs for UP Intermediate Chemistry.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::up-board::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Relations, Functions & Inverse Trigonometry", "canonicalName": "relations-fn-up-12", "description": "Types of functions, composition, and inverse trigonometric functions for UP Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Matrices, Determinants & Continuity", "canonicalName": "matrices-det-up-12", "description": "Matrix algebra, cofactors, continuity, and differentiability for UP Intermediate.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Integration & Differential Equations", "canonicalName": "integration-de-up-12", "description": "Definite integrals, area, and first-order differential equations for UP Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Vectors, 3D Geometry & Linear Programming", "canonicalName": "vectors-3d-up-12", "description": "Vector algebra, lines/planes in 3D, and graphical LPP for UP Intermediate.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::up-board::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction in Flowering Plants & Human Reproduction", "canonicalName": "reproduction-up-12", "description": "Pollination, fertilisation, and human reproductive system for UP Board Intermediate Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics & Evolution", "canonicalName": "genetics-evolution-up-12", "description": "Mendelian genetics, molecular basis of inheritance, and Darwinian evolution for UP Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Human Physiology & Health", "canonicalName": "physiology-health-up-12", "description": "Digestion, respiration, neural control, and human diseases for UP Intermediate Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Ecology & Environmental Issues", "canonicalName": "ecology-up-12", "description": "Ecosystem dynamics, biodiversity, and environmental pollution for UP Board Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::up-board::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Physical World, Units & Kinematics", "canonicalName": "kinematics-up-11", "description": "Measurement, motion in straight line and plane for UP Board Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Laws of Motion & Work Energy", "canonicalName": "laws-motion-up-11", "description": "Newton's laws, friction, work-energy theorem, and conservation laws for UP Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Gravitation, Properties of Matter & Thermodynamics", "canonicalName": "gravitation-thermo-up-11", "description": "Gravitational field, elasticity, surface tension, and thermodynamic laws for UP Class 11.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Oscillations & Waves", "canonicalName": "oscillations-waves-up-11", "description": "SHM, progressive waves, stationary waves, and Doppler effect for UP Intermediate.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::up-board::12::accountancy",
+    "source": "curated",
+    "topics": [
+      { "name": "Partnership Accounts", "canonicalName": "partnership-up-12", "description": "Goodwill, admission, retirement, and dissolution of partnership firm for UP Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Company Accounts", "canonicalName": "company-accounts-up-12", "description": "Share capital, debentures, and company financial statements for UP Intermediate.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Financial Statement Analysis", "canonicalName": "fsa-up-12", "description": "Ratio analysis and cash flow statement for UP Board Accountancy.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Computerised Accounting System", "canonicalName": "comp-accounting-up-12", "description": "Basic computer accounting concepts and Tally for UP Board Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
     "targetKey": "academic_excellence::rbse::12::physics",
     "source": "curated",
     "topics": [
@@ -19,6 +74,61 @@
       { "name": "Electromagnetic Induction & Alternating Currents", "canonicalName": "emi-ac-rbse-12", "description": "Faraday's law, Lenz's law, and AC circuits for RBSE Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Wave Optics & Atoms", "canonicalName": "wave-optics-rbse-12", "description": "Interference, diffraction, and Bohr atomic model for RBSE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "Electronic Devices", "canonicalName": "electronic-devices-rbse-12", "description": "p-n junction, transistor characteristics, and logic gates for RBSE Rajasthan.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::rbse::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Solid State & Solutions", "canonicalName": "solid-solutions-rbse-12", "description": "Crystal structure, colligative properties for Rajasthan Board Class 12 Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-rbse-12", "description": "Cell potentials, rate expressions, and Arrhenius theory for RBSE Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Organic Chemistry — Haloalkanes to Biomolecules", "canonicalName": "organic-rbse-12", "description": "Haloalkanes, alcohols, amines, and biomolecules for Rajasthan Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "p, d, f Block Elements & Coordination", "canonicalName": "pblock-coord-rbse-12", "description": "Group 15-18 elements and coordination chemistry for RBSE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::rbse::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Relations, Functions & Inverse Trig", "canonicalName": "relations-rbse-12", "description": "Function types and inverse trig principal values for Rajasthan Board Maths.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Calculus — Differentiation & Integration", "canonicalName": "calculus-rbse-12", "description": "Derivatives, applications, definite integrals for RBSE Class 12 Maths.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Algebra — Matrices, Determinants & Linear Programming", "canonicalName": "algebra-rbse-12", "description": "Matrix operations, determinants, and graphical LPP for Rajasthan Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Vectors, 3D Geometry & Probability", "canonicalName": "vectors-prob-rbse-12", "description": "Vector algebra, lines/planes, and Bayes' theorem for RBSE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::rbse::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction — Plant & Human", "canonicalName": "reproduction-rbse-12", "description": "Flower anatomy, reproductive health, and human reproduction for RBSE Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics, Inheritance & Molecular Biology", "canonicalName": "genetics-rbse-12", "description": "Mendel's laws, DNA replication, and gene expression for Rajasthan Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Evolution & Microbes in Human Welfare", "canonicalName": "evolution-microbes-rbse-12", "description": "Darwinism, microbial applications in industry and medicine for RBSE Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biotechnology & Ecology", "canonicalName": "biotech-ecology-rbse-12", "description": "rDNA technology, transgenic organisms, and ecosystem for RBSE Biology.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::rbse::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Kinematics & Laws of Motion", "canonicalName": "kinematics-rbse-11", "description": "Motion in 1D and 2D, Newton's laws for RBSE Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy & Rotational Motion", "canonicalName": "work-rotation-rbse-11", "description": "Work-energy theorem, torque, and moment of inertia for Rajasthan Board Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Thermodynamics & Oscillations", "canonicalName": "thermo-osc-rbse-11", "description": "Laws of thermodynamics and SHM for RBSE Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Waves & Gravitation", "canonicalName": "waves-grav-rbse-11", "description": "Sound waves, resonance, and gravitational field for Rajasthan Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::rbse::12::accountancy",
+    "source": "curated",
+    "topics": [
+      { "name": "Partnership Firm Accounts", "canonicalName": "partnership-rbse-12", "description": "Goodwill, admission, retirement of partners for Rajasthan Board Accountancy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Company Accounts", "canonicalName": "company-rbse-12", "description": "Share capital, debentures, and company final accounts for RBSE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Financial Statement Analysis & Cash Flow", "canonicalName": "fsa-cashflow-rbse-12", "description": "Ratio analysis and cash flow statement for Rajasthan Board Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Accounting for NPOs & Computer Accounting", "canonicalName": "npo-comp-rbse-12", "description": "Non-profit organisation accounts and computerised accounting for RBSE.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   },
   {
@@ -34,6 +144,61 @@
   },
   {
     "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::gseb::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-gseb-12", "description": "Electrochemical cells, Nernst equation, rate laws, and Arrhenius equation for Gujarat HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "p-Block Elements & Coordination Chemistry", "canonicalName": "pblock-coord-gseb-12", "description": "Group 15-18 elements, Werner's theory, and crystal field theory for GSEB Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Organic Chemistry — Haloalkanes & Alcohols", "canonicalName": "organic-gseb-12", "description": "Substitution reactions, alcohols, phenols, and ethers for Gujarat Board HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biomolecules & Polymers", "canonicalName": "biomol-gseb-12", "description": "Carbohydrates, proteins, enzymes, and synthetic polymers for GSEB Class 12 Chemistry.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::gseb::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Vectors & Three-Dimensional Geometry", "canonicalName": "vectors-3d-gseb-12", "description": "Vector algebra, dot/cross products, and line/plane equations for Gujarat Board HSC Maths.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Calculus — Integration & Differential Equations", "canonicalName": "calculus-gseb-12", "description": "Definite integrals, area, and solving differential equations for GSEB Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Probability & Statistics", "canonicalName": "prob-stats-gseb-12", "description": "Bayes' theorem, distributions, and statistical measures for Gujarat Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Matrices, Determinants & Linear Programming", "canonicalName": "matrices-lpp-gseb-12", "description": "Matrix algebra, cofactors, and graphical LPP for GSEB HSC Mathematics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::gseb::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction in Plants & Animals", "canonicalName": "reproduction-gseb-12", "description": "Pollination, fertilisation, embryo development for Gujarat Board Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics & Molecular Basis of Inheritance", "canonicalName": "genetics-gseb-12", "description": "Mendel's laws, linkage, DNA structure, and gene expression for GSEB Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Evolution & Human Health", "canonicalName": "evolution-health-gseb-12", "description": "Natural selection, immunity, drugs, and human diseases for Gujarat Board Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biotechnology & Ecology", "canonicalName": "biotech-ecology-gseb-12", "description": "Recombinant DNA technology, transgenic organisms, and ecosystem dynamics for GSEB.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::gseb::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Kinematics & Laws of Motion", "canonicalName": "kinematics-gseb-11", "description": "Projectile motion, Newton's laws for Gujarat Board Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy & Thermodynamics", "canonicalName": "work-thermo-gseb-11", "description": "Work-energy theorem and thermodynamic laws for GSEB Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Oscillations, Waves & Gravitation", "canonicalName": "osc-waves-gseb-11", "description": "SHM, sound waves, and gravitational field for Gujarat Board Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Properties of Matter & Kinetic Theory", "canonicalName": "properties-kinetic-gseb-11", "description": "Elasticity, viscosity, and kinetic theory of gases for GSEB Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::gseb::12::accountancy",
+    "source": "curated",
+    "topics": [
+      { "name": "Accounting for Partnership Firms", "canonicalName": "partnership-gseb-12", "description": "Admission, retirement, dissolution of firm for Gujarat Board HSC Accountancy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Company Accounts", "canonicalName": "company-gseb-12", "description": "Share issue, debentures, and company final statements for GSEB Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Analysis of Financial Statements", "canonicalName": "fsa-gseb-12", "description": "Ratio analysis, fund flow, and cash flow statement for Gujarat Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Computerised Accounting", "canonicalName": "comp-accounting-gseb-12", "description": "Database concepts and computer-based accounting for GSEB HSC.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
     "targetKey": "academic_excellence::kerala-hse::12::physics",
     "source": "curated",
     "topics": [
@@ -41,6 +206,50 @@
       { "name": "Atoms, Nuclei & Electronic Devices", "canonicalName": "atoms-nuclei-kerala-12", "description": "Rutherford and Bohr models, fission, fusion, and semiconductor devices for Kerala Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Electromagnetic Induction & AC", "canonicalName": "emi-kerala-12", "description": "Faraday's and Lenz's laws, AC generators, and transformer for Kerala HSE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "Optics", "canonicalName": "optics-kerala-12", "description": "Refraction, total internal reflection, interference, and diffraction for Kerala Board Physics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kerala-hse::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Coordination Compounds & d-Block Elements", "canonicalName": "coord-dblock-kerala-12", "description": "IUPAC naming, bonding theories, and transition metal chemistry for Kerala HSE Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Organic Chemistry — Amines & Biomolecules", "canonicalName": "amines-biomol-kerala-12", "description": "Amine reactions, diazonium salts, carbohydrates, and nucleic acids for Kerala Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-kerala-12", "description": "Nernst equation, rate laws, and activation energy for Kerala HSE Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Haloalkanes, Alcohols & Ethers", "canonicalName": "halo-alcohol-kerala-12", "description": "Nucleophilic substitution, elimination, and alcohol reactions for Kerala Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kerala-hse::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Relations, Functions & Inverse Trigonometry", "canonicalName": "relations-fn-kerala-12", "description": "Types of relations, function composition, and principal values for Kerala HSE Maths.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Calculus — Integration & Differential Equations", "canonicalName": "calculus-kerala-12", "description": "Definite integrals, applications, and ODEs for Kerala Board Class 12 Mathematics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Vectors, 3D Geometry & Linear Programming", "canonicalName": "vectors-lpp-kerala-12", "description": "Vector algebra, lines/planes, and LPP for Kerala HSE Mathematics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Matrices, Determinants & Probability", "canonicalName": "matrices-prob-kerala-12", "description": "Matrix algebra, determinants, and conditional probability for Kerala Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kerala-hse::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction in Organisms", "canonicalName": "reproduction-kerala-12", "description": "Sexual and asexual reproduction in plants and animals for Kerala HSE Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics & Evolution", "canonicalName": "genetics-evolution-kerala-12", "description": "Mendelian genetics, molecular biology, and evolutionary theory for Kerala Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Biology & Human Welfare", "canonicalName": "biology-welfare-kerala-12", "description": "Microbes in medicine, agriculture applications, and human health for Kerala HSE.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Biotechnology & Ecology", "canonicalName": "biotech-ecology-kerala-12", "description": "rDNA, transgenic organisms, ecosystem, and biodiversity for Kerala Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::kerala-hse::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Kinematics & Laws of Motion", "canonicalName": "kinematics-kerala-11", "description": "Motion equations, Newton's laws for Kerala HSE Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy & Thermodynamics", "canonicalName": "work-thermo-kerala-11", "description": "Work-energy theorem and thermodynamic laws for Kerala Board Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Gravitation & Properties of Matter", "canonicalName": "grav-matter-kerala-11", "description": "Gravitational field, escape velocity, and elasticity for Kerala Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Oscillations, Waves & Kinetic Theory", "canonicalName": "osc-kinetic-kerala-11", "description": "SHM, wave motion, and kinetic theory for Kerala HSE Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   },
   {
@@ -56,6 +265,50 @@
   },
   {
     "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::bieap::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-bieap-12", "description": "Cell EMF, rate laws for AP Board Intermediate Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Coordination Compounds & Biomolecules", "canonicalName": "coord-biomol-bieap-12", "description": "IUPAC naming, CFT, and biomolecules for BIEAP Class 12 Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Organic Chemistry — Carbonyl & Nitrogen Compounds", "canonicalName": "organic-nitrogen-bieap-12", "description": "Aldehydes, ketones, amines, and their reactions for AP Intermediate.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "p, d-Block Elements", "canonicalName": "pblock-bieap-12", "description": "Group 15-18 elements and transition metal properties for BIEAP.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::bieap::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Algebra — Complex Numbers & Matrices", "canonicalName": "algebra-matrices-bieap-12", "description": "Complex number operations and matrix algebra for AP Board Class 12 Maths.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Calculus — Differentiation & Integration", "canonicalName": "calculus-bieap-12", "description": "Derivatives, applications, and integration for BIEAP Intermediate Mathematics.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Coordinate Geometry — Conics", "canonicalName": "conics-bieap-12", "description": "Parabola, ellipse, hyperbola equations and properties for AP Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Probability & Statistics", "canonicalName": "prob-stats-bieap-12", "description": "Conditional probability, distributions, and statistical measures for BIEAP.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::bieap::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction in Flowering Plants", "canonicalName": "reproduction-plants-bieap-12", "description": "Pollination types, fertilisation, endosperm for AP Board Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics & Molecular Biology", "canonicalName": "genetics-mol-bieap-12", "description": "Mendelian and molecular genetics for BIEAP Class 12 Biology.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Human Physiology", "canonicalName": "physiology-bieap-12", "description": "Digestion, respiration, and excretion systems for AP Intermediate Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Ecology & Biotechnology", "canonicalName": "ecology-biotech-bieap-12", "description": "Ecosystems, biodiversity, and rDNA technology for BIEAP Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::bieap::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Kinematics & Laws of Motion", "canonicalName": "kinematics-bieap-11", "description": "Equations of motion and Newton's laws for AP Board Intermediate Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy & Gravitation", "canonicalName": "work-grav-bieap-11", "description": "Work-energy theorem and gravitational field for BIEAP Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Thermal & Mechanical Properties", "canonicalName": "thermal-mech-bieap-11", "description": "Thermodynamics, elasticity, and surface tension for AP Intermediate.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Oscillations & Waves", "canonicalName": "osc-waves-bieap-11", "description": "SHM and sound waves for AP Board Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
     "targetKey": "academic_excellence::tsbie::12::physics",
     "source": "curated",
     "topics": [
@@ -63,6 +316,50 @@
       { "name": "Magnetic Effects & Electromagnetic Induction", "canonicalName": "magnetism-emi-tsbie-12", "description": "Magnetic field due to current, Faraday's law, and self-inductance for TSBIE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
       { "name": "Optics & Modern Physics", "canonicalName": "optics-modern-tsbie-12", "description": "Refraction, lenses, photoelectric effect, and nuclear physics for Telangana Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
       { "name": "Semiconductor Electronics", "canonicalName": "semiconductor-tsbie-12", "description": "p-n junction, rectifiers, transistors, and logic gates for TSBIE Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tsbie::12::chemistry",
+    "source": "curated",
+    "topics": [
+      { "name": "Electrochemistry, Kinetics & Surface Chemistry", "canonicalName": "electrochemistry-tsbie-12", "description": "Cell potentials, rate expressions, and catalysis for TSBIE Class 12 Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "p & d Block Elements & Coordination", "canonicalName": "pblock-coord-tsbie-12", "description": "Inorganic chemistry of p and d block elements for Telangana Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Organic Chemistry — Aldehydes to Polymers", "canonicalName": "organic-tsbie-12", "description": "Carbonyl chemistry, amines, biomolecules, and polymers for TSBIE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Haloalkanes & Alcohols", "canonicalName": "halo-alcohol-tsbie-12", "description": "Halogen-containing compounds and oxygen compounds for Telangana Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tsbie::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Algebra — Complex Numbers & Matrices", "canonicalName": "algebra-tsbie-12", "description": "Complex number arithmetic and matrix operations for TSBIE Class 12 Maths.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Calculus — Differentiation & Integration", "canonicalName": "calculus-tsbie-12", "description": "Derivatives, integrals, and differential equations for Telangana Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Coordinate Geometry — 2D & 3D", "canonicalName": "coord-geom-tsbie-12", "description": "Straight lines, conics, and 3D plane equations for TSBIE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Probability & Statistics", "canonicalName": "prob-stats-tsbie-12", "description": "Conditional probability, binomial distribution, and statistical measures for TSBIE.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tsbie::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction & Reproductive Health", "canonicalName": "reproduction-tsbie-12", "description": "Flowering plant reproduction and human reproductive system for TSBIE Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics, Heredity & Variation", "canonicalName": "genetics-tsbie-12", "description": "Mendelian genetics, sex determination, and chromosomal disorders for Telangana Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Evolution & Diversity", "canonicalName": "evolution-tsbie-12", "description": "Origin of life, biological evolution, and biodiversity for TSBIE Class 12.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Ecology, Biotechnology & Human Welfare", "canonicalName": "ecology-biotech-tsbie-12", "description": "Ecosystems, rDNA technology, and microbes in medicine for Telangana Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::tsbie::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Kinematics & Newton's Laws", "canonicalName": "kinematics-tsbie-11", "description": "Motion equations and Newton's laws for TSBIE Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy, Gravitation & Rotational Motion", "canonicalName": "work-grav-tsbie-11", "description": "Work-energy theorem, gravitational field, and moment of inertia for Telangana Board Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Thermodynamics & Mechanical Properties", "canonicalName": "thermo-mech-tsbie-11", "description": "Laws of thermodynamics and elasticity for TSBIE Class 11.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Oscillations, Waves & Kinetic Theory", "canonicalName": "osc-waves-tsbie-11", "description": "SHM, wave propagation, and gas theory for TSBIE Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   },
   {
@@ -78,13 +375,57 @@
   },
   {
     "objectiveType": "academic_excellence",
-    "targetKey": "academic_excellence::gseb::12::chemistry",
+    "targetKey": "academic_excellence::wbchse::12::chemistry",
     "source": "curated",
     "topics": [
-      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-gseb-12", "description": "Electrochemical cells, Nernst equation, rate laws, and Arrhenius equation for Gujarat HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
-      { "name": "p-Block Elements & Coordination Chemistry", "canonicalName": "pblock-coord-gseb-12", "description": "Group 15-18 elements, Werner's theory, and crystal field theory for GSEB Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
-      { "name": "Organic Chemistry — Haloalkanes & Alcohols", "canonicalName": "organic-gseb-12", "description": "Substitution reactions, alcohols, phenols, and ethers for Gujarat Board HSC Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
-      { "name": "Biomolecules & Polymers", "canonicalName": "biomol-gseb-12", "description": "Carbohydrates, proteins, enzymes, and synthetic polymers for GSEB Class 12 Chemistry.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+      { "name": "Electrochemistry & Chemical Kinetics", "canonicalName": "electrochemistry-wbchse-12", "description": "Cell potentials, rate laws, and activation energy for WB Higher Secondary Chemistry.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "p & d Block Elements & Coordination Chemistry", "canonicalName": "pblock-coord-wbchse-12", "description": "Inorganic elements and coordination compounds for WBCHSE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Organic Chemistry — Haloalkanes to Polymers", "canonicalName": "organic-wbchse-12", "description": "Organic reactions from haloalkanes through polymers for West Bengal Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Thermodynamics, Solutions & Solid State", "canonicalName": "thermo-solutions-wbchse-12", "description": "Chemical thermodynamics, colligative properties, and solid state for WBCHSE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::wbchse::12::mathematics",
+    "source": "curated",
+    "topics": [
+      { "name": "Algebra — Relations, Functions & Matrices", "canonicalName": "algebra-wbchse-12", "description": "Function types, inverse, and matrix algebra for WBCHSE Higher Secondary Maths.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Calculus — Differentiation, Integration & DE", "canonicalName": "calculus-wbchse-12", "description": "Derivatives, integrals, and differential equations for West Bengal Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Coordinate Geometry, Vectors & 3D", "canonicalName": "coord-vectors-wbchse-12", "description": "Conics, vector algebra, and 3D geometry for WBCHSE Class 12.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Linear Programming & Probability", "canonicalName": "lpp-prob-wbchse-12", "description": "Graphical LPP, Bayes' theorem, and probability distributions for WB Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::wbchse::12::biology",
+    "source": "curated",
+    "topics": [
+      { "name": "Reproduction in Organisms", "canonicalName": "reproduction-wbchse-12", "description": "Plant and human reproduction for WBCHSE Higher Secondary Biology.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Genetics & Molecular Biology", "canonicalName": "genetics-mol-wbchse-12", "description": "Mendelian genetics, DNA, and gene expression for West Bengal Board Biology.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Evolution, Microbes & Biotechnology", "canonicalName": "evolution-biotech-wbchse-12", "description": "Biological evolution, microbial applications, and rDNA technology for WBCHSE.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Ecology & Environmental Biology", "canonicalName": "ecology-wbchse-12", "description": "Ecosystem dynamics, biodiversity conservation, and pollution for WB Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::wbchse::11::physics",
+    "source": "curated",
+    "topics": [
+      { "name": "Kinematics & Laws of Motion", "canonicalName": "kinematics-wbchse-11", "description": "Motion in 1D/2D and Newton's laws for WBCHSE Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Work, Energy & Rotational Dynamics", "canonicalName": "work-rotation-wbchse-11", "description": "Work-energy theorem and rotational motion for West Bengal Board Class 11.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Gravitation, Thermodynamics & Kinetic Theory", "canonicalName": "grav-thermo-wbchse-11", "description": "Gravitational field, thermodynamic laws, and ideal gas for WBCHSE Class 11.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Oscillations, Waves & Properties of Matter", "canonicalName": "osc-waves-wbchse-11", "description": "SHM, sound, and mechanical properties for WB Board Class 11 Physics.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
+    ]
+  },
+  {
+    "objectiveType": "academic_excellence",
+    "targetKey": "academic_excellence::wbchse::12::accountancy",
+    "source": "curated",
+    "topics": [
+      { "name": "Partnership Firm Accounts", "canonicalName": "partnership-wbchse-12", "description": "Admission, retirement, and dissolution of partnership firm for WBCHSE Accountancy.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 1 },
+      { "name": "Company Accounts — Shares & Debentures", "canonicalName": "company-wbchse-12", "description": "Issue and redemption of shares and debentures for West Bengal Board.", "baseDifficulty": "intermediate", "isFutureProofing": false, "sortOrder": 2 },
+      { "name": "Financial Statement Analysis", "canonicalName": "fsa-wbchse-12", "description": "Ratio analysis and cash flow statement for WBCHSE Class 12 Accountancy.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 3 },
+      { "name": "Not-for-Profit Organisations & Computerised Accounting", "canonicalName": "npo-comp-wbchse-12", "description": "NPO accounts and basic computerised accounting for WB Board.", "baseDifficulty": "foundational", "isFutureProofing": false, "sortOrder": 4 }
     ]
   }
 ]
