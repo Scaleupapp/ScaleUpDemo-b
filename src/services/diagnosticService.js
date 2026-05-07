@@ -21,6 +21,7 @@ const diagnosticPoolService = require('./diagnosticPoolService');
 const DiagnosticQuestionBank = require('../models/DiagnosticQuestionBank');
 const selector = require('./diagnosticSelectorService');
 const { normalize } = require('./competencyNormalizer');
+const calibration = require('../utils/calibration');
 
 const RATING_TO_NUM = { novice: 0, familiar: 1, proficient: 2, expert: 3, unsure: 0 };
 
@@ -729,18 +730,25 @@ async function finishAttemptV2(attemptId) {
     }
   } catch (_) { /* fall back to canonical */ }
 
-  // Persist results into the schema's results Map (keyed by canonical for v2).
+  // Spec §10.2 — use calibration utility for delta/class consistency
   for (const [canonical, stats] of byCanonical.entries()) {
     const score = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
-    const band = score < 30 ? 'novice'
-      : score < 55 ? 'familiar'
-      : score < 80 ? 'proficient'
-      : 'expert';
-    const ratingMidpoint = { novice: 15, familiar: 42, proficient: 67, expert: 90 }[ratingsMap.get(canonical)] ?? 50;
+    const band = calibration.scoreToBand(score).toLowerCase();
+    // selfRatings stored lowercase per Plan 2a — calibration utility is case-insensitive
+    const selfRating = ratingsMap.get(canonical);
+    let calibrationDelta = 0;
+    let calibrationClass = 'well-calibrated';
+    try {
+      calibrationDelta = calibration.calibrationDelta(score, selfRating);
+      calibrationClass = calibration.calibrationClass(calibrationDelta);
+    } catch (_) {
+      // unknown self-rating (legacy attempt) — leave defaults
+    }
     attempt.results.set(canonical, {
       assessedBand: band,
       score,
-      calibrationDelta: score - ratingMidpoint,
+      calibrationDelta,
+      calibrationClass,
       questionsAsked: stats.total,
     });
   }
@@ -756,6 +764,54 @@ async function finishAttemptV2(attemptId) {
     v2: true,
   });
 
+  // Spec §10.5 — foreground insights generation (blocks results return)
+  // Lazy require so tests can stub without OPENAI_API_KEY at module load time.
+  const insightsGenerationService = require('./diagnostic/insightsGenerationService');
+  attempt.insightsStatus = 'generating';
+  await attempt.save();
+
+  const insightsInput = {
+    objectiveType:      attempt.objectiveSnapshot?.objectiveType || 'upskilling',
+    specificsCanonical: attempt.objectiveSnapshot?.specificsCanonical || null,
+    timelineWeeks:      attempt.objectiveSnapshot?.timelineWeeks || 12,
+    weeklyCommitHours:  attempt.objectiveSnapshot?.weeklyCommitHours || 6,
+    companyProfile:     attempt.objectiveSnapshot?.companyProfile || null,
+    topics: Array.from(attempt.results.entries()).map(([canonicalName, r]) => ({
+      canonicalName,
+      name:               displayByCanonical.get(canonicalName) || canonicalName,
+      selfRating:         ratingsMap.get(canonicalName),
+      measuredScore:      r.score,
+      questionsAsked:     r.questionsAsked,
+      missedDifficulties: _missedDifficultiesFor(attempt.answers, canonicalName),
+    })),
+  };
+
+  const t0 = Date.now();
+  let insightsResult;
+  try {
+    insightsResult = await insightsGenerationService.generateInsights(insightsInput);
+  } catch (err) {
+    console.warn('[diagnosticService] insights generation hard failure:', err.message);
+    insightsResult = {
+      source: 'template',
+      fallbackReason: 'error',
+      insights: insightsGenerationService._templateInsights(insightsInput),
+    };
+  }
+
+  attempt.insightsJson      = insightsResult.insights;
+  attempt.insightsSource    = insightsResult.source;
+  attempt.insightsStatus    = insightsResult.source === 'llm' ? 'completed' : 'fallback';
+  attempt.insightsLatencyMs = Date.now() - t0;
+  await attempt.save();
+
+  telemetry.logEvent('diagnostic.insights_generated', {
+    userId: String(attempt.userId),
+    source: insightsResult.source,
+    fallbackReason: insightsResult.fallbackReason || null,
+    latencyMs: attempt.insightsLatencyMs,
+  });
+
   return _resultsObjectFromAttemptV2(attempt, displayByCanonical);
 }
 
@@ -768,14 +824,28 @@ function _resultsObjectFromAttemptV2(attempt, displayByCanonical = new Map()) {
       band: v.assessedBand,
       score: v.score,
       calibrationDelta: v.calibrationDelta,
+      calibrationClass: v.calibrationClass || 'well-calibrated',
       questionsAsked: v.questionsAsked,
     });
   }
   return {
     attemptId: String(attempt._id),
     status: attempt.status,
+    insightsStatus: attempt.insightsStatus || 'pending',
+    insights: attempt.insightsJson || null,
+    planStatus: attempt.appliedToProfileAt ? 'queued' : 'pending',
     results,
   };
+}
+
+function _missedDifficultiesFor(answers, comp) {
+  const missed = new Set();
+  for (const a of answers) {
+    if (a.competency === comp && a.isCorrect === false && a.difficulty) {
+      missed.add(a.difficulty);
+    }
+  }
+  return Array.from(missed);
 }
 
 // ---------------------------------------------------------------------------
@@ -818,5 +888,6 @@ module.exports = {
     submitAnswerV2,
     finishAttemptV2,
     _v2PoolCache,
+    _missedDifficultiesFor,
   },
 };

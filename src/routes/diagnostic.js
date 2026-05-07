@@ -18,6 +18,7 @@ router.post('/:attemptId/self-rating', ctrl.submitSelfRating);
 router.get('/:attemptId/next-question', ctrl.nextQuestion);
 router.post('/:attemptId/answer', ctrl.submitAnswer);
 router.post('/:attemptId/finish', ctrl.finish);
+router.get('/:attemptId/results', ctrl.getResults);
 router.post('/:attemptId/abandon', ctrl.abandon);
 
 // Voice answer upload (Phase 3a Task 7)

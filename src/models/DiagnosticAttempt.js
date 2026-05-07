@@ -24,6 +24,7 @@ const competencyResultSchema = new mongoose.Schema({
   assessedBand:     { type: String, enum: ['novice', 'familiar', 'proficient', 'expert'] },
   score:            { type: Number, min: 0, max: 100 },
   calibrationDelta: { type: Number },           // -3..+3
+  calibrationClass: { type: String, enum: ['well-calibrated', 'overestimates', 'undersells'], default: 'well-calibrated' },
   questionsAsked:   { type: Number, default: 0 },
 }, { _id: false });
 
@@ -82,11 +83,22 @@ const diagnosticAttemptSchema = new mongoose.Schema({
   // re-running the profile update.
   appliedToProfileAt: { type: Date, default: null },
 
-  // --- Insights & plan handoff (spec §4.4) ---
+  // --- Insights & plan handoff (spec §4.4 / §10.5) ---
+  insightsStatus: {
+    type: String,
+    enum: ['pending', 'generating', 'completed', 'fallback', 'error'],
+    default: 'pending',
+  },
+  insightsSource: {
+    type: String,
+    enum: ['llm', 'template'],
+    default: undefined,
+  },
   insightsJson: {
     type: mongoose.Schema.Types.Mixed,
     default: null,
   },
+  insightsLatencyMs: { type: Number, default: null },
   planGenerationStatus: {
     type: String,
     enum: ['pending', 'generating', 'ready', 'failed'],

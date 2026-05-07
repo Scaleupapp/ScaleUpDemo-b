@@ -136,3 +136,133 @@ test('diagnostic happy-path: start → self-rate → answer all → finish', asy
   // Two correct at easy → familiar (not novice)
   assert.strictEqual(sql.band, 'familiar');
 });
+
+// ---------------------------------------------------------------------------
+// GET /:attemptId/results — controller unit-level tests (no full flow needed)
+// ---------------------------------------------------------------------------
+
+test('GET /:attemptId/results: returns correct shape with insightsStatus + calibrationClass', async () => {
+  const userId = new mongoose.Types.ObjectId();
+  const attemptId = new mongoose.Types.ObjectId();
+
+  const fakeAttempt = {
+    _id: attemptId,
+    userId,
+    status: 'completed',
+    insightsStatus: 'fallback',
+    insightsJson: { hero: 'Strong in SQL', patterns: ['pattern-a'], breakdown: [] },
+    appliedToProfileAt: null,
+    objectiveSnapshot: null,
+    results: new Map([
+      ['sql', { assessedBand: 'familiar', score: 60, calibrationDelta: -10, calibrationClass: 'undersells', questionsAsked: 2 }],
+    ]),
+  };
+
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  require.cache[dapath] = {
+    exports: function FakeDA() {},
+    loaded: true, id: dapath,
+  };
+  require.cache[dapath].exports.findById = async () => fakeAttempt;
+
+  // TopicTaxonomy — return null so display falls back to canonical
+  const taxPath = require.resolve('../models/TopicTaxonomy');
+  require.cache[taxPath] = {
+    exports: { findOne: () => ({ lean: async () => null }) },
+    loaded: true, id: taxPath,
+  };
+
+  // topicTaxonomyService — buildTargetKey not invoked when objectiveSnapshot is null
+  const taxSvcPath = require.resolve('../services/diagnostic/topicTaxonomyService');
+  require.cache[taxSvcPath] = {
+    exports: { canonicalize: s => s.toLowerCase(), buildTargetKey: () => null },
+    loaded: true, id: taxSvcPath,
+  };
+
+  // Re-load controller so it picks up the stubs above
+  delete require.cache[require.resolve('../controllers/diagnosticController')];
+  const ctrl = require('../controllers/diagnosticController');
+
+  const req = { params: { attemptId: String(attemptId) }, user: { id: String(userId) } };
+  let captured;
+  let statusCode;
+  const res = {
+    status: function (c) { statusCode = c; return this; },
+    json: function (b) { captured = b; return this; },
+  };
+  await ctrl.getResults(req, res);
+
+  assert.strictEqual(statusCode, 200);
+  assert.strictEqual(captured.attemptId, String(attemptId));
+  assert.strictEqual(captured.status, 'completed');
+  assert.ok(['completed', 'fallback', 'generating', 'pending'].includes(captured.insightsStatus));
+  assert.ok(captured.insights, 'insights JSON present');
+  assert.ok(typeof captured.insights.hero === 'string');
+  assert.ok(Array.isArray(captured.insights.patterns));
+  assert.strictEqual(captured.planStatus, 'pending');
+  assert.ok(Array.isArray(captured.results));
+  for (const r of captured.results) {
+    assert.ok(['well-calibrated', 'overestimates', 'undersells'].includes(r.calibrationClass));
+    assert.ok(typeof r.canonicalCompetency === 'string');
+  }
+});
+
+test('GET /:attemptId/results: 404 for missing attempt', async () => {
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  require.cache[dapath] = {
+    exports: function FakeDA() {},
+    loaded: true, id: dapath,
+  };
+  require.cache[dapath].exports.findById = async () => null;
+
+  delete require.cache[require.resolve('../controllers/diagnosticController')];
+  const ctrl = require('../controllers/diagnosticController');
+
+  const req = { params: { attemptId: String(new mongoose.Types.ObjectId()) }, user: { id: String(new mongoose.Types.ObjectId()) } };
+  let captured;
+  let statusCode;
+  const res = {
+    status: function (c) { statusCode = c; return this; },
+    json: function (b) { captured = b; return this; },
+  };
+  await ctrl.getResults(req, res);
+  assert.strictEqual(statusCode, 404);
+  assert.strictEqual(captured.error, 'attempt_not_found');
+});
+
+test('GET /:attemptId/results: 403 for wrong user', async () => {
+  const userId = new mongoose.Types.ObjectId();
+  const attemptId = new mongoose.Types.ObjectId();
+
+  const fakeAttempt = {
+    _id: attemptId,
+    userId,
+    status: 'completed',
+    insightsStatus: 'completed',
+    insightsJson: null,
+    appliedToProfileAt: null,
+    objectiveSnapshot: null,
+    results: new Map(),
+  };
+
+  const dapath = require.resolve('../models/DiagnosticAttempt');
+  require.cache[dapath] = {
+    exports: function FakeDA() {},
+    loaded: true, id: dapath,
+  };
+  require.cache[dapath].exports.findById = async () => fakeAttempt;
+
+  delete require.cache[require.resolve('../controllers/diagnosticController')];
+  const ctrl = require('../controllers/diagnosticController');
+
+  const req = { params: { attemptId: String(attemptId) }, user: { id: String(new mongoose.Types.ObjectId()) } };
+  let captured;
+  let statusCode;
+  const res = {
+    status: function (c) { statusCode = c; return this; },
+    json: function (b) { captured = b; return this; },
+  };
+  await ctrl.getResults(req, res);
+  assert.strictEqual(statusCode, 403);
+  assert.strictEqual(captured.error, 'forbidden');
+});

@@ -841,17 +841,19 @@ test('V2: startAttempt → nextQuestion → submitAnswer → finishAttempt with 
     _internal: { calculatePoolAllocation: () => [] },
   };
 
-  const dapath2 = require.resolve('../models/DiagnosticAttempt');
-  const objpath2 = require.resolve('../models/UserObjective');
-  const kppath2 = require.resolve('../models/KnowledgeProfile');
-  const bankpath2 = require.resolve('../models/DiagnosticQuestionBank');
-  const taxpath2 = require.resolve('../models/TopicTaxonomy');
-  const poolpath2 = require.resolve('./diagnosticPoolService');
-  const svcpath2 = require.resolve('./diagnosticService');
+  const dapath2    = require.resolve('../models/DiagnosticAttempt');
+  const objpath2   = require.resolve('../models/UserObjective');
+  const kppath2    = require.resolve('../models/KnowledgeProfile');
+  const bankpath2  = require.resolve('../models/DiagnosticQuestionBank');
+  const taxpath2   = require.resolve('../models/TopicTaxonomy');
+  const poolpath2  = require.resolve('./diagnosticPoolService');
+  const igspath2   = require.resolve('./diagnostic/insightsGenerationService');
+  const svcpath2   = require.resolve('./diagnosticService');
   const orig2 = {
-    da: require.cache[dapath2], obj: require.cache[objpath2], kp: require.cache[kppath2],
-    bank: require.cache[bankpath2], tax: require.cache[taxpath2], pool: require.cache[poolpath2],
-    svc: require.cache[svcpath2], flag: process.env.FEATURE_DAY1_DIAGNOSTIC_V2,
+    da:   require.cache[dapath2],   obj:  require.cache[objpath2],  kp:  require.cache[kppath2],
+    bank: require.cache[bankpath2], tax:  require.cache[taxpath2],  pool: require.cache[poolpath2],
+    igs:  require.cache[igspath2],  svc:  require.cache[svcpath2],
+    flag: process.env.FEATURE_DAY1_DIAGNOSTIC_V2,
   };
   process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = 'true';
   require.cache[dapath2]   = { exports: FakeDA, loaded: true, id: dapath2 };
@@ -860,6 +862,14 @@ test('V2: startAttempt → nextQuestion → submitAnswer → finishAttempt with 
   require.cache[bankpath2] = { exports: FakeBank, loaded: true, id: bankpath2 };
   require.cache[taxpath2]  = { exports: FakeTax, loaded: true, id: taxpath2 };
   require.cache[poolpath2] = { exports: FakePool, loaded: true, id: poolpath2 };
+  // Stub insightsGenerationService so finishAttemptV2 doesn't call OpenAI
+  require.cache[igspath2]  = {
+    exports: {
+      generateInsights: async () => ({ source: 'template', insights: { hero: 'test', calibration: 'ok', patterns: ['p'], topicTakeaways: {}, planHeadline: 'plan' } }),
+      _templateInsights: () => ({ hero: 'test', calibration: 'ok', patterns: ['p'], topicTakeaways: {}, planHeadline: 'plan' }),
+    },
+    loaded: true, id: igspath2,
+  };
   delete require.cache[svcpath2];
 
   try {
@@ -894,6 +904,10 @@ test('V2: startAttempt → nextQuestion → submitAnswer → finishAttempt with 
     assert.strictEqual(final.results[0].score, 100, '1/1 correct → score 100');
     assert.strictEqual(final.results[0].band, 'expert');
     assert.strictEqual(savedAttempt.planGenerationStatus, 'pending');
+    // New Task 3 assertions
+    assert.ok(final.insightsStatus, 'insightsStatus should be present on result object');
+    assert.ok(final.insights, 'insights should be non-null on result object');
+    assert.strictEqual(final.results[0].calibrationClass, 'undersells', 'score 100 vs familiar midpoint 42 → undersells');
   } finally {
     if (orig2.da)   require.cache[dapath2]   = orig2.da;   else delete require.cache[dapath2];
     if (orig2.obj)  require.cache[objpath2]  = orig2.obj;  else delete require.cache[objpath2];
@@ -901,6 +915,7 @@ test('V2: startAttempt → nextQuestion → submitAnswer → finishAttempt with 
     if (orig2.bank) require.cache[bankpath2] = orig2.bank; else delete require.cache[bankpath2];
     if (orig2.tax)  require.cache[taxpath2]  = orig2.tax;  else delete require.cache[taxpath2];
     if (orig2.pool) require.cache[poolpath2] = orig2.pool; else delete require.cache[poolpath2];
+    if (orig2.igs)  require.cache[igspath2]  = orig2.igs;  else delete require.cache[igspath2];
     if (orig2.svc)  require.cache[svcpath2]  = orig2.svc;  else delete require.cache[svcpath2];
     if (orig2.flag === undefined) delete process.env.FEATURE_DAY1_DIAGNOSTIC_V2;
     else process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = orig2.flag;
@@ -961,5 +976,120 @@ test('V2: feature flag off → V1 path preserved', async () => {
   } finally {
     if (origFlag === undefined) delete process.env.FEATURE_DAY1_DIAGNOSTIC_V2;
     else process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = origFlag;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Task 3 — _missedDifficultiesFor smoke tests (pure function, no DB needed)
+// ---------------------------------------------------------------------------
+test('_missedDifficultiesFor: empty answers → []', () => {
+  const { _internal } = require('./diagnosticService');
+  const result = _internal._missedDifficultiesFor([], 'foo');
+  assert.deepStrictEqual(result, []);
+});
+
+test('_missedDifficultiesFor: returns unique missed difficulties for the given competency', () => {
+  const { _internal } = require('./diagnosticService');
+  const answers = [
+    { competency: 'a', isCorrect: false, difficulty: 'hard' },
+    { competency: 'a', isCorrect: false, difficulty: 'medium' },
+    { competency: 'a', isCorrect: false, difficulty: 'hard' },   // duplicate — deduped
+    { competency: 'a', isCorrect: true,  difficulty: 'easy' },   // correct — excluded
+    { competency: 'b', isCorrect: false, difficulty: 'easy' },   // different competency — excluded
+  ];
+  const result = _internal._missedDifficultiesFor(answers, 'a');
+  assert.deepStrictEqual(result.slice().sort(), ['hard', 'medium']);
+});
+
+// ---------------------------------------------------------------------------
+// Task 3 — finishAttemptV2 populates insights fields (template fallback)
+// ---------------------------------------------------------------------------
+test('V2: finishAttemptV2 populates insightsJson/Source/Status/Latency on template fallback', async () => {
+  const mongoose2 = require('mongoose');
+  const attemptId3b = new mongoose2.Types.ObjectId();
+  let savedAttempt3b = null;
+
+  const fakeAttempt3b = {
+    _id: attemptId3b,
+    status: 'in_progress',
+    userId: new mongoose2.Types.ObjectId(),
+    selfRatings: new Map([['sql', 'familiar']]),
+    answers: [
+      { competency: 'sql', difficulty: 'medium', isCorrect: true,  timeTaken: 10 },
+      { competency: 'sql', difficulty: 'medium', isCorrect: false, timeTaken: 8 },
+    ],
+    results: new Map(),
+    objectiveSnapshot: null,
+    appliedToProfileAt: null,
+    insightsStatus: 'pending',
+    insightsSource: undefined,
+    insightsJson: null,
+    insightsLatencyMs: null,
+    planGenerationStatus: 'pending',
+    save: async function () { savedAttempt3b = this; return this; },
+  };
+
+  const dapath3b   = require.resolve('../models/DiagnosticAttempt');
+  const taxpath3b  = require.resolve('../models/TopicTaxonomy');
+  const objpath3b  = require.resolve('../models/UserObjective');
+  const igspath3b  = require.resolve('./diagnostic/insightsGenerationService');
+  const calpath3b  = require.resolve('../utils/calibration');
+  const svcpath3b  = require.resolve('./diagnosticService');
+
+  const orig3b = {
+    da:  require.cache[dapath3b],
+    tax: require.cache[taxpath3b],
+    obj: require.cache[objpath3b],
+    igs: require.cache[igspath3b],
+    svc: require.cache[svcpath3b],
+    flag: process.env.FEATURE_DAY1_DIAGNOSTIC_V2,
+  };
+
+  process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = 'true';
+  require.cache[dapath3b]  = { exports: { findById: async () => fakeAttempt3b }, loaded: true, id: dapath3b };
+  require.cache[taxpath3b] = { exports: { findOne: () => ({ lean: async () => null }) }, loaded: true, id: taxpath3b };
+  require.cache[objpath3b] = { exports: { findById: () => ({ lean: async () => null }) }, loaded: true, id: objpath3b };
+  // Stub insightsGenerationService: generateInsights throws → hard-failure path exercises template branch in service
+  const templateOut = { hero: 'h', calibration: 'c', patterns: ['p'], topicTakeaways: { sql: 'do it' }, planHeadline: 'plan for you here' };
+  require.cache[igspath3b] = {
+    exports: {
+      generateInsights: async () => { throw new Error('forced-error'); },
+      _templateInsights: () => templateOut,
+    },
+    loaded: true, id: igspath3b,
+  };
+  delete require.cache[svcpath3b];
+
+  try {
+    const svc3b = require(svcpath3b);
+    const final3b = await svc3b._internal.finishAttemptV2(attemptId3b);
+
+    // Result object shape
+    assert.strictEqual(final3b.status, 'completed');
+    assert.ok(final3b.insights !== null, 'insights should be non-null on fallback');
+    assert.strictEqual(final3b.insightsStatus, 'fallback');
+
+    // Persisted fields on the attempt
+    assert.ok(savedAttempt3b.insightsJson !== null, 'insightsJson should be persisted');
+    assert.strictEqual(savedAttempt3b.insightsSource, 'template');
+    assert.strictEqual(savedAttempt3b.insightsStatus, 'fallback');
+    assert.strictEqual(typeof savedAttempt3b.insightsLatencyMs, 'number');
+
+    // calibrationClass present on every result entry
+    const VALID_CLASSES = ['well-calibrated', 'overestimates', 'undersells'];
+    for (const [, r] of savedAttempt3b.results.entries()) {
+      assert.ok(VALID_CLASSES.includes(r.calibrationClass), `calibrationClass '${r.calibrationClass}' must be one of the three enum values`);
+    }
+  } finally {
+    if (orig3b.da)  require.cache[dapath3b]  = orig3b.da;  else delete require.cache[dapath3b];
+    if (orig3b.tax) require.cache[taxpath3b] = orig3b.tax; else delete require.cache[taxpath3b];
+    if (orig3b.obj) require.cache[objpath3b] = orig3b.obj; else delete require.cache[objpath3b];
+    if (orig3b.igs) require.cache[igspath3b] = orig3b.igs; else delete require.cache[igspath3b];
+    if (orig3b.svc) require.cache[svcpath3b] = orig3b.svc; else delete require.cache[svcpath3b];
+    if (orig3b.flag === undefined) delete process.env.FEATURE_DAY1_DIAGNOSTIC_V2;
+    else process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = orig3b.flag;
+    // restore calibration (not stubbed, but clean up if polluted)
+    delete require.cache[calpath3b];
+    require(calpath3b);
   }
 });
