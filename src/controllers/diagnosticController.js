@@ -17,7 +17,7 @@ const start = async (req, res, next) => {
   try {
     const data = await diagnosticService.startAttempt(req.user.userId);
     if (!data) {
-      return res.status(409).json(apiResponse.error('Cannot start a new diagnostic right now. Either your objective has no mapped competencies yet, or you completed one less than 30 days ago.'));
+      return res.status(409).json(apiResponse.error('Cannot start a new diagnostic right now. Make sure you have an active learning objective with topic self-ratings set during onboarding.'));
     }
     res.json(apiResponse.success(data));
   } catch (err) { next(err); }
@@ -106,7 +106,7 @@ async function getResults(req, res) {
     }
 
     // Resolve display names from TopicTaxonomy (canonical → display).
-    // Mirrors finishAttemptV2's lookup — falls back silently to canonical names.
+    // Mirrors finishAttempt's lookup — falls back silently to canonical names.
     let displayByCanonical = new Map();
     try {
       const { buildTargetKey } = topicTaxonomyService;

@@ -320,17 +320,17 @@ async function _assemblePoolFromTaxonomy({ objectiveType, targetKey, topicsWithR
  * for whatever's missing, then persist the LLM-generated questions for next time.
  *
  * Dispatches based on first-arg shape:
- *   - Array → legacy v1 (allocation, ctx)
- *   - Object with .objectiveType → Plan 3a taxonomy-driven path
+ *   - Object with .objectiveType → taxonomy-driven (used by the engine)
+ *   - Array → allocation-driven (used by submitSelfRating)
  */
 async function assemblePool(allocationOrOptions, ctx = {}) {
   if (allocationOrOptions && !Array.isArray(allocationOrOptions) && allocationOrOptions.objectiveType) {
     return _assemblePoolFromTaxonomy(allocationOrOptions);
   }
-  return _assemblePoolV1(allocationOrOptions, ctx);
+  return _assemblePoolFromAllocation(allocationOrOptions, ctx);
 }
 
-async function _assemblePoolV1(allocation, ctx = {}) {
+async function _assemblePoolFromAllocation(allocation, ctx = {}) {
   const assembleStart = Date.now();
   // Build one cell per (competency, difficulty) and fetch all in parallel (I2)
   const cells = [];

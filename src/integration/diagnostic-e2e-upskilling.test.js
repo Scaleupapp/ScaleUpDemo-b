@@ -1,15 +1,12 @@
 'use strict';
 
-// E2E integration test: upskilling × PM happy path (V2 diagnostic engine).
+// E2E integration test: upskilling × PM happy path (diagnostic engine).
 // Connects to MONGODB_URI_TEST (or localhost fallback). Run manually against
 // a local Mongo — it will time out in CI without a reachable instance.
 //
 // Usage:
 //   MONGODB_URI_TEST=mongodb://localhost:27017/scaleup_test \
-//   FEATURE_DAY1_DIAGNOSTIC_V2=true \
 //   node --test src/integration/diagnostic-e2e-upskilling.test.js
-
-process.env.FEATURE_DAY1_DIAGNOSTIC_V2 = 'true';
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -35,7 +32,7 @@ require.cache[telemetryPath] = {
   loaded: true, id: telemetryPath,
 };
 
-// userContextService (called by startAttemptV1; not on V2 path but top-level required).
+// userContextService — top-level required by diagnosticService for getSynthesis.
 const ucPath = require.resolve('../services/userContextService');
 require.cache[ucPath] = {
   exports: { get: async () => null },
@@ -73,19 +70,7 @@ require.cache[taxModelPath] = {
   loaded: true, id: taxModelPath,
 };
 
-// KnowledgeProfile, ConceptMastery — not touched in V2 happy path but top-level.
-const kpPath = require.resolve('../models/KnowledgeProfile');
-require.cache[kpPath] = {
-  exports: { findOne: async () => null, findOneAndUpdate: async () => null },
-  loaded: true, id: kpPath,
-};
-const cmPath = require.resolve('../models/ConceptMastery');
-require.cache[cmPath] = {
-  exports: { findOneAndUpdate: async () => null },
-  loaded: true, id: cmPath,
-};
-
-// insightsGenerationService — lazy-required in finishAttemptV2. Stub returns
+// insightsGenerationService — lazy-required in finishAttempt. Stub returns
 // template-style insights so the test doesn't need OPENAI_API_KEY.
 const insightsSvcPath = require.resolve('../services/diagnostic/insightsGenerationService');
 const fakeInsights = {
@@ -155,14 +140,14 @@ require.cache[bankPath] = {
   loaded: true, id: bankPath,
 };
 
-// journeyGenerationService — not on V2 happy path but may be lazy-required.
+// journeyGenerationService — not on the engine happy path but may be lazy-required.
 const planPath = require.resolve('../services/journeyGenerationService');
 require.cache[planPath] = {
   exports: { regenerateForUser: async () => null },
   loaded: true, id: planPath,
 };
 
-// competencyNormalizer — used in V1 submitAnswer path; stub for safety.
+// competencyNormalizer — top-level required; stub for safety.
 const normPath = require.resolve('../services/competencyNormalizer');
 require.cache[normPath] = {
   exports: { normalize: (s) => s.toLowerCase() },
@@ -173,14 +158,14 @@ require.cache[normPath] = {
 // Test
 // ---------------------------------------------------------------------------
 
-test('E2E: upskilling × PM V2 — start → answer all → finish → results + insights', { timeout: 30_000 }, async () => {
+test('E2E: upskilling × PM — start → answer all → finish → results + insights', { timeout: 30_000 }, async () => {
   await mongoose.connect(MONGO_URI);
 
   // Clean up any prior test data.
   const userId = new mongoose.Types.ObjectId();
 
-  // Seed a UserObjective with topicSelfRatings (canonical keys, as V2 expects).
-  // V2 reads this instead of accepting a separate submitSelfRating call.
+  // Seed a UserObjective with topicSelfRatings (canonical keys, as the engine expects).
+  // The engine reads this directly; submitSelfRating is a legacy pass-through.
   const UserObjective = require('../models/UserObjective');
   const objective = await UserObjective.create({
     userId,
@@ -208,7 +193,7 @@ test('E2E: upskilling × PM V2 — start → answer all → finish → results +
   const attemptId = start.attemptId;
 
   // ===== Answer all questions =====
-  // V2 pool is seeded from the stub — 2 questions, both answered correctly.
+  // Pool is seeded from the stub — 2 questions, both answered correctly.
   const q1Resp = await svc.nextQuestion(attemptId);
   assert.strictEqual(q1Resp.done, false, 'first question should not be done');
   assert.ok(q1Resp.question, 'first question should exist');

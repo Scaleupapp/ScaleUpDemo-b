@@ -6,7 +6,6 @@
 
 const FLAGS = {
   FEATURE_DAY1_DIAGNOSTIC: process.env.FEATURE_DAY1_DIAGNOSTIC === 'true',
-  FEATURE_DAY1_DIAGNOSTIC_V2: process.env.FEATURE_DAY1_DIAGNOSTIC_V2 === 'true',
 };
 
 function isEnabled(flag) {
