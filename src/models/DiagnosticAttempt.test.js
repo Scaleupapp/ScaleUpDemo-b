@@ -97,7 +97,7 @@ test('DiagnosticAttempt: attemptType accepts recalibration with previousAttemptI
   const prev = new mongoose.Types.ObjectId();
   const doc = new DA({
     userId: new mongoose.Types.ObjectId(),
-    flowType: 'existing_user_tune',
+    flowType: 'recalibration',
     attemptType: 'recalibration',
     previousAttemptId: prev,
   });

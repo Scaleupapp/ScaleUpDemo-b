@@ -30,6 +30,9 @@ const competencyResultSchema = new mongoose.Schema({
 
 const diagnosticAttemptSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  // 'existing_user_tune' is retained on the enum for backward-compat with
+  // legacy DB docs; the current engine only ever writes 'new_user' or
+  // 'recalibration'.
   flowType: { type: String, enum: ['new_user', 'existing_user_tune', 'recalibration'], required: true },
 
   status: {
@@ -66,9 +69,9 @@ const diagnosticAttemptSchema = new mongoose.Schema({
     default: () => new Map(),
   },
 
-  // Snapshot of the user's primary objective at attempt creation; used by the
-  // retake cooldown to detect objective changes (Edge 6), and by submitSelfRating
-  // to pass the objective label to the pool assembler.
+  // Snapshot of the user's primary objective at attempt creation; used to
+  // pass the objective label to the pool assembler and to scope KnowledgeProfile
+  // entries by objective.
   objectiveSnapshot: {
     _id: { type: mongoose.Schema.Types.ObjectId, ref: 'UserObjective' },
     label: { type: String, default: null },
@@ -78,9 +81,9 @@ const diagnosticAttemptSchema = new mongoose.Schema({
   cohort: { type: String }, // 'pre_diagnostic' | 'post_diagnostic_taken' | etc.
   confidence: { type: String, enum: ['high', 'medium', 'low'], default: 'high' },
 
-  // Idempotency checkpoint: set immediately after _applyToKnowledgeProfile succeeds.
-  // Allows future replay tooling to detect partially-applied attempts without
-  // re-running the profile update.
+  // Idempotency checkpoint for legacy KnowledgeProfile updates. Retained so
+  // older attempt documents continue to deserialize cleanly; not written by
+  // the current engine.
   appliedToProfileAt: { type: Date, default: null },
 
   // --- Insights & plan handoff (spec §4.4 / §10.5) ---

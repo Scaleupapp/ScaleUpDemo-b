@@ -1,8 +1,8 @@
 # Day-1 Diagnostic API
 
-> API surface for `/api/v1/diagnostic/*`. Last updated: 2026-04-28.
+> API surface for `/api/v1/diagnostic/*`. Last updated: 2026-05-08.
 
-The diagnostic feature establishes a baseline proficiency profile in the user's first session (new user) or refines existing signal (existing user). Behind feature flag `FEATURE_DAY1_DIAGNOSTIC=true`. All routes are JWT-authenticated.
+The diagnostic feature establishes a baseline proficiency profile in the user's first session and powers Phase 4 recalibration. Behind feature flag `FEATURE_DAY1_DIAGNOSTIC=true`. All routes are JWT-authenticated.
 
 ## Lifecycle
 
@@ -16,7 +16,7 @@ A `DiagnosticAttempt` document tracks state across the lifecycle. At-most-one in
 ## Endpoints
 
 ### POST `/api/v1/diagnostic/start`
-Creates a new attempt. Responds 409 when the user has no mapped competencies on their primary objective, OR completed a diagnostic in the last 30 days against the same objective.
+Creates a new attempt. Responds 409 when the user has no active learning objective, or the objective has no `topicSelfRatings` set during onboarding.
 
 **Response 200:**
 ```json
@@ -24,9 +24,11 @@ Creates a new attempt. Responds 409 when the user has no mapped competencies on 
   "success": true,
   "data": {
     "attemptId": "...",
-    "flowType": "new_user" | "existing_user_tune",
+    "flowType": "new_user",
+    "totalEstimatedQuestions": 12,
+    "estimatedDurationSec": 360,
     "competenciesToAssess": [
-      { "name": "sql", "questionCap": 3 }
+      { "name": "product-strategy", "questionCap": 3 }
     ]
   }
 }
