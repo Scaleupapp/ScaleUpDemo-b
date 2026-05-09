@@ -366,6 +366,10 @@ components:
         source:
           type: string
           enum: [llm-generated, template, rebalanced]
+        nextCheckInAt:
+          type: [string, 'null']
+          format: date-time
+          description: ISO timestamp of the next recalibration check-in (lastDiagnosticCompletedAt + 7 days). Null when the plan has no associated diagnostic attempt.
 
     PlanStatus:
       type: object
