@@ -6,10 +6,41 @@ const allocationSchema = new mongoose.Schema({
   focusActivity: { type: String, required: true },
 }, { _id: false });
 
+const taskTopicSchema = new mongoose.Schema({
+  canonicalName: { type: String, required: true },
+  displayName: { type: String, required: true },
+}, { _id: false });
+
+const taskCompletionSchema = new mongoose.Schema({
+  mode: { type: String, enum: ['auto', 'manual'], required: true },
+  requiresSelfRating: { type: Boolean, default: false },
+}, { _id: false });
+
+const taskProgressSchema = new mongoose.Schema({
+  status: { type: String, enum: ['pending', 'in_progress', 'complete', 'skipped'], default: 'pending' },
+  completedAt: { type: Date, default: null },
+  selfRating: { type: Number, min: 1, max: 5, default: null },
+  sourceEventId: { type: String, default: null },
+}, { _id: false });
+
+const taskSchema = new mongoose.Schema({
+  type: {
+    type: String,
+    enum: ['quiz', 'in_app_content', 'ai_interview', 'external_link', 'competition', 'manual'],
+    required: true,
+  },
+  topic: { type: taskTopicSchema, required: true },
+  payload: { type: mongoose.Schema.Types.Mixed, default: {} },
+  completion: { type: taskCompletionSchema, required: true },
+  progress: { type: taskProgressSchema, default: () => ({ status: 'pending' }) },
+  generatedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
 const weeklyEntrySchema = new mongoose.Schema({
   week: { type: Number, required: true, min: 1 },
   weeklyGoal: { type: String, required: true },
   allocations: { type: [allocationSchema], default: [] },
+  tasks: { type: [taskSchema], default: [] },
 }, { _id: false });
 
 const milestoneSchema = new mongoose.Schema({
