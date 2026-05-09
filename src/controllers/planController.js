@@ -71,6 +71,20 @@ async function getCurrent(req, res) {
     isUserStated: !!m.isUserStated,
   }));
 
+  // Compute nextCheckInAt from the diagnostic attempt that produced this plan.
+  // Falls back to plan.updatedAt if the attempt is missing (defensive only —
+  // every plan should have a diagnosticAttemptId per the schema).
+  let nextCheckInAt = null;
+  try {
+    const attempt = plan.diagnosticAttemptId
+      ? await DiagnosticAttempt.findById(plan.diagnosticAttemptId).lean()
+      : null;
+    const anchor = attempt?.completedAt || plan.updatedAt;
+    if (anchor) {
+      nextCheckInAt = new Date(new Date(anchor).getTime() + 7 * 86400000).toISOString();
+    }
+  } catch (_) { /* leave null */ }
+
   return res.status(200).json(apiResponse.success({
     planId: String(plan._id),
     planHeadline: plan.planHeadline,
@@ -81,6 +95,7 @@ async function getCurrent(req, res) {
     weeklySchedule,
     milestones,
     source: plan.source,
+    nextCheckInAt,
   }));
 }
 

@@ -10,6 +10,7 @@ const taxonomyServicePath = require.resolve('../services/diagnostic/topicTaxonom
 
 let activePlan = null;
 let latestAttempt = null;
+let attemptById = null;
 let activeObjective = null;
 let activeTaxonomy = null;
 require.cache[planModelPath] = {
@@ -20,6 +21,7 @@ require.cache[planModelPath] = {
 require.cache[attemptModelPath] = {
   exports: {
     findOne: (filter) => ({ sort: () => ({ select: () => ({ lean: async () => latestAttempt }) }) }),
+    findById: (id) => ({ lean: async () => attemptById }),
   },
 };
 require.cache[objectiveModelPath] = {
@@ -255,4 +257,34 @@ test('planController.getCurrent: falls back to canonical names when taxonomy loo
   assert.strictEqual(res._status, 200);
   assert.strictEqual(res._json.success, true);
   assert.strictEqual(res._json.data.weeklySchedule[0].allocations[0].topic, 'foo', 'falls back to canonical when no taxonomy');
+});
+
+test('planController.getCurrent: returns nextCheckInAt = diagnosticAttempt.completedAt + 7 days', async () => {
+  const completedAt = new Date('2026-05-01T00:00:00Z');
+  const expectedNext = new Date('2026-05-08T00:00:00Z').toISOString();
+
+  activePlan = {
+    _id: new mongoose.Types.ObjectId(),
+    objectiveId: new mongoose.Types.ObjectId(),
+    diagnosticAttemptId: new mongoose.Types.ObjectId(),
+    planHeadline: 'x',
+    estimatedTotalHours: 10,
+    weeklySchedule: [],
+    milestones: [],
+    source: 'llm-generated',
+    updatedAt: new Date('2026-04-20T00:00:00Z'), // distinct from completedAt to prove we used the attempt
+  };
+  activeObjective = null;
+  activeTaxonomy = null;
+  attemptById = { completedAt };
+
+  const req = { user: { userId: new mongoose.Types.ObjectId() } };
+  const res = fakeRes();
+  await ctrl.getCurrent(req, res);
+
+  assert.strictEqual(res._json.success, true);
+  assert.strictEqual(res._json.data.nextCheckInAt, expectedNext);
+
+  // reset shared mutable state so it doesn't leak into subsequent tests
+  attemptById = null;
 });
