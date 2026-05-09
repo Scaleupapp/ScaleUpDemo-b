@@ -64,7 +64,7 @@ function stubModels({ attempt = null, plan = null, hours = {} } = {}) {
 
 async function test_tooRecent_returnsNotEligible() {
   const recentAttempt = makeAttempt({
-    completedAt: new Date(Date.now() - 10 * 86400000), // only 10 days ago
+    completedAt: new Date(Date.now() - 3 * 86400000), // only 3 days ago — under new 7d gate
   });
   const restore = stubModels({ attempt: recentAttempt });
   try {
@@ -73,7 +73,26 @@ async function test_tooRecent_returnsNotEligible() {
     const result = await svc.computeEligibility('user1', {});
     assert.strictEqual(result.eligible, false);
     assert.strictEqual(result.reason, 'too_recent');
-    assert.ok(result.daysSinceLast < 30, 'should report days since last');
+    assert.ok(result.daysSinceLast < 7, 'should report days since last');
+  } finally {
+    restore();
+  }
+}
+
+async function test_passesCooldownAtDay8() {
+  // 8 days ago — was blocked under old 30d gate, must pass under new 7d gate.
+  // Uses the biggest-gap-always-included rule to pass with no plan/hours.
+  const attempt = makeAttempt({
+    completedAt: new Date(Date.now() - 8 * 86400000),
+  });
+  const plan = makePlan();
+  const hours = {};
+  const restore = stubModels({ attempt, plan, hours });
+  try {
+    delete require.cache[require.resolve('./recalibrationEligibilityService')];
+    const svc = require('./recalibrationEligibilityService');
+    const result = await svc.computeEligibility('user1', {});
+    assert.strictEqual(result.eligible, true, `expected eligible=true at day 8; got ${JSON.stringify(result)}`);
   } finally {
     restore();
   }
@@ -164,6 +183,7 @@ async function test_capsAtSix() {
 (async () => {
   const tests = [
     test_tooRecent_returnsNotEligible,
+    test_passesCooldownAtDay8,
     test_30dPlusAndFiveHours_returnsEligible,
     test_biggestGapAlwaysIncluded,
     test_userFlagOverride,

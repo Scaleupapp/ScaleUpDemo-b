@@ -15,7 +15,7 @@
 const DiagnosticAttempt = require('../../models/DiagnosticAttempt');
 const Plan = require('../../models/Plan');
 
-const MIN_DAYS_SINCE_LAST = 30;
+const MIN_DAYS_SINCE_LAST = 7;
 const MIN_HOURS_ON_TOPIC = 5;
 const MAX_ELIGIBLE_TOPICS = 6;
 const QUESTIONS_PER_TOPIC = 2;
