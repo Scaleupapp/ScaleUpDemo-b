@@ -39,6 +39,23 @@ class ConsumptionService {
     }
 
     await progress.save();
+
+    // Best-effort plan task progress update.
+    try {
+      const planProgressService = require('./plan/planProgressService');
+      const topic = (content?.topics && content.topics[0]) || null;
+      if (topic) {
+        await planProgressService.onContentProgress({
+          userId,
+          contentId: String(contentId),
+          percent: progress.percentageCompleted || 0,
+          topic,
+        });
+      }
+    } catch (err) {
+      console.warn('[consumptionService] planProgressService.onContentProgress failed:', err.message);
+    }
+
     return progress;
   }
 
@@ -99,6 +116,23 @@ class ConsumptionService {
       await updateStreak(userId);
     } catch (e) {
       console.error('[consumptionService] Streak update error:', e.message);
+    }
+
+    try {
+      const planProgressService = require('./plan/planProgressService');
+      const Content = require('../models/Content');
+      const content = await Content.findById(contentId).lean();
+      const topic = (content?.topics && content.topics[0]) || null;
+      if (topic) {
+        await planProgressService.onContentProgress({
+          userId,
+          contentId: String(contentId),
+          percent: 100,
+          topic,
+        });
+      }
+    } catch (err) {
+      console.warn('[consumptionService] planProgressService.onContentProgress (markCompleted) failed:', err.message);
     }
 
     return progress;
