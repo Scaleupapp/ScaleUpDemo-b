@@ -4,7 +4,6 @@ const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
 const compression = require('compression');
-const OpenApiValidator = require('express-openapi-validator');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -44,31 +43,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- OpenAPI request validator ---
-// Validates incoming requests against openapi.yaml. We intentionally only
-// validate paths the spec documents — undocumented paths fall through
-// untouched, so the spec can be expanded incrementally without breaking
-// production. validateResponses is off in production to avoid runtime cost
-// + protect against any spec/code drift surfacing as 500s; flip on in tests.
-//   Disable globally with FEATURE_OPENAPI_VALIDATION=false.
-if (process.env.FEATURE_OPENAPI_VALIDATION !== 'false') {
-  app.use(
-    OpenApiValidator.middleware({
-      apiSpec: path.join(__dirname, '..', 'openapi.yaml'),
-      validateRequests: { allowUnknownQueryParameters: true },
-      validateResponses: process.env.FEATURE_OPENAPI_VALIDATE_RESPONSES === 'true',
-      validateApiSpec: false, // we lint separately via redocly
-      ignorePaths: (path_) =>
-        // Only validate the v1 surface; everything else (admin static, /health) skips.
-        !path_.startsWith('/api/v1/'),
-      // Be lenient for paths that aren't (yet) in the spec — the validator
-      // would otherwise return 404 for "not found" or 405 for method.
-      ignoreUndocumented: true,
-    }),
-  );
-}
-
 // --- Routes ---
+// (express-openapi-validator middleware was tried here but is incompatible
+// with Express 4's pinned path-to-regexp ~0.1.12; the runtime contract
+// guarantee is provided instead by openapi-contract.test.js + redocly lint
+// at PR time and the generated client types at build time. Re-add only
+// when Express is upgraded to v5+.)
 app.use('/api/v1/auth', require('./routes/auth'));
 app.use('/api/v1/onboarding', require('./routes/onboarding'));
 app.use('/api/v1/objectives', require('./routes/objectives'));
