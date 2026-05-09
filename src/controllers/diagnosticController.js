@@ -14,13 +14,17 @@ function _gateOrPass(req, res, next) {
 }
 
 // Maps service-level blocked reasons to user-facing message + a stable
-// machine code clients can switch on (e.g. iOS routes EMPTY_SPECIFICS to
-// onboarding rather than showing the generic snag).
+// machine code clients switch on. `resumeStep` tells the client which
+// onboarding step to drop the user into rather than the default step 1
+// (so users don't redo profile + background when only the objective or
+// topic-ratings step is missing).
+//   Step 3 = Objective + specifics    (NO_OBJECTIVE / EMPTY_SPECIFICS)
+//   Step 5 = Interests + self-ratings (NO_TOPIC_RATINGS / NO_SIGNAL)
 const BLOCKED_REASON_MAP = {
-  NO_OBJECTIVE:    { code: 'NEEDS_ONBOARDING',   message: "You haven't set up a learning objective yet. Let's get you onboarded." },
-  EMPTY_SPECIFICS: { code: 'NEEDS_ONBOARDING',   message: 'Your objective is missing details. Complete onboarding to start the diagnostic.' },
-  NO_SIGNAL:       { code: 'NEEDS_RECALIBRATION', message: "We couldn't build a diagnostic for your objective. Please refresh the app and try again." },
-  NO_TOPIC_RATINGS:{ code: 'NEEDS_ONBOARDING',   message: "We couldn't find your topic ratings. Re-run onboarding to set them." },
+  NO_OBJECTIVE:    { code: 'NEEDS_ONBOARDING',    resumeStep: 3, message: "You haven't set up a learning objective yet. Let's pick one." },
+  EMPTY_SPECIFICS: { code: 'NEEDS_ONBOARDING',    resumeStep: 3, message: 'Your objective is missing some details. Take a minute to fill them in.' },
+  NO_SIGNAL:       { code: 'NEEDS_RECALIBRATION', resumeStep: 5, message: "We couldn't build a diagnostic for your objective. Please refresh and try again." },
+  NO_TOPIC_RATINGS:{ code: 'NEEDS_ONBOARDING',    resumeStep: 5, message: "We couldn't find your topic ratings. Take a minute to set them." },
 };
 
 const start = async (req, res, next) => {
@@ -33,10 +37,10 @@ const start = async (req, res, next) => {
         error: mapped.message,
         code: mapped.code,
         reason: data.reason,
+        resumeStep: mapped.resumeStep,
       });
     }
     if (!data) {
-      // Defensive: legacy null return path.
       return res.status(409).json(apiResponse.error('Cannot start a new diagnostic right now.'));
     }
     res.json(apiResponse.success(data));

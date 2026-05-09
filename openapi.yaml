@@ -45,11 +45,19 @@ components:
       type: object
       required: [success]
       properties:
-        success: { type: boolean, enum: [false] }
-        error:   { type: string, description: User-facing message }
-        message: { type: string, description: Legacy alias for error }
-        code:    { type: string, description: Stable machine code (e.g. NEEDS_ONBOARDING) }
-        reason:  { type: string, description: Internal classification (e.g. EMPTY_SPECIFICS) }
+        success:    { type: boolean, enum: [false] }
+        error:      { type: string, description: User-facing message }
+        message:    { type: string, description: Legacy alias for error }
+        code:       { type: string, description: Stable machine code (e.g. NEEDS_ONBOARDING) }
+        reason:     { type: string, description: Internal classification (e.g. EMPTY_SPECIFICS) }
+        resumeStep:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: |
+            When `code: NEEDS_ONBOARDING` is returned, the onboarding step the
+            client should drop the user back into. 3 = objective+specifics,
+            5 = topic ratings. Falls back to step 1 if absent.
 
     SelfRating:
       type: string
