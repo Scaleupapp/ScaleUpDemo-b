@@ -130,3 +130,80 @@ test('onQuizComplete: does not retroactively complete past-week tasks', async ()
     Plan.findOne = origFindOne;
   }
 });
+
+function makePlanWithContentTask() {
+  return {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    weeklySchedule: [{
+      week: 1,
+      weeklyGoal: 'g',
+      allocations: [],
+      tasks: [{
+        _id: new mongoose.Types.ObjectId(),
+        type: 'in_app_content',
+        topic: { canonicalName: 'roadmapping', displayName: 'Roadmapping' },
+        payload: { contentId: 'c-42' },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      }],
+    }],
+    save: async function () { this._saved = true; return this; },
+  };
+}
+
+test('onContentProgress: at 79% bumps pending -> in_progress (not complete)', async () => {
+  const plan = makePlanWithContentTask();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.onContentProgress({
+      userId: plan.userId.toString(),
+      contentId: 'c-42', percent: 79, topic: 'roadmapping',
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(out.completed, false);
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.status, 'in_progress');
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.completedAt, null);
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('onContentProgress: at 80% marks complete', async () => {
+  const plan = makePlanWithContentTask();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.onContentProgress({
+      userId: plan.userId.toString(),
+      contentId: 'c-42', percent: 80, topic: 'roadmapping',
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(out.completed, true);
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.status, 'complete');
+    assert.ok(plan.weeklySchedule[0].tasks[0].progress.completedAt instanceof Date);
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.sourceEventId, 'c-42');
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('onContentProgress: returns matched=false when contentId in payload does not match', async () => {
+  const plan = makePlanWithContentTask();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.onContentProgress({
+      userId: plan.userId.toString(),
+      contentId: 'unrelated', percent: 90, topic: 'roadmapping',
+    });
+    assert.strictEqual(out.matched, false);
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.status, 'pending');
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
