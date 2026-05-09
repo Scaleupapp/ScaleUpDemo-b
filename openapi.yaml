@@ -1,0 +1,193 @@
+openapi: 3.1.0
+info:
+  title: ScaleUp Backend API
+  version: 0.1.0
+  description: |
+    Authoritative backend API contract. This file is the single source of
+    truth for request/response shapes between the backend and the iOS /
+    Android RN clients. When you add or change an endpoint, update this
+    file in the same PR — clients regenerate their typed bindings from here.
+
+    Currently documents the highest-risk surfaces (diagnostic + plan +
+    onboarding) — extend incrementally as endpoints get touched.
+
+    Tooling:
+      - iOS:     https://github.com/apple/swift-openapi-generator
+      - RN:      https://github.com/drwpow/openapi-typescript
+      - Backend: see test/openapi-contract.test.js (planned)
+
+servers:
+  - url: https://api.scaleupapp.club/api/v1
+    description: Production
+  - url: http://localhost:5000/api/v1
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ApiSuccessEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, enum: [true] }
+        message: { type: string }
+        data:    { description: Endpoint-specific payload }
+
+    ApiErrorEnvelope:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean, enum: [false] }
+        error:   { type: string, description: User-facing message }
+        message: { type: string, description: Legacy alias for error }
+        code:    { type: string, description: Stable machine code (e.g. NEEDS_ONBOARDING) }
+        reason:  { type: string, description: Internal classification (e.g. EMPTY_SPECIFICS) }
+
+    SelfRating:
+      type: string
+      enum: [novice, familiar, proficient, expert, unsure]
+
+    DiagnosticAttemptStart:
+      type: object
+      required: [attemptId, flowType, competenciesToAssess]
+      properties:
+        attemptId: { type: string }
+        flowType:
+          type: string
+          enum: [new_user, recalibration]
+        totalEstimatedQuestions: { type: integer, minimum: 0 }
+        estimatedDurationSec:    { type: integer, minimum: 0 }
+        competenciesToAssess:
+          type: array
+          items:
+            type: object
+            required: [name, questionCap]
+            properties:
+              name:        { type: string }
+              questionCap: { type: integer, minimum: 0 }
+
+    PlanAllocation:
+      type: object
+      required: [topic, hoursAllocated, focusActivity]
+      properties:
+        topic:           { type: string, description: Display name (resolved from taxonomy) }
+        canonicalTopic:  { type: string, description: Canonical/slug name }
+        hoursAllocated:  { type: number, minimum: 0 }
+        focusActivity:   { type: string }
+
+    PlanWeeklyEntry:
+      type: object
+      required: [weekNumber, weekLabel, totalHours, allocations]
+      properties:
+        weekNumber: { type: integer, minimum: 1 }
+        weekLabel:  { type: string }
+        totalHours: { type: number, minimum: 0 }
+        allocations:
+          type: array
+          items: { $ref: '#/components/schemas/PlanAllocation' }
+
+    PlanMilestone:
+      type: object
+      required: [title, measurableCriteria, weekTarget, isUserStated]
+      properties:
+        title:              { type: string }
+        measurableCriteria: { type: string }
+        weekTarget:         { type: integer, minimum: 1 }
+        isUserStated:       { type: boolean }
+
+    PlanCurrent:
+      type: object
+      required: [planId, planHeadline, totalWeeks, totalHours, milestoneCount, weeklySchedule, milestones]
+      properties:
+        planId:               { type: string }
+        planHeadline:         { type: string }
+        totalWeeks:           { type: integer, minimum: 0 }
+        totalHours:           { type: number,  minimum: 0 }
+        milestoneCount:       { type: integer, minimum: 0 }
+        bufferRecommendation: { type: string, nullable: true }
+        weeklySchedule:
+          type: array
+          items: { $ref: '#/components/schemas/PlanWeeklyEntry' }
+        milestones:
+          type: array
+          items: { $ref: '#/components/schemas/PlanMilestone' }
+        source:
+          type: string
+          enum: [llm-generated, template, rebalanced]
+
+    PlanStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pending, generating, ready, failed]
+        planId:    { type: string, nullable: true }
+        source:    { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time, nullable: true }
+
+paths:
+  /diagnostic/start:
+    post:
+      summary: Start a new diagnostic attempt for the authenticated user
+      tags: [Diagnostic]
+      responses:
+        '200':
+          description: Attempt created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DiagnosticAttemptStart' }
+        '409':
+          description: |
+            User is not ready to start a diagnostic. The `code` field is the
+            stable machine code clients should branch on:
+              - NEEDS_ONBOARDING — user has no objective or empty specifics;
+                redirect to the onboarding flow.
+              - NEEDS_RECALIBRATION — taxonomy/data is missing in a recoverable
+                way; ask the user to retry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
+
+  /plan/status:
+    get:
+      summary: Check whether the authenticated user has a generated plan
+      tags: [Plan]
+      responses:
+        '200':
+          description: Status payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanStatus' }
+
+  /plan/current:
+    get:
+      summary: Fetch the user's currently active plan
+      tags: [Plan]
+      responses:
+        '200':
+          description: Active plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanCurrent' }
+        '404':
+          description: No active plan exists yet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
