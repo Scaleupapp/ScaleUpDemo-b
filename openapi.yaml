@@ -1631,3 +1631,4016 @@ paths:
       tags: [Dashboard]
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+  /admin/applications:
+    get:
+      operationId: getAdminApplications
+      summary: 'Auto-stubbed: GET /api/v1/admin/applications (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/applications/{id}/approve:
+    post:
+      operationId: postAdminApplicationsByidApprove
+      summary: 'Auto-stubbed: POST /api/v1/admin/applications/{id}/approve (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/applications/{id}/reject:
+    post:
+      operationId: postAdminApplicationsByidReject
+      summary: 'Auto-stubbed: POST /api/v1/admin/applications/{id}/reject (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/users:
+    get:
+      operationId: getAdminUsers
+      summary: 'Auto-stubbed: GET /api/v1/admin/users (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/users/{id}/ban:
+    put:
+      operationId: putAdminUsersByidBan
+      summary: 'Auto-stubbed: PUT /api/v1/admin/users/{id}/ban (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/users/{id}/unban:
+    put:
+      operationId: putAdminUsersByidUnban
+      summary: 'Auto-stubbed: PUT /api/v1/admin/users/{id}/unban (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/content:
+    get:
+      operationId: getAdminContent
+      summary: 'Auto-stubbed: GET /api/v1/admin/content (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/content/{id}/moderate:
+    put:
+      operationId: putAdminContentByidModerate
+      summary: 'Auto-stubbed: PUT /api/v1/admin/content/{id}/moderate (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/content/{id}/remove:
+    put:
+      operationId: putAdminContentByidRemove
+      summary: 'Auto-stubbed: PUT /api/v1/admin/content/{id}/remove (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/content/{id}/dismiss:
+    put:
+      operationId: putAdminContentByidDismiss
+      summary: 'Auto-stubbed: PUT /api/v1/admin/content/{id}/dismiss (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/content/{id}/reports:
+    get:
+      operationId: getAdminContentByidReports
+      summary: 'Auto-stubbed: GET /api/v1/admin/content/{id}/reports (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/creators:
+    get:
+      operationId: getAdminCreators
+      summary: 'Auto-stubbed: GET /api/v1/admin/creators (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/creators/{id}/promote:
+    put:
+      operationId: putAdminCreatorsByidPromote
+      summary: 'Auto-stubbed: PUT /api/v1/admin/creators/{id}/promote (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /admin/notes/pending:
+    get:
+      operationId: getAdminNotesPending
+      summary: 'Auto-stubbed: GET /api/v1/admin/notes/pending (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/stats:
+    get:
+      operationId: getAdminStats
+      summary: 'Auto-stubbed: GET /api/v1/admin/stats (extend with real schema when touched)'
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /tutor/conversations:
+    get:
+      operationId: getTutorConversations
+      summary: 'Auto-stubbed: GET /api/v1/tutor/conversations (extend with real schema when touched)'
+      tags:
+        - Tutor
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /tutor/{contentId}/status:
+    get:
+      operationId: getTutorBycontentidStatus
+      summary: 'Auto-stubbed: GET /api/v1/tutor/{contentId}/status (extend with real schema when touched)'
+      tags:
+        - Tutor
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: contentId
+        in: path
+        required: true
+        schema:
+          type: string
+  /tutor/{contentId}:
+    get:
+      operationId: getTutorBycontentid
+      summary: 'Auto-stubbed: GET /api/v1/tutor/{contentId} (extend with real schema when touched)'
+      tags:
+        - Tutor
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: contentId
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteTutorBycontentid
+      summary: 'Auto-stubbed: DELETE /api/v1/tutor/{contentId} (extend with real schema when touched)'
+      tags:
+        - Tutor
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /tutor/{contentId}/message:
+    post:
+      operationId: postTutorBycontentidMessage
+      summary: 'Auto-stubbed: POST /api/v1/tutor/{contentId}/message (extend with real schema when touched)'
+      tags:
+        - Tutor
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: contentId
+        in: path
+        required: true
+        schema:
+          type: string
+  /audio-summaries/generate:
+    post:
+      operationId: postAudioSummariesGenerate
+      summary: 'Auto-stubbed: POST /api/v1/audio-summaries/generate (extend with real schema when touched)'
+      tags:
+        - AudioSummaries
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /audio-summaries/{contentId}:
+    get:
+      operationId: getAudioSummariesBycontentid
+      summary: 'Auto-stubbed: GET /api/v1/audio-summaries/{contentId} (extend with real schema when touched)'
+      tags:
+        - AudioSummaries
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: contentId
+        in: path
+        required: true
+        schema:
+          type: string
+  /audio-summaries/{contentId}/status:
+    get:
+      operationId: getAudioSummariesBycontentidStatus
+      summary: 'Auto-stubbed: GET /api/v1/audio-summaries/{contentId}/status (extend with real schema when touched)'
+      tags:
+        - AudioSummaries
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: contentId
+        in: path
+        required: true
+        schema:
+          type: string
+  /auth/phone/verify:
+    post:
+      operationId: postAuthPhoneVerify
+      summary: 'Auto-stubbed: POST /api/v1/auth/phone/verify (extend with real schema when touched)'
+      tags:
+        - Auth
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /colleges/search:
+    get:
+      operationId: getCollegesSearch
+      summary: 'Auto-stubbed: GET /api/v1/colleges/search (extend with real schema when touched)'
+      tags:
+        - Colleges
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/challenges/today:
+    get:
+      operationId: getCompetitionChallengesToday
+      summary: 'Auto-stubbed: GET /api/v1/competition/challenges/today (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/challenges/{id}:
+    get:
+      operationId: getCompetitionChallengesByid
+      summary: 'Auto-stubbed: GET /api/v1/competition/challenges/{id} (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/challenges/{id}/start:
+    post:
+      operationId: postCompetitionChallengesByidStart
+      summary: 'Auto-stubbed: POST /api/v1/competition/challenges/{id}/start (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/challenges/{id}/answer:
+    put:
+      operationId: putCompetitionChallengesByidAnswer
+      summary: 'Auto-stubbed: PUT /api/v1/competition/challenges/{id}/answer (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/challenges/{id}/complete:
+    post:
+      operationId: postCompetitionChallengesByidComplete
+      summary: 'Auto-stubbed: POST /api/v1/competition/challenges/{id}/complete (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/challenges/{id}/results:
+    get:
+      operationId: getCompetitionChallengesByidResults
+      summary: 'Auto-stubbed: GET /api/v1/competition/challenges/{id}/results (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/challenges/{id}/review:
+    get:
+      operationId: getCompetitionChallengesByidReview
+      summary: 'Auto-stubbed: GET /api/v1/competition/challenges/{id}/review (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/leaderboard/weekly:
+    get:
+      operationId: getCompetitionLeaderboardWeekly
+      summary: 'Auto-stubbed: GET /api/v1/competition/leaderboard/weekly (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/leaderboard/alltime:
+    get:
+      operationId: getCompetitionLeaderboardAlltime
+      summary: 'Auto-stubbed: GET /api/v1/competition/leaderboard/alltime (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/objective-topic:
+    get:
+      operationId: getCompetitionObjectiveTopic
+      summary: 'Auto-stubbed: GET /api/v1/competition/objective-topic (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/profile:
+    get:
+      operationId: getCompetitionProfile
+      summary: 'Auto-stubbed: GET /api/v1/competition/profile (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/stats:
+    get:
+      operationId: getCompetitionStats
+      summary: 'Auto-stubbed: GET /api/v1/competition/stats (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/live-events/upcoming:
+    get:
+      operationId: getCompetitionLiveEventsUpcoming
+      summary: 'Auto-stubbed: GET /api/v1/competition/live-events/upcoming (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/live-events/{id}:
+    get:
+      operationId: getCompetitionLiveEventsByid
+      summary: 'Auto-stubbed: GET /api/v1/competition/live-events/{id} (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/live-events/{id}/join:
+    post:
+      operationId: postCompetitionLiveEventsByidJoin
+      summary: 'Auto-stubbed: POST /api/v1/competition/live-events/{id}/join (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/live-events/{id}/lobby:
+    get:
+      operationId: getCompetitionLiveEventsByidLobby
+      summary: 'Auto-stubbed: GET /api/v1/competition/live-events/{id}/lobby (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/live-events/{id}/question:
+    get:
+      operationId: getCompetitionLiveEventsByidQuestion
+      summary: 'Auto-stubbed: GET /api/v1/competition/live-events/{id}/question (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/live-events/{id}/answer:
+    put:
+      operationId: putCompetitionLiveEventsByidAnswer
+      summary: 'Auto-stubbed: PUT /api/v1/competition/live-events/{id}/answer (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/live-events/{id}/question-results:
+    get:
+      operationId: getCompetitionLiveEventsByidQuestionResults
+      summary: 'Auto-stubbed: GET /api/v1/competition/live-events/{id}/question-results (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/live-events/{id}/results:
+    get:
+      operationId: getCompetitionLiveEventsByidResults
+      summary: 'Auto-stubbed: GET /api/v1/competition/live-events/{id}/results (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/admin/challenge-candidates:
+    get:
+      operationId: getCompetitionAdminChallengeCandidates
+      summary: 'Auto-stubbed: GET /api/v1/competition/admin/challenge-candidates (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /competition/admin/challenge-candidates/{id}:
+    put:
+      operationId: putCompetitionAdminChallengeCandidatesByid
+      summary: 'Auto-stubbed: PUT /api/v1/competition/admin/challenge-candidates/{id} (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /competition/admin/challenges/generate:
+    post:
+      operationId: postCompetitionAdminChallengesGenerate
+      summary: 'Auto-stubbed: POST /api/v1/competition/admin/challenges/generate (extend with real schema when touched)'
+      tags:
+        - Competition
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /content/request-upload:
+    post:
+      operationId: postContentRequestUpload
+      summary: 'Auto-stubbed: POST /api/v1/content/request-upload (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /content/complete-upload:
+    post:
+      operationId: postContentCompleteUpload
+      summary: 'Auto-stubbed: POST /api/v1/content/complete-upload (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /content/request-thumbnail-upload:
+    post:
+      operationId: postContentRequestThumbnailUpload
+      summary: 'Auto-stubbed: POST /api/v1/content/request-thumbnail-upload (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /content/multipart/initiate:
+    post:
+      operationId: postContentMultipartInitiate
+      summary: 'Auto-stubbed: POST /api/v1/content/multipart/initiate (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /content/multipart/complete:
+    post:
+      operationId: postContentMultipartComplete
+      summary: 'Auto-stubbed: POST /api/v1/content/multipart/complete (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /content/multipart/abort:
+    post:
+      operationId: postContentMultipartAbort
+      summary: 'Auto-stubbed: POST /api/v1/content/multipart/abort (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /content/my-content:
+    get:
+      operationId: getContentMyContent
+      summary: 'Auto-stubbed: GET /api/v1/content/my-content (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /content/{id}:
+    put:
+      operationId: putContentByid
+      summary: 'Auto-stubbed: PUT /api/v1/content/{id} (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteContentByid
+      summary: 'Auto-stubbed: DELETE /api/v1/content/{id} (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      operationId: getContentByid
+      summary: 'Auto-stubbed: GET /api/v1/content/{id} (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /content/{id}/publish:
+    post:
+      operationId: postContentByidPublish
+      summary: 'Auto-stubbed: POST /api/v1/content/{id}/publish (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/{id}/unpublish:
+    post:
+      operationId: postContentByidUnpublish
+      summary: 'Auto-stubbed: POST /api/v1/content/{id}/unpublish (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/feed:
+    get:
+      operationId: getContentFeed
+      summary: 'Auto-stubbed: GET /api/v1/content/feed (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /content/explore:
+    get:
+      operationId: getContentExplore
+      summary: 'Auto-stubbed: GET /api/v1/content/explore (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /content/liked:
+    get:
+      operationId: getContentLiked
+      summary: 'Auto-stubbed: GET /api/v1/content/liked (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /content/saved:
+    get:
+      operationId: getContentSaved
+      summary: 'Auto-stubbed: GET /api/v1/content/saved (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /content/{id}/interaction-status:
+    get:
+      operationId: getContentByidInteractionStatus
+      summary: 'Auto-stubbed: GET /api/v1/content/{id}/interaction-status (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/{id}/stream:
+    get:
+      operationId: getContentByidStream
+      summary: 'Auto-stubbed: GET /api/v1/content/{id}/stream (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/{id}/like:
+    post:
+      operationId: postContentByidLike
+      summary: 'Auto-stubbed: POST /api/v1/content/{id}/like (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/{id}/save:
+    post:
+      operationId: postContentByidSave
+      summary: 'Auto-stubbed: POST /api/v1/content/{id}/save (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/{id}/rate:
+    post:
+      operationId: postContentByidRate
+      summary: 'Auto-stubbed: POST /api/v1/content/{id}/rate (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/{id}/share:
+    post:
+      operationId: postContentByidShare
+      summary: 'Auto-stubbed: POST /api/v1/content/{id}/share (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/{id}/report:
+    post:
+      operationId: postContentByidReport
+      summary: 'Auto-stubbed: POST /api/v1/content/{id}/report (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /content/{id}/comments:
+    get:
+      operationId: getContentByidComments
+      summary: 'Auto-stubbed: GET /api/v1/content/{id}/comments (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: postContentByidComments
+      summary: 'Auto-stubbed: POST /api/v1/content/{id}/comments (extend with real schema when touched)'
+      tags:
+        - Content
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /creator/apply:
+    post:
+      operationId: postCreatorApply
+      summary: 'Auto-stubbed: POST /api/v1/creator/apply (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /creator/application:
+    get:
+      operationId: getCreatorApplication
+      summary: 'Auto-stubbed: GET /api/v1/creator/application (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /creator/search:
+    get:
+      operationId: getCreatorSearch
+      summary: 'Auto-stubbed: GET /api/v1/creator/search (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /creator/profile:
+    get:
+      operationId: getCreatorProfile
+      summary: 'Auto-stubbed: GET /api/v1/creator/profile (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      operationId: putCreatorProfile
+      summary: 'Auto-stubbed: PUT /api/v1/creator/profile (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /creator/applications:
+    get:
+      operationId: getCreatorApplications
+      summary: 'Auto-stubbed: GET /api/v1/creator/applications (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /creator/applications/{applicationId}/endorse:
+    post:
+      operationId: postCreatorApplicationsByapplicationidEndorse
+      summary: 'Auto-stubbed: POST /api/v1/creator/applications/{applicationId}/endorse (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+  /creator/applications/{applicationId}/reject:
+    post:
+      operationId: postCreatorApplicationsByapplicationidReject
+      summary: 'Auto-stubbed: POST /api/v1/creator/applications/{applicationId}/reject (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+  /creator/{creatorId}:
+    get:
+      operationId: getCreatorBycreatorid
+      summary: 'Auto-stubbed: GET /api/v1/creator/{creatorId} (extend with real schema when touched)'
+      tags:
+        - Creator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: creatorId
+        in: path
+        required: true
+        schema:
+          type: string
+  /diagnostic/syllabus/upload-init:
+    post:
+      operationId: postDiagnosticSyllabusUploadInit
+      summary: 'Auto-stubbed: POST /api/v1/diagnostic/syllabus/upload-init (extend with real schema when touched)'
+      tags:
+        - Diagnostic
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /diagnostic/syllabus/{id}/complete:
+    post:
+      operationId: postDiagnosticSyllabusByidComplete
+      summary: 'Auto-stubbed: POST /api/v1/diagnostic/syllabus/{id}/complete (extend with real schema when touched)'
+      tags:
+        - Diagnostic
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /diagnostic/syllabus/{id}/status:
+    get:
+      operationId: getDiagnosticSyllabusByidStatus
+      summary: 'Auto-stubbed: GET /api/v1/diagnostic/syllabus/{id}/status (extend with real schema when touched)'
+      tags:
+        - Diagnostic
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /flashcards/generate:
+    post:
+      operationId: postFlashcardsGenerate
+      summary: 'Auto-stubbed: POST /api/v1/flashcards/generate (extend with real schema when touched)'
+      tags:
+        - Flashcards
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /flashcards:
+    get:
+      operationId: getFlashcards
+      summary: 'Auto-stubbed: GET /api/v1/flashcards (extend with real schema when touched)'
+      tags:
+        - Flashcards
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /flashcards/{id}:
+    get:
+      operationId: getFlashcardsByid
+      summary: 'Auto-stubbed: GET /api/v1/flashcards/{id} (extend with real schema when touched)'
+      tags:
+        - Flashcards
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteFlashcardsByid
+      summary: 'Auto-stubbed: DELETE /api/v1/flashcards/{id} (extend with real schema when touched)'
+      tags:
+        - Flashcards
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /flashcards/{id}/study:
+    post:
+      operationId: postFlashcardsByidStudy
+      summary: 'Auto-stubbed: POST /api/v1/flashcards/{id}/study (extend with real schema when touched)'
+      tags:
+        - Flashcards
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /privacy/export:
+    get:
+      operationId: getPrivacyExport
+      summary: 'Auto-stubbed: GET /api/v1/privacy/export (extend with real schema when touched)'
+      tags:
+        - Privacy
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /privacy/consent:
+    get:
+      operationId: getPrivacyConsent
+      summary: 'Auto-stubbed: GET /api/v1/privacy/consent (extend with real schema when touched)'
+      tags:
+        - Privacy
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      operationId: putPrivacyConsent
+      summary: 'Auto-stubbed: PUT /api/v1/privacy/consent (extend with real schema when touched)'
+      tags:
+        - Privacy
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /privacy/consent/withdraw:
+    post:
+      operationId: postPrivacyConsentWithdraw
+      summary: 'Auto-stubbed: POST /api/v1/privacy/consent/withdraw (extend with real schema when touched)'
+      tags:
+        - Privacy
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /privacy/audit-log:
+    get:
+      operationId: getPrivacyAuditLog
+      summary: 'Auto-stubbed: GET /api/v1/privacy/audit-log (extend with real schema when touched)'
+      tags:
+        - Privacy
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /privacy/breach-notify:
+    post:
+      operationId: postPrivacyBreachNotify
+      summary: 'Auto-stubbed: POST /api/v1/privacy/breach-notify (extend with real schema when touched)'
+      tags:
+        - Privacy
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /interviews/start:
+    post:
+      operationId: postInterviewsStart
+      summary: 'Auto-stubbed: POST /api/v1/interviews/start (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /interviews/analytics:
+    get:
+      operationId: getInterviewsAnalytics
+      summary: 'Auto-stubbed: GET /api/v1/interviews/analytics (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /interviews/{id}/complete:
+    post:
+      operationId: postInterviewsByidComplete
+      summary: 'Auto-stubbed: POST /api/v1/interviews/{id}/complete (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /interviews/{id}/realtime-token:
+    post:
+      operationId: postInterviewsByidRealtimeToken
+      summary: 'Auto-stubbed: POST /api/v1/interviews/{id}/realtime-token (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /interviews/{id}/upload-url:
+    post:
+      operationId: postInterviewsByidUploadUrl
+      summary: 'Auto-stubbed: POST /api/v1/interviews/{id}/upload-url (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /interviews/{id}/process-answer:
+    post:
+      operationId: postInterviewsByidProcessAnswer
+      summary: 'Auto-stubbed: POST /api/v1/interviews/{id}/process-answer (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /interviews/{id}/snapshot:
+    post:
+      operationId: postInterviewsByidSnapshot
+      summary: 'Auto-stubbed: POST /api/v1/interviews/{id}/snapshot (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /interviews/{id}/status:
+    get:
+      operationId: getInterviewsByidStatus
+      summary: 'Auto-stubbed: GET /api/v1/interviews/{id}/status (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /interviews/{id}:
+    get:
+      operationId: getInterviewsByid
+      summary: 'Auto-stubbed: GET /api/v1/interviews/{id} (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteInterviewsByid
+      summary: 'Auto-stubbed: DELETE /api/v1/interviews/{id} (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /interviews:
+    get:
+      operationId: getInterviews
+      summary: 'Auto-stubbed: GET /api/v1/interviews (extend with real schema when touched)'
+      tags:
+        - Interviews
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /journey/adaptations:
+    get:
+      operationId: getJourneyAdaptations
+      summary: 'Auto-stubbed: GET /api/v1/journey/adaptations (extend with real schema when touched)'
+      tags:
+        - Journey
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /learning-paths/explore:
+    get:
+      operationId: getLearningPathsExplore
+      summary: 'Auto-stubbed: GET /api/v1/learning-paths/explore (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /learning-paths/mine:
+    get:
+      operationId: getLearningPathsMine
+      summary: 'Auto-stubbed: GET /api/v1/learning-paths/mine (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /learning-paths/{id}:
+    get:
+      operationId: getLearningPathsByid
+      summary: 'Auto-stubbed: GET /api/v1/learning-paths/{id} (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      operationId: putLearningPathsByid
+      summary: 'Auto-stubbed: PUT /api/v1/learning-paths/{id} (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /learning-paths:
+    post:
+      operationId: postLearningPaths
+      summary: 'Auto-stubbed: POST /api/v1/learning-paths (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /learning-paths/{id}/publish:
+    post:
+      operationId: postLearningPathsByidPublish
+      summary: 'Auto-stubbed: POST /api/v1/learning-paths/{id}/publish (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /learning-paths/{id}/archive:
+    post:
+      operationId: postLearningPathsByidArchive
+      summary: 'Auto-stubbed: POST /api/v1/learning-paths/{id}/archive (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /learning-paths/{id}/items:
+    post:
+      operationId: postLearningPathsByidItems
+      summary: 'Auto-stubbed: POST /api/v1/learning-paths/{id}/items (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /learning-paths/{id}/items/reorder:
+    put:
+      operationId: putLearningPathsByidItemsReorder
+      summary: 'Auto-stubbed: PUT /api/v1/learning-paths/{id}/items/reorder (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /learning-paths/{id}/items/{contentId}:
+    delete:
+      operationId: deleteLearningPathsByidItemsBycontentid
+      summary: 'Auto-stubbed: DELETE /api/v1/learning-paths/{id}/items/{contentId} (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: contentId
+        in: path
+        required: true
+        schema:
+          type: string
+  /learning-paths/{id}/follow:
+    post:
+      operationId: postLearningPathsByidFollow
+      summary: 'Auto-stubbed: POST /api/v1/learning-paths/{id}/follow (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteLearningPathsByidFollow
+      summary: 'Auto-stubbed: DELETE /api/v1/learning-paths/{id}/follow (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /learning-paths/{id}/rate:
+    post:
+      operationId: postLearningPathsByidRate
+      summary: 'Auto-stubbed: POST /api/v1/learning-paths/{id}/rate (extend with real schema when touched)'
+      tags:
+        - LearningPaths
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /legal/privacy-policy:
+    get:
+      operationId: getLegalPrivacyPolicy
+      summary: 'Auto-stubbed: GET /api/v1/legal/privacy-policy (extend with real schema when touched)'
+      tags:
+        - Legal
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /legal/terms-of-service:
+    get:
+      operationId: getLegalTermsOfService
+      summary: 'Auto-stubbed: GET /api/v1/legal/terms-of-service (extend with real schema when touched)'
+      tags:
+        - Legal
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /mindmaps/generate:
+    post:
+      operationId: postMindmapsGenerate
+      summary: 'Auto-stubbed: POST /api/v1/mindmaps/generate (extend with real schema when touched)'
+      tags:
+        - Mindmaps
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /mindmaps:
+    get:
+      operationId: getMindmaps
+      summary: 'Auto-stubbed: GET /api/v1/mindmaps (extend with real schema when touched)'
+      tags:
+        - Mindmaps
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /mindmaps/{id}:
+    get:
+      operationId: getMindmapsByid
+      summary: 'Auto-stubbed: GET /api/v1/mindmaps/{id} (extend with real schema when touched)'
+      tags:
+        - Mindmaps
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteMindmapsByid
+      summary: 'Auto-stubbed: DELETE /api/v1/mindmaps/{id} (extend with real schema when touched)'
+      tags:
+        - Mindmaps
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /note-requests:
+    post:
+      operationId: postNoteRequests
+      summary: 'Auto-stubbed: POST /api/v1/note-requests (extend with real schema when touched)'
+      tags:
+        - NoteRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    get:
+      operationId: getNoteRequests
+      summary: 'Auto-stubbed: GET /api/v1/note-requests (extend with real schema when touched)'
+      tags:
+        - NoteRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /note-requests/mine:
+    get:
+      operationId: getNoteRequestsMine
+      summary: 'Auto-stubbed: GET /api/v1/note-requests/mine (extend with real schema when touched)'
+      tags:
+        - NoteRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /note-requests/{id}:
+    get:
+      operationId: getNoteRequestsByid
+      summary: 'Auto-stubbed: GET /api/v1/note-requests/{id} (extend with real schema when touched)'
+      tags:
+        - NoteRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteNoteRequestsByid
+      summary: 'Auto-stubbed: DELETE /api/v1/note-requests/{id} (extend with real schema when touched)'
+      tags:
+        - NoteRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /note-requests/{id}/upvote:
+    post:
+      operationId: postNoteRequestsByidUpvote
+      summary: 'Auto-stubbed: POST /api/v1/note-requests/{id}/upvote (extend with real schema when touched)'
+      tags:
+        - NoteRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /note-requests/{id}/claim:
+    post:
+      operationId: postNoteRequestsByidClaim
+      summary: 'Auto-stubbed: POST /api/v1/note-requests/{id}/claim (extend with real schema when touched)'
+      tags:
+        - NoteRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /note-requests/{id}/fulfill:
+    post:
+      operationId: postNoteRequestsByidFulfill
+      summary: 'Auto-stubbed: POST /api/v1/note-requests/{id}/fulfill (extend with real schema when touched)'
+      tags:
+        - NoteRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /notes/request-upload:
+    post:
+      operationId: postNotesRequestUpload
+      summary: 'Auto-stubbed: POST /api/v1/notes/request-upload (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /notes/complete-upload:
+    post:
+      operationId: postNotesCompleteUpload
+      summary: 'Auto-stubbed: POST /api/v1/notes/complete-upload (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /notes/request-thumbnail-upload:
+    post:
+      operationId: postNotesRequestThumbnailUpload
+      summary: 'Auto-stubbed: POST /api/v1/notes/request-thumbnail-upload (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /notes/multipart/initiate:
+    post:
+      operationId: postNotesMultipartInitiate
+      summary: 'Auto-stubbed: POST /api/v1/notes/multipart/initiate (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /notes/multipart/complete:
+    post:
+      operationId: postNotesMultipartComplete
+      summary: 'Auto-stubbed: POST /api/v1/notes/multipart/complete (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /notes/multipart/abort:
+    post:
+      operationId: postNotesMultipartAbort
+      summary: 'Auto-stubbed: POST /api/v1/notes/multipart/abort (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /notes/my-notes:
+    get:
+      operationId: getNotesMyNotes
+      summary: 'Auto-stubbed: GET /api/v1/notes/my-notes (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /notes/analytics:
+    get:
+      operationId: getNotesAnalytics
+      summary: 'Auto-stubbed: GET /api/v1/notes/analytics (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /notes/analytics/{id}:
+    get:
+      operationId: getNotesAnalyticsByid
+      summary: 'Auto-stubbed: GET /api/v1/notes/analytics/{id} (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /notes/{id}:
+    put:
+      operationId: putNotesByid
+      summary: 'Auto-stubbed: PUT /api/v1/notes/{id} (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteNotesByid
+      summary: 'Auto-stubbed: DELETE /api/v1/notes/{id} (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /notes/{id}/publish:
+    post:
+      operationId: postNotesByidPublish
+      summary: 'Auto-stubbed: POST /api/v1/notes/{id}/publish (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /notes/{id}/unpublish:
+    post:
+      operationId: postNotesByidUnpublish
+      summary: 'Auto-stubbed: POST /api/v1/notes/{id}/unpublish (extend with real schema when touched)'
+      tags:
+        - Notes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /notifications:
+    get:
+      operationId: getNotifications
+      summary: 'Auto-stubbed: GET /api/v1/notifications (extend with real schema when touched)'
+      tags:
+        - Notifications
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /notifications/unread-count:
+    get:
+      operationId: getNotificationsUnreadCount
+      summary: 'Auto-stubbed: GET /api/v1/notifications/unread-count (extend with real schema when touched)'
+      tags:
+        - Notifications
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /notifications/{id}/read:
+    put:
+      operationId: putNotificationsByidRead
+      summary: 'Auto-stubbed: PUT /api/v1/notifications/{id}/read (extend with real schema when touched)'
+      tags:
+        - Notifications
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /notifications/read-all:
+    post:
+      operationId: postNotificationsReadAll
+      summary: 'Auto-stubbed: POST /api/v1/notifications/read-all (extend with real schema when touched)'
+      tags:
+        - Notifications
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /notifications/{id}:
+    delete:
+      operationId: deleteNotificationsByid
+      summary: 'Auto-stubbed: DELETE /api/v1/notifications/{id} (extend with real schema when touched)'
+      tags:
+        - Notifications
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /notifications/test:
+    post:
+      operationId: postNotificationsTest
+      summary: 'Auto-stubbed: POST /api/v1/notifications/test (extend with real schema when touched)'
+      tags:
+        - Notifications
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /quizzes:
+    get:
+      operationId: getQuizzes
+      summary: 'Auto-stubbed: GET /api/v1/quizzes (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /quizzes/history:
+    get:
+      operationId: getQuizzesHistory
+      summary: 'Auto-stubbed: GET /api/v1/quizzes/history (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /quizzes/request:
+    post:
+      operationId: postQuizzesRequest
+      summary: 'Auto-stubbed: POST /api/v1/quizzes/request (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /quizzes/pending:
+    get:
+      operationId: getQuizzesPending
+      summary: 'Auto-stubbed: GET /api/v1/quizzes/pending (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /quizzes/skill-assessments:
+    get:
+      operationId: getQuizzesSkillAssessments
+      summary: 'Auto-stubbed: GET /api/v1/quizzes/skill-assessments (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /quizzes/trigger/{triggerId}:
+    get:
+      operationId: getQuizzesTriggerBytriggerid
+      summary: 'Auto-stubbed: GET /api/v1/quizzes/trigger/{triggerId} (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: triggerId
+        in: path
+        required: true
+        schema:
+          type: string
+  /quizzes/{id}:
+    get:
+      operationId: getQuizzesByid
+      summary: 'Auto-stubbed: GET /api/v1/quizzes/{id} (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /quizzes/{id}/start:
+    post:
+      operationId: postQuizzesByidStart
+      summary: 'Auto-stubbed: POST /api/v1/quizzes/{id}/start (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /quizzes/{id}/answer:
+    put:
+      operationId: putQuizzesByidAnswer
+      summary: 'Auto-stubbed: PUT /api/v1/quizzes/{id}/answer (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /quizzes/{id}/complete:
+    post:
+      operationId: postQuizzesByidComplete
+      summary: 'Auto-stubbed: POST /api/v1/quizzes/{id}/complete (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /quizzes/{id}/results:
+    get:
+      operationId: getQuizzesByidResults
+      summary: 'Auto-stubbed: GET /api/v1/quizzes/{id}/results (extend with real schema when touched)'
+      tags:
+        - Quizzes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /recommendations/feed:
+    get:
+      operationId: getRecommendationsFeed
+      summary: 'Auto-stubbed: GET /api/v1/recommendations/feed (extend with real schema when touched)'
+      tags:
+        - Recommendations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /recommendations/similar/{id}:
+    get:
+      operationId: getRecommendationsSimilarByid
+      summary: 'Auto-stubbed: GET /api/v1/recommendations/similar/{id} (extend with real schema when touched)'
+      tags:
+        - Recommendations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /recommendations/objective/{objectiveId}:
+    get:
+      operationId: getRecommendationsObjectiveByobjectiveid
+      summary: 'Auto-stubbed: GET /api/v1/recommendations/objective/{objectiveId} (extend with real schema when touched)'
+      tags:
+        - Recommendations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: objectiveId
+        in: path
+        required: true
+        schema:
+          type: string
+  /recommendations/gaps:
+    get:
+      operationId: getRecommendationsGaps
+      summary: 'Auto-stubbed: GET /api/v1/recommendations/gaps (extend with real schema when touched)'
+      tags:
+        - Recommendations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /recommendations/trending/notes:
+    get:
+      operationId: getRecommendationsTrendingNotes
+      summary: 'Auto-stubbed: GET /api/v1/recommendations/trending/notes (extend with real schema when touched)'
+      tags:
+        - Recommendations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /recommendations/trending:
+    get:
+      operationId: getRecommendationsTrending
+      summary: 'Auto-stubbed: GET /api/v1/recommendations/trending (extend with real schema when touched)'
+      tags:
+        - Recommendations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /recommendations/next-actions:
+    get:
+      operationId: getRecommendationsNextActions
+      summary: 'Auto-stubbed: GET /api/v1/recommendations/next-actions (extend with real schema when touched)'
+      tags:
+        - Recommendations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /recommendations/post-quiz:
+    get:
+      operationId: getRecommendationsPostQuiz
+      summary: 'Auto-stubbed: GET /api/v1/recommendations/post-quiz (extend with real schema when touched)'
+      tags:
+        - Recommendations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /social/follow/{userId}:
+    post:
+      operationId: postSocialFollowByuserid
+      summary: 'Auto-stubbed: POST /api/v1/social/follow/{userId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteSocialFollowByuserid
+      summary: 'Auto-stubbed: DELETE /api/v1/social/follow/{userId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /social/followers/{userId}:
+    get:
+      operationId: getSocialFollowersByuserid
+      summary: 'Auto-stubbed: GET /api/v1/social/followers/{userId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+  /social/following/{userId}:
+    get:
+      operationId: getSocialFollowingByuserid
+      summary: 'Auto-stubbed: GET /api/v1/social/following/{userId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+  /social/comments/{commentId}:
+    put:
+      operationId: putSocialCommentsBycommentid
+      summary: 'Auto-stubbed: PUT /api/v1/social/comments/{commentId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: commentId
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteSocialCommentsBycommentid
+      summary: 'Auto-stubbed: DELETE /api/v1/social/comments/{commentId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /social/comments/{commentId}/like:
+    post:
+      operationId: postSocialCommentsBycommentidLike
+      summary: 'Auto-stubbed: POST /api/v1/social/comments/{commentId}/like (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: commentId
+        in: path
+        required: true
+        schema:
+          type: string
+  /social/comments/{commentId}/replies:
+    get:
+      operationId: getSocialCommentsBycommentidReplies
+      summary: 'Auto-stubbed: GET /api/v1/social/comments/{commentId}/replies (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: commentId
+        in: path
+        required: true
+        schema:
+          type: string
+  /social/playlists:
+    post:
+      operationId: postSocialPlaylists
+      summary: 'Auto-stubbed: POST /api/v1/social/playlists (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    get:
+      operationId: getSocialPlaylists
+      summary: 'Auto-stubbed: GET /api/v1/social/playlists (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /social/playlists/{playlistId}:
+    get:
+      operationId: getSocialPlaylistsByplaylistid
+      summary: 'Auto-stubbed: GET /api/v1/social/playlists/{playlistId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: playlistId
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      operationId: putSocialPlaylistsByplaylistid
+      summary: 'Auto-stubbed: PUT /api/v1/social/playlists/{playlistId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    delete:
+      operationId: deleteSocialPlaylistsByplaylistid
+      summary: 'Auto-stubbed: DELETE /api/v1/social/playlists/{playlistId} (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /social/playlists/{playlistId}/items:
+    post:
+      operationId: postSocialPlaylistsByplaylistidItems
+      summary: 'Auto-stubbed: POST /api/v1/social/playlists/{playlistId}/items (extend with real schema when touched)'
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: playlistId
+        in: path
+        required: true
+        schema:
+          type: string
+  /social/playlists/{playlistId}/items/{contentId}:
+    delete:
+      operationId: deleteSocialPlaylistsByplaylistidItemsBycontentid
+      summary: >-
+        Auto-stubbed: DELETE /api/v1/social/playlists/{playlistId}/items/{contentId} (extend with real schema when
+        touched)
+      tags:
+        - Social
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    parameters:
+      - name: playlistId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: contentId
+        in: path
+        required: true
+        schema:
+          type: string
+  /user-inferences:
+    get:
+      operationId: getUserInferences
+      summary: 'Auto-stubbed: GET /api/v1/user-inferences (extend with real schema when touched)'
+      tags:
+        - UserInferences
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /user-inferences/{key}/resolve:
+    put:
+      operationId: putUserInferencesBykeyResolve
+      summary: 'Auto-stubbed: PUT /api/v1/user-inferences/{key}/resolve (extend with real schema when touched)'
+      tags:
+        - UserInferences
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+  /website/feedback:
+    post:
+      operationId: postWebsiteFeedback
+      summary: 'Auto-stubbed: POST /api/v1/website/feedback (extend with real schema when touched)'
+      tags:
+        - Website
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /youtube/import/video:
+    post:
+      operationId: postYoutubeImportVideo
+      summary: 'Auto-stubbed: POST /api/v1/youtube/import/video (extend with real schema when touched)'
+      tags:
+        - Youtube
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /youtube/import/channel:
+    post:
+      operationId: postYoutubeImportChannel
+      summary: 'Auto-stubbed: POST /api/v1/youtube/import/channel (extend with real schema when touched)'
+      tags:
+        - Youtube
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /youtube/import/playlist:
+    post:
+      operationId: postYoutubeImportPlaylist
+      summary: 'Auto-stubbed: POST /api/v1/youtube/import/playlist (extend with real schema when touched)'
+      tags:
+        - Youtube
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /youtube/search:
+    get:
+      operationId: getYoutubeSearch
+      summary: 'Auto-stubbed: GET /api/v1/youtube/search (extend with real schema when touched)'
+      tags:
+        - Youtube
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /youtube/imports:
+    get:
+      operationId: getYoutubeImports
+      summary: 'Auto-stubbed: GET /api/v1/youtube/imports (extend with real schema when touched)'
+      tags:
+        - Youtube
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'

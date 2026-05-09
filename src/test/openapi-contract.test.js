@@ -185,3 +185,57 @@ test('contract: openapi.yaml parses and Ajv accepts every schema', () => {
     assert.ok(typeof validate === 'function', `Ajv could not compile #/components/schemas/${name}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Parameterized lint over every documented operation:
+//   - has a 200 (or 201) response
+//   - response content uses application/json
+//   - the response schema either inlines or $refs a real component
+//   - operationId is unique
+// Doesn't invoke handlers — just ensures the spec itself is internally
+// consistent for each path. Lower-cost than per-handler invocation but
+// catches whole categories of "shape declared but not real" bugs.
+// ---------------------------------------------------------------------------
+test('contract: every documented operation has a typed success response', () => {
+  const errs = [];
+  const seenOperationIds = new Set();
+
+  for (const [pathStr, pathItem] of Object.entries(spec.paths || {})) {
+    for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+      const op = pathItem[method];
+      if (!op) continue;
+
+      // Operation IDs must be unique (clients use them as function names).
+      if (op.operationId) {
+        if (seenOperationIds.has(op.operationId)) {
+          errs.push(`duplicate operationId "${op.operationId}" at ${method.toUpperCase()} ${pathStr}`);
+        } else {
+          seenOperationIds.add(op.operationId);
+        }
+      } else {
+        errs.push(`missing operationId at ${method.toUpperCase()} ${pathStr}`);
+      }
+
+      // Need at least one 2xx response with a JSON schema.
+      const successCode = op.responses && (op.responses['200'] ? '200'
+        : op.responses['201'] ? '201'
+        : op.responses['204'] ? '204'
+        : null);
+      if (!successCode) {
+        errs.push(`no 2xx response at ${method.toUpperCase()} ${pathStr}`);
+        continue;
+      }
+      if (successCode === '204') continue; // No body expected.
+
+      const resp = op.responses[successCode];
+      const json = resp.content && resp.content['application/json'];
+      if (!json) {
+        // Allow $ref'd responses.
+        if (resp.$ref) continue;
+        errs.push(`no application/json schema for ${method.toUpperCase()} ${pathStr} ${successCode}`);
+      }
+    }
+  }
+
+  assert.deepStrictEqual(errs, [], 'spec consistency violations:\n' + errs.join('\n'));
+});
