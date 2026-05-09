@@ -13,6 +13,27 @@ function classifyCalibration(delta) {
   return 'well-calibrated';
 }
 
+// Onboarding stores timeline as a human-friendly string like "3_months".
+// The plan generator treats timeline as a number of WEEKS for arithmetic
+// (cap = timeline * weeklyCommitHours * buffer). Convert here so the
+// generator never sees a string and produces NaN-filled allocations.
+function timelineToWeeks(raw) {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+  if (typeof raw === 'string') {
+    const m = raw.match(/^(\d+)\s*_?(week|month|year)s?$/i);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      const unit = m[2].toLowerCase();
+      if (unit.startsWith('week'))  return n;
+      if (unit.startsWith('month')) return Math.round(n * 4.345);
+      if (unit.startsWith('year'))  return Math.round(n * 52);
+    }
+    const asNum = parseInt(raw, 10);
+    if (Number.isFinite(asNum) && asNum > 0) return asNum;
+  }
+  return 12; // sensible default = ~3 months
+}
+
 function buildContractInput(attempt, objective, companyProfile) {
   const resultsObj = attempt.results instanceof Map
     ? Object.fromEntries(attempt.results)
@@ -44,8 +65,10 @@ function buildContractInput(attempt, objective, companyProfile) {
     objectiveType: objective.objectiveType,
     specificsCanonical: objective.specificsCanonical || objective.specifics || {},
     companyProfile,
-    timeline: objective.timeline || 8,
-    weeklyCommitHours: objective.weeklyCommitHours || 5,
+    timeline: timelineToWeeks(objective.timeline),
+    weeklyCommitHours: Number.isFinite(objective.weeklyCommitHours) && objective.weeklyCommitHours > 0
+      ? objective.weeklyCommitHours
+      : 5,
     topicResults,
     userMilestoneHints: objective.userMilestoneHints || [],
   };
