@@ -135,6 +135,21 @@ class KnowledgeService {
       data: { topic: quiz.topic, score: quizScore, attemptId: attemptId.toString() },
     });
 
+    // Update plan task progress for quiz completion (best-effort).
+    // The task's topic.canonicalName is set at plan-generation time from the
+    // same topic taxonomy as the quiz's `topic`, so a string match is correct.
+    try {
+      const planProgressService = require('./plan/planProgressService');
+      await planProgressService.onQuizComplete({
+        userId,
+        quizId: String(quiz._id),
+        attemptId: String(attempt._id),
+        topic: quiz.topic,
+      });
+    } catch (err) {
+      console.warn('[knowledgeService] planProgressService.onQuizComplete failed:', err.message);
+    }
+
     return profile;
   }
 
