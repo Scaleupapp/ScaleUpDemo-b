@@ -124,12 +124,12 @@ async function uploadVoiceAnswer(req, res) {
 async function getResults(req, res) {
   try {
     const attempt = await DiagnosticAttempt.findById(req.params.attemptId);
-    if (!attempt) return res.status(404).json({ error: 'attempt_not_found' });
+    if (!attempt) return res.status(404).json(apiResponse.error('attempt_not_found'));
     // The auth middleware exposes the authenticated user as `req.user.userId`,
     // not `req.user.id`. Comparing against `.id` (which is undefined) used to
     // 403 every poll, leaving iOS stuck on the "Generating insights" screen.
     if (String(attempt.userId) !== String(req.user.userId)) {
-      return res.status(403).json({ error: 'forbidden' });
+      return res.status(403).json(apiResponse.error('forbidden'));
     }
 
     // Resolve display names from TopicTaxonomy (canonical → display).
@@ -179,7 +179,10 @@ async function getResults(req, res) {
       responseBody.previousAttemptId = attempt.previousAttemptId;
     }
 
-    return res.status(200).json(responseBody);
+    // Wrap in the standard {success, data} envelope — iOS APIClient
+    // strict-decodes that shape and otherwise treats the response as
+    // un-decodable, keeping the user stuck on the polling screen.
+    return res.status(200).json(apiResponse.success(responseBody));
   } catch (err) {
     console.error('[diagnosticController.getResults]', err);
     return res.status(500).json({ error: 'internal_error' });
