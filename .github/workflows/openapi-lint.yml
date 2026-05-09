@@ -1,0 +1,45 @@
+name: OpenAPI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'openapi.yaml'
+      - 'src/controllers/**'
+      - 'src/routes/**'
+      - 'src/test/openapi-contract.test.js'
+      - '.github/workflows/openapi-lint.yml'
+  pull_request:
+    paths:
+      - 'openapi.yaml'
+      - 'src/controllers/**'
+      - 'src/routes/**'
+      - 'src/test/openapi-contract.test.js'
+
+jobs:
+  lint:
+    name: Lint openapi.yaml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Redocly CLI
+        run: npm install --no-save @redocly/cli@^2
+      - name: Lint
+        run: npx redocly lint openapi.yaml --max-problems 200
+
+  contract-test:
+    name: Contract tests (response shape vs spec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - name: Run contract tests
+        env:
+          OPENAI_API_KEY: stub
+        run: node --test src/test/openapi-contract.test.js

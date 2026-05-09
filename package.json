@@ -9,7 +9,9 @@
     "workers": "node src/workers/index.js",
     "migrate:youtube-to-s3": "node scripts/migrateYoutubeToS3.js",
     "seed:content": "node scripts/seedContent.js",
-    "test": "node scripts/run-tests.js"
+    "test": "node scripts/run-tests.js",
+    "openapi:lint": "redocly lint openapi.yaml --max-problems 200",
+    "openapi:contract-test": "node scripts/run-tests.js src/test/openapi-contract.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
@@ -22,6 +24,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
+    "express-openapi-validator": "^5.6.2",
     "firebase-admin": "^13.8.0",
     "google-auth-library": "^9.14.0",
     "googleapis": "^144.0.0",
@@ -41,7 +44,12 @@
     "youtube-transcript": "^1.2.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "@redocly/cli": "^2.30.4",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "js-yaml": "^4.1.1",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2"
   },
   "overrides": {
     "protobufjs": "^7.5.5",

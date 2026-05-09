@@ -1,20 +1,29 @@
 openapi: 3.1.0
 info:
   title: ScaleUp Backend API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Authoritative backend API contract. This file is the single source of
-    truth for request/response shapes between the backend and the iOS /
-    Android RN clients. When you add or change an endpoint, update this
-    file in the same PR — clients regenerate their typed bindings from here.
+    Source of truth for request/response shapes between the backend and the
+    iOS / Android RN clients. Update this file in the same PR as any wire
+    shape change so client type generators and runtime validators stay in
+    sync.
 
-    Currently documents the highest-risk surfaces (diagnostic + plan +
-    onboarding) — extend incrementally as endpoints get touched.
+    ## Coverage status
+    - **Documented** (full schemas): auth, onboarding, objectives, diagnostic,
+      plan, journey, progress, users, knowledge, dashboard.
+    - **Not yet documented**: admin, aiTutor, audioSummaries, colleges,
+      competition, content, creator, diagnosticAdmin, flashcards, gdpr,
+      interviews, learningPaths, legal, mindmaps, noteRequests, notes,
+      notifications, quizzes, recommendations, social, userInferences,
+      youtube, website. The runtime validator is configured to skip
+      undocumented paths so adoption is incremental — extend this file as
+      you touch those endpoints.
 
-    Tooling:
-      - iOS:     https://github.com/apple/swift-openapi-generator
-      - RN:      https://github.com/drwpow/openapi-typescript
-      - Backend: see test/openapi-contract.test.js (planned)
+    ## Tooling
+    - iOS:     https://github.com/apple/swift-openapi-generator
+    - RN:      https://github.com/drwpow/openapi-typescript
+    - Backend: express-openapi-validator middleware in src/app.js
+    - Lint:    `npx redocly lint openapi.yaml`
 
 servers:
   - url: https://api.scaleupapp.club/api/v1
@@ -25,6 +34,28 @@ servers:
 security:
   - BearerAuth: []
 
+tags:
+  - name: Auth
+    description: Registration, login, OTP, password reset
+  - name: Onboarding
+    description: Step-by-step user onboarding
+  - name: Objectives
+    description: Learning objectives (one per user)
+  - name: Diagnostic
+    description: Day-1 diagnostic + recalibration
+  - name: Plan
+    description: Personalised learning plan
+  - name: Journey
+    description: Active learning journey orchestration
+  - name: Progress
+    description: Activity history, stats, insights
+  - name: Users
+    description: User profile + account management
+  - name: Knowledge
+    description: Knowledge profile + topic mastery
+  - name: Dashboard
+    description: Home dashboard aggregate
+
 components:
   securitySchemes:
     BearerAuth:
@@ -32,12 +63,49 @@ components:
       scheme: bearer
       bearerFormat: JWT
 
+  responses:
+    Unauthorized:
+      description: Missing or invalid auth token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
+    Forbidden:
+      description: Authenticated but not allowed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
+    Conflict:
+      description: |
+        Domain-level conflict. May include a `code` field (stable machine
+        identifier) and a `resumeStep` field (onboarding step to resume).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
+    RateLimited:
+      description: Rate limited
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
+
   schemas:
+    # =====================================================================
+    # Envelopes + primitives
+    # =====================================================================
     ApiSuccessEnvelope:
       type: object
-      required: [success, data]
+      required: [success]
       properties:
-        success: { type: boolean, enum: [true] }
+        success: { const: true }
         message: { type: string }
         data:    { description: Endpoint-specific payload }
 
@@ -45,32 +113,119 @@ components:
       type: object
       required: [success]
       properties:
-        success:    { type: boolean, enum: [false] }
+        success:    { const: false }
         error:      { type: string, description: User-facing message }
         message:    { type: string, description: Legacy alias for error }
-        code:       { type: string, description: Stable machine code (e.g. NEEDS_ONBOARDING) }
-        reason:     { type: string, description: Internal classification (e.g. EMPTY_SPECIFICS) }
+        code:       { type: string, description: Stable machine code (NEEDS_ONBOARDING / NEEDS_RECALIBRATION) }
+        reason:     { type: string, description: Internal classification }
         resumeStep:
           type: integer
           minimum: 1
           maximum: 5
           description: |
-            When `code: NEEDS_ONBOARDING` is returned, the onboarding step the
-            client should drop the user back into. 3 = objective+specifics,
-            5 = topic ratings. Falls back to step 1 if absent.
+            When `code: NEEDS_ONBOARDING`, the onboarding step the client should drop the user into.
+            3 = objective+specifics, 5 = topic ratings.
+
+    Tokens:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken:  { type: string }
+        refreshToken: { type: string }
 
     SelfRating:
       type: string
       enum: [novice, familiar, proficient, expert, unsure]
 
+    ProficiencyBand:
+      type: string
+      enum: [novice, familiar, proficient, expert]
+
+    # =====================================================================
+    # User
+    # =====================================================================
+    User:
+      type: object
+      required: [_id, onboardingComplete, diagnosticComplete]
+      properties:
+        _id:                 { type: string }
+        email:               { type: string, format: email }
+        phone:               { type: string }
+        firstName:           { type: string }
+        lastName:            { type: string }
+        role:                { type: string, enum: [user, creator, admin] }
+        avatarUrl:           { type: [string, 'null'] }
+        onboardingStep:      { type: integer, minimum: 1, maximum: 5 }
+        onboardingComplete:  { type: boolean }
+        diagnosticComplete:  { type: boolean }
+        needsCalibration:    { type: boolean }
+        createdAt:           { type: string, format: date-time }
+
+    AuthResult:
+      type: object
+      required: [user, accessToken, refreshToken]
+      properties:
+        user:         { $ref: '#/components/schemas/User' }
+        accessToken:  { type: string }
+        refreshToken: { type: string }
+
+    # =====================================================================
+    # Objective + onboarding
+    # =====================================================================
+    Specifics:
+      type: object
+      properties:
+        examName:      { type: string }
+        targetSkill:   { type: string }
+        targetRole:    { type: string }
+        targetCompany: { type: string }
+        fromDomain:    { type: string }
+        toDomain:      { type: string }
+      additionalProperties: true
+
+    UserObjective:
+      type: object
+      required: [_id, userId, objectiveType, status]
+      properties:
+        _id:                  { type: string }
+        userId:               { type: string }
+        objectiveType:
+          type: string
+          enum: [exam_preparation, upskilling, interview_preparation, career_switch, casual_learning, networking, academic_excellence]
+        specifics:            { $ref: '#/components/schemas/Specifics' }
+        specificsCanonical:   { $ref: '#/components/schemas/Specifics' }
+        timeline:             { type: string }
+        targetDate:           { type: [string, 'null'], format: date-time }
+        currentLevel:         { type: string, enum: [beginner, intermediate, advanced] }
+        weeklyCommitHours:    { type: number, minimum: 0 }
+        preferredLearningStyle: { type: string }
+        topicsOfInterest:
+          type: array
+          items:
+            type: object
+            required: [canonicalName, name]
+            properties:
+              canonicalName: { type: string }
+              name:          { type: string }
+              source:        { type: string }
+              isFutureProofing: { type: boolean }
+        topicSelfRatings:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/SelfRating' }
+          description: Map of canonicalName → SelfRating
+        status:               { type: string, enum: [active, paused, completed] }
+        isPrimary:            { type: boolean }
+        needsCalibration:     { type: boolean }
+
+    # =====================================================================
+    # Diagnostic
+    # =====================================================================
     DiagnosticAttemptStart:
       type: object
       required: [attemptId, flowType, competenciesToAssess]
       properties:
         attemptId: { type: string }
-        flowType:
-          type: string
-          enum: [new_user, recalibration]
+        flowType:  { type: string, enum: [new_user, recalibration] }
         totalEstimatedQuestions: { type: integer, minimum: 0 }
         estimatedDurationSec:    { type: integer, minimum: 0 }
         competenciesToAssess:
@@ -82,12 +237,92 @@ components:
               name:        { type: string }
               questionCap: { type: integer, minimum: 0 }
 
+    DiagnosticOption:
+      type: object
+      required: [key, text]
+      properties:
+        key:  { type: string }
+        text: { type: string }
+
+    DiagnosticQuestion:
+      type: object
+      required: [_id, competency, difficulty, prompt, options]
+      properties:
+        _id:                 { type: string }
+        competency:          { type: string, description: Display name }
+        canonicalCompetency: { type: string, description: Canonical key }
+        difficulty:          { type: string, enum: [easy, medium, hard] }
+        prompt:              { type: string }
+        options:
+          type: array
+          items: { $ref: '#/components/schemas/DiagnosticOption' }
+        type:                { type: string, enum: [mcq, voice], default: mcq }
+
+    DiagnosticNextQuestion:
+      type: object
+      properties:
+        question: { $ref: '#/components/schemas/DiagnosticQuestion' }
+        done:     { type: boolean }
+        progress:
+          type: object
+          properties:
+            current: { type: integer, minimum: 0 }
+            total:   { type: integer, minimum: 0 }
+
+    DiagnosticInsights:
+      type: object
+      properties:
+        hero:           { type: string }
+        calibration:    { type: string }
+        patterns:
+          type: array
+          items: { type: string }
+        topicTakeaways:
+          type: object
+          additionalProperties: { type: string }
+        planHeadline:   { type: string }
+
+    DiagnosticResult:
+      type: object
+      required: [competency, score, band]
+      properties:
+        competency:          { type: string }
+        canonicalCompetency: { type: string }
+        band:                { $ref: '#/components/schemas/ProficiencyBand' }
+        score:               { type: integer, minimum: 0, maximum: 100 }
+        calibrationDelta:    { type: integer }
+        calibrationClass:    { type: string, enum: [well-calibrated, overestimates, undersells] }
+        questionsAsked:      { type: integer, minimum: 0 }
+        displayName:         { type: string }
+        selfRating:          { $ref: '#/components/schemas/SelfRating' }
+        strongestMoment:     { type: string }
+        stretchMoment:       { type: string }
+        missedDifficulties:
+          type: array
+          items: { type: string }
+
+    DiagnosticResults:
+      type: object
+      required: [attemptId, status, results]
+      properties:
+        attemptId:      { type: string }
+        status:         { type: string, enum: [in_progress, completed, abandoned] }
+        insightsStatus: { type: string, enum: [pending, generating, completed, fallback, error] }
+        insights:       { $ref: '#/components/schemas/DiagnosticInsights' }
+        planStatus:     { type: string, enum: [pending, generating, ready, failed, queued] }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/DiagnosticResult' }
+
+    # =====================================================================
+    # Plan
+    # =====================================================================
     PlanAllocation:
       type: object
       required: [topic, hoursAllocated, focusActivity]
       properties:
-        topic:           { type: string, description: Display name (resolved from taxonomy) }
-        canonicalTopic:  { type: string, description: Canonical/slug name }
+        topic:           { type: string }
+        canonicalTopic:  { type: string }
         hoursAllocated:  { type: number, minimum: 0 }
         focusActivity:   { type: string }
 
@@ -120,7 +355,8 @@ components:
         totalWeeks:           { type: integer, minimum: 0 }
         totalHours:           { type: number,  minimum: 0 }
         milestoneCount:       { type: integer, minimum: 0 }
-        bufferRecommendation: { type: string, nullable: true }
+        bufferRecommendation:
+          type: [string, 'null']
         weeklySchedule:
           type: array
           items: { $ref: '#/components/schemas/PlanWeeklyEntry' }
@@ -135,17 +371,661 @@ components:
       type: object
       required: [status]
       properties:
-        status:
-          type: string
-          enum: [pending, generating, ready, failed]
-        planId:    { type: string, nullable: true }
-        source:    { type: string, nullable: true }
-        updatedAt: { type: string, format: date-time, nullable: true }
+        status:    { type: string, enum: [pending, generating, ready, failed] }
+        planId:    { type: [string, 'null'] }
+        source:    { type: [string, 'null'] }
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+
+    # =====================================================================
+    # Journey
+    # =====================================================================
+    JourneyDay:
+      type: object
+      properties:
+        date:        { type: string, format: date }
+        completed:   { type: boolean }
+        activities:
+          type: array
+          items: { type: object, additionalProperties: true }
+
+    Journey:
+      type: object
+      required: [_id, userId, status]
+      properties:
+        _id:        { type: string }
+        userId:     { type: string }
+        status:     { type: string, enum: [active, paused, completed] }
+        weekNumber: { type: integer }
+        startedAt:  { type: string, format: date-time }
+      additionalProperties: true
 
 paths:
+  # =====================================================================
+  # Auth
+  # =====================================================================
+  /auth/register:
+    post:
+      operationId: authRegister
+      summary: Register a new user with email + password
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, firstName]
+              properties:
+                email:     { type: string, format: email }
+                password:  { type: string, minLength: 8, maxLength: 128 }
+                firstName: { type: string, minLength: 1 }
+                lastName:  { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/login:
+    post:
+      operationId: authLogin
+      summary: Email + password login
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/google:
+    post:
+      operationId: authGoogle
+      summary: Google ID-token sign-in (creates account if new)
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                googleToken: { type: string }
+                idToken:     { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/refresh-token:
+    post:
+      operationId: authRefreshToken
+      summary: Exchange a refresh token for a new access token
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Tokens' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/forgot-password:
+    post:
+      operationId: authForgotPassword
+      summary: Send a password-reset OTP to the email
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: OTP sent (no-op if email is unknown)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/reset-password:
+    post:
+      operationId: authResetPassword
+      summary: Reset password using an OTP
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, otp, newPassword]
+              properties:
+                email:       { type: string, format: email }
+                otp:         { type: string, minLength: 6, maxLength: 6 }
+                newPassword: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        '200':
+          description: Password updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/phone/send-otp:
+    post:
+      operationId: authSendPhoneOTP
+      summary: Send a phone-verification OTP via SMS
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, description: E.164 format }
+      responses:
+        '200':
+          description: OTP sent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/phone/verify-otp:
+    post:
+      operationId: authVerifyPhoneOTP
+      summary: Verify the phone OTP and return tokens (creates account if new)
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, otp]
+              properties:
+                phone: { type: string }
+                otp:   { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      operationId: authLogout
+      summary: Invalidate the current refresh token
+      tags: [Auth]
+      responses:
+        '200': { description: Logged out, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/reactivate:
+    post:
+      operationId: authReactivate
+      summary: Reactivate a soft-deleted account
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthResult' }
+
+  # =====================================================================
+  # Onboarding
+  # =====================================================================
+  /onboarding:
+    get:
+      operationId: getOnboardingStatus
+      summary: Current onboarding state for the authenticated user
+      tags: [Onboarding]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          step:                { type: integer, minimum: 1, maximum: 5 }
+                          complete:            { type: boolean }
+                          objective:           { $ref: '#/components/schemas/UserObjective' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /onboarding/profile:
+    put:
+      operationId: updateOnboardingProfile
+      summary: Step 1 — set profile (firstName, lastName)
+      tags: [Onboarding]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstName]
+              properties:
+                firstName: { type: string }
+                lastName:  { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /onboarding/background:
+    put:
+      operationId: updateOnboardingBackground
+      summary: Step 2 — set education + work entries
+      tags: [Onboarding]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                educationEntries:
+                  type: array
+                  items: { type: object, additionalProperties: true }
+                workEntries:
+                  type: array
+                  items: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /onboarding/objective:
+    post:
+      operationId: setOnboardingObjective
+      summary: Step 3 — set learning objective + specifics
+      tags: [Onboarding]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectiveType]
+              properties:
+                objectiveType:
+                  type: string
+                  enum: [exam_preparation, upskilling, interview_preparation, career_switch, casual_learning, networking, academic_excellence]
+                specifics: { $ref: '#/components/schemas/Specifics' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UserObjective' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /onboarding/preferences:
+    put:
+      operationId: updateOnboardingPreferences
+      summary: Step 4 — preferences (timeline, level, weekly hours, learning style)
+      tags: [Onboarding]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeline:               { type: string }
+                currentLevel:           { type: string, enum: [beginner, intermediate, advanced] }
+                weeklyCommitHours:      { type: number, minimum: 0 }
+                preferredLearningStyle: { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /onboarding/interests:
+    put:
+      operationId: updateOnboardingInterests
+      summary: Step 5 — selected topics + self-ratings
+      tags: [Onboarding]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topicsOfInterest, topicSelfRatings]
+              properties:
+                topicsOfInterest:
+                  type: array
+                  items: { type: object, additionalProperties: true }
+                topicSelfRatings:
+                  type: object
+                  additionalProperties: { $ref: '#/components/schemas/SelfRating' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /onboarding/topics/suggest:
+    post:
+      operationId: suggestOnboardingTopics
+      summary: Suggest topics for the user's objective (LLM-backed)
+      tags: [Onboarding]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectiveType]
+              properties:
+                objectiveType: { type: string }
+                specifics:     { $ref: '#/components/schemas/Specifics' }
+      responses:
+        '200':
+          description: Suggested topics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          topics:
+                            type: array
+                            items: { type: object, additionalProperties: true }
+
+  /onboarding/complete:
+    post:
+      operationId: completeOnboarding
+      summary: Final step — commit all collected onboarding data and mark user onboarded
+      tags: [Onboarding]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectiveType, timeline, currentLevel, weeklyCommitHours, topicsOfInterest, topicSelfRatings]
+              properties:
+                objectiveType:          { type: string }
+                specifics:              { $ref: '#/components/schemas/Specifics' }
+                timeline:               { type: string }
+                currentLevel:           { type: string }
+                weeklyCommitHours:      { type: number }
+                preferredLearningStyle: { type: string }
+                targetDate:             { type: string }
+                topicsOfInterest:
+                  type: array
+                  items: { type: object, additionalProperties: true }
+                topicSelfRatings:
+                  type: object
+                  additionalProperties: { $ref: '#/components/schemas/SelfRating' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [userObjectiveId]
+                properties:
+                  userObjectiveId: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # =====================================================================
+  # Objectives
+  # =====================================================================
+  /objectives:
+    get:
+      operationId: getObjectives
+      summary: List the authenticated user's objectives
+      tags: [Objectives]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/UserObjective' }
+    post:
+      operationId: createObjective
+      summary: Create a new objective
+      tags: [Objectives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserObjective' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UserObjective' }
+
+  /objectives/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: updateObjective
+      summary: Update an objective
+      tags: [Objectives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserObjective' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UserObjective' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /objectives/{id}/pause:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: pauseObjective
+      summary: Pause an objective
+      tags: [Objectives]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /objectives/{id}/resume:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: resumeObjective
+      summary: Resume a paused objective
+      tags: [Objectives]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /objectives/{id}/set-primary:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: setPrimaryObjective
+      summary: Promote an objective to be the primary one
+      tags: [Objectives]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /objectives/{id}/activate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: activateObjective
+      summary: Reactivate a completed/paused objective
+      tags: [Objectives]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /objectives/{id}/analyze:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: analyzeObjective
+      summary: Run LLM-driven analysis on the objective
+      tags: [Objectives]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /objectives/{id}/brief:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getObjectiveBrief
+      summary: Detailed brief for an objective
+      tags: [Objectives]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  # =====================================================================
+  # Diagnostic
+  # =====================================================================
+  /diagnostic/synthesis:
+    get:
+      operationId: getDiagnosticSynthesis
+      summary: E1 synthesis screen payload (for existing-user re-entry)
+      tags: [Diagnostic]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: true
+
   /diagnostic/start:
     post:
-      summary: Start a new diagnostic attempt for the authenticated user
+      operationId: startDiagnostic
+      summary: Start a new diagnostic attempt
       tags: [Diagnostic]
       responses:
         '200':
@@ -158,32 +1038,239 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/DiagnosticAttemptStart' }
-        '409':
-          description: |
-            User is not ready to start a diagnostic. The `code` field is the
-            stable machine code clients should branch on:
-              - NEEDS_ONBOARDING — user has no objective or empty specifics;
-                redirect to the onboarding flow.
-              - NEEDS_RECALIBRATION — taxonomy/data is missing in a recoverable
-                way; ask the user to retry.
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /diagnostic/{attemptId}/self-rating:
+    parameters:
+      - { name: attemptId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: submitDiagnosticSelfRating
+      summary: Submit per-topic self-ratings for an attempt
+      tags: [Diagnostic]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ratings]
+              properties:
+                ratings:
+                  type: object
+                  additionalProperties: { $ref: '#/components/schemas/SelfRating' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+        '503':
+          description: Pool assembly transient failure
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
 
+  /diagnostic/{attemptId}/next-question:
+    parameters:
+      - { name: attemptId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getDiagnosticNextQuestion
+      summary: Fetch the next adaptive question
+      tags: [Diagnostic]
+      responses:
+        '200':
+          description: Either a question, or done
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DiagnosticNextQuestion' }
+
+  /diagnostic/{attemptId}/answer:
+    parameters:
+      - { name: attemptId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: submitDiagnosticAnswer
+      summary: Submit an MCQ answer
+      tags: [Diagnostic]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [questionId, selectedAnswer]
+              properties:
+                questionId:     { type: string }
+                selectedAnswer: { type: string }
+                timeTaken:      { type: number, minimum: 0 }
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties: { ack: { const: true } }
+
+  /diagnostic/{attemptId}/finish:
+    parameters:
+      - { name: attemptId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: finishDiagnostic
+      summary: Finalise the attempt; computes results + insights
+      tags: [Diagnostic]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DiagnosticResults' }
+
+  /diagnostic/{attemptId}/results:
+    parameters:
+      - { name: attemptId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getDiagnosticResults
+      summary: Fetch results (poll while insights are generating)
+      tags: [Diagnostic]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DiagnosticResults' }
+
+  /diagnostic/{attemptId}/abandon:
+    parameters:
+      - { name: attemptId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: abandonDiagnostic
+      summary: Abandon an attempt (3-tier policy based on completion %)
+      tags: [Diagnostic]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /diagnostic/recalibration/eligible:
+    get:
+      operationId: getRecalibrationEligibility
+      summary: Check whether the user is eligible for re-calibration
+      tags: [Diagnostic]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [eligible]
+                        properties:
+                          eligible:        { type: boolean }
+                          reason:          { type: string }
+                          daysSinceLast:   { type: integer }
+                          eligibleTopics:
+                            type: array
+                            items: { type: string }
+
+  /diagnostic/recalibration/start:
+    post:
+      operationId: startRecalibration
+      summary: Start a recalibration attempt
+      tags: [Diagnostic]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userFlaggedTopics:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DiagnosticAttemptStart' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /diagnostic/voice/upload:
+    post:
+      operationId: uploadVoiceAnswer
+      summary: Upload a voice-question audio answer (multipart)
+      tags: [Diagnostic]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio, attemptId, questionId, canonicalCompetency]
+              properties:
+                audio:                { type: string, format: binary }
+                attemptId:            { type: string }
+                questionId:           { type: string }
+                canonicalCompetency:  { type: string }
+      responses:
+        '200':
+          description: Transcribed + scored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          transcript: { type: string }
+                          score:      { type: number }
+                          band:       { $ref: '#/components/schemas/ProficiencyBand' }
+
+  # =====================================================================
+  # Plan
+  # =====================================================================
   /plan/status:
     get:
-      summary: Check whether the authenticated user has a generated plan
+      operationId: getPlanStatus
+      summary: Plan-generation status for the authenticated user
       tags: [Plan]
       responses:
         '200':
-          description: Status payload
+          description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PlanStatus' }
 
   /plan/current:
     get:
-      summary: Fetch the user's currently active plan
+      operationId: getPlanCurrent
+      summary: The user's currently active plan
       tags: [Plan]
       responses:
         '200':
@@ -191,11 +1278,356 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PlanCurrent' }
-        '404':
-          description: No active plan exists yet
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # =====================================================================
+  # Journey
+  # =====================================================================
+  /journey:
+    get:
+      operationId: getActiveJourney
+      summary: The user's active journey
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/ApiSuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/Journey' } } }] } } } }
+
+  /journey/generate:
+    post:
+      operationId: generateJourney
+      summary: Generate (or regenerate) a journey from the current plan
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /journey/today:
+    get:
+      operationId: getTodayPlan
+      summary: Today's activities
+      tags: [Journey]
+      responses:
+        '200':
+          description: OK
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message: { type: string }
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/JourneyDay' }
+
+  /journey/week/{weekNumber}:
+    parameters:
+      - { name: weekNumber, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      operationId: getWeekPlan
+      summary: A specific week's plan
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /journey/pause:
+    put:
+      operationId: pauseJourney
+      summary: Pause the active journey
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /journey/resume:
+    put:
+      operationId: resumeJourney
+      summary: Resume the paused journey
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /journey/milestones:
+    get:
+      operationId: getMilestones
+      summary: All milestones for the active journey
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+    post:
+      operationId: addMilestone
+      summary: Add a user-defined milestone
+      tags: [Journey]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlanMilestone' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /journey/milestones/{milestoneId}:
+    parameters:
+      - { name: milestoneId, in: path, required: true, schema: { type: string } }
+    delete:
+      operationId: deleteMilestone
+      summary: Delete a milestone
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /journey/progress:
+    get:
+      operationId: getJourneyProgress
+      summary: Progress summary across the journey
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /journey/dashboard:
+    get:
+      operationId: getJourneyDashboard
+      summary: Journey-tab dashboard payload
+      tags: [Journey]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /journey/assignment/complete:
+    put:
+      operationId: completeJourneyAssignment
+      summary: Mark a journey assignment as complete
+      tags: [Journey]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignmentId]
+              properties:
+                assignmentId: { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  # =====================================================================
+  # Progress
+  # =====================================================================
+  /progress/history:
+    get:
+      operationId: getProgressHistory
+      summary: Lifetime activity history
+      tags: [Progress]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /progress/stats:
+    get:
+      operationId: getProgressStats
+      summary: Aggregate stats (totals, streaks, time spent)
+      tags: [Progress]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /progress/activity-heatmap:
+    get:
+      operationId: getActivityHeatmap
+      summary: Per-day activity heatmap
+      tags: [Progress]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /progress/timeline:
+    get:
+      operationId: getProgressTimeline
+      summary: Chronological timeline of completions
+      tags: [Progress]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /progress/insights:
+    get:
+      operationId: getProgressInsights
+      summary: Insights derived from recent activity
+      tags: [Progress]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /progress/{contentId}:
+    parameters:
+      - { name: contentId, in: path, required: true, schema: { type: string } }
+    put:
+      operationId: updateProgress
+      summary: Update progress for a content item
+      tags: [Progress]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                positionSec: { type: number, minimum: 0 }
+                durationSec: { type: number, minimum: 0 }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /progress/{contentId}/complete:
+    parameters:
+      - { name: contentId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: markProgressCompleted
+      summary: Mark a content item as completed
+      tags: [Progress]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  # =====================================================================
+  # Users
+  # =====================================================================
+  /users/me:
+    get:
+      operationId: getMe
+      summary: The authenticated user's profile
+      tags: [Users]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/User' }
+    put:
+      operationId: updateMe
+      summary: Update the authenticated user's profile
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName: { type: string }
+                lastName:  { type: string }
+                phone:     { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/User' }
+    delete:
+      operationId: deleteMe
+      summary: Soft-delete the authenticated user
+      tags: [Users]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /users/me/avatar:
+    put:
+      operationId: uploadAvatar
+      summary: Upload/replace the user's avatar (multipart)
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [avatar]
+              properties:
+                avatar: { type: string, format: binary }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties: { avatarUrl: { type: string } }
+
+  /users/{userId}:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getPublicProfile
+      summary: Public profile of any user
+      tags: [Users]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/User' }
+
+  /users/{userId}/contributor-card:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getContributorCard
+      summary: Public contributor stats (notes/flashcards/etc)
+      tags: [Users]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  # =====================================================================
+  # Knowledge
+  # =====================================================================
+  /knowledge/profile:
+    get:
+      operationId: getKnowledgeProfile
+      summary: Full knowledge profile (mastery + history per topic)
+      tags: [Knowledge]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /knowledge/topic/{topic}:
+    parameters:
+      - { name: topic, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getTopicDetail
+      summary: Detail for a single topic (canonical or display name)
+      tags: [Knowledge]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /knowledge/gaps:
+    get:
+      operationId: getKnowledgeGaps
+      summary: Identified knowledge gaps
+      tags: [Knowledge]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  /knowledge/strengths:
+    get:
+      operationId: getKnowledgeStrengths
+      summary: Identified knowledge strengths
+      tags: [Knowledge]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
+
+  # =====================================================================
+  # Dashboard
+  # =====================================================================
+  /dashboard:
+    get:
+      operationId: getDashboard
+      summary: Aggregate home-screen payload (greeting, today, recent, etc.)
+      tags: [Dashboard]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccessEnvelope' } } } }
