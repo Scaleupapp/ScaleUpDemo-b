@@ -93,6 +93,12 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 14. Diagnostic Health Check — Daily 04:00 IST (22:30 UTC prev day)
+  cronQueue.add('diagnosticHealthCheck', {}, {
+    repeat: { pattern: '30 22 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -183,6 +189,9 @@ function startCronJobs() {
         break;
       case 'mixpanelDailyDigest':
         await require('./mixpanelDailyDigestWorker').run();
+        break;
+      case 'diagnosticHealthCheck':
+        await require('./diagnosticHealthCheckWorker').run();
         break;
     }
   }, { connection });

@@ -149,25 +149,125 @@ function _snapshotKey(attempt) {
   return String(attempt._id);
 }
 
+// Self-healing helper: try to backfill an objective's topicSelfRatings using
+// the same 4-tier fallback as scripts/migrate/backfillTopicSelfRatings.js.
+// Returns { ratings: Map, source, canonicalToPersist? } on success, or
+// { ratings: null, reason } when no signal is available.
+async function _selfHealTopicSelfRatings(objective) {
+  const { buildTargetKey } = _getTaxonomyHelpers();
+  const TopicTaxonomy = _getTopicTaxonomyModel();
+  const DEFAULT_RATING = 'familiar';
+
+  const ratingsFromTopics = (topics) => {
+    const r = new Map();
+    for (const t of topics || []) {
+      if (t && t.canonicalName) r.set(t.canonicalName, DEFAULT_RATING);
+    }
+    return r;
+  };
+
+  // 1) Existing taxonomy lookup with current canonical/specifics.
+  try {
+    const targetKey = buildTargetKey(
+      objective.objectiveType,
+      objective.specificsCanonical || objective.specifics || {},
+    );
+    const tax = await TopicTaxonomy.findOne({ objectiveType: objective.objectiveType, targetKey }).lean();
+    if (tax && tax.topics?.length > 0) {
+      return { ratings: ratingsFromTopics(tax.topics), source: 'taxonomy' };
+    }
+  } catch (_) { /* fall through */ }
+
+  // 2) If specifics has values but specificsCanonical is empty, normalize
+  //    via LLM and retry the lookup, then fall through to LLM generation.
+  const specificsHasValue = (s) => s && Object.values(s).some(v => v != null && v !== '');
+  let canonicalToPersist = null;
+  if (specificsHasValue(objective.specifics) && !specificsHasValue(objective.specificsCanonical)) {
+    try {
+      const { normalizeSpecifics } = require('./diagnostic/specificsNormalizationService');
+      const normalized = await normalizeSpecifics({
+        objectiveType: objective.objectiveType,
+        specifics: objective.specifics,
+      });
+      if (specificsHasValue(normalized)) {
+        canonicalToPersist = normalized;
+        const targetKey2 = buildTargetKey(objective.objectiveType, normalized);
+        const tax2 = await TopicTaxonomy.findOne({ objectiveType: objective.objectiveType, targetKey: targetKey2 }).lean();
+        if (tax2 && tax2.topics?.length > 0) {
+          return { ratings: ratingsFromTopics(tax2.topics), source: 'taxonomy-after-normalize', canonicalToPersist };
+        }
+        // 3) Generate a taxonomy via LLM as last resort.
+        try {
+          const { generateTaxonomyForTargetKey } = require('./diagnostic/topicTaxonomyService');
+          const tax3 = await generateTaxonomyForTargetKey(targetKey2);
+          if (tax3 && tax3.topics?.length > 0) {
+            return { ratings: ratingsFromTopics(tax3.topics), source: 'taxonomy-generated', canonicalToPersist };
+          }
+        } catch (_) { /* fall through */ }
+      }
+    } catch (_) { /* fall through */ }
+  }
+
+  // 4) V1 onboarding shape — fall back to analysis.competencies.
+  const competencies = objective.analysis?.competencies || [];
+  if (competencies.length > 0) {
+    const r = new Map();
+    for (const c of competencies) {
+      if (c?.name) r.set(c.name, DEFAULT_RATING);
+    }
+    if (r.size > 0) return { ratings: r, source: 'competencies' };
+  }
+
+  return {
+    ratings: null,
+    reason: specificsHasValue(objective.specifics) ? 'NO_SIGNAL' : 'EMPTY_SPECIFICS',
+  };
+}
+
 async function startAttempt(userId) {
   const { canonicalize, buildTargetKey } = _getTaxonomyHelpers();
   const { totalQuestionsForAttempt } = _getSelectorPlan();
 
   const objective = await UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean()
     || await UserObjective.findOne({ userId, status: 'active' }).lean();
-  if (!objective) return null;
+  if (!objective) return { blocked: true, reason: 'NO_OBJECTIVE' };
 
   // Canonicalize topicSelfRatings keys (display names → canonical).
   const ratingsRaw = objective.topicSelfRatings || new Map();
   const ratingsIter = ratingsRaw instanceof Map
     ? Array.from(ratingsRaw.entries())
     : Object.entries(ratingsRaw);
-  const canonicalRatings = new Map();
+  let canonicalRatings = new Map();
   for (const [name, rating] of ratingsIter) {
     if (!rating) continue;
     canonicalRatings.set(canonicalize(name), rating);
   }
-  if (canonicalRatings.size === 0) return null; // caller falls back
+
+  // Self-healing: if topicSelfRatings is empty, run the migration's fallback
+  // chain inline. Persists the seeded ratings so future calls see them.
+  if (canonicalRatings.size === 0) {
+    const seeded = await _selfHealTopicSelfRatings(objective);
+    if (seeded.ratings && seeded.ratings.size > 0) {
+      canonicalRatings = seeded.ratings;
+      try {
+        const update = { topicSelfRatings: Object.fromEntries(canonicalRatings.entries()) };
+        if (seeded.canonicalToPersist) update.specificsCanonical = seeded.canonicalToPersist;
+        await UserObjective.updateOne({ _id: objective._id }, { $set: update });
+        objective.topicSelfRatings = update.topicSelfRatings;
+        if (seeded.canonicalToPersist) objective.specificsCanonical = seeded.canonicalToPersist;
+        telemetry.logEvent('diagnostic.self_healed', {
+          userId: String(userId),
+          source: seeded.source,
+          ratingsCount: canonicalRatings.size,
+        });
+      } catch (err) {
+        console.warn('[diagnosticService] self-heal persist failed:', err.message);
+      }
+    } else {
+      // Still empty — surface a structured reason for client routing.
+      return { blocked: true, reason: seeded.reason || 'NO_TOPIC_RATINGS' };
+    }
+  }
 
   const targetKey = buildTargetKey(
     objective.objectiveType,

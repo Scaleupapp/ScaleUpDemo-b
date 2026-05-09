@@ -13,11 +13,31 @@ function _gateOrPass(req, res, next) {
   next();
 }
 
+// Maps service-level blocked reasons to user-facing message + a stable
+// machine code clients can switch on (e.g. iOS routes EMPTY_SPECIFICS to
+// onboarding rather than showing the generic snag).
+const BLOCKED_REASON_MAP = {
+  NO_OBJECTIVE:    { code: 'NEEDS_ONBOARDING',   message: "You haven't set up a learning objective yet. Let's get you onboarded." },
+  EMPTY_SPECIFICS: { code: 'NEEDS_ONBOARDING',   message: 'Your objective is missing details. Complete onboarding to start the diagnostic.' },
+  NO_SIGNAL:       { code: 'NEEDS_RECALIBRATION', message: "We couldn't build a diagnostic for your objective. Please refresh the app and try again." },
+  NO_TOPIC_RATINGS:{ code: 'NEEDS_ONBOARDING',   message: "We couldn't find your topic ratings. Re-run onboarding to set them." },
+};
+
 const start = async (req, res, next) => {
   try {
     const data = await diagnosticService.startAttempt(req.user.userId);
+    if (data && data.blocked) {
+      const mapped = BLOCKED_REASON_MAP[data.reason] || BLOCKED_REASON_MAP.NO_TOPIC_RATINGS;
+      return res.status(409).json({
+        success: false,
+        error: mapped.message,
+        code: mapped.code,
+        reason: data.reason,
+      });
+    }
     if (!data) {
-      return res.status(409).json(apiResponse.error('Cannot start a new diagnostic right now. Make sure you have an active learning objective with topic self-ratings set during onboarding.'));
+      // Defensive: legacy null return path.
+      return res.status(409).json(apiResponse.error('Cannot start a new diagnostic right now.'));
     }
     res.json(apiResponse.success(data));
   } catch (err) { next(err); }
