@@ -118,10 +118,15 @@ ${anchorsBlock}`,
       });
     }
 
-    if (validated.length > 0) {
-      await QuestionBank.insertMany(validated);
-    }
-    return validated;
+    if (validated.length === 0) return [];
+    // insertMany returns mongoose documents whose _id is populated; the
+    // input `validated` array is *not* mutated, so we must return the
+    // result. If we return the input array, downstream code (the pool
+    // assembler) sees questions with no _id and the iOS client fails to
+    // decode the question payload (no `_id` -> JSON omits the field ->
+    // DecodingError.keyNotFound on `id`).
+    const inserted = await QuestionBank.insertMany(validated);
+    return inserted.map(d => (typeof d.toObject === 'function' ? d.toObject() : d));
   } finally {
     clearTimeout(timer);
   }
