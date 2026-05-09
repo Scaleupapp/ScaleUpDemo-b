@@ -515,6 +515,18 @@ async function finishAttempt(attemptId) {
   attempt.planGenerationStatus = 'pending';
   await attempt.save();
 
+  // Flip the user-level flag so the app routes them to home instead of
+  // back into the diagnostic flow on next launch / /me refresh. Best-
+  // effort — the diagnostic itself is committed even if this fails.
+  if (attempt.attemptType !== 'recalibration') {
+    try {
+      const User = require('../models/User');
+      await User.findByIdAndUpdate(attempt.userId, { diagnosticComplete: true });
+    } catch (err) {
+      console.warn('[diagnosticService] failed to mark User.diagnosticComplete:', err.message);
+    }
+  }
+
   // Persist re-calibration growth before insights/plan so it's available in results.
   if (attempt.attemptType === 'recalibration') {
     try {
