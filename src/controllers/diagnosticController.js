@@ -125,7 +125,10 @@ async function getResults(req, res) {
   try {
     const attempt = await DiagnosticAttempt.findById(req.params.attemptId);
     if (!attempt) return res.status(404).json({ error: 'attempt_not_found' });
-    if (String(attempt.userId) !== String(req.user.id)) {
+    // The auth middleware exposes the authenticated user as `req.user.userId`,
+    // not `req.user.id`. Comparing against `.id` (which is undefined) used to
+    // 403 every poll, leaving iOS stuck on the "Generating insights" screen.
+    if (String(attempt.userId) !== String(req.user.userId)) {
       return res.status(403).json({ error: 'forbidden' });
     }
 
