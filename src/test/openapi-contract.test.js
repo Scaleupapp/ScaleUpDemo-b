@@ -122,11 +122,12 @@ test('contract: GET /plan/current 200 response matches PlanCurrent schema', asyn
     await ctrl.getCurrent(req, res);
 
     assert.strictEqual(res._status, 200, `expected 200, got ${res._status}`);
+    assert.strictEqual(res._json.success, true, 'response must be wrapped in success envelope');
 
     const ajv = makeValidator();
     const validate = ajv.compile(resolveSchema('#/components/schemas/PlanCurrent'));
-    const ok = validate(res._json);
-    assert.ok(ok, `response failed PlanCurrent schema:\n${JSON.stringify(validate.errors, null, 2)}\nresponse:\n${JSON.stringify(res._json, null, 2)}`);
+    const ok = validate(res._json.data);
+    assert.ok(ok, `response failed PlanCurrent schema:\n${JSON.stringify(validate.errors, null, 2)}\nresponse:\n${JSON.stringify(res._json.data, null, 2)}`);
   } finally {
     for (const [k, v] of Object.entries(orig)) {
       const map = { plan: planModelPath, obj: objectiveModelPath, tax: taxonomyModelPath, svc: taxonomySvcPath, ctrl: ctrlPath };
@@ -160,12 +161,13 @@ test('contract: GET /plan/status pending-state matches PlanStatus schema', async
     await ctrl.getStatus(req, res);
 
     assert.strictEqual(res._status, 200);
+    assert.strictEqual(res._json.success, true);
 
     const ajv = makeValidator();
     const validate = ajv.compile(resolveSchema('#/components/schemas/PlanStatus'));
-    const ok = validate(res._json);
-    assert.ok(ok, `response failed PlanStatus schema:\n${JSON.stringify(validate.errors, null, 2)}\nresponse:\n${JSON.stringify(res._json, null, 2)}`);
-    assert.strictEqual(res._json.status, 'pending');
+    const ok = validate(res._json.data);
+    assert.ok(ok, `response failed PlanStatus schema:\n${JSON.stringify(validate.errors, null, 2)}\nresponse:\n${JSON.stringify(res._json.data, null, 2)}`);
+    assert.strictEqual(res._json.data.status, 'pending');
   } finally {
     if (orig.plan) require.cache[planModelPath]    = orig.plan; else delete require.cache[planModelPath];
     if (orig.att)  require.cache[attemptModelPath] = orig.att;  else delete require.cache[attemptModelPath];

@@ -55,7 +55,21 @@ test('planController.getStatus: returns generating when no plan yet', async () =
   const req = { user: { userId: new mongoose.Types.ObjectId() } };
   const res = fakeRes();
   await ctrl.getStatus(req, res);
-  assert.strictEqual(res._json.status, 'generating');
+  // Response must be wrapped in the standard {success, data} envelope —
+  // iOS APIClient strict-decodes that shape and bombs out otherwise.
+  assert.strictEqual(res._json.success, true);
+  assert.strictEqual(res._json.data.status, 'generating');
+});
+
+test('planController.getStatus: returns pending with planId:null when user has no attempts', async () => {
+  activePlan = null;
+  latestAttempt = null;
+  const req = { user: { userId: new mongoose.Types.ObjectId() } };
+  const res = fakeRes();
+  await ctrl.getStatus(req, res);
+  assert.strictEqual(res._json.success, true);
+  assert.strictEqual(res._json.data.status, 'pending');
+  assert.strictEqual(res._json.data.planId, null);
 });
 
 test('planController.getStatus: returns ready when plan exists', async () => {
@@ -64,8 +78,9 @@ test('planController.getStatus: returns ready when plan exists', async () => {
   const req = { user: { userId: new mongoose.Types.ObjectId() } };
   const res = fakeRes();
   await ctrl.getStatus(req, res);
-  assert.strictEqual(res._json.status, 'ready');
-  assert.ok(res._json.planId);
+  assert.strictEqual(res._json.success, true);
+  assert.strictEqual(res._json.data.status, 'ready');
+  assert.ok(res._json.data.planId);
 });
 
 test('planController.getCurrent: returns the active plan', async () => {
@@ -80,8 +95,9 @@ test('planController.getCurrent: returns the active plan', async () => {
   const req = { user: { userId: new mongoose.Types.ObjectId() } };
   const res = fakeRes();
   await ctrl.getCurrent(req, res);
-  assert.strictEqual(res._json.planHeadline, 'h');
-  assert.strictEqual(res._json.source, 'template');
+  assert.strictEqual(res._json.success, true);
+  assert.strictEqual(res._json.data.planHeadline, 'h');
+  assert.strictEqual(res._json.data.source, 'template');
 });
 
 test('planController.getCurrent: returns 404 when no plan', async () => {
@@ -155,7 +171,9 @@ test('planController.getCurrent: response shape matches iOS PlanDTO contract', a
   await ctrl.getCurrent(req, res);
 
   assert.strictEqual(res._status, 200);
-  const body = res._json;
+  // Response is wrapped in {success, data} envelope.
+  assert.strictEqual(res._json.success, true, 'response must be wrapped in success envelope');
+  const body = res._json.data;
 
   // Top-level required fields
   for (const k of IOS_PLAN_DTO_REQUIRED) {
@@ -235,5 +253,6 @@ test('planController.getCurrent: falls back to canonical names when taxonomy loo
   const res = fakeRes();
   await ctrl.getCurrent(req, res);
   assert.strictEqual(res._status, 200);
-  assert.strictEqual(res._json.weeklySchedule[0].allocations[0].topic, 'foo', 'falls back to canonical when no taxonomy');
+  assert.strictEqual(res._json.success, true);
+  assert.strictEqual(res._json.data.weeklySchedule[0].allocations[0].topic, 'foo', 'falls back to canonical when no taxonomy');
 });

@@ -1,5 +1,6 @@
 const Plan = require('../models/Plan');
 const DiagnosticAttempt = require('../models/DiagnosticAttempt');
+const apiResponse = require('../utils/apiResponse');
 
 async function getStatus(req, res) {
   const userId = req.user.userId;
@@ -7,24 +8,24 @@ async function getStatus(req, res) {
     .sort({ updatedAt: -1 })
     .lean();
   if (activePlan) {
-    return res.status(200).json({
+    return res.status(200).json(apiResponse.success({
       status: 'ready',
       planId: String(activePlan._id),
       source: activePlan.source,
       updatedAt: activePlan.updatedAt,
-    });
+    }));
   }
   const latestAttempt = await DiagnosticAttempt.findOne({ userId, status: 'completed' })
     .sort({ completedAt: -1 })
     .select('planGenerationStatus planId')
     .lean();
   if (!latestAttempt) {
-    return res.status(200).json({ status: 'pending' });
+    return res.status(200).json(apiResponse.success({ status: 'pending', planId: null }));
   }
-  return res.status(200).json({
+  return res.status(200).json(apiResponse.success({
     status: latestAttempt.planGenerationStatus || 'pending',
     planId: latestAttempt.planId ? String(latestAttempt.planId) : null,
-  });
+  }));
 }
 
 async function getCurrent(req, res) {
@@ -32,7 +33,7 @@ async function getCurrent(req, res) {
   const plan = await Plan.findOne({ userId, isActive: true })
     .sort({ updatedAt: -1 })
     .lean();
-  if (!plan) return res.status(404).json({ message: 'No active plan' });
+  if (!plan) return res.status(404).json(apiResponse.error('No active plan'));
 
   // Resolve canonical → display names via TopicTaxonomy (best-effort).
   const displayByCanonical = new Map();
@@ -70,7 +71,7 @@ async function getCurrent(req, res) {
     isUserStated: !!m.isUserStated,
   }));
 
-  return res.status(200).json({
+  return res.status(200).json(apiResponse.success({
     planId: String(plan._id),
     planHeadline: plan.planHeadline,
     totalWeeks: weeklySchedule.length,
@@ -80,7 +81,7 @@ async function getCurrent(req, res) {
     weeklySchedule,
     milestones,
     source: plan.source,
-  });
+  }));
 }
 
 module.exports = { getStatus, getCurrent };
