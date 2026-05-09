@@ -1265,7 +1265,12 @@ paths:
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PlanStatus' }
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PlanStatus' }
 
   /plan/current:
     get:
@@ -1277,7 +1282,12 @@ paths:
           description: Active plan
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PlanCurrent' }
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PlanCurrent' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # =====================================================================
