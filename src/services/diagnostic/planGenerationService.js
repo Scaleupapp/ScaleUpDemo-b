@@ -272,6 +272,7 @@ async function generate(input) {
           topicCanonicalName: alloc.topicCanonicalName,
           objectiveType: input.objectiveType,
           objectiveId: input.objectiveId,
+          userId: input.userId,
         });
       } catch (err) {
         console.warn('[planGenerationService] taskCatalogService.resolveTopic failed:', err.message);

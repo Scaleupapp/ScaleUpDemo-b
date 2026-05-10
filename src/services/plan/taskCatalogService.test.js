@@ -2,6 +2,17 @@ const test = require('node:test');
 const assert = require('node:assert');
 const mongoose = require('mongoose');
 
+// Pre-stub openai config so quizGenerationService loads without OPENAI_API_KEY.
+{
+  const openaiPath = require.resolve('../../config/openai');
+  if (!require.cache[openaiPath]) {
+    require.cache[openaiPath] = {
+      exports: { chat: { completions: { create: async () => ({ choices: [] }) } } },
+      loaded: true, id: openaiPath,
+    };
+  }
+}
+
 delete require.cache[require.resolve('../../models/Quiz')];
 const Quiz = require('../../models/Quiz');
 delete require.cache[require.resolve('../../models/Content')];
@@ -129,5 +140,83 @@ test('resolveTopic: empty topic returns nulls without DB call', async () => {
   } finally {
     Quiz.findOne = origQuiz;
     Content.findOne = origContent;
+  }
+});
+
+test('resolveTopic: lazy-generates quiz when none exists', async () => {
+  const quizGenerationService = require('../quizGenerationService');
+  const orig = quizGenerationService.generateQuiz;
+  const generatedQuizId = new mongoose.Types.ObjectId();
+  quizGenerationService.generateQuiz = async () => ({ _id: generatedQuizId, topic: 'foo', estimatedMinutes: 8 });
+
+  const origQuizFind = Quiz.findOne;
+  Quiz.findOne = () => makeQuery(null);
+  const origContentFind = Content.findOne;
+  Content.findOne = () => makeQuery(null);
+
+  try {
+    const out = await taskCatalogService.resolveTopic({
+      topicCanonicalName: 'foo',
+      objectiveType: 'upskilling',
+      objectiveId: new mongoose.Types.ObjectId(),
+      userId: new mongoose.Types.ObjectId(),
+    });
+    assert.strictEqual(out.quizId, String(generatedQuizId));
+  } finally {
+    Quiz.findOne = origQuizFind;
+    Content.findOne = origContentFind;
+    quizGenerationService.generateQuiz = orig;
+  }
+});
+
+test('resolveTopic: returns null quizId when lazy gen fails', async () => {
+  const quizGenerationService = require('../quizGenerationService');
+  const orig = quizGenerationService.generateQuiz;
+  quizGenerationService.generateQuiz = async () => { throw new Error('synthetic_failure'); };
+
+  const origQuizFind = Quiz.findOne;
+  Quiz.findOne = () => makeQuery(null);
+  const origContentFind = Content.findOne;
+  Content.findOne = () => makeQuery(null);
+
+  try {
+    const out = await taskCatalogService.resolveTopic({
+      topicCanonicalName: 'foo',
+      objectiveType: 'upskilling',
+      objectiveId: new mongoose.Types.ObjectId(),
+      userId: new mongoose.Types.ObjectId(),
+    });
+    assert.strictEqual(out.quizId, null);
+  } finally {
+    Quiz.findOne = origQuizFind;
+    Content.findOne = origContentFind;
+    quizGenerationService.generateQuiz = orig;
+  }
+});
+
+test('resolveTopic: skips lazy gen when userId is missing', async () => {
+  const quizGenerationService = require('../quizGenerationService');
+  let called = false;
+  const orig = quizGenerationService.generateQuiz;
+  quizGenerationService.generateQuiz = async () => { called = true; return null; };
+
+  const origQuizFind = Quiz.findOne;
+  Quiz.findOne = () => makeQuery(null);
+  const origContentFind = Content.findOne;
+  Content.findOne = () => makeQuery(null);
+
+  try {
+    const out = await taskCatalogService.resolveTopic({
+      topicCanonicalName: 'foo',
+      objectiveType: 'upskilling',
+      objectiveId: new mongoose.Types.ObjectId(),
+      // userId omitted
+    });
+    assert.strictEqual(out.quizId, null);
+    assert.strictEqual(called, false, 'lazy gen should not be attempted without userId');
+  } finally {
+    Quiz.findOne = origQuizFind;
+    Content.findOne = origContentFind;
+    quizGenerationService.generateQuiz = orig;
   }
 });
