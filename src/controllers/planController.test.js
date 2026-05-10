@@ -288,3 +288,47 @@ test('planController.getCurrent: returns nextCheckInAt = diagnosticAttempt.compl
   // reset shared mutable state so it doesn't leak into subsequent tests
   attemptById = null;
 });
+
+test('planController.getCurrent: surfaces weeklySchedule[i].tasks[] on the response', async () => {
+  const taskId = new mongoose.Types.ObjectId();
+  activePlan = {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    objectiveId: new mongoose.Types.ObjectId(),
+    diagnosticAttemptId: new mongoose.Types.ObjectId(),
+    planHeadline: 'x',
+    estimatedTotalHours: 10,
+    weeklySchedule: [{
+      week: 1,
+      weeklyGoal: 'g',
+      allocations: [{ topicCanonicalName: 'product-strategy', hours: 3, focusActivity: 'practice' }],
+      tasks: [{
+        _id: taskId,
+        type: 'quiz',
+        topic: { canonicalName: 'product-strategy', displayName: 'Product Strategy' },
+        payload: { quizId: 'q-1', estimatedMinutes: 10 },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      }],
+    }],
+    milestones: [],
+    source: 'llm-generated',
+    updatedAt: new Date(),
+  };
+  activeObjective = null;
+  activeTaxonomy = null;
+  attemptById = null;
+
+  const req = { user: { userId: activePlan.userId.toString() } };
+  const res = fakeRes();
+  await ctrl.getCurrent(req, res);
+
+  assert.strictEqual(res._json.success, true);
+  const week = res._json.data.weeklySchedule[0];
+  assert.ok(Array.isArray(week.tasks), 'tasks should be present on the response');
+  assert.strictEqual(week.tasks.length, 1);
+  assert.strictEqual(week.tasks[0].type, 'quiz');
+  assert.strictEqual(week.tasks[0].payload.quizId, 'q-1');
+  assert.strictEqual(week.tasks[0].progress.status, 'pending');
+  assert.ok(week.tasks[0].taskId, 'taskId (string of _id) should be on the response');
+});

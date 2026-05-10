@@ -336,6 +336,49 @@ components:
         allocations:
           type: array
           items: { $ref: '#/components/schemas/PlanAllocation' }
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanTask'
+
+    PlanTask:
+      type: object
+      required: [taskId, type, topic, completion, progress]
+      properties:
+        taskId:
+          type: string
+          description: ObjectId of the task (stable across plan recalibrations within a single Plan document).
+        type:
+          type: string
+          enum: [quiz, in_app_content, ai_interview, external_link, competition, manual]
+        topic:
+          type: object
+          required: [canonicalName, displayName]
+          properties:
+            canonicalName: { type: string }
+            displayName:   { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+          description: Type-discriminated. Quiz payload includes quizId, estimatedMinutes; in_app_content includes contentId, contentType, estimatedMinutes; etc.
+        completion:
+          type: object
+          required: [mode, requiresSelfRating]
+          properties:
+            mode:                { type: string, enum: [auto, manual] }
+            requiresSelfRating:  { type: boolean }
+        progress:
+          type: object
+          required: [status]
+          properties:
+            status: { type: string, enum: [pending, in_progress, complete, skipped] }
+            completedAt:
+              type: [string, 'null']
+              format: date-time
+            selfRating:
+              type: [integer, 'null']
+              minimum: 1
+              maximum: 5
 
     PlanMilestone:
       type: object

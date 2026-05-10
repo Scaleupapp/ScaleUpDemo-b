@@ -61,6 +61,18 @@ async function getCurrent(req, res) {
         hoursAllocated: a.hours,
         focusActivity: a.focusActivity,
       })),
+      tasks: (w.tasks || []).map(t => ({
+        taskId: String(t._id),
+        type: t.type,
+        topic: t.topic,
+        payload: t.payload || {},
+        completion: t.completion,
+        progress: {
+          status: t.progress?.status || 'pending',
+          completedAt: t.progress?.completedAt || null,
+          selfRating: t.progress?.selfRating || null,
+        },
+      })),
     };
   });
 
