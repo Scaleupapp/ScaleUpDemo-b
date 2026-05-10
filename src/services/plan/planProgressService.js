@@ -318,6 +318,15 @@ async function markManualComplete({ userId, taskId, selfRating }) {
         } catch (err) {
           console.warn('[planProgressService] ExternalContentTouch.create failed:', err.message);
         }
+
+        // Phase 7: best-effort fetch the URL content so future recalibrations
+        // and the LLM judge have grounding data on what the user actually consumed.
+        try {
+          const externalContentFetcherService = require('./externalContentFetcherService');
+          await externalContentFetcherService.fetchSnapshot(foundTask.payload?.url || '');
+        } catch (err) {
+          console.warn('[planProgressService] external content fetch failed:', err.message);
+        }
       }
 
       return { matched: true, planId: String(plan._id), weekNumber: foundWeek.week, taskId: String(foundTask._id) };

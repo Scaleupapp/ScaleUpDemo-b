@@ -522,6 +522,11 @@ test('markManualComplete: writes ExternalContentTouch when task type is external
   const origCreate = ExternalContentTouch.create;
   ExternalContentTouch.create = async (doc) => { inserted.push(doc); return doc; };
 
+  // Phase 7: stub externalContentFetcher so we don't hit the network during tests.
+  const externalContentFetcherService = require('./externalContentFetcherService');
+  const origFetchSnapshot = externalContentFetcherService.fetchSnapshot;
+  externalContentFetcherService.fetchSnapshot = async () => ({ url: '', title: '', excerpt: '', contentType: 'unknown', wordCount: 0 });
+
   const plan = {
     _id: new mongoose.Types.ObjectId(),
     userId: new mongoose.Types.ObjectId(),
@@ -558,6 +563,7 @@ test('markManualComplete: writes ExternalContentTouch when task type is external
   } finally {
     Plan.findOne = origFindOne;
     ExternalContentTouch.create = origCreate;
+    externalContentFetcherService.fetchSnapshot = origFetchSnapshot;
   }
 });
 
