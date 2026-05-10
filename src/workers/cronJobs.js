@@ -99,6 +99,12 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 15. Weekly Auto-Calibration — Daily 03:00 IST (21:30 UTC prev day)
+  cronQueue.add('weeklyAutoCalibration', {}, {
+    repeat: { pattern: '30 21 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -192,6 +198,9 @@ function startCronJobs() {
         break;
       case 'diagnosticHealthCheck':
         await require('./diagnosticHealthCheckWorker').run();
+        break;
+      case 'weeklyAutoCalibration':
+        await require('./weeklyAutoCalibrationWorker').runWeeklyAutoCalibration();
         break;
     }
   }, { connection });
