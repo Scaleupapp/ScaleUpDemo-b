@@ -35,6 +35,7 @@ async function backfillOne(plan) {
         topicCanonicalName: alloc.topicCanonicalName,
         objectiveType,
         objectiveId: plan.objectiveId,
+        userId: plan.userId,
       });
       const displayName = alloc.topicCanonicalName
         .replace(/-/g, ' ')
