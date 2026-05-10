@@ -359,3 +359,159 @@ test('onContentProgress: retries on VersionError', async () => {
     plan.save = origSave;
   }
 });
+
+function makePlanWithInterviewTask() {
+  return {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    weeklySchedule: [{
+      week: 1,
+      weeklyGoal: 'g',
+      allocations: [],
+      tasks: [{
+        _id: new mongoose.Types.ObjectId(),
+        type: 'ai_interview',
+        topic: { canonicalName: 'product-strategy', displayName: 'Product Strategy' },
+        payload: { scenario: 'placement_behavioral', estimatedMinutes: 15 },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      }],
+    }],
+    save: async function () { this._saved = true; return this; },
+  };
+}
+
+function makePlanWithCompetitionTask() {
+  return {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    weeklySchedule: [{
+      week: 1,
+      weeklyGoal: 'g',
+      allocations: [],
+      tasks: [{
+        _id: new mongoose.Types.ObjectId(),
+        type: 'competition',
+        topic: { canonicalName: 'product-strategy', displayName: 'Product Strategy' },
+        payload: { topicCanonicalName: 'product-strategy', estimatedMinutes: 8 },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      }],
+    }],
+    save: async function () { this._saved = true; return this; },
+  };
+}
+
+function makePlanWithManualTask() {
+  return {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    weeklySchedule: [{
+      week: 1,
+      weeklyGoal: 'g',
+      allocations: [],
+      tasks: [{
+        _id: new mongoose.Types.ObjectId(),
+        type: 'manual',
+        topic: { canonicalName: 'product-strategy', displayName: 'Product Strategy' },
+        payload: { title: 'Practice on your own', description: 'x', estimatedMinutes: 30 },
+        completion: { mode: 'manual', requiresSelfRating: true },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      }],
+    }],
+    save: async function () { this._saved = true; return this; },
+  };
+}
+
+test('onInterviewComplete: matches ai_interview task and marks complete', async () => {
+  const plan = makePlanWithInterviewTask();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+  try {
+    const out = await planProgressService.onInterviewComplete({
+      userId: plan.userId.toString(),
+      sessionId: 'sess-99',
+      topic: 'product-strategy',
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.status, 'complete');
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.sourceEventId, 'sess-99');
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('onCompetitionPlayed: matches competition task and marks complete', async () => {
+  const plan = makePlanWithCompetitionTask();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+  try {
+    const out = await planProgressService.onCompetitionPlayed({
+      userId: plan.userId.toString(),
+      challengeId: 'ch-99',
+      topic: 'product-strategy',
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.status, 'complete');
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.sourceEventId, 'ch-99');
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('markManualComplete: marks task complete with selfRating', async () => {
+  const plan = makePlanWithManualTask();
+  const taskId = plan.weeklySchedule[0].tasks[0]._id.toString();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+  try {
+    const out = await planProgressService.markManualComplete({
+      userId: plan.userId.toString(),
+      taskId,
+      selfRating: 4,
+    });
+    assert.strictEqual(out.matched, true);
+    const task = plan.weeklySchedule[0].tasks[0];
+    assert.strictEqual(task.progress.status, 'complete');
+    assert.strictEqual(task.progress.selfRating, 4);
+    assert.ok(task.progress.completedAt instanceof Date);
+    assert.ok(typeof task.progress.sourceEventId === 'string' && task.progress.sourceEventId.startsWith('manual_'));
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('markManualComplete: rejects selfRating outside 1-5', async () => {
+  const plan = makePlanWithManualTask();
+  const taskId = plan.weeklySchedule[0].tasks[0]._id.toString();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+  try {
+    const out = await planProgressService.markManualComplete({
+      userId: plan.userId.toString(),
+      taskId,
+      selfRating: 99,
+    });
+    assert.strictEqual(out.matched, false);
+    assert.strictEqual(out.reason, 'invalid_self_rating');
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('markManualComplete: returns matched=false when taskId not in plan', async () => {
+  const plan = makePlanWithManualTask();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+  try {
+    const out = await planProgressService.markManualComplete({
+      userId: plan.userId.toString(),
+      taskId: new mongoose.Types.ObjectId().toString(),
+      selfRating: 3,
+    });
+    assert.strictEqual(out.matched, false);
+    assert.strictEqual(out.reason, 'task_not_found');
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});

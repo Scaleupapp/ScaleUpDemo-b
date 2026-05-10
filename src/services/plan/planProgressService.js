@@ -149,8 +149,116 @@ async function onContentProgress({ userId, contentId, percent, topic }) {
   );
 }
 
+async function onInterviewComplete({ userId, sessionId, topic }) {
+  const topicKey = canonicalize(topic);
+  if (!topicKey) return { matched: false, reason: 'no_topic' };
+
+  return withVersionRetry(
+    () => Plan.findOne({ userId, isActive: true }).sort({ updatedAt: -1 }),
+    async (plan) => {
+      const startIdx = findCurrentWeekIndex(plan);
+      if (startIdx === null) return { matched: false, reason: 'all_weeks_complete' };
+      for (let i = startIdx; i < plan.weeklySchedule.length; i++) {
+        const week = plan.weeklySchedule[i];
+        const match = findPendingTaskInWeek(
+          week,
+          t => t.type === 'ai_interview' && canonicalize(t.topic?.canonicalName) === topicKey,
+        );
+        if (match) {
+          const snap = snapshotProgress(match);
+          match.progress.status = 'complete';
+          match.progress.completedAt = new Date();
+          match.progress.sourceEventId = String(sessionId);
+          await saveWithRevert(plan, match, snap);
+          return { matched: true, planId: String(plan._id), weekNumber: week.week, taskId: String(match._id) };
+        }
+      }
+      return { matched: false, reason: 'no_matching_task' };
+    },
+  );
+}
+
+async function onCompetitionPlayed({ userId, challengeId, topic }) {
+  const topicKey = canonicalize(topic);
+  if (!topicKey) return { matched: false, reason: 'no_topic' };
+
+  return withVersionRetry(
+    () => Plan.findOne({ userId, isActive: true }).sort({ updatedAt: -1 }),
+    async (plan) => {
+      const startIdx = findCurrentWeekIndex(plan);
+      if (startIdx === null) return { matched: false, reason: 'all_weeks_complete' };
+      for (let i = startIdx; i < plan.weeklySchedule.length; i++) {
+        const week = plan.weeklySchedule[i];
+        const match = findPendingTaskInWeek(
+          week,
+          t => t.type === 'competition' && canonicalize(t.topic?.canonicalName) === topicKey,
+        );
+        if (match) {
+          const snap = snapshotProgress(match);
+          match.progress.status = 'complete';
+          match.progress.completedAt = new Date();
+          match.progress.sourceEventId = String(challengeId);
+          await saveWithRevert(plan, match, snap);
+          return { matched: true, planId: String(plan._id), weekNumber: week.week, taskId: String(match._id) };
+        }
+      }
+      return { matched: false, reason: 'no_matching_task' };
+    },
+  );
+}
+
+async function markManualComplete({ userId, taskId, selfRating }) {
+  const rating = Number(selfRating);
+  if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+    return { matched: false, reason: 'invalid_self_rating' };
+  }
+
+  return withVersionRetry(
+    () => Plan.findOne({ userId, isActive: true }).sort({ updatedAt: -1 }),
+    async (plan) => {
+      let foundWeek = null;
+      let foundTask = null;
+      for (const week of plan.weeklySchedule) {
+        for (const task of (week.tasks || [])) {
+          if (String(task._id) === String(taskId)) {
+            foundWeek = week;
+            foundTask = task;
+            break;
+          }
+        }
+        if (foundTask) break;
+      }
+      if (!foundTask) return { matched: false, reason: 'task_not_found' };
+
+      const snap = snapshotProgress(foundTask);
+      foundTask.progress.status = 'complete';
+      foundTask.progress.completedAt = new Date();
+      foundTask.progress.selfRating = rating;
+      foundTask.progress.sourceEventId = `manual_${Date.now()}`;
+      await saveWithRevert(plan, foundTask, snap);
+
+      // Best-effort: update KnowledgeProfile.topicSelfRatings.
+      try {
+        const KnowledgeProfile = require('../../models/KnowledgeProfile');
+        await KnowledgeProfile.updateOne(
+          { userId },
+          { $set: { [`topicSelfRatings.${foundTask.topic.canonicalName}`]: rating } },
+          { upsert: true },
+        );
+      } catch (err) {
+        console.warn('[planProgressService] KnowledgeProfile update failed:', err.message);
+      }
+
+      return { matched: true, planId: String(plan._id), weekNumber: foundWeek.week, taskId: String(foundTask._id) };
+    },
+  );
+}
+
 module.exports = {
   onQuizComplete,
   onContentProgress,
+  onInterviewComplete,
+  onCompetitionPlayed,
+  markManualComplete,
   _internal: { findCurrentWeekIndex, findPendingTaskInWeek, withVersionRetry, CONTENT_COMPLETE_THRESHOLD, MAX_RETRIES },
 };
