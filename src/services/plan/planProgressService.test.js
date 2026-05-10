@@ -207,3 +207,55 @@ test('onContentProgress: returns matched=false when contentId in payload does no
     Plan.findOne = origFindOne;
   }
 });
+
+test('onQuizComplete: matches when caller passes loose-cased topic ("Product Strategy")', async () => {
+  const plan = makePlanWithQuizTask();
+  // Plan task has canonicalName 'product-strategy' (kebab). Caller passes "Product Strategy" (mixed case + spaces).
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.onQuizComplete({
+      userId: plan.userId.toString(),
+      quizId: 'qz-1',
+      attemptId: 'att-loose',
+      topic: 'Product Strategy', // <- not kebab-case
+    });
+    assert.strictEqual(out.matched, true, 'caller-side topic should be canonicalized before match');
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.status, 'complete');
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('onContentProgress: matches when task-side canonicalName is non-canonical (defensive)', async () => {
+  const plan = makePlanWithContentTask();
+  // Mutate the plan task's canonicalName to a non-canonical form to prove
+  // task-side canonicalization (a plan generator could regress on this).
+  plan.weeklySchedule[0].tasks[0].topic.canonicalName = 'Roadmapping ';
+
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.onContentProgress({
+      userId: plan.userId.toString(),
+      contentId: 'c-42',
+      percent: 80,
+      topic: 'roadmapping',
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(out.completed, true);
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('onQuizComplete: returns matched=false with reason="no_topic" for empty topic', async () => {
+  const out = await planProgressService.onQuizComplete({
+    userId: new mongoose.Types.ObjectId().toString(),
+    quizId: 'q', attemptId: 'a', topic: '',
+  });
+  assert.strictEqual(out.matched, false);
+  assert.strictEqual(out.reason, 'no_topic');
+});

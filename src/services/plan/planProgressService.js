@@ -1,4 +1,5 @@
 const Plan = require('../../models/Plan');
+const { canonicalize } = require('../diagnostic/topicTaxonomyService');
 
 const CONTENT_COMPLETE_THRESHOLD = 80;
 
@@ -25,6 +26,9 @@ function findPendingTaskInWeek(week, predicate) {
 }
 
 async function onQuizComplete({ userId, quizId, attemptId, topic }) {
+  const topicKey = canonicalize(topic);
+  if (!topicKey) return { matched: false, reason: 'no_topic' };
+
   const plan = await Plan.findOne({ userId, isActive: true }).sort({ updatedAt: -1 });
   if (!plan) return { matched: false, reason: 'no_active_plan' };
 
@@ -36,7 +40,7 @@ async function onQuizComplete({ userId, quizId, attemptId, topic }) {
     const week = plan.weeklySchedule[i];
     const match = findPendingTaskInWeek(
       week,
-      t => t.type === 'quiz' && t.topic?.canonicalName === topic,
+      t => t.type === 'quiz' && canonicalize(t.topic?.canonicalName) === topicKey,
     );
     if (match) {
       match.progress.status = 'complete';
@@ -51,6 +55,9 @@ async function onQuizComplete({ userId, quizId, attemptId, topic }) {
 }
 
 async function onContentProgress({ userId, contentId, percent, topic }) {
+  const topicKey = canonicalize(topic);
+  if (!topicKey) return { matched: false, reason: 'no_topic' };
+
   const plan = await Plan.findOne({ userId, isActive: true }).sort({ updatedAt: -1 });
   if (!plan) return { matched: false, reason: 'no_active_plan' };
 
@@ -63,7 +70,7 @@ async function onContentProgress({ userId, contentId, percent, topic }) {
     const match = (week.tasks || []).find(t =>
       t.type === 'in_app_content'
       && (t.progress?.status === 'pending' || t.progress?.status === 'in_progress')
-      && t.topic?.canonicalName === topic
+      && canonicalize(t.topic?.canonicalName) === topicKey
       && String(t.payload?.contentId || '') === String(contentId)
     );
     if (!match) continue;
