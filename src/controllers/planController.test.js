@@ -43,6 +43,8 @@ require.cache[taxonomyServicePath] = {
 
 delete require.cache[require.resolve('./planController')];
 const ctrl = require('./planController');
+const { markTaskComplete } = ctrl;
+const Plan = require('../models/Plan');
 
 function fakeRes() {
   const r = { _status: 200, _json: null };
@@ -331,4 +333,73 @@ test('planController.getCurrent: surfaces weeklySchedule[i].tasks[] on the respo
   assert.strictEqual(week.tasks[0].payload.quizId, 'q-1');
   assert.strictEqual(week.tasks[0].progress.status, 'pending');
   assert.ok(week.tasks[0].taskId, 'taskId (string of _id) should be on the response');
+});
+
+test('markTaskComplete: 200 with taskId on successful manual completion', async () => {
+  const userId = new mongoose.Types.ObjectId();
+  const taskId = new mongoose.Types.ObjectId();
+  activePlan = {
+    _id: new mongoose.Types.ObjectId(),
+    userId,
+    objectiveId: new mongoose.Types.ObjectId(),
+    diagnosticAttemptId: new mongoose.Types.ObjectId(),
+    planHeadline: 'x',
+    estimatedTotalHours: 10,
+    weeklySchedule: [{
+      week: 1, weeklyGoal: 'g', allocations: [],
+      tasks: [{
+        _id: taskId,
+        type: 'manual',
+        topic: { canonicalName: 'p', displayName: 'P' },
+        payload: { title: 'do x', estimatedMinutes: 30 },
+        completion: { mode: 'manual', requiresSelfRating: true },
+        progress: { status: 'pending' },
+      }],
+    }],
+    milestones: [],
+    source: 'llm-generated',
+    save: async function () { this._saved = true; return this; },
+  };
+  // markManualComplete uses Plan.findOne({...}).sort(...) returning hydrated doc.
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => activePlan });
+
+  let captured;
+  const res = { status: () => res, json: (b) => { captured = b; return res; } };
+  const req = {
+    user: { userId: userId.toString() },
+    params: { taskId: taskId.toString() },
+    body: { selfRating: 4 },
+  };
+  try {
+    await markTaskComplete(req, res);
+    assert.strictEqual(captured.success, true);
+    assert.strictEqual(captured.data.taskId, taskId.toString());
+    assert.strictEqual(activePlan.weeklySchedule[0].tasks[0].progress.status, 'complete');
+    assert.strictEqual(activePlan.weeklySchedule[0].tasks[0].progress.selfRating, 4);
+  } finally {
+    Plan.findOne = origFindOne;
+  }
+});
+
+test('markTaskComplete: 400 when selfRating is invalid', async () => {
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => null });
+  let captured, statusCode;
+  const res = {
+    status: (c) => { statusCode = c; return res; },
+    json: (b) => { captured = b; return res; },
+  };
+  const req = {
+    user: { userId: new mongoose.Types.ObjectId().toString() },
+    params: { taskId: new mongoose.Types.ObjectId().toString() },
+    body: { selfRating: 99 },
+  };
+  try {
+    await markTaskComplete(req, res);
+    assert.strictEqual(statusCode, 400);
+    assert.strictEqual(captured.success, false);
+  } finally {
+    Plan.findOne = origFindOne;
+  }
 });

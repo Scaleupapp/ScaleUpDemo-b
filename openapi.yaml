@@ -1337,6 +1337,46 @@ paths:
                       data: { $ref: '#/components/schemas/PlanCurrent' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /plan/tasks/{taskId}/complete:
+    parameters:
+      - { name: taskId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: markPlanTaskComplete
+      summary: Mark a manual or external task complete with a self-rating
+      tags: [Plan]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selfRating]
+              properties:
+                selfRating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+      responses:
+        '200':
+          description: Task marked complete
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [taskId, planId, weekNumber]
+                        properties:
+                          taskId:     { type: string }
+                          planId:     { type: string }
+                          weekNumber: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   # =====================================================================
   # Journey
   # =====================================================================

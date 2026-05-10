@@ -111,4 +111,31 @@ async function getCurrent(req, res) {
   }));
 }
 
-module.exports = { getStatus, getCurrent };
+async function markTaskComplete(req, res) {
+  const userId = req.user.userId;
+  const { taskId } = req.params;
+  const { selfRating } = req.body || {};
+
+  const planProgressService = require('../services/plan/planProgressService');
+  const result = await planProgressService.markManualComplete({ userId, taskId, selfRating });
+
+  if (result.matched) {
+    return res.status(200).json(apiResponse.success({
+      taskId: result.taskId,
+      planId: result.planId,
+      weekNumber: result.weekNumber,
+    }));
+  }
+
+  // Map service-level reasons to HTTP status codes.
+  const statusByReason = {
+    invalid_self_rating: 400,
+    task_not_found: 404,
+    no_active_plan: 404,
+    concurrent_update: 409,
+  };
+  const status = statusByReason[result.reason] || 400;
+  return res.status(status).json(apiResponse.error(result.reason || 'unknown_error'));
+}
+
+module.exports = { getStatus, getCurrent, markTaskComplete };
