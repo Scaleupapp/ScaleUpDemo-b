@@ -515,3 +515,72 @@ test('markManualComplete: returns matched=false when taskId not in plan', async 
     Plan.findOne = origFindOne;
   }
 });
+
+test('markManualComplete: writes ExternalContentTouch when task type is external_link', async () => {
+  const ExternalContentTouch = require('../../models/ExternalContentTouch');
+  const inserted = [];
+  const origCreate = ExternalContentTouch.create;
+  ExternalContentTouch.create = async (doc) => { inserted.push(doc); return doc; };
+
+  const plan = {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    weeklySchedule: [{
+      week: 1, weeklyGoal: 'g', allocations: [],
+      tasks: [{
+        _id: new mongoose.Types.ObjectId(),
+        type: 'external_link',
+        topic: { canonicalName: 'react-hooks', displayName: 'React Hooks' },
+        payload: { url: 'https://ocw.mit.edu/x', title: 'MIT OCW: X', source: 'mit', why: 'r', estimatedMinutes: 30 },
+        completion: { mode: 'manual', requiresSelfRating: true },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      }],
+    }],
+    save: async function () { this._saved = true; return this; },
+  };
+  const taskId = plan.weeklySchedule[0].tasks[0]._id.toString();
+
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.markManualComplete({
+      userId: plan.userId.toString(),
+      taskId,
+      selfRating: 4,
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(inserted.length, 1, 'should insert one ExternalContentTouch');
+    assert.strictEqual(inserted[0].url, 'https://ocw.mit.edu/x');
+    assert.strictEqual(inserted[0].selfRating, 4);
+    assert.strictEqual(inserted[0].topicCanonicalName, 'react-hooks');
+    assert.strictEqual(String(inserted[0].userId), plan.userId.toString());
+  } finally {
+    Plan.findOne = origFindOne;
+    ExternalContentTouch.create = origCreate;
+  }
+});
+
+test('markManualComplete: does NOT write ExternalContentTouch for non-external_link tasks', async () => {
+  const ExternalContentTouch = require('../../models/ExternalContentTouch');
+  const inserted = [];
+  const origCreate = ExternalContentTouch.create;
+  ExternalContentTouch.create = async (doc) => { inserted.push(doc); return doc; };
+
+  const plan = makePlanWithManualTask(); // existing factory from Phase 3 tests
+  const taskId = plan.weeklySchedule[0].tasks[0]._id.toString();
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    await planProgressService.markManualComplete({
+      userId: plan.userId.toString(),
+      taskId,
+      selfRating: 3,
+    });
+    assert.strictEqual(inserted.length, 0, 'manual tasks should not produce ExternalContentTouch rows');
+  } finally {
+    Plan.findOne = origFindOne;
+    ExternalContentTouch.create = origCreate;
+  }
+});

@@ -249,6 +249,26 @@ async function markManualComplete({ userId, taskId, selfRating }) {
         console.warn('[planProgressService] KnowledgeProfile update failed:', err.message);
       }
 
+      // For external_link tasks, also append a row to ExternalContentTouch
+      // so future recalibrations know the user touched this URL.
+      if (foundTask.type === 'external_link') {
+        try {
+          const ExternalContentTouch = require('../../models/ExternalContentTouch');
+          await ExternalContentTouch.create({
+            userId,
+            taskId: foundTask._id,
+            url: foundTask.payload?.url || '',
+            title: foundTask.payload?.title || '',
+            source: foundTask.payload?.source || '',
+            topicCanonicalName: foundTask.topic.canonicalName,
+            selfRating: rating,
+            completedAt: foundTask.progress.completedAt,
+          });
+        } catch (err) {
+          console.warn('[planProgressService] ExternalContentTouch.create failed:', err.message);
+        }
+      }
+
       return { matched: true, planId: String(plan._id), weekNumber: foundWeek.week, taskId: String(foundTask._id) };
     },
   );
