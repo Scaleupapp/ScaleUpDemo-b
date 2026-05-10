@@ -219,6 +219,20 @@ class CompetitionService {
 
     await this._updateWeeklyLeaderboard(userId, challenge.topic, handicappedScore);
 
+    // Best-effort: mark matching plan task complete.
+    try {
+      const planProgressService = require('./plan/planProgressService');
+      if (challenge?.topic) {
+        await planProgressService.onCompetitionPlayed({
+          userId: String(userId),
+          challengeId: String(challengeId),
+          topic: challenge.topic,
+        });
+      }
+    } catch (err) {
+      console.warn('[competitionService] planProgressService.onCompetitionPlayed failed:', err.message);
+    }
+
     return {
       handicappedScore, timeTaken, isPersonalBest,
       correct, total: challenge.questions.length,

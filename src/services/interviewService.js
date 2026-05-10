@@ -390,6 +390,24 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
         console.error('[InterviewEval] Failed to send notification:', notifErr.message);
       }
 
+      // Best-effort: mark matching plan task complete.
+      try {
+        const planProgressService = require('./plan/planProgressService');
+        // Use targetRole as the topic key — interviews aren't topic-tagged today,
+        // but the plan's interview task uses the allocation's topicCanonicalName
+        // which usually mirrors the user's targetRole.
+        const topic = session.targetRole || session.targetCompany || '';
+        if (topic) {
+          await planProgressService.onInterviewComplete({
+            userId: String(session.userId),
+            sessionId: String(session._id),
+            topic,
+          });
+        }
+      } catch (err) {
+        console.warn('[interviewService] planProgressService.onInterviewComplete failed:', err.message);
+      }
+
       return session;
     } catch (err) {
       console.error(`[InterviewEval] Evaluation failed for session ${sessionId}:`, err.message);
