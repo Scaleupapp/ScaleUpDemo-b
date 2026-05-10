@@ -188,7 +188,7 @@ test('generate: post-processes weeklySchedule to include tasks[] per topic', asy
   }
 });
 
-test('generate: emits no task for a topic with no quiz and no content', async () => {
+test('generate: emits no quiz/content/manual task for a topic with no quiz and no content (interview obj still emits ai_interview + competition)', async () => {
   const planService = require('./planGenerationService');
   const mongoose = require('mongoose');
 
@@ -216,8 +216,123 @@ test('generate: emits no task for a topic with no quiz and no content', async ()
       ],
     });
     out.weeklySchedule.forEach(w => {
-      assert.strictEqual((w.tasks || []).length, 0, `week ${w.week} should have no tasks`);
+      const tasks = w.tasks || [];
+      assert.ok(!tasks.some(t => t.type === 'quiz'), `week ${w.week} should have no quiz task`);
+      assert.ok(!tasks.some(t => t.type === 'in_app_content'), `week ${w.week} should have no in_app_content task`);
+      // interview_preparation emits ai_interview even when no quiz/content; manual fallback is suppressed
+      assert.ok(!tasks.some(t => t.type === 'manual'), `week ${w.week} should not emit manual when ai_interview covers the topic`);
     });
+  } finally {
+    openai.chat.completions.create = origCreate;
+    taskCatalogService.resolveTopic = origResolve;
+  }
+});
+
+test('generate: emits ai_interview task only when objectiveType is interview_preparation or career_switch', async () => {
+  const planService = require('./planGenerationService');
+  const mongoose = require('mongoose');
+  const openai = require('../../config/openai');
+  const origCreate = openai.chat.completions.create;
+  openai.chat.completions.create = async () => { throw new Error('test stub'); };
+
+  const taskCatalogService = require('../plan/taskCatalogService');
+  const origResolve = taskCatalogService.resolveTopic;
+  taskCatalogService.resolveTopic = async () => ({
+    quizId: 'qz1', quizMinutes: 10,
+    contentId: 'c1', contentType: 'article', contentMinutes: 12,
+  });
+
+  try {
+    for (const objType of ['interview_preparation', 'career_switch']) {
+      const out = await planService.generate({
+        userId: new mongoose.Types.ObjectId(),
+        objectiveId: new mongoose.Types.ObjectId(),
+        diagnosticAttemptId: new mongoose.Types.ObjectId(),
+        objectiveType: objType,
+        specificsCanonical: { targetRole: 'product-manager' },
+        timeline: 2, weeklyCommitHours: 5,
+        topicResults: [{ canonicalName: 'product-strategy', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false }],
+      });
+      const w0 = out.weeklySchedule[0];
+      assert.ok(w0.tasks.some(t => t.type === 'ai_interview'), `${objType} should emit ai_interview`);
+    }
+
+    const out2 = await planService.generate({
+      userId: new mongoose.Types.ObjectId(),
+      objectiveId: new mongoose.Types.ObjectId(),
+      diagnosticAttemptId: new mongoose.Types.ObjectId(),
+      objectiveType: 'upskilling',
+      specificsCanonical: { targetSkill: 'react' },
+      timeline: 2, weeklyCommitHours: 5,
+      topicResults: [{ canonicalName: 'react-hooks', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false }],
+    });
+    const w0b = out2.weeklySchedule[0];
+    assert.ok(!w0b.tasks.some(t => t.type === 'ai_interview'), 'upskilling should NOT emit ai_interview');
+  } finally {
+    openai.chat.completions.create = origCreate;
+    taskCatalogService.resolveTopic = origResolve;
+  }
+});
+
+test('generate: emits competition task for every topic regardless of objective', async () => {
+  const planService = require('./planGenerationService');
+  const mongoose = require('mongoose');
+  const openai = require('../../config/openai');
+  const origCreate = openai.chat.completions.create;
+  openai.chat.completions.create = async () => { throw new Error('test stub'); };
+
+  const taskCatalogService = require('../plan/taskCatalogService');
+  const origResolve = taskCatalogService.resolveTopic;
+  taskCatalogService.resolveTopic = async () => ({ quizId: 'qz1', quizMinutes: 10, contentId: null });
+
+  try {
+    const out = await planService.generate({
+      userId: new mongoose.Types.ObjectId(),
+      objectiveId: new mongoose.Types.ObjectId(),
+      diagnosticAttemptId: new mongoose.Types.ObjectId(),
+      objectiveType: 'casual_learning',
+      specificsCanonical: {},
+      timeline: 2, weeklyCommitHours: 5,
+      topicResults: [{ canonicalName: 'general-knowledge', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false }],
+    });
+    const w0 = out.weeklySchedule[0];
+    const competitionTask = w0.tasks.find(t => t.type === 'competition');
+    assert.ok(competitionTask, 'every topic should emit a competition task');
+    assert.strictEqual(competitionTask.payload.topicCanonicalName, 'general-knowledge');
+  } finally {
+    openai.chat.completions.create = origCreate;
+    taskCatalogService.resolveTopic = origResolve;
+  }
+});
+
+test('generate: emits manual fallback when topic has no quiz/content/interview', async () => {
+  const planService = require('./planGenerationService');
+  const mongoose = require('mongoose');
+  const openai = require('../../config/openai');
+  const origCreate = openai.chat.completions.create;
+  openai.chat.completions.create = async () => { throw new Error('test stub'); };
+
+  const taskCatalogService = require('../plan/taskCatalogService');
+  const origResolve = taskCatalogService.resolveTopic;
+  taskCatalogService.resolveTopic = async () => ({ quizId: null, contentId: null });
+
+  try {
+    const out = await planService.generate({
+      userId: new mongoose.Types.ObjectId(),
+      objectiveId: new mongoose.Types.ObjectId(),
+      diagnosticAttemptId: new mongoose.Types.ObjectId(),
+      objectiveType: 'upskilling',
+      specificsCanonical: { targetSkill: 'rare-skill' },
+      timeline: 2, weeklyCommitHours: 5,
+      topicResults: [{ canonicalName: 'unmapped-topic', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false }],
+    });
+    const w0 = out.weeklySchedule[0];
+    const manualTask = w0.tasks.find(t => t.type === 'manual');
+    assert.ok(manualTask, 'should emit manual fallback when nothing else resolved');
+    assert.strictEqual(manualTask.completion.mode, 'manual');
+    assert.strictEqual(manualTask.completion.requiresSelfRating, true);
+    assert.ok(manualTask.payload.title, 'manual task needs a title');
+    assert.ok(manualTask.payload.estimatedMinutes > 0);
   } finally {
     openai.chat.completions.create = origCreate;
     taskCatalogService.resolveTopic = origResolve;

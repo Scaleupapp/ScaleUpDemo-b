@@ -300,6 +300,51 @@ async function generate(input) {
           progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
         });
       }
+
+      // ai_interview — gated on interview-style objectives
+      const interviewObjectives = ['interview_preparation', 'career_switch'];
+      const emitsInterview = interviewObjectives.includes(input.objectiveType);
+      if (emitsInterview) {
+        const targetRoleLower = String(input.specificsCanonical?.targetRole || '').toLowerCase();
+        let scenario = 'placement_behavioral';
+        if (input.objectiveType === 'interview_preparation' && targetRoleLower.includes('mba')) {
+          scenario = 'mba_admissions';
+        } else if (/engineer|developer|programmer|data|ml|software/.test(targetRoleLower)) {
+          scenario = 'placement_technical';
+        }
+        tasks.push({
+          type: 'ai_interview',
+          topic: topicShape,
+          payload: { scenario, estimatedMinutes: 15 },
+          completion: { mode: 'auto', requiresSelfRating: false },
+          progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+        });
+      }
+
+      // competition — emit for every topic; tap launches competition tab filtered by topic
+      tasks.push({
+        type: 'competition',
+        topic: topicShape,
+        payload: { topicCanonicalName: alloc.topicCanonicalName, estimatedMinutes: 8 },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      });
+
+      // manual fallback — only when nothing else resolved for this topic
+      const emittedNonCompetition = !!resolved.quizId || !!resolved.contentId || emitsInterview;
+      if (!emittedNonCompetition) {
+        tasks.push({
+          type: 'manual',
+          topic: topicShape,
+          payload: {
+            title: `Practice ${displayName} on your own`,
+            description: `Spend ~30 minutes deepening your understanding of ${displayName}. Reading, exercises, or applying it to a real problem all count.`,
+            estimatedMinutes: 30,
+          },
+          completion: { mode: 'manual', requiresSelfRating: true },
+          progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+        });
+      }
     }
     week.tasks = tasks;
   }
