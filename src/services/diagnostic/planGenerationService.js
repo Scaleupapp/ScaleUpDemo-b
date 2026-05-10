@@ -1,5 +1,6 @@
 const openai = require('../../config/openai');
 const taskCatalogService = require('../plan/taskCatalogService');
+const externalContentJudgeService = require('../plan/externalContentJudgeService');
 
 const BUFFER_FACTOR = 0.85;
 const OVERESTIMATES_BUMP = 1.20;
@@ -344,6 +345,44 @@ async function generate(input) {
           completion: { mode: 'manual', requiresSelfRating: true },
           progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
         });
+      }
+
+      // external_link tasks via LLM-as-judge — gated behind feature flag
+      // because of latency/cost. When enabled, evaluates if in-app coverage
+      // is enough for the user to advance one band; emits 0-3 vetted external
+      // links if there are gaps.
+      if (process.env.FEATURE_EXTERNAL_CONTENT_JUDGE === 'true') {
+        const inAppContent = [];
+        if (resolved.quizId) inAppContent.push({ type: 'quiz', title: `Quiz on ${displayName}` });
+        if (resolved.contentId) inAppContent.push({ type: 'content', title: `Content on ${displayName}` });
+        const measuredBand = (input.topicResults || [])
+          .find(t => t.canonicalName === alloc.topicCanonicalName)?.measuredBand || 'developing';
+        try {
+          const judgment = await externalContentJudgeService.judgeTopic({
+            objectiveType: input.objectiveType,
+            targetKey: `${input.objectiveType}::${input.specificsCanonical?.targetRole || input.specificsCanonical?.targetSkill || 'general'}`,
+            topic: alloc.topicCanonicalName,
+            measuredBand,
+            inAppContent,
+          });
+          for (const link of (judgment.externalLinks || [])) {
+            tasks.push({
+              type: 'external_link',
+              topic: topicShape,
+              payload: {
+                url: link.url,
+                title: link.title,
+                source: link.source,
+                why: link.why,
+                estimatedMinutes: link.estimatedMinutes,
+              },
+              completion: { mode: 'manual', requiresSelfRating: true },
+              progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+            });
+          }
+        } catch (err) {
+          console.warn('[planGenerationService] externalContentJudge failed:', err.message);
+        }
       }
     }
     week.tasks = tasks;

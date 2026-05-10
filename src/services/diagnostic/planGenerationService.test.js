@@ -338,3 +338,91 @@ test('generate: emits manual fallback when topic has no quiz/content/interview',
     taskCatalogService.resolveTopic = origResolve;
   }
 });
+
+test('generate: emits external_link tasks when judge returns links AND feature flag is on', async () => {
+  process.env.FEATURE_EXTERNAL_CONTENT_JUDGE = 'true';
+  const planService = require('./planGenerationService');
+  const mongoose = require('mongoose');
+
+  const openai = require('../../config/openai');
+  const origCreate = openai.chat.completions.create;
+  openai.chat.completions.create = async () => { throw new Error('test stub'); };
+
+  const taskCatalogService = require('../plan/taskCatalogService');
+  const origResolve = taskCatalogService.resolveTopic;
+  taskCatalogService.resolveTopic = async () => ({
+    quizId: 'qz1', quizMinutes: 10,
+    contentId: 'c1', contentType: 'article', contentMinutes: 12,
+  });
+
+  const judgeService = require('../plan/externalContentJudgeService');
+  const origJudge = judgeService.judgeTopic;
+  judgeService.judgeTopic = async () => ({
+    inAppCoverageAdequate: false,
+    gaps: ['advanced patterns'],
+    externalLinks: [
+      { url: 'https://ocw.mit.edu/courses/x', title: 'MIT OCW: X', source: 'mit', why: 'patterns deep dive', estimatedMinutes: 45 },
+    ],
+  });
+
+  try {
+    const out = await planService.generate({
+      userId: new mongoose.Types.ObjectId(),
+      objectiveId: new mongoose.Types.ObjectId(),
+      diagnosticAttemptId: new mongoose.Types.ObjectId(),
+      objectiveType: 'upskilling',
+      specificsCanonical: { targetSkill: 'react' },
+      timeline: 2, weeklyCommitHours: 5,
+      topicResults: [{ canonicalName: 'react-hooks', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false }],
+    });
+    const w0 = out.weeklySchedule[0];
+    const externalLinkTasks = w0.tasks.filter(t => t.type === 'external_link');
+    assert.strictEqual(externalLinkTasks.length, 1);
+    assert.strictEqual(externalLinkTasks[0].payload.url, 'https://ocw.mit.edu/courses/x');
+    assert.strictEqual(externalLinkTasks[0].completion.mode, 'manual');
+    assert.strictEqual(externalLinkTasks[0].completion.requiresSelfRating, true);
+  } finally {
+    openai.chat.completions.create = origCreate;
+    taskCatalogService.resolveTopic = origResolve;
+    judgeService.judgeTopic = origJudge;
+    delete process.env.FEATURE_EXTERNAL_CONTENT_JUDGE;
+  }
+});
+
+test('generate: emits NO external_link tasks when feature flag is off (default)', async () => {
+  delete process.env.FEATURE_EXTERNAL_CONTENT_JUDGE;
+  const planService = require('./planGenerationService');
+  const mongoose = require('mongoose');
+
+  const openai = require('../../config/openai');
+  const origCreate = openai.chat.completions.create;
+  openai.chat.completions.create = async () => { throw new Error('test stub'); };
+
+  const taskCatalogService = require('../plan/taskCatalogService');
+  const origResolve = taskCatalogService.resolveTopic;
+  taskCatalogService.resolveTopic = async () => ({ quizId: 'qz1', contentId: 'c1', contentType: 'article', quizMinutes: 8, contentMinutes: 12 });
+
+  const judgeService = require('../plan/externalContentJudgeService');
+  const origJudge = judgeService.judgeTopic;
+  let judgeCalls = 0;
+  judgeService.judgeTopic = async () => { judgeCalls++; return { inAppCoverageAdequate: false, gaps: [], externalLinks: [{ url: 'https://ocw.mit.edu/x', title: 't', source: 's', why: 'w', estimatedMinutes: 30 }] }; };
+
+  try {
+    const out = await planService.generate({
+      userId: new mongoose.Types.ObjectId(),
+      objectiveId: new mongoose.Types.ObjectId(),
+      diagnosticAttemptId: new mongoose.Types.ObjectId(),
+      objectiveType: 'upskilling',
+      specificsCanonical: { targetSkill: 'react' },
+      timeline: 1, weeklyCommitHours: 5,
+      topicResults: [{ canonicalName: 'react-hooks', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false }],
+    });
+    const w0 = out.weeklySchedule[0];
+    assert.strictEqual(w0.tasks.filter(t => t.type === 'external_link').length, 0);
+    assert.strictEqual(judgeCalls, 0, 'judge must not be called when feature flag is off');
+  } finally {
+    openai.chat.completions.create = origCreate;
+    taskCatalogService.resolveTopic = origResolve;
+    judgeService.judgeTopic = origJudge;
+  }
+});
