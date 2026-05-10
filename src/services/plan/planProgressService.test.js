@@ -259,3 +259,103 @@ test('onQuizComplete: returns matched=false with reason="no_topic" for empty top
   assert.strictEqual(out.matched, false);
   assert.strictEqual(out.reason, 'no_topic');
 });
+
+test('onQuizComplete: retries on VersionError and succeeds on second attempt', async () => {
+  let saveAttempts = 0;
+  const plan = makePlanWithQuizTask();
+  const origSave = plan.save;
+  plan.save = async function () {
+    saveAttempts++;
+    if (saveAttempts === 1) {
+      const err = new Error('No matching document found for ... __v=5');
+      err.name = 'VersionError';
+      throw err;
+    }
+    this._saved = true;
+    return this;
+  };
+
+  let loadCount = 0;
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => {
+    loadCount++;
+    return { sort: () => plan };
+  };
+
+  try {
+    const out = await planProgressService.onQuizComplete({
+      userId: plan.userId.toString(),
+      quizId: 'qz-1', attemptId: 'att-retry', topic: 'product-strategy',
+    });
+    assert.strictEqual(out.matched, true, 'should succeed after retry');
+    assert.strictEqual(saveAttempts, 2, 'should have attempted save twice');
+    assert.strictEqual(loadCount, 2, 'should have re-loaded after VersionError');
+    assert.strictEqual(plan._saved, true);
+  } finally {
+    Plan.findOne = origFindOne;
+    plan.save = origSave;
+  }
+});
+
+test('onQuizComplete: returns concurrent_update after MAX_RETRIES VersionErrors', async () => {
+  let saveAttempts = 0;
+  const plan = makePlanWithQuizTask();
+  const origSave = plan.save;
+  plan.save = async function () {
+    saveAttempts++;
+    const err = new Error('VersionError');
+    err.name = 'VersionError';
+    throw err;
+  };
+
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.onQuizComplete({
+      userId: plan.userId.toString(),
+      quizId: 'qz-1', attemptId: 'att-fail', topic: 'product-strategy',
+    });
+    assert.strictEqual(out.matched, false);
+    assert.strictEqual(out.reason, 'concurrent_update');
+    assert.ok(saveAttempts >= 3, `expected at least 3 save attempts, got ${saveAttempts}`);
+  } finally {
+    Plan.findOne = origFindOne;
+    plan.save = origSave;
+  }
+});
+
+test('onContentProgress: retries on VersionError', async () => {
+  let saveAttempts = 0;
+  const plan = makePlanWithContentTask();
+  const origSave = plan.save;
+  plan.save = async function () {
+    saveAttempts++;
+    if (saveAttempts === 1) {
+      const err = new Error('VersionError');
+      err.name = 'VersionError';
+      throw err;
+    }
+    this._saved = true;
+    return this;
+  };
+
+  // Reset task progress between simulated reloads is unnecessary since the
+  // test reuses the same in-memory plan object — both attempts see the same
+  // pending task. The point is just that the second save() succeeds.
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.onContentProgress({
+      userId: plan.userId.toString(),
+      contentId: 'c-42', percent: 80, topic: 'roadmapping',
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(out.completed, true);
+    assert.strictEqual(saveAttempts, 2);
+  } finally {
+    Plan.findOne = origFindOne;
+    plan.save = origSave;
+  }
+});
