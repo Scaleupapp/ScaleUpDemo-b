@@ -1,4 +1,5 @@
 const openai = require('../../config/openai');
+const taskCatalogService = require('../plan/taskCatalogService');
 
 const BUFFER_FACTOR = 0.85;
 const OVERESTIMATES_BUMP = 1.20;
@@ -257,6 +258,52 @@ async function generate(input) {
   }
   clampToCapacity(plan, input.timeline, input.weeklyCommitHours);
   const estimatedTotalHours = sumTotalHours(plan);
+
+  // Post-process: populate tasks[] per week from each allocation's topic.
+  // Best-effort — a topic with no matching quiz/content yields no tasks for
+  // that topic this week, but the rest of the plan is unaffected.
+  for (const week of plan.weeklySchedule) {
+    const tasks = [];
+    for (const alloc of (week.allocations || [])) {
+      let resolved;
+      try {
+        resolved = await taskCatalogService.resolveTopic({
+          topicCanonicalName: alloc.topicCanonicalName,
+          objectiveType: input.objectiveType,
+          objectiveId: input.objectiveId,
+        });
+      } catch (err) {
+        console.warn('[planGenerationService] taskCatalogService.resolveTopic failed:', err.message);
+        continue;
+      }
+      const displayName = alloc.topicCanonicalName.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const topicShape = { canonicalName: alloc.topicCanonicalName, displayName };
+      if (resolved.quizId) {
+        tasks.push({
+          type: 'quiz',
+          topic: topicShape,
+          payload: { quizId: resolved.quizId, estimatedMinutes: resolved.quizMinutes },
+          completion: { mode: 'auto', requiresSelfRating: false },
+          progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+        });
+      }
+      if (resolved.contentId) {
+        tasks.push({
+          type: 'in_app_content',
+          topic: topicShape,
+          payload: {
+            contentId: resolved.contentId,
+            contentType: resolved.contentType,
+            estimatedMinutes: resolved.contentMinutes,
+          },
+          completion: { mode: 'auto', requiresSelfRating: false },
+          progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+        });
+      }
+    }
+    week.tasks = tasks;
+  }
+
   return {
     planHeadline: plan.planHeadline,
     bufferRecommendation: plan.bufferRecommendation,
