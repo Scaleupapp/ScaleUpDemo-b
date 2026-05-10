@@ -425,6 +425,59 @@ components:
           type: [string, 'null']
           format: date-time
 
+    PlanMastery:
+      type: object
+      required: [topics, interview]
+      properties:
+        topics:
+          type: array
+          items: { $ref: '#/components/schemas/PlanTopicMastery' }
+        interview: { $ref: '#/components/schemas/PlanInterviewMastery' }
+
+    PlanTopicMastery:
+      type: object
+      required: [canonicalName, displayName, level, score, quizzesTaken, contentConsumed, externalTouches, scoreHistory, trend]
+      properties:
+        canonicalName: { type: string }
+        displayName:   { type: string }
+        level:         { type: string }
+        score:         { type: number }
+        quizzesTaken:    { type: integer }
+        contentConsumed: { type: integer }
+        externalTouches: { type: integer }
+        lastAssessedAt:
+          type: [string, 'null']
+          format: date-time
+        scoreHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              score: { type: number }
+              date:
+                type: [string, 'null']
+                format: date-time
+        trend: { type: string, enum: [improving, stable, declining] }
+
+    PlanInterviewMastery:
+      type: object
+      required: [totalSessions, averageScore, trend, perTopic]
+      properties:
+        totalSessions: { type: integer }
+        averageScore:  { type: number }
+        trend: { type: string, enum: [improving, stable, declining] }
+        perTopic:
+          type: array
+          items:
+            type: object
+            required: [topic, displayName, score, sessions, trend]
+            properties:
+              topic:       { type: string }
+              displayName: { type: string }
+              score:       { type: number }
+              sessions:    { type: integer }
+              trend: { type: string, enum: [improving, stable, declining] }
+
     # =====================================================================
     # Journey
     # =====================================================================
@@ -1336,6 +1389,23 @@ paths:
                     properties:
                       data: { $ref: '#/components/schemas/PlanCurrent' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /plan/mastery:
+    get:
+      operationId: getPlanMastery
+      summary: Aggregated per-topic mastery + objective-level interview rollup
+      tags: [Plan]
+      responses:
+        '200':
+          description: Mastery summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PlanMastery' }
 
   /plan/tasks/{taskId}/complete:
     parameters:

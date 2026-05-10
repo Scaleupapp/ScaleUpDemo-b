@@ -6,6 +6,7 @@ router.use(auth);
 
 router.get('/status', ctrl.getStatus);
 router.get('/current', ctrl.getCurrent);
+router.get('/mastery', ctrl.getMastery);
 router.post('/tasks/:taskId/complete', ctrl.markTaskComplete);
 
 module.exports = router;

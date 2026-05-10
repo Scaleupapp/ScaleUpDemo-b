@@ -138,4 +138,15 @@ async function markTaskComplete(req, res) {
   return res.status(status).json(apiResponse.error(result.reason || 'unknown_error'));
 }
 
-module.exports = { getStatus, getCurrent, markTaskComplete };
+async function getMastery(req, res) {
+  try {
+    const topicMasteryService = require('../services/plan/topicMasteryService');
+    const summary = await topicMasteryService.getMasterySummary(req.user.userId);
+    return res.status(200).json(apiResponse.success(summary));
+  } catch (err) {
+    console.error('[planController.getMastery]', err);
+    return res.status(500).json(apiResponse.error('internal_error'));
+  }
+}
+
+module.exports = { getStatus, getCurrent, markTaskComplete, getMastery };

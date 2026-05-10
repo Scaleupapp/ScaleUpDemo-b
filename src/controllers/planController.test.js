@@ -43,7 +43,7 @@ require.cache[taxonomyServicePath] = {
 
 delete require.cache[require.resolve('./planController')];
 const ctrl = require('./planController');
-const { markTaskComplete } = ctrl;
+const { markTaskComplete, getMastery } = ctrl;
 const Plan = require('../models/Plan');
 
 function fakeRes() {
@@ -379,6 +379,28 @@ test('markTaskComplete: 200 with taskId on successful manual completion', async 
     assert.strictEqual(activePlan.weeklySchedule[0].tasks[0].progress.selfRating, 4);
   } finally {
     Plan.findOne = origFindOne;
+  }
+});
+
+test('getMastery: returns 200 with aggregated summary', async () => {
+  const topicMasteryService = require('../services/plan/topicMasteryService');
+  const orig = topicMasteryService.getMasterySummary;
+  topicMasteryService.getMasterySummary = async () => ({
+    topics: [{ canonicalName: 'p', displayName: 'P', level: 'intermediate', score: 50, quizzesTaken: 2, contentConsumed: 1, externalTouches: 0, lastAssessedAt: null, scoreHistory: [], trend: 'stable' }],
+    interview: { totalSessions: 0, averageScore: 0, trend: 'stable', perTopic: [] },
+  });
+
+  let captured;
+  const res = { status: () => res, json: (b) => { captured = b; return res; } };
+  const req = { user: { userId: new mongoose.Types.ObjectId().toString() } };
+
+  try {
+    await getMastery(req, res);
+    assert.strictEqual(captured.success, true);
+    assert.strictEqual(captured.data.topics.length, 1);
+    assert.strictEqual(captured.data.interview.totalSessions, 0);
+  } finally {
+    topicMasteryService.getMasterySummary = orig;
   }
 });
 
