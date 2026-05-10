@@ -302,26 +302,6 @@ async function generate(input) {
         });
       }
 
-      // ai_interview — gated on interview-style objectives
-      const interviewObjectives = ['interview_preparation', 'career_switch'];
-      const emitsInterview = interviewObjectives.includes(input.objectiveType);
-      if (emitsInterview) {
-        const targetRoleLower = String(input.specificsCanonical?.targetRole || '').toLowerCase();
-        let scenario = 'placement_behavioral';
-        if (input.objectiveType === 'interview_preparation' && targetRoleLower.includes('mba')) {
-          scenario = 'mba_admissions';
-        } else if (/engineer|developer|programmer|data|ml|software/.test(targetRoleLower)) {
-          scenario = 'placement_technical';
-        }
-        tasks.push({
-          type: 'ai_interview',
-          topic: topicShape,
-          payload: { scenario, estimatedMinutes: 15 },
-          completion: { mode: 'auto', requiresSelfRating: false },
-          progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
-        });
-      }
-
       // competition — emit for every topic; tap launches competition tab filtered by topic
       tasks.push({
         type: 'competition',
@@ -331,8 +311,10 @@ async function generate(input) {
         progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
       });
 
-      // manual fallback — only when nothing else resolved for this topic
-      const emittedNonCompetition = !!resolved.quizId || !!resolved.contentId || emitsInterview;
+      // manual fallback — only when nothing else resolved for this topic.
+      // (Per-week ai_interview is emitted at the objective level below; it does
+      // not "cover" a specific topic, so it does not satisfy this guard.)
+      const emittedNonCompetition = !!resolved.quizId || !!resolved.contentId;
       if (!emittedNonCompetition) {
         tasks.push({
           type: 'manual',
@@ -385,6 +367,52 @@ async function generate(input) {
         }
       }
     }
+
+    // Phase 6: ONE ai_interview task per week at the objective level (not per allocation).
+    // Gated on objectives that genuinely call for interview practice.
+    const isInterviewQualified = (() => {
+      const t = input.objectiveType;
+      if (t === 'interview_preparation') return true;
+      // career_switch only if specifics indicate active interview prep
+      // (target role set + reasonable timeline). Long-tail career switches don't need a behavioral interview yet.
+      if (t === 'career_switch') {
+        const hasTargetRole = !!input.specificsCanonical?.targetRole;
+        const wks = Number(input.timeline) || 0;
+        return hasTargetRole && wks > 0 && wks <= 16;
+      }
+      return false;
+    })();
+
+    if (isInterviewQualified) {
+      const targetRoleLower = String(input.specificsCanonical?.targetRole || '').toLowerCase();
+      let scenario = 'placement_behavioral';
+      if (input.objectiveType === 'interview_preparation' && /mba|admissions/.test(targetRoleLower)) {
+        scenario = 'mba_admissions';
+      } else if (/engineer|developer|sde|backend|frontend|fullstack|data\b|ml\b|ai\b/.test(targetRoleLower)) {
+        scenario = (week.week % 2 === 0) ? 'placement_technical' : 'placement_behavioral';
+      } else if (/product manager|^pm\b|growth|strategy|consulting|case/.test(targetRoleLower)) {
+        scenario = (week.week % 2 === 0) ? 'case_study' : 'placement_behavioral';
+      } else if (input.objectiveType === 'interview_preparation' && /(^|\b)hr|people|recruiter/.test(targetRoleLower)) {
+        scenario = 'placement_hr';
+      }
+
+      // topicHints: this week's allocation topics — used as candidate topics for the interviewer.
+      // Actual question weighting happens at startInterview time using live KnowledgeProfile data.
+      const topicHints = (week.allocations || []).map(a => a.topicCanonicalName).slice(0, 6);
+
+      tasks.push({
+        type: 'ai_interview',
+        topic: { canonicalName: '_objective', displayName: 'Mock interview' },
+        payload: {
+          scenario,
+          estimatedMinutes: 15,
+          topicHints,
+        },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      });
+    }
+
     week.tasks = tasks;
   }
 

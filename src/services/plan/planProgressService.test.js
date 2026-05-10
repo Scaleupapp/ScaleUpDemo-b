@@ -584,3 +584,94 @@ test('markManualComplete: does NOT write ExternalContentTouch for non-external_l
     ExternalContentTouch.create = origCreate;
   }
 });
+
+test('onInterviewComplete: matches objective-level ai_interview task and updates topicInterviewMastery', async () => {
+  const KnowledgeProfile = require('../../models/KnowledgeProfile');
+  let savedProfile = null;
+  const fakeProfile = {
+    userId: new mongoose.Types.ObjectId(),
+    topicInterviewMastery: new Map(),
+    save: async function () { savedProfile = this; return this; },
+  };
+  const origFind = KnowledgeProfile.findOne;
+  KnowledgeProfile.findOne = () => fakeProfile;
+
+  const plan = {
+    _id: new mongoose.Types.ObjectId(),
+    userId: fakeProfile.userId,
+    weeklySchedule: [{
+      week: 1, weeklyGoal: 'g', allocations: [],
+      tasks: [{
+        _id: new mongoose.Types.ObjectId(),
+        type: 'ai_interview',
+        topic: { canonicalName: '_objective', displayName: 'Mock interview' },
+        payload: { scenario: 'placement_behavioral', estimatedMinutes: 15 },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      }],
+    }],
+    save: async function () { return this; },
+  };
+  const origPlanFind = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+
+  try {
+    const out = await planProgressService.onInterviewComplete({
+      userId: fakeProfile.userId.toString(),
+      sessionId: 'sess-1',
+      topic: 'product manager',
+      perQuestionEval: [
+        { questionNumber: 1, concept: 'stakeholder-management', score: 8 },
+        { questionNumber: 2, concept: 'stakeholder-management', score: 6 },
+        { questionNumber: 3, concept: 'roadmapping', score: 4 },
+      ],
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.status, 'complete');
+    assert.ok(savedProfile, 'KnowledgeProfile.save should have been called');
+    const sm = fakeProfile.topicInterviewMastery.get('stakeholder-management');
+    assert.ok(sm, 'stakeholder-management mastery should exist');
+    assert.strictEqual(sm.sessions, 1);
+    assert.strictEqual(Math.round(sm.score), 7);
+    const rd = fakeProfile.topicInterviewMastery.get('roadmapping');
+    assert.strictEqual(rd.sessions, 1);
+    assert.strictEqual(rd.score, 4);
+  } finally {
+    Plan.findOne = origPlanFind;
+    KnowledgeProfile.findOne = origFind;
+  }
+});
+
+test('onInterviewComplete: matches even when topic param does not match (objective-level)', async () => {
+  // Phase 6: matcher ignores topic param — finds ANY pending ai_interview in current/future weeks.
+  const plan = {
+    _id: new mongoose.Types.ObjectId(),
+    userId: new mongoose.Types.ObjectId(),
+    weeklySchedule: [{
+      week: 1, weeklyGoal: 'g', allocations: [],
+      tasks: [{
+        _id: new mongoose.Types.ObjectId(),
+        type: 'ai_interview',
+        topic: { canonicalName: '_objective', displayName: 'Mock interview' },
+        payload: { scenario: 'placement_behavioral' },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending' },
+      }],
+    }],
+    save: async function () { return this; },
+  };
+  const origPlanFind = Plan.findOne;
+  Plan.findOne = () => ({ sort: () => plan });
+  try {
+    const out = await planProgressService.onInterviewComplete({
+      userId: plan.userId.toString(),
+      sessionId: 'sess-2',
+      topic: 'literally anything',
+      perQuestionEval: [],
+    });
+    assert.strictEqual(out.matched, true);
+    assert.strictEqual(plan.weeklySchedule[0].tasks[0].progress.status, 'complete');
+  } finally {
+    Plan.findOne = origPlanFind;
+  }
+});

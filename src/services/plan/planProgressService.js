@@ -149,33 +149,84 @@ async function onContentProgress({ userId, contentId, percent, topic }) {
   );
 }
 
-async function onInterviewComplete({ userId, sessionId, topic }) {
-  const topicKey = canonicalize(topic);
-  if (!topicKey) return { matched: false, reason: 'no_topic' };
-
+// Phase 6: ai_interview is now objective-level (one per week, not per topic).
+// Match ANY pending ai_interview in current/future weeks — topic param is ignored
+// for matching but perQuestionEval drives topicInterviewMastery updates.
+async function onInterviewComplete({ userId, sessionId, topic, perQuestionEval }) {
   return withVersionRetry(
     () => Plan.findOne({ userId, isActive: true }).sort({ updatedAt: -1 }),
     async (plan) => {
       const startIdx = findCurrentWeekIndex(plan);
       if (startIdx === null) return { matched: false, reason: 'all_weeks_complete' };
+
+      let matched = null;
+      let matchedWeek = null;
       for (let i = startIdx; i < plan.weeklySchedule.length; i++) {
         const week = plan.weeklySchedule[i];
-        const match = findPendingTaskInWeek(
-          week,
-          t => t.type === 'ai_interview' && canonicalize(t.topic?.canonicalName) === topicKey,
-        );
-        if (match) {
-          const snap = snapshotProgress(match);
-          match.progress.status = 'complete';
-          match.progress.completedAt = new Date();
-          match.progress.sourceEventId = String(sessionId);
-          await saveWithRevert(plan, match, snap);
-          return { matched: true, planId: String(plan._id), weekNumber: week.week, taskId: String(match._id) };
-        }
+        const m = findPendingTaskInWeek(week, t => t.type === 'ai_interview');
+        if (m) { matched = m; matchedWeek = week; break; }
       }
-      return { matched: false, reason: 'no_matching_task' };
+      if (!matched) return { matched: false, reason: 'no_matching_task' };
+
+      const snap = snapshotProgress(matched);
+      matched.progress.status = 'complete';
+      matched.progress.completedAt = new Date();
+      matched.progress.sourceEventId = String(sessionId);
+      await saveWithRevert(plan, matched, snap);
+
+      // Update topicInterviewMastery from per-question scores aggregated by concept.
+      try {
+        if (Array.isArray(perQuestionEval) && perQuestionEval.length > 0) {
+          const KnowledgeProfile = require('../../models/KnowledgeProfile');
+          const byConcept = {};
+          for (const ev of perQuestionEval) {
+            const c = canonicalize(ev.concept || 'general') || 'general';
+            if (!byConcept[c]) byConcept[c] = { sum: 0, n: 0 };
+            byConcept[c].sum += Number(ev.score) || 0;
+            byConcept[c].n += 1;
+          }
+          const profile = await KnowledgeProfile.findOne({ userId });
+          if (profile) {
+            // After Mongoose load, topicInterviewMastery is a Map; .get/.set work directly.
+            for (const [concept, agg] of Object.entries(byConcept)) {
+              const newAvg = agg.sum / agg.n;
+              const existing = (profile.topicInterviewMastery && typeof profile.topicInterviewMastery.get === 'function')
+                ? profile.topicInterviewMastery.get(concept)
+                : null;
+              const prev = existing || { score: 0, sessions: 0, scoreHistory: [], trend: 'stable' };
+              const blended = (prev.score * prev.sessions + newAvg) / (prev.sessions + 1);
+              const history = (prev.scoreHistory || []).concat([{ score: newAvg, sessionId, scoredAt: new Date() }]).slice(-20);
+              const trend = computeInterviewTrend(history.map(h => h.score));
+              profile.topicInterviewMastery.set(concept, {
+                score: blended,
+                sessions: prev.sessions + 1,
+                lastScoredAt: new Date(),
+                trend,
+                scoreHistory: history,
+              });
+            }
+            await profile.save();
+          }
+        }
+      } catch (err) {
+        console.warn('[planProgressService] topicInterviewMastery update failed:', err.message);
+      }
+
+      return { matched: true, planId: String(plan._id), weekNumber: matchedWeek.week, taskId: String(matched._id) };
     },
   );
+}
+
+function computeInterviewTrend(scores) {
+  if (!scores || scores.length < 3) return 'stable';
+  const recent = scores.slice(-3);
+  const earlier = scores.slice(-6, -3);
+  if (earlier.length === 0) return 'stable';
+  const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const earlierAvg = earlier.reduce((a, b) => a + b, 0) / earlier.length;
+  if (recentAvg - earlierAvg > 0.5) return 'improving';
+  if (earlierAvg - recentAvg > 0.5) return 'declining';
+  return 'stable';
 }
 
 async function onCompetitionPlayed({ userId, challengeId, topic }) {

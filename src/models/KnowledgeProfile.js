@@ -43,6 +43,25 @@ const knowledgeProfileSchema = new mongoose.Schema({
     },
   }],
 
+  // Phase 6: per-topic interview mastery, keyed by canonical (kebab-case) topic name.
+  // Updated by planProgressService.onInterviewComplete from perQuestion eval scores.
+  // Read by interviewService.startInterview to bias question selection toward weak topics.
+  topicInterviewMastery: {
+    type: Map,
+    of: new mongoose.Schema({
+      score: { type: Number, default: 0 },         // running average 0..10
+      sessions: { type: Number, default: 0 },
+      lastScoredAt: { type: Date },
+      trend: { type: String, enum: ['improving', 'stable', 'declining'], default: 'stable' },
+      scoreHistory: [{
+        score: Number,
+        sessionId: mongoose.Schema.Types.ObjectId,
+        scoredAt: Date,
+      }],
+    }, { _id: false }),
+    default: () => new Map(),
+  },
+
   learningVelocity: {
     topicsPerWeek: { type: Number, default: 0 },
     averageScoreImprovement: { type: Number, default: 0 },

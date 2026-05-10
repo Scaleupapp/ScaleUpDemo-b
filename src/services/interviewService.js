@@ -63,11 +63,43 @@ class InterviewService {
   /**
    * Start a new interview session
    */
-  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId }) {
+  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null }) {
     // Check user doesn't have an existing in_progress session
     const existing = await InterviewSession.findOne({ userId, status: 'in_progress' });
     if (existing) {
       throw new ApiError(409, 'You already have an interview in progress. Complete or abandon it before starting a new one.');
+    }
+
+    // Phase 6: bias topic selection from KnowledgeProfile.topicInterviewMastery.
+    // Lower historical scores → more questions on that topic next session.
+    if (!topicWeights) {
+      try {
+        const KnowledgeProfile = require('../models/KnowledgeProfile');
+        const profile = await KnowledgeProfile.findOne({ userId }).lean();
+        if (profile && profile.topicInterviewMastery) {
+          // mongoose .lean() returns the Map as a plain object.
+          const mastery = profile.topicInterviewMastery instanceof Map
+            ? Object.fromEntries(profile.topicInterviewMastery)
+            : (profile.topicInterviewMastery || {});
+          const weights = {};
+          for (const [topic, m] of Object.entries(mastery)) {
+            const s = (m && typeof m.score === 'number') ? m.score : 0;
+            // Inverse weighting: lower score → more questions next time.
+            weights[topic] = s < 4 ? 4 : s < 7 ? 2 : 1;
+          }
+          if (Object.keys(weights).length > 0) topicWeights = weights;
+        }
+      } catch (err) {
+        console.warn('[interviewService] failed to read topicInterviewMastery:', err.message);
+      }
+    }
+
+    let topicPriorityBlock = '';
+    if (topicWeights && Object.keys(topicWeights).length > 0) {
+      const sorted = Object.entries(topicWeights).sort((a, b) => b[1] - a[1]);
+      topicPriorityBlock = `\n\nTOPIC PRIORITY for this session (weight = relative number of questions to ask):\n`
+        + sorted.map(([t, w]) => `  - ${t}: ${w}`).join('\n')
+        + `\nFocus more questions on higher-weighted topics. Topics not listed should appear at most once.\nAnnotate each question's evaluation with a 'concept' field naming the topic (use canonical kebab-case names from the priority list).`;
     }
 
     // Gather previously asked questions from past sessions to avoid repeats
@@ -117,7 +149,7 @@ Previously asked questions to AVOID (from past sessions):
 ${prevQuestionsStr}
 
 INTERVIEW TYPE GUIDELINES:
-${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}`;
+${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBlock}`;
 
     // Create session
     const session = await InterviewSession.create({
@@ -390,20 +422,17 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
         console.error('[InterviewEval] Failed to send notification:', notifErr.message);
       }
 
-      // Best-effort: mark matching plan task complete.
+      // Best-effort: mark matching plan task complete + update topicInterviewMastery.
+      // Phase 6: ai_interview is objective-level — matching no longer needs a topic.
+      // perQuestionEval drives per-topic mastery in KnowledgeProfile.
       try {
         const planProgressService = require('./plan/planProgressService');
-        // Use targetRole as the topic key — interviews aren't topic-tagged today,
-        // but the plan's interview task uses the allocation's topicCanonicalName
-        // which usually mirrors the user's targetRole.
-        const topic = session.targetRole || session.targetCompany || '';
-        if (topic) {
-          await planProgressService.onInterviewComplete({
-            userId: String(session.userId),
-            sessionId: String(session._id),
-            topic,
-          });
-        }
+        await planProgressService.onInterviewComplete({
+          userId: String(session.userId),
+          sessionId: String(session._id),
+          topic: session.targetRole || session.targetCompany || '',
+          perQuestionEval: session.evaluation?.perQuestion || [],
+        });
       } catch (err) {
         console.warn('[interviewService] planProgressService.onInterviewComplete failed:', err.message);
       }
