@@ -418,7 +418,7 @@ components:
       type: object
       required: [status]
       properties:
-        status:    { type: string, enum: [pending, generating, ready, failed] }
+        status:    { type: string, enum: [pending, generating, ready, failed, no_diagnostic] }
         planId:    { type: [string, 'null'] }
         source:    { type: [string, 'null'] }
         updatedAt:

@@ -65,14 +65,14 @@ test('planController.getStatus: returns generating when no plan yet', async () =
   assert.strictEqual(res._json.data.status, 'generating');
 });
 
-test('planController.getStatus: returns pending with planId:null when user has no attempts', async () => {
+test('planController.getStatus: returns no_diagnostic when user has no completed attempts', async () => {
   activePlan = null;
   latestAttempt = null;
   const req = { user: { userId: new mongoose.Types.ObjectId() } };
   const res = fakeRes();
   await ctrl.getStatus(req, res);
   assert.strictEqual(res._json.success, true);
-  assert.strictEqual(res._json.data.status, 'pending');
+  assert.strictEqual(res._json.data.status, 'no_diagnostic');
   assert.strictEqual(res._json.data.planId, null);
 });
 

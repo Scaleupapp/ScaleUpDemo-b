@@ -20,7 +20,7 @@ async function getStatus(req, res) {
     .select('planGenerationStatus planId')
     .lean();
   if (!latestAttempt) {
-    return res.status(200).json(apiResponse.success({ status: 'pending', planId: null }));
+    return res.status(200).json(apiResponse.success({ status: 'no_diagnostic', planId: null }));
   }
   return res.status(200).json(apiResponse.success({
     status: latestAttempt.planGenerationStatus || 'pending',
