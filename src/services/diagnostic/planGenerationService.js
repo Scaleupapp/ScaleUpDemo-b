@@ -260,24 +260,48 @@ async function generate(input) {
   clampToCapacity(plan, input.timeline, input.weeklyCommitHours);
   const estimatedTotalHours = sumTotalHours(plan);
 
+  // Pre-resolve each unique topic exactly once, in parallel with a small
+  // concurrency cap. Previously this loop ran resolveTopic for every
+  // week × allocation (e.g. 12 × 6 = 72 calls), each potentially triggering
+  // a 60s LLM quiz-gen. Now it's N (unique topic count) calls, in parallel,
+  // which is the actual bound — cuts plan gen from 4-6 min to ~30-60s for a
+  // 7-topic plan. Map keys on the raw topicCanonicalName since that's what
+  // the per-week lookup uses.
+  const uniqueTopics = Array.from(new Set(
+    plan.weeklySchedule.flatMap(w => (w.allocations || []).map(a => a.topicCanonicalName))
+  )).filter(Boolean);
+
+  const resolvedByTopic = new Map();
+  const CONCURRENCY = 4;
+  for (let i = 0; i < uniqueTopics.length; i += CONCURRENCY) {
+    const chunk = uniqueTopics.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(chunk.map(async (topic) => {
+      try {
+        const r = await taskCatalogService.resolveTopic({
+          topicCanonicalName: topic,
+          objectiveType: input.objectiveType,
+          objectiveId: input.objectiveId,
+          userId: input.userId,
+        });
+        return [topic, r];
+      } catch (err) {
+        console.warn('[planGenerationService] resolveTopic failed for', topic, ':', err.message);
+        return [topic, null];
+      }
+    }));
+    for (const [topic, r] of results) {
+      if (r) resolvedByTopic.set(topic, r);
+    }
+  }
+
   // Post-process: populate tasks[] per week from each allocation's topic.
   // Best-effort — a topic with no matching quiz/content yields no tasks for
   // that topic this week, but the rest of the plan is unaffected.
   for (const week of plan.weeklySchedule) {
     const tasks = [];
     for (const alloc of (week.allocations || [])) {
-      let resolved;
-      try {
-        resolved = await taskCatalogService.resolveTopic({
-          topicCanonicalName: alloc.topicCanonicalName,
-          objectiveType: input.objectiveType,
-          objectiveId: input.objectiveId,
-          userId: input.userId,
-        });
-      } catch (err) {
-        console.warn('[planGenerationService] taskCatalogService.resolveTopic failed:', err.message);
-        continue;
-      }
+      const resolved = resolvedByTopic.get(alloc.topicCanonicalName);
+      if (!resolved) continue;
       const displayName = alloc.topicCanonicalName.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
       const topicShape = { canonicalName: alloc.topicCanonicalName, displayName };
       if (resolved.quizId) {

@@ -29,6 +29,17 @@ const MS_PER_DAY = 86400000;
 const RECENCY_7_DAYS = 7 * MS_PER_DAY;
 const RECENCY_30_DAYS = 30 * MS_PER_DAY;
 
+// Slug normalizer — UserObjective.topicsOfInterest stores canonical slugs
+// while Content.topics stores display phrases. We slugify both sides so
+// the recommendation match works regardless of the vocabulary mismatch.
+function _slug(s) {
+  return String(s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 // ─── Social proof normalization caps ────────────────────────────────────────────
 const SOCIAL_CAPS = {
   likes: 500,
@@ -197,11 +208,14 @@ class RecommendationService {
     // Build content type filter based on learning style
     const contentTypeFilter = this._learningStyleToContentTypes(preferredLearningStyle);
 
-    // Query: published content matching the user's interest topics
+    // Query: published content matching the user's interest topics.
+    // UserObjective.topicsOfInterest is canonical-slug form ("product-management")
+    // while Content.topics is display form ("Product Management"), so a direct
+    // $in never matches. We fetch a broader candidate set and slug-match in
+    // memory below. Acceptable scope since published Content is small in dev
+    // and the warm-path service is the long-term home for this user anyway.
+    const topicSlugs = new Set(topicsOfInterest.map(_slug).filter(Boolean));
     const query = { status: 'published' };
-    if (topicsOfInterest.length) {
-      query.topics = { $in: topicsOfInterest };
-    }
     if (contentTypeFilter) {
       query.contentType = { $in: contentTypeFilter };
     }
@@ -214,11 +228,11 @@ class RecommendationService {
     const scored = candidates.map(content => {
       let score = 0;
 
-      // Topic match (simple for cold start — binary match)
-      const overlap = content.topics.filter(t => topicsOfInterest.includes(t)).length;
-      const topicScore = topicsOfInterest.length > 0
-        ? (overlap / topicsOfInterest.length) * SCORE_WEIGHTS.TOPIC_RELEVANCE_MAX
-        : SCORE_WEIGHTS.TOPIC_RELEVANCE_MAX * 0.5; // neutral if no interests specified
+      // Topic match (binary, slug-normalized on both sides).
+      const overlap = (content.topics || []).filter(t => topicSlugs.has(_slug(t))).length;
+      const topicScore = topicSlugs.size > 0
+        ? (overlap / topicSlugs.size) * SCORE_WEIGHTS.TOPIC_RELEVANCE_MAX
+        : SCORE_WEIGHTS.TOPIC_RELEVANCE_MAX * 0.5;
       score += topicScore;
 
       // Difficulty calibration
@@ -623,15 +637,19 @@ class RecommendationService {
     let affinityScore = 0;
 
     // Objective-based relevance (0–30 pts of the 40)
+    // Normalize both sides: UserObjective.topicsOfInterest holds canonical
+    // slugs ("product-management"); Content.topics holds display phrases
+    // ("Product Management"). Without slugify-on-read no item ever matched
+    // and topic relevance silently contributed 0 → ranking collapsed onto
+    // quality + recency → the "Home shows generic content" complaint.
     if (Object.keys(topicWeights).length > 0) {
       let matchWeight = 0;
       for (const topic of contentTopics) {
-        if (topicWeights[topic]) {
-          matchWeight += topicWeights[topic];
+        const key = _slug(topic);
+        if (topicWeights[key]) {
+          matchWeight += topicWeights[key];
         }
       }
-      // Normalize: the highest possible matchWeight would be 1.0 (if all content
-      // topics perfectly match with full weight), so cap at 1.0
       objectiveScore = Math.min(1, matchWeight) * 30;
     }
 
@@ -640,7 +658,8 @@ class RecommendationService {
       const maxAffinity = Math.max(...consumptionGraph.topicNodes.map(n => n.affinityScore || 0), 1);
       let affinitySum = 0;
       for (const topic of contentTopics) {
-        const node = consumptionGraph.topicNodes.find(n => n.topic === topic);
+        const slug = _slug(topic);
+        const node = consumptionGraph.topicNodes.find(n => _slug(n.topic) === slug);
         if (node && node.affinityScore > 0) {
           affinitySum += node.affinityScore / maxAffinity;
         }
@@ -799,12 +818,16 @@ class RecommendationService {
 
     const weights = {};
 
-    // Helper to distribute a total weight evenly across an objective's topics
+    // Helper to distribute a total weight evenly across an objective's topics.
+    // Keys are slugs so the topic-relevance scorer can match Content.topics
+    // (which arrive as display-form phrases) after slugifying.
     const distribute = (topics, totalWeight) => {
       if (!topics || !topics.length) return;
       const perTopic = totalWeight / topics.length;
       for (const topic of topics) {
-        weights[topic] = (weights[topic] || 0) + perTopic;
+        const key = _slug(topic);
+        if (!key) continue;
+        weights[key] = (weights[key] || 0) + perTopic;
       }
     };
 

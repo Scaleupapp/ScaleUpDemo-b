@@ -150,16 +150,28 @@ async function getResults(req, res) {
       }
     } catch (_) { /* fall back to canonical names */ }
 
+    // Title-case fallback so the UI never shows raw kebab-case when the
+    // TopicTaxonomy lookup misses (it does for many objective/targetKey combos).
+    const titleCaseFromSlug = (slug) => String(slug || '')
+      .replace(/[-_]+/g, ' ')
+      .trim()
+      .split(' ')
+      .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+      .join(' ');
+
     const results = [];
     for (const [comp, v] of attempt.results.entries()) {
+      const displayName = displayByCanonical.get(comp) || titleCaseFromSlug(comp);
       results.push({
-        competency:          displayByCanonical.get(comp) || comp,
+        competency:          displayName,
+        displayName,
         canonicalCompetency: comp,
         band:                v.assessedBand,
         score:               v.score,
         calibrationDelta:    v.calibrationDelta,
         calibrationClass:    v.calibrationClass || 'well-calibrated',
         questionsAsked:      v.questionsAsked,
+        selfRating:          v.selfRating || null,
       });
     }
 

@@ -127,7 +127,7 @@ const TRIGGER_TO_QUIZ_TYPE = {
 
 class QuizGenerationService {
 
-  async generateQuiz({ triggerId, userId, topic, contentIds, type, questionCount: requestedCount, objectiveId, assessmentType, isSkillAssessment }) {
+  async generateQuiz({ triggerId, userId, topic, contentIds, type, questionCount: requestedCount, objectiveId, assessmentType, isSkillAssessment, suppressNotification }) {
     const quizType = isSkillAssessment ? 'competency_assessment' : (TRIGGER_TO_QUIZ_TYPE[type] || 'topic_consolidation');
 
     // Resolve content — contentIds may be empty for on-demand topic quizzes
@@ -403,11 +403,16 @@ class QuizGenerationService {
       await QuizTrigger.findByIdAndUpdate(triggerId, { quizId: quiz._id, status: 'generated' });
     }
 
-    await notificationQueue.add('send', {
-      userId, title: 'Quiz Ready!',
-      body: `Test your ${topic} knowledge — ${quiz.totalQuestions} questions from your recent learning.`,
-      data: { type: 'quiz_ready', quizId: quiz._id },
-    });
+    // Skip per-quiz pushes when the caller is in a bulk-generation path
+    // (e.g. plan generation seeds 10-15 quizzes at once — sending a push
+    // per quiz spams the user. The plan-ready notification covers the batch).
+    if (!suppressNotification) {
+      await notificationQueue.add('send', {
+        userId, title: 'Quiz Ready!',
+        body: `Test your ${topic} knowledge — ${quiz.totalQuestions} questions from your recent learning.`,
+        data: { type: 'quiz_ready', quizId: quiz._id },
+      });
+    }
 
     console.log(`[QuizGeneration] Quiz created: id=${quiz._id}, topic="${topic}", questions=${quiz.totalQuestions}, competencyAware=${!!competencyContext}`);
     return quiz;

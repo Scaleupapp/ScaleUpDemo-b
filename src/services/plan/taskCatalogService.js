@@ -15,9 +15,13 @@ async function resolveTopic({ topicCanonicalName, objectiveType, objectiveId, us
   }
 
   // Phase 7: lazy quiz generation. If no quiz exists for this topic+objective,
-  // synchronously generate one via the existing quizGenerationService. Plan
-  // generation is async via the worker, so the latency hit is invisible to
-  // the user. 15s hard timeout falls back to no-quiz (manual task takes over).
+  // synchronously generate one via the existing quizGenerationService.
+  //
+  // Timeout was 15s, but quiz LLM gen averages 20-40s, so every call timed out
+  // and we wasted 15s × N topics producing nothing. Raised to 60s so successes
+  // actually persist + get cached for adjacent weeks. `suppressNotification`
+  // stops the per-quiz "Quiz Ready!" push from firing during bulk plan-gen
+  // (the plan-ready push covers the batch).
   if (!quiz && objectiveId && userId) {
     let timeoutHandle;
     try {
@@ -30,9 +34,10 @@ async function resolveTopic({ topicCanonicalName, objectiveType, objectiveId, us
           contentIds: [],
           type: 'plan_seed',
           questionCount: 5,
+          suppressNotification: true,
         }),
         new Promise((_, reject) => {
-          timeoutHandle = setTimeout(() => reject(new Error('lazy_gen_timeout')), 15000);
+          timeoutHandle = setTimeout(() => reject(new Error('lazy_gen_timeout')), 60000);
         }),
       ]);
       if (generated && generated._id) {
