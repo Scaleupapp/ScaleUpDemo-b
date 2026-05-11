@@ -44,53 +44,95 @@ test('judgeTopic: returns adequate=true with empty links when LLM says coverage 
 });
 
 test('judgeTopic: filters out external links not on the whitelist', async () => {
-  await withStubbedLLM(
-    {
-      inAppCoverageAdequate: false,
-      gaps: ['advanced patterns missing'],
-      externalLinks: [
-        { url: 'https://ocw.mit.edu/courses/foo', title: 'MIT OCW Foo', source: 'mit', why: 'reason', estimatedMinutes: 30 },
-        { url: 'https://random-spam-blog.io/foo', title: 'Spam', source: 'spam', why: 'r', estimatedMinutes: 10 },
-        { url: 'not-a-url', title: 'broken', source: 'x', why: 'r', estimatedMinutes: 5 },
-      ],
-    },
-    async () => {
-      const out = await judgeService.judgeTopic({
-        objectiveType: 'upskilling',
-        targetKey: 'upskilling::react',
-        topic: 'react-hooks',
-        measuredBand: 'developing',
-        inAppContent: [],
-      });
-      assert.strictEqual(out.inAppCoverageAdequate, false);
-      assert.strictEqual(out.externalLinks.length, 1, 'only the MIT link should survive');
-      assert.strictEqual(out.externalLinks[0].url, 'https://ocw.mit.edu/courses/foo');
-    },
-  );
+  const externalContentFetcherService = require('./externalContentFetcherService');
+  const origFetch = externalContentFetcherService.fetchSnapshot;
+  externalContentFetcherService.fetchSnapshot = async (url) => ({ url, fetchError: null, excerpt: 'A'.repeat(2000), wordCount: 500 });
+  try {
+    await withStubbedLLM(
+      {
+        inAppCoverageAdequate: false,
+        gaps: ['advanced patterns missing'],
+        externalLinks: [
+          { url: 'https://ocw.mit.edu/courses/foo', title: 'MIT OCW Foo', source: 'mit', why: 'reason', estimatedMinutes: 30 },
+          { url: 'https://random-spam-blog.io/foo', title: 'Spam', source: 'spam', why: 'r', estimatedMinutes: 10 },
+          { url: 'not-a-url', title: 'broken', source: 'x', why: 'r', estimatedMinutes: 5 },
+        ],
+      },
+      async () => {
+        const out = await judgeService.judgeTopic({
+          objectiveType: 'upskilling',
+          targetKey: 'upskilling::react',
+          topic: 'react-hooks',
+          measuredBand: 'developing',
+          inAppContent: [],
+        });
+        assert.strictEqual(out.inAppCoverageAdequate, false);
+        assert.strictEqual(out.externalLinks.length, 1, 'only the MIT link should survive');
+        assert.strictEqual(out.externalLinks[0].url, 'https://ocw.mit.edu/courses/foo');
+      },
+    );
+  } finally {
+    externalContentFetcherService.fetchSnapshot = origFetch;
+  }
 });
 
 test('judgeTopic: caps externalLinks at 3 even if LLM returns more', async () => {
+  const externalContentFetcherService = require('./externalContentFetcherService');
+  const origFetch = externalContentFetcherService.fetchSnapshot;
+  externalContentFetcherService.fetchSnapshot = async (url) => ({ url, fetchError: null, excerpt: 'A'.repeat(2000), wordCount: 500 });
+  try {
+    await withStubbedLLM(
+      {
+        inAppCoverageAdequate: false,
+        gaps: ['gap'],
+        externalLinks: Array.from({ length: 5 }, (_, i) => ({
+          url: `https://ocw.mit.edu/courses/${i}`,
+          title: `MIT ${i}`,
+          source: 'mit',
+          why: 'r',
+          estimatedMinutes: 20,
+        })),
+      },
+      async () => {
+        const out = await judgeService.judgeTopic({
+          objectiveType: 'upskilling',
+          targetKey: 'k',
+          topic: 'react-hooks',
+          measuredBand: 'developing',
+          inAppContent: [],
+        });
+        assert.strictEqual(out.externalLinks.length, 3);
+      },
+    );
+  } finally {
+    externalContentFetcherService.fetchSnapshot = origFetch;
+  }
+});
+
+test('judgeTopic: drops links that fetchSnapshot returns as signup-walled', async () => {
+  const externalContentFetcherService = require('./externalContentFetcherService');
+  const origFetch = externalContentFetcherService.fetchSnapshot;
+  externalContentFetcherService.fetchSnapshot = async (url) => {
+    if (url.includes('signupwall')) return { url, fetchError: null, excerpt: 'Sign up to read more', wordCount: 20 };
+    if (url.includes('404')) return { url, fetchError: 'http_404', excerpt: '', wordCount: 0 };
+    return { url, fetchError: null, excerpt: 'A'.repeat(2000), wordCount: 500 };
+  };
   await withStubbedLLM(
-    {
-      inAppCoverageAdequate: false,
-      gaps: ['gap'],
-      externalLinks: Array.from({ length: 5 }, (_, i) => ({
-        url: `https://ocw.mit.edu/courses/${i}`,
-        title: `MIT ${i}`,
-        source: 'mit',
-        why: 'r',
-        estimatedMinutes: 20,
-      })),
-    },
+    { inAppCoverageAdequate: false, gaps: [], externalLinks: [
+      { url: 'https://ocw.mit.edu/good', title: 'good', source: 'mit', why: 'w', estimatedMinutes: 30 },
+      { url: 'https://ocw.mit.edu/signupwall', title: 'wall', source: 'mit', why: 'w', estimatedMinutes: 30 },
+      { url: 'https://ocw.mit.edu/404', title: 'broken', source: 'mit', why: 'w', estimatedMinutes: 30 },
+    ]},
     async () => {
-      const out = await judgeService.judgeTopic({
-        objectiveType: 'upskilling',
-        targetKey: 'k',
-        topic: 'react-hooks',
-        measuredBand: 'developing',
-        inAppContent: [],
-      });
-      assert.strictEqual(out.externalLinks.length, 3);
+      try {
+        const out = await judgeService.judgeTopic({
+          objectiveType: 'upskilling', targetKey: 'k', topic: 't', measuredBand: 'developing', inAppContent: [],
+        });
+        assert.strictEqual(out.externalLinks.length, 1, 'only the readable URL should survive');
+        assert.ok(out.externalLinks[0].url.endsWith('/good'));
+      } finally {
+        externalContentFetcherService.fetchSnapshot = origFetch;
+      }
     },
   );
 });

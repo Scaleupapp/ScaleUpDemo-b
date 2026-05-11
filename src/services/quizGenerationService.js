@@ -223,6 +223,30 @@ class QuizGenerationService {
       promptData.note = `Generate questions about "${topic}" based on general knowledge. No specific source content available.`;
     }
 
+    // C2O loop: pull excerpts from external content the user has actually consumed
+    // on this topic, so the quiz tests what they read/watched.
+    let externalContext = '';
+    try {
+      const ExternalContentTouch = require('../models/ExternalContentTouch');
+      const ExternalContentSnapshot = require('../models/ExternalContentSnapshot');
+      const touches = await ExternalContentTouch.find({
+        userId, topicCanonicalName: topic,
+      }).sort({ completedAt: -1 }).limit(3).lean();
+      const urls = touches.map(t => t.url).filter(Boolean);
+      if (urls.length > 0) {
+        const snapshots = await ExternalContentSnapshot.find({ url: { $in: urls } })
+          .select('url title excerpt').lean();
+        const excerpts = snapshots
+          .map(s => `[${s.title || s.url}]\n${(s.excerpt || '').slice(0, 1500)}`)
+          .filter(s => s.length > 20);
+        if (excerpts.length > 0) {
+          externalContext = `\n\nADDITIONAL CONTEXT — external resources the user recently consumed on this topic:\n${excerpts.join('\n\n---\n\n')}\n\nWhere natural, base 1-2 questions on this material so the quiz reinforces what the user actually read.`;
+        }
+      }
+    } catch (err) {
+      console.warn('[quizGeneration] C2O external-context lookup failed:', err.message);
+    }
+
     let questions;
     try {
       // Scale max_tokens based on question complexity:
@@ -236,7 +260,7 @@ class QuizGenerationService {
 
       console.log(`[QuizGeneration] Calling OpenAI for topic="${topic}", questionCount=${questionCount}, assessmentType=${effectiveAssessmentType || 'mixed'}, contentCount=${conceptData.length}, competencyAware=${!!competencyContext}, maxTokens=${maxTokens}`);
 
-      const userPrompt = JSON.stringify(promptData);
+      const userPrompt = JSON.stringify(promptData) + externalContext;
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [

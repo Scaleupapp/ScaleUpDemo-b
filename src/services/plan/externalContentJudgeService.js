@@ -95,16 +95,38 @@ async function judgeTopic({ objectiveType, targetKey, topic, measuredBand, inApp
       return { ...SAFE_DEFAULT };
     }
 
-    const filteredLinks = (parsed.externalLinks || [])
-      .filter(link => link && typeof link.url === 'string' && isAllowed(link.url))
-      .slice(0, MAX_LINKS)
-      .map(link => ({
-        url: link.url,
-        title: String(link.title || '').slice(0, 200),
-        source: String(link.source || '').slice(0, 80),
-        why: String(link.why || '').slice(0, 280),
-        estimatedMinutes: Number.isFinite(link.estimatedMinutes) ? Math.max(5, Math.min(180, link.estimatedMinutes)) : 30,
-      }));
+    // Pre-fetch each whitelisted link to verify it's actually readable.
+    // Drop links that 404, error, or look like signup-wall pages.
+    const allowedRawLinks = (parsed.externalLinks || [])
+      .filter(link => link && typeof link.url === 'string' && isAllowed(link.url));
+
+    const validated = [];
+    const externalContentFetcherService = require('./externalContentFetcherService');
+    for (const link of allowedRawLinks) {
+      if (validated.length >= MAX_LINKS) break;
+      let snapshot;
+      try {
+        snapshot = await externalContentFetcherService.fetchSnapshot(link.url);
+      } catch {
+        continue; // network error — drop
+      }
+      if (snapshot?.fetchError) continue; // 404, pdf, timeout — drop
+      // Signup-wall heuristic: very short excerpts are usually gate pages
+      const excerpt = String(snapshot?.excerpt || '');
+      const wordCount = Number(snapshot?.wordCount || 0);
+      const looksLikeGate = wordCount < 300
+        || /sign up|create account|create your account|subscribe to read|log in to continue|register to read/i.test(excerpt);
+      if (looksLikeGate) continue;
+      validated.push(link);
+    }
+
+    const filteredLinks = validated.map(link => ({
+      url: link.url,
+      title: String(link.title || '').slice(0, 200),
+      source: String(link.source || '').slice(0, 80),
+      why: String(link.why || '').slice(0, 280),
+      estimatedMinutes: Number.isFinite(link.estimatedMinutes) ? Math.max(5, Math.min(180, link.estimatedMinutes)) : 30,
+    }));
 
     return {
       inAppCoverageAdequate: !!parsed.inAppCoverageAdequate,

@@ -18,10 +18,8 @@ const ALLOWED_DOMAINS = [
   'developer.mozilla.org',
   'web.dev',
 
-  // MOOC platforms — free audit tracks only; the judge prompt must specify
-  // "no paid courses"
-  'coursera.org',
-  'edx.org',
+  // MOOC platforms — Indian government free platforms only.
+  // Coursera/edX dropped: content gated behind account signup.
   'nptel.ac.in',
   'swayam.gov.in',
 
@@ -42,11 +40,6 @@ const ALLOWED_DOMAINS = [
   'stripe.com',
   'cloudflare.com',
   'highscalability.com',
-
-  // PM / interview prep (free articles)
-  'lennysnewsletter.com',
-  'productschool.com',
-  'svpg.com',
 
   // Academic content (free)
   'arxiv.org',
