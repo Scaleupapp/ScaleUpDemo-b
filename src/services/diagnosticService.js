@@ -370,6 +370,35 @@ async function _ensureAttemptPool(attempt) {
     meta = { targetKey, objectiveType };
   }
 
+  // Fast path on cache miss: if the attempt already has poolQuestionIds
+  // persisted (i.e. submitSelfRating succeeded earlier), reconstitute the
+  // cache from those IDs. Re-running the full LLM-fallback pool assembly
+  // here was throwing on taxonomy-less targetKeys (e.g.
+  // "interview_preparation::principal-product-manager::zomato") because
+  // the assemble path under nextQuestion goes through the strict
+  // _assemblePoolFromTaxonomy variant, not the LLM-fallback wrapper that
+  // submitSelfRating's call uses. Result: 500 on every next-question.
+  if (Array.isArray(attempt.poolQuestionIds) && attempt.poolQuestionIds.length > 0) {
+    try {
+      const questions = await DiagnosticQuestionBank.find({
+        _id: { $in: attempt.poolQuestionIds },
+      }).lean();
+      if (questions.length > 0) {
+        // Preserve the order the IDs were stored in (Mongo doesn't honor
+        // $in order). Order matters for the "next remaining" pick.
+        const byId = new Map(questions.map((q) => [String(q._id), q]));
+        const ordered = attempt.poolQuestionIds
+          .map((id) => byId.get(String(id)))
+          .filter(Boolean);
+        const entry = { _meta: meta, questions: ordered };
+        _attemptPoolCache.set(key, entry);
+        return entry;
+      }
+    } catch (err) {
+      console.warn('[diagnosticService] pool rehydrate failed, falling back to reassembly:', err.message);
+    }
+  }
+
   // Build topicsWithRatings from the attempt's stored canonical selfRatings.
   const ratingsMap = attempt.selfRatings instanceof Map
     ? attempt.selfRatings
