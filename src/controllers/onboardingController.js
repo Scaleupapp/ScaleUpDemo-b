@@ -112,18 +112,32 @@ const suggestTopics = async function suggestTopics(req, res) {
     return res.status(400).json({ error: 'objectiveType required' });
   }
   const targetKey = buildTargetKey(objectiveType, specifics, targetCompany);
-  const entry = await TopicTaxonomy.findOne({ objectiveType, targetKey });
+  let entry = await TopicTaxonomy.findOne({ objectiveType, targetKey });
+  let cacheHit = true;
+
   if (!entry) {
-    // NOTE: Plan 3a will extend this to trigger realtime LLM generation here.
-    return res.status(404).json({
-      code: 'TAXONOMY_MISSING',
-      message: 'No taxonomy entry yet for this objective + specifics. LLM generation arrives in Plan 3a.',
-      targetKey,
-    });
+    // Fallback: generate the taxonomy on-demand via LLM. Plan 3a's promised
+    // generation, finally wired in. generateTaxonomyForTargetKey is
+    // idempotent (it also checks for an existing entry) so concurrent
+    // onboarders with the same targetKey are safe.
+    cacheHit = false;
+    try {
+      const { generateTaxonomyForTargetKey } = require('../services/diagnostic/topicTaxonomyService');
+      entry = await generateTaxonomyForTargetKey(targetKey);
+    } catch (err) {
+      console.warn('[onboarding.suggestTopics] LLM generation failed for', targetKey, ':', err.message);
+      return res.status(503).json({
+        code: 'TAXONOMY_GENERATION_FAILED',
+        message: 'We could not prepare topics for this objective right now. Please try again in a moment.',
+        targetKey,
+      });
+    }
   }
+
   return res.status(200).json({
     targetKey,
     source: entry.source,
+    cacheHit,
     topics: entry.topics,
   });
 };
