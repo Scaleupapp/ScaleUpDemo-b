@@ -57,6 +57,32 @@ class DashboardService {
     const consistencyScore = journey ? Math.min(100, journey.progress.currentStreak * 14) : 0;
     const readinessScore = Math.round(knowledgeScore * 0.4 + journeyScore * 0.3 + consistencyScore * 0.3);
 
+    // Phase-7-follow-up: compute plan-based progress (tasks completed / total tasks)
+    // This is the new source-of-truth for the Home objective bar, replacing the
+    // Journey-content-only fraction. Falls back to Journey if no active plan.
+    let planProgress = null;
+    try {
+      const Plan = require('../models/Plan');
+      const activePlan = await Plan.findOne({ userId, isActive: true })
+        .select('weeklySchedule.tasks.progress.status').lean();
+      if (activePlan) {
+        let total = 0, complete = 0;
+        for (const week of (activePlan.weeklySchedule || [])) {
+          for (const task of (week.tasks || [])) {
+            total++;
+            if (task.progress?.status === 'complete') complete++;
+          }
+        }
+        planProgress = {
+          tasksTotal: total,
+          tasksComplete: complete,
+          fraction: total > 0 ? complete / total : 0,
+        };
+      }
+    } catch (err) {
+      console.warn('[DashboardService] plan-based progress lookup failed:', err.message);
+    }
+
     // Today's plan
     let todayPlan = null;
     if (journey) {
@@ -126,6 +152,7 @@ class DashboardService {
       pendingQuizzes,
       weeklyGrowth,
       recentAchievements,
+      planProgress,  // null when user has no active plan; else { tasksTotal, tasksComplete, fraction }
     };
   }
 }
