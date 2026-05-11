@@ -26,7 +26,11 @@ const updateInterests = async (req, res, next) => {
   try { res.json(apiResponse.success(await onboardingService.updateInterests(req.user.userId, req.body))); } catch (err) { next(err); }
 };
 const completeOnboarding = async function completeOnboarding(req, res) {
-  const userId = req.user && req.user._id;
+  // Auth middleware exposes the authenticated user as `req.user.userId`,
+  // not `req.user._id`. Reading `_id` (which is undefined) used to 401 every
+  // onboarding completion, leaving users stuck on "Start Learning". Same
+  // pattern as the diagnosticController.getResults fix from Phase 1.
+  const userId = req.user && (req.user.userId || req.user._id);
   if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
   const body = req.body || {};
