@@ -212,17 +212,52 @@ class RecommendationService {
     // UserObjective.topicsOfInterest is canonical-slug form ("product-management")
     // while Content.topics is display form ("Product Management"), so a direct
     // $in never matches. We fetch a broader candidate set and slug-match in
-    // memory below. Acceptable scope since published Content is small in dev
-    // and the warm-path service is the long-term home for this user anyway.
+    // memory below. Also expand with broad domains (same logic as warm path)
+    // so granular topics like 'product-strategy-vision' still match against
+    // 'product management' content.
     const topicSlugs = new Set(topicsOfInterest.map(_slug).filter(Boolean));
+    if (objectives.length) {
+      const primary = objectives.find(o => o.isPrimary) || objectives[0];
+      const spec = primary?.specificsCanonical || primary?.specifics || {};
+      const candidates = [spec.targetRole, spec.targetSkill, spec.examName, spec.toDomain]
+        .filter(Boolean)
+        .map((s) => String(s).toLowerCase().replace(/^(principal|senior|sr\.?|junior|jr\.?|lead|staff|chief|head of)\s+/i, ''));
+      for (const c of candidates) {
+        topicSlugs.add(_slug(c));
+        if (/product manager/.test(c)) {
+          ['product-management', 'product', 'product-strategy', 'user-research', 'prioritization'].forEach(s => topicSlugs.add(s));
+        }
+        if (/engineer|developer|sde|backend|frontend|fullstack/.test(c)) {
+          ['dsa', 'algorithms', 'system-design', 'python'].forEach(s => topicSlugs.add(s));
+        }
+        if (/data scientist|ml engineer|machine learning|ai engineer/.test(c)) {
+          ['machine-learning', 'ai-fundamentals', 'llm', 'python'].forEach(s => topicSlugs.add(s));
+        }
+        if (/mba|consultant/.test(c)) {
+          ['mba-preparation', 'business-soft-skills', 'communication'].forEach(s => topicSlugs.add(s));
+        }
+      }
+      topicSlugs.delete('');
+    }
     const query = { status: 'published' };
     if (contentTypeFilter) {
       query.contentType = { $in: contentTypeFilter };
     }
 
-    const candidates = await Content.find(query)
+    let candidates = await Content.find(query)
       .sort({ 'aiData.qualityScore': -1, publishedAt: -1 })
       .lean();
+
+    // Strict topic-match filter when the user has expressed interests. The
+    // unfiltered candidate set is currently dominated by NEET/JEE content
+    // (largest topic bucket in the pool), so any Principal-PM user without
+    // a topic filter saw exam-prep videos first. Topic relevance alone
+    // wasn't enough to dethrone them because quality+recency still scored.
+    if (topicSlugs.size > 0) {
+      candidates = candidates.filter((c) =>
+        (c.topics || []).some((t) => topicSlugs.has(_slug(t)))
+      );
+    }
 
     // Score with difficulty mix preference
     const scored = candidates.map(content => {
@@ -831,14 +866,67 @@ class RecommendationService {
       }
     };
 
+    // Broad-domain expansion. User topics are granular ('product-strategy-
+    // vision', 'data-driven-decision-making'); Content.topics are broader
+    // ('product management', 'data'). Without a bridge, a Principal PM user
+    // sees zero topic matches and the ranker falls back to global popular
+    // content (which in our pool today is NEET/JEE videos — not what a
+    // Principal PM wants to see).
+    //
+    // We extract domain slugs from each objective's specifics — targetRole,
+    // examName, etc. — and add them to the weights map at half-weight. This
+    // lets 'product-management' content surface even when the user only
+    // checked granular sub-topics. Long-term: stamp parentCanonical on
+    // TopicTaxonomy entries and use that instead.
+    const expandDomains = (obj) => {
+      const out = new Set();
+      const spec = obj?.specificsCanonical || obj?.specifics || {};
+      const candidates = [spec.targetRole, spec.targetSkill, spec.examName, spec.toDomain]
+        .filter(Boolean)
+        .map((s) => String(s).toLowerCase());
+      for (const c of candidates) {
+        // Strip seniority qualifiers so 'principal product manager' →
+        // 'product manager' → also 'product management', 'product'.
+        const stripped = c.replace(/^(principal|senior|sr\.?|junior|jr\.?|lead|staff|chief|head of)\s+/i, '');
+        out.add(_slug(stripped));
+        if (/product manager/.test(stripped)) {
+          out.add('product-management');
+          out.add('product');
+          out.add('product-strategy');
+          out.add('user-research');
+          out.add('prioritization');
+        }
+        if (/data scientist|ml engineer|machine learning|ai engineer/.test(stripped)) {
+          out.add('machine-learning'); out.add('ai-fundamentals'); out.add('llm'); out.add('python');
+        }
+        if (/engineer|developer|sde|backend|frontend|fullstack/.test(stripped)) {
+          out.add('dsa'); out.add('algorithms'); out.add('system-design'); out.add('python');
+        }
+        if (/designer|ux|ui/.test(stripped)) {
+          out.add('ui-ux');
+        }
+        if (/mba|consultant/.test(stripped)) {
+          out.add('mba-preparation'); out.add('business-soft-skills'); out.add('communication');
+        }
+      }
+      out.delete('');
+      return Array.from(out);
+    };
+
     if (primary) {
       distribute(primary.topicsOfInterest, PRIMARY_OBJECTIVE_WEIGHT);
+      const domains = expandDomains(primary);
+      if (domains.length) {
+        distribute(domains, PRIMARY_OBJECTIVE_WEIGHT * 0.5);
+      }
     }
 
     if (secondaries.length) {
       const perSecondary = SECONDARY_OBJECTIVES_POOL / secondaries.length;
       for (const sec of secondaries) {
         distribute(sec.topicsOfInterest, perSecondary);
+        const domains = expandDomains(sec);
+        if (domains.length) distribute(domains, perSecondary * 0.5);
       }
     }
 

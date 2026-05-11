@@ -159,9 +159,22 @@ async function getResults(req, res) {
       .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
       .join(' ');
 
+    // Per-topic answer aggregates from attempt.answers[]: time spent + correct
+    // ratio. Drives the per-topic time stat and accuracy strip on iOS.
+    const answersByComp = new Map();
+    for (const a of (attempt.answers || [])) {
+      const key = a.competency;
+      if (!answersByComp.has(key)) answersByComp.set(key, { totalSec: 0, correct: 0, total: 0 });
+      const bucket = answersByComp.get(key);
+      bucket.totalSec += Number(a.timeTaken || 0);
+      bucket.total += 1;
+      if (a.isCorrect) bucket.correct += 1;
+    }
+
     const results = [];
     for (const [comp, v] of attempt.results.entries()) {
       const displayName = displayByCanonical.get(comp) || titleCaseFromSlug(comp);
+      const agg = answersByComp.get(comp) || { totalSec: 0, correct: 0, total: 0 };
       results.push({
         competency:          displayName,
         displayName,
@@ -172,8 +185,41 @@ async function getResults(req, res) {
         calibrationClass:    v.calibrationClass || 'well-calibrated',
         questionsAsked:      v.questionsAsked,
         selfRating:          v.selfRating || null,
+        timeTakenSec:        Math.round(agg.totalSec),
+        avgSecPerQuestion:   agg.total > 0 ? Math.round(agg.totalSec / agg.total) : 0,
+        correctCount:        agg.correct,
+        totalCount:          agg.total,
       });
     }
+
+    // Whole-attempt rollup: total time, avg/question, and accuracy split by
+    // difficulty. A senior user wants to see "how did I do on hard questions"
+    // at a glance, not just "0 of 8 well-calibrated".
+    const allAnswers = attempt.answers || [];
+    const accBuckets = {
+      easy:   { correct: 0, total: 0 },
+      medium: { correct: 0, total: 0 },
+      hard:   { correct: 0, total: 0 },
+    };
+    let totalSec = 0;
+    for (const a of allAnswers) {
+      totalSec += Number(a.timeTaken || 0);
+      const bucket = accBuckets[a.difficulty];
+      if (bucket) {
+        bucket.total += 1;
+        if (a.isCorrect) bucket.correct += 1;
+      }
+    }
+    const stats = {
+      totalQuestions:    allAnswers.length,
+      totalTimeSec:      Math.round(totalSec),
+      avgSecPerQuestion: allAnswers.length > 0 ? Math.round(totalSec / allAnswers.length) : 0,
+      accuracyByDifficulty: {
+        easy:   { ...accBuckets.easy,   pct: accBuckets.easy.total   > 0 ? Math.round(100 * accBuckets.easy.correct   / accBuckets.easy.total)   : null },
+        medium: { ...accBuckets.medium, pct: accBuckets.medium.total > 0 ? Math.round(100 * accBuckets.medium.correct / accBuckets.medium.total) : null },
+        hard:   { ...accBuckets.hard,   pct: accBuckets.hard.total   > 0 ? Math.round(100 * accBuckets.hard.correct   / accBuckets.hard.total)   : null },
+      },
+    };
 
     const planStatus = attempt.appliedToProfileAt ? 'queued' : 'pending';
 
@@ -184,6 +230,7 @@ async function getResults(req, res) {
       insights:       attempt.insightsJson || null,
       planStatus,
       results,
+      stats,
     };
 
     if (attempt.attemptType === 'recalibration') {
