@@ -310,12 +310,39 @@ async function startAttempt(userId) {
 
   telemetry.logEvent('diagnostic.started', { userId: String(userId), flowType: 'new_user' });
 
+  // Build display names from the canonical slugs (e.g.
+  // "quantitative-reasoning" → "Quantitative Reasoning") so the iOS rating
+  // and results screens never show raw kebab-case.
+  const titleCase = (slug) => String(slug || '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
+
+  const competenciesPayload = Array.from(canonicalRatings.entries()).map(([c, rating]) => ({
+    name: c,
+    displayName: titleCase(c),
+    questionCap: 3,
+    // Echo the rating the user provided during onboarding so the client can
+    // skip its self-rating screen rather than asking the same question twice.
+    selfRating: rating,
+  }));
+
+  // If onboarding already produced ratings for every competency we'll assess,
+  // the client should not show the diagnostic's self-rating step — it's pure
+  // duplication. Surface a flag so the client can skip to question 1.
+  const selfRatingsAlreadyProvided = competenciesPayload.length > 0
+    && competenciesPayload.every((c) => !!c.selfRating);
+
   return {
     attemptId: attempt._id,
     flowType: 'new_user',
     totalEstimatedQuestions: totalEstimated,
     estimatedDurationSec: totalEstimated * 30,
-    competenciesToAssess: Array.from(canonicalRatings.keys()).map(c => ({ name: c, questionCap: 3 })),
+    competenciesToAssess: competenciesPayload,
+    selfRatingsAlreadyProvided,
   };
 }
 
