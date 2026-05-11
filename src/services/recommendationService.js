@@ -43,6 +43,74 @@ const SOURCE_FAIRNESS_TARGET = { original: 0.5, youtube: 0.5 };
 class RecommendationService {
 
   // ═══════════════════════════════════════════════════════════════════════════════
+  //  TOPIC GATHERING (shared helper)
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Gathers the set of canonical topic names that should drive recommendations
+   * for this user, combining:
+   *   1. UserObjective.topicSelfRatings Map keys (onboarding step 5)
+   *   2. Active Plan.weeklySchedule[].allocations[].topicCanonicalName
+   *   3. ConsumptionGraph.topicNodes[].topic (historic affinity)
+   *   4. UserObjective.topicsOfInterest (explicit interests)
+   *
+   * Returns a Set of unique topic strings. May be empty.
+   *
+   * Topics from sources (1) and (4) ensure recommendations are topic-aware
+   * from day 1 — right after onboarding, before any content consumption.
+   *
+   * @param {string|ObjectId} userId
+   * @returns {Promise<Set<string>>}
+   */
+  async _gatherUserTopics(userId) {
+    const Plan = require('../models/Plan');
+    const [plan, graph, objectives] = await Promise.all([
+      Plan.findOne({ userId, isActive: true })
+        .select('weeklySchedule.allocations.topicCanonicalName')
+        .lean(),
+      ConsumptionGraph.findOne({ userId }).select('topicNodes.topic').lean(),
+      UserObjective.find({ userId, status: 'active' })
+        .select('topicsOfInterest topicSelfRatings')
+        .lean(),
+    ]);
+
+    const topics = new Set();
+
+    // (1) Onboarding-declared self-ratings — these keys are the canonical
+    // topic names the user said they care about. `lean()` returns a Map as a
+    // plain object, but defensive handling keeps it robust either way.
+    for (const obj of (objectives || [])) {
+      const ratings = obj?.topicSelfRatings;
+      if (!ratings) continue;
+      const keys = ratings instanceof Map ? Array.from(ratings.keys()) : Object.keys(ratings);
+      for (const k of keys) {
+        if (k) topics.add(k);
+      }
+    }
+
+    // (2) Active plan allocations — what the user is actively learning now.
+    for (const w of (plan?.weeklySchedule || [])) {
+      for (const a of (w.allocations || [])) {
+        if (a.topicCanonicalName) topics.add(a.topicCanonicalName);
+      }
+    }
+
+    // (3) Historic consumption affinity.
+    for (const node of (graph?.topicNodes || [])) {
+      if (node.topic) topics.add(node.topic);
+    }
+
+    // (4) Explicit interests on each active objective.
+    for (const obj of (objectives || [])) {
+      for (const t of (obj?.topicsOfInterest || [])) {
+        if (t) topics.add(t);
+      }
+    }
+
+    return topics;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
   //  PUBLIC METHODS
   // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -433,24 +501,10 @@ class RecommendationService {
    * Looks at recent high-engagement content in the user's topic areas.
    */
   async getTrendingInTopics(userId, { limit = 10 } = {}) {
-    const [consumptionGraph, objectives, consumedIds] = await Promise.all([
-      ConsumptionGraph.findOne({ userId }),
-      UserObjective.find({ userId, status: 'active' }),
+    const [consumedIds, userTopics] = await Promise.all([
       this._getConsumedContentIds(userId),
+      this._gatherUserTopics(userId),
     ]);
-
-    // Gather the user's topics from consumption + objectives
-    const userTopics = new Set();
-    if (consumptionGraph) {
-      for (const node of consumptionGraph.topicNodes) {
-        userTopics.add(node.topic);
-      }
-    }
-    for (const obj of objectives) {
-      for (const topic of (obj.topicsOfInterest || [])) {
-        userTopics.add(topic);
-      }
-    }
 
     if (userTopics.size === 0) {
       // No topics to trend on — return globally trending content
