@@ -52,13 +52,22 @@ const completeOnboarding = async function completeOnboarding(req, res) {
     specificsCanonical = body.specifics || {};
   }
 
+  // iOS sends topicsOfInterest as objects [{canonicalName, name, source, isFutureProofing}],
+  // but the schema expects [String]. Normalize to canonicalName strings. We accept both
+  // shapes so older clients sending plain strings still work.
+  const topicsOfInterestNormalized = Array.isArray(body.topicsOfInterest)
+    ? body.topicsOfInterest
+        .map((t) => (typeof t === 'string' ? t : (t && (t.canonicalName || t.name))))
+        .filter(Boolean)
+    : [];
+
   const $set = {
     userId,
     objectiveType: body.objectiveType,
     timeline: body.timeline,
     currentLevel: body.currentLevel,
     weeklyCommitHours: body.weeklyCommitHours,
-    topicsOfInterest: body.topicsOfInterest,
+    topicsOfInterest: topicsOfInterestNormalized,
     topicSelfRatings: body.topicSelfRatings,
     specifics: body.specifics || {},
     specificsCanonical,
@@ -69,11 +78,20 @@ const completeOnboarding = async function completeOnboarding(req, res) {
   if (body.preferredLearningStyle) $set.preferredLearningStyle = body.preferredLearningStyle;
   if (body.targetDate) $set.targetDate = body.targetDate;
 
-  const saved = await UserObjective.findOneAndUpdate(
-    { userId, isPrimary: true },
-    { $set },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
-  );
+  let saved;
+  try {
+    saved = await UserObjective.findOneAndUpdate(
+      { userId, isPrimary: true },
+      { $set },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+  } catch (err) {
+    // Surface the failure as JSON so the client doesn't hang waiting on a
+    // request the server has already given up on. Previously a CastError
+    // crashed the handler and the iOS spinner spun forever.
+    console.error('[onboarding.complete] save failed:', err.message, { userId, fields: Object.keys($set) });
+    return res.status(500).json({ error: 'save_failed', message: err.message });
+  }
 
   // Mark User as onboarded so the app advances past the onboarding flow.
   // Best-effort: don't fail the response if this somehow errors.
@@ -86,7 +104,12 @@ const completeOnboarding = async function completeOnboarding(req, res) {
     console.warn('[onboarding.complete] failed to flip User flags:', err.message);
   }
 
-  return res.status(200).json({ userObjectiveId: saved._id });
+  // iOS `OnboardingCompleteResponse` requires `needsCalibration`. Don't omit it
+  // or JSONDecoder throws and the user sees a silent failure.
+  return res.status(200).json({
+    userObjectiveId: saved._id,
+    needsCalibration: saved.needsCalibration === true,
+  });
 };
 
 // Build a deterministic taxonomy lookup key.
