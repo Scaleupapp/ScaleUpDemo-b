@@ -299,7 +299,46 @@ test('generate: career_switch with no targetRole does NOT emit interview tasks',
   }
 });
 
-test('generate: upskilling does NOT emit interview tasks', async () => {
+test('generate: upskilling WITH targetRole emits interview tasks (Phase 6 follow-up)', async () => {
+  process.env.FEATURE_EXTERNAL_CONTENT_JUDGE = 'false';
+  const planService = require('./planGenerationService');
+  const mongoose = require('mongoose');
+  const openai = require('../../config/openai');
+  const origCreate = openai.chat.completions.create;
+  openai.chat.completions.create = async () => { throw new Error('test stub'); };
+  const taskCatalogService = require('../plan/taskCatalogService');
+  const origResolve = taskCatalogService.resolveTopic;
+  taskCatalogService.resolveTopic = async () => ({ quizId: 'q', quizMinutes: 8, contentId: 'c', contentType: 'article', contentMinutes: 12 });
+
+  try {
+    const out = await planService.generate({
+      userId: new mongoose.Types.ObjectId(),
+      objectiveId: new mongoose.Types.ObjectId(),
+      diagnosticAttemptId: new mongoose.Types.ObjectId(),
+      objectiveType: 'upskilling',
+      // Use raw specifics (not specificsCanonical) to also exercise the fallback
+      specifics: { targetRole: 'product manager' },
+      timeline: 4, weeklyCommitHours: 5,
+      topicResults: [
+        { canonicalName: 'a', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false },
+        { canonicalName: 'b', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false },
+      ],
+    });
+    let totalInterview = 0;
+    for (const w of out.weeklySchedule) {
+      const interviewTasks = w.tasks.filter(t => t.type === 'ai_interview');
+      assert.strictEqual(interviewTasks.length, 1, `week ${w.week} should have 1 ai_interview, got ${interviewTasks.length}`);
+      assert.strictEqual(interviewTasks[0].topic.canonicalName, '_objective');
+      totalInterview += interviewTasks.length;
+    }
+    assert.ok(totalInterview >= 1, 'expected at least 1 ai_interview task overall');
+  } finally {
+    openai.chat.completions.create = origCreate;
+    taskCatalogService.resolveTopic = origResolve;
+  }
+});
+
+test('generate: upskilling WITHOUT targetRole still does NOT emit interview tasks', async () => {
   const planService = require('./planGenerationService');
   const mongoose = require('mongoose');
   const openai = require('../../config/openai');
@@ -315,13 +354,49 @@ test('generate: upskilling does NOT emit interview tasks', async () => {
       objectiveId: new mongoose.Types.ObjectId(),
       diagnosticAttemptId: new mongoose.Types.ObjectId(),
       objectiveType: 'upskilling',
-      specificsCanonical: { targetSkill: 'react' },
+      specificsCanonical: {}, // no targetRole
       timeline: 4, weeklyCommitHours: 5,
       topicResults: [{ canonicalName: 'a', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false }],
     });
     for (const w of out.weeklySchedule) {
       assert.strictEqual(w.tasks.filter(t => t.type === 'ai_interview').length, 0);
     }
+  } finally {
+    openai.chat.completions.create = origCreate;
+    taskCatalogService.resolveTopic = origResolve;
+  }
+});
+
+test('generate: scenario selector falls back to specifics.targetRole when specificsCanonical is empty', async () => {
+  process.env.FEATURE_EXTERNAL_CONTENT_JUDGE = 'false';
+  const planService = require('./planGenerationService');
+  const mongoose = require('mongoose');
+  const openai = require('../../config/openai');
+  const origCreate = openai.chat.completions.create;
+  openai.chat.completions.create = async () => { throw new Error('test stub'); };
+  const taskCatalogService = require('../plan/taskCatalogService');
+  const origResolve = taskCatalogService.resolveTopic;
+  taskCatalogService.resolveTopic = async () => ({ quizId: 'q', quizMinutes: 8, contentId: 'c', contentType: 'article', contentMinutes: 12 });
+
+  try {
+    const out = await planService.generate({
+      userId: new mongoose.Types.ObjectId(),
+      objectiveId: new mongoose.Types.ObjectId(),
+      diagnosticAttemptId: new mongoose.Types.ObjectId(),
+      objectiveType: 'interview_preparation',
+      specificsCanonical: {}, // empty — must fall back to specifics.targetRole
+      specifics: { targetRole: 'data engineer' },
+      timeline: 4, weeklyCommitHours: 5,
+      topicResults: [
+        { canonicalName: 'a', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false },
+        { canonicalName: 'b', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false },
+      ],
+    });
+    // engineer regex: week 1 (odd) -> placement_behavioral, week 2 (even) -> placement_technical
+    const w1 = out.weeklySchedule[0];
+    const w2 = out.weeklySchedule[1];
+    assert.strictEqual(w1.tasks.find(t => t.type === 'ai_interview').payload.scenario, 'placement_behavioral');
+    assert.strictEqual(w2.tasks.find(t => t.type === 'ai_interview').payload.scenario, 'placement_technical');
   } finally {
     openai.chat.completions.create = origCreate;
     taskCatalogService.resolveTopic = origResolve;

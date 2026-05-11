@@ -373,19 +373,27 @@ async function generate(input) {
     // Gated on objectives that genuinely call for interview practice.
     const isInterviewQualified = (() => {
       const t = input.objectiveType;
+      // Read targetRole from canonical first, fall back to raw specifics for older users
+      const targetRole = input.specificsCanonical?.targetRole || input.specifics?.targetRole;
+      const hasTargetRole = !!targetRole;
+      const wks = Number(input.timeline) || 0;
+
       if (t === 'interview_preparation') return true;
-      // career_switch only if specifics indicate active interview prep
-      // (target role set + reasonable timeline). Long-tail career switches don't need a behavioral interview yet.
       if (t === 'career_switch') {
-        const hasTargetRole = !!input.specificsCanonical?.targetRole;
-        const wks = Number(input.timeline) || 0;
         return hasTargetRole && wks > 0 && wks <= 16;
+      }
+      // Phase-6-follow-up: if user is upskilling toward a specific role within a
+      // realistic timeline, interview practice is valuable even though they didn't
+      // pick the "interview_preparation" objective type. Many users mislabel
+      // their objective in onboarding.
+      if (t === 'upskilling') {
+        return hasTargetRole && wks > 0 && wks <= 24;
       }
       return false;
     })();
 
     if (isInterviewQualified) {
-      const targetRoleLower = String(input.specificsCanonical?.targetRole || '').toLowerCase();
+      const targetRoleLower = String(input.specificsCanonical?.targetRole || input.specifics?.targetRole || '').toLowerCase();
       let scenario = 'placement_behavioral';
       if (input.objectiveType === 'interview_preparation' && /mba|admissions/.test(targetRoleLower)) {
         scenario = 'mba_admissions';
