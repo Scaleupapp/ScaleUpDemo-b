@@ -86,6 +86,10 @@ app.use('/api/v1/audio-summaries', require('./routes/audioSummaries'));
 app.use('/api/v1/note-requests', require('./routes/noteRequests'));
 app.use('/api/v1/interviews', require('./routes/interviews'));
 
+// --- v2 API namespace (parallel rollout) ---
+// v2 lives alongside v1. Drop this mount to roll back. v1 is never touched.
+app.use('/api/v2', require('./routes/v2'));
+
 // --- Health Check ---
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 
