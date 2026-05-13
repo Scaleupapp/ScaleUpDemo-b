@@ -239,7 +239,7 @@ async function handle({ userId, mode, payload = {} }) {
 
   switch (mode) {
     case 'greeting':
-      return await greeting({ ctx, systemPrompt, userId });
+      return await greeting({ ctx, systemPrompt, userId, contextHint: payload.message });
 
     case 'conversation':
       return await conversation({ ctx, systemPrompt, userId, message: payload.message, history: payload.history });
@@ -250,8 +250,30 @@ async function handle({ userId, mode, payload = {} }) {
     case 'interview_config':
       return interviewConfig({ ctx, payload });
 
-    case 'note':
-      return { mode, output: { reply: 'Upload a PDF, image, or audio file. I\'ll process it into a summary, mind map, flashcards, and audio narration.', delegateTo: 'POST /api/v1/notes/request-upload' } };
+    case 'note': {
+      // Note mode: tells the iOS client to launch the v1 upload flow.
+      // We don't directly proxy the multipart upload from Compass — the client
+      // hits /api/v1/notes/request-upload to get a presigned S3 URL, then
+      // uploads, then completes. We persist the user intent into the thread.
+      const reply = "I can turn an upload into a summary, mind map, flashcards, and audio narration. Choose a file (PDF, image, or audio) to get started.";
+      await appendToThread(userId, 'assistant', reply, { mode: 'note' });
+      return {
+        mode: 'note',
+        output: {
+          reply,
+          action: {
+            type: 'open_note_upload',
+            // iOS observes `action.type` and presents its v1 CreateNotesView /
+            // file picker. Provide the API endpoints so the iOS client doesn't
+            // need to hard-code them.
+            endpoints: {
+              requestUpload: 'POST /api/v1/notes/request-upload',
+              completeUpload: 'POST /api/v1/notes/complete-upload',
+            },
+          },
+        },
+      };
+    }
 
     case 'insight':
       return await insight({ ctx, systemPrompt, userId });
@@ -279,6 +301,7 @@ async function handle({ userId, mode, payload = {} }) {
  * Single-shot LLM call. Returns text on success, null on failure or budget exhausted.
  */
 async function callLLM({ userId, systemPrompt, userPrompt, history = [], maxTokens = COMPASS_MAX_TOKENS }) {
+  // Estimate first — Anthropic charges by total tokens; we approximate at 4 chars/token.
   const estimatedTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4) + maxTokens;
   const allowed = await checkAndIncrementBudget(userId, estimatedTokens);
   if (!allowed) {
@@ -310,19 +333,51 @@ async function callLLM({ userId, systemPrompt, userPrompt, history = [], maxToke
       .join('')
       .trim();
 
-    return { text: text || null, capped: false };
+    // Reconcile: deduct the estimate, then charge actual usage.
+    // Anthropic returns response.usage = { input_tokens, output_tokens }.
+    const actualTokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+    const delta = actualTokens - estimatedTokens;
+    if (delta !== 0) {
+      // delta > 0 → actual exceeded estimate; charge the difference.
+      // delta < 0 → estimate was too high; refund.
+      await adjustBudget(userId, delta);
+    }
+
+    return {
+      text: text || null,
+      capped: false,
+      tokensIn: response.usage?.input_tokens || 0,
+      tokensOut: response.usage?.output_tokens || 0,
+    };
   } catch (err) {
+    // Refund the estimate since the call didn't actually consume tokens.
+    await adjustBudget(userId, -estimatedTokens);
     console.error('[compass] LLM error', err.message);
     return { text: null, capped: false, error: err.message };
   }
 }
 
-async function greeting({ ctx, systemPrompt, userId }) {
+/**
+ * Adjust today's budget counter by `delta` (positive = charge more, negative = refund).
+ * Used for actual-vs-estimate reconciliation.
+ */
+async function adjustBudget(userId, delta) {
+  if (!userId || delta === 0) return;
+  try {
+    const key = budgetKey(userId);
+    await redis.incrby(key, delta);
+  } catch (err) {
+    console.warn('[compass] Redis budget adjust failed:', err.message);
+  }
+}
+
+async function greeting({ ctx, systemPrompt, userId, contextHint }) {
   const name = ctx.user?.name || 'there';
 
-  // Use LLM for a context-aware greeting so it reflects the user's state
-  // (no objective yet, plan brewing, behind/ahead of plan, etc.)
-  const userPrompt = `Greet the learner in ONE short sentence (max 20 words). Don't list options — those appear as chips below your message. Make it warm, specific to their state, and prompt them to act.`;
+  // LLM-generated greeting, optionally adapted by the screen the user came from.
+  const userPrompt = contextHint
+    ? `${contextHint}\n\nGreet the learner in ONE short sentence (max 20 words) tailored to that context. Don't list options — those appear as chips below.`
+    : `Greet the learner in ONE short sentence (max 20 words). Don't list options — those appear as chips below your message. Make it warm, specific to their state, and prompt them to act.`;
   const { text } = await callLLM({
     userId, systemPrompt, userPrompt,
     maxTokens: 80,
@@ -335,10 +390,15 @@ async function greeting({ ctx, systemPrompt, userId }) {
       ? `Hi ${name} — your plan is brewing. Want to chat or browse content while we wait?`
       : `Hi ${name} — what do you want to do?`;
 
+  const greetingText = text || fallback;
+
+  // Persist greeting so conversation history is coherent across cold-starts.
+  await appendToThread(userId, 'assistant', greetingText, { mode: 'greeting' });
+
   return {
     mode: 'greeting',
     output: {
-      message: text || fallback,
+      message: greetingText,
       suggestedActions: [
         { id: 'quiz_me',       label: '⚡ Quiz me',           mode: 'quiz_config' },
         { id: 'interview',     label: '🎙️ Practice interview', mode: 'interview_config' },
@@ -371,10 +431,11 @@ async function conversation({ ctx, systemPrompt, userId, message, history = [] }
   // Append a directive to keep replies tight + offer follow-ups inline
   const extended = systemPrompt + `\n\nReply rules:\n- Be conversational and concise (3-5 sentences max unless the question genuinely requires more).\n- Ground answers in the learner's objective and recent context.\n- End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\` — these will be parsed and shown as chips.\n- Refuse off-topic / harmful / professional-advice requests politely; redirect to learning.`;
 
-  const { text, capped } = await callLLM({
+  const llmResult = await callLLM({
     userId, systemPrompt: extended, userPrompt: message, history: effectiveHistory,
     maxTokens: COMPASS_MAX_TOKENS,
   });
+  const { text, capped, tokensIn, tokensOut } = llmResult;
 
   if (capped) {
     const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
@@ -403,45 +464,133 @@ async function conversation({ ctx, systemPrompt, userId, message, history = [] }
     reply = text.replace(jsonMatch[0], '').trim();
   }
 
-  await appendToThread(userId, 'assistant', reply, { mode: 'conversation', followups });
+  await appendToThread(userId, 'assistant', reply, {
+    mode: 'conversation', followups, tokensIn, tokensOut,
+  });
 
   return { mode: 'conversation', output: { reply, followups } };
 }
 
+/**
+ * Personalized quiz configurator. Uses the learner's actual weakest topic +
+ * recent activity to suggest a focused config the user can still override.
+ */
 function quizConfig({ ctx }) {
-  // Surfaces the inline configurator state for the iOS Compass chat to render.
-  const weakest = ctx.knowledge.weakTopics[0];
+  const weakest    = ctx.knowledge.weakTopics[0];
+  const secondWeak = ctx.knowledge.weakTopics[1];
+
+  // Pick topic
+  const topicValue = weakest ? weakest.topic : 'last_7_days';
+  const topicLabel = weakest
+    ? `${weakest.topic} (your weakest, ${weakest.mastery}%)`
+    : 'Last 7 days of content';
+
+  // Pick format based on mastery level — beginners get recall, mid gets application, advanced gets case
+  const masteryFloor = weakest?.mastery ?? 40;
+  const formatValue =
+    masteryFloor < 30 ? 'recall'
+    : masteryFloor < 60 ? 'application'
+    : 'case_study';
+  const formatLabel =
+    formatValue === 'recall' ? 'Recall · foundations first'
+    : formatValue === 'application' ? 'Application · real-world scenarios'
+    : 'Case study · multi-part';
+
+  // Difficulty matches the topic's mastery level
+  const difficultyValue =
+    masteryFloor < 30 ? 'easy'
+    : masteryFloor < 60 ? 'medium'
+    : 'hard';
+  const difficultyLabel =
+    difficultyValue === 'easy' ? 'Easy · build confidence'
+    : difficultyValue === 'medium' ? 'Medium · stretch you'
+    : 'Hard · pressure-test';
+
+  // Count: more for weak topics so you actually learn
+  const count = masteryFloor < 40 ? 10 : 7;
+
+  // Headline reflects the personalization
+  const headline = weakest
+    ? `I'd focus on ${weakest.topic} — that's your biggest gap. Adjust anything below.`
+    : 'Got it. Here\'s how I\'d set it up — change anything you want.';
+
   return {
     mode: 'quiz_config',
     output: {
-      headline: 'Got it. Here\'s how I\'d set it up — change anything you want.',
+      headline,
       config: {
-        topic:      { value: weakest ? weakest.topic : 'last 7 days', label: weakest ? `Focused: ${weakest.topic}` : 'Last 7 days of content' },
-        format:     { value: 'mix',    label: 'Mix · recall + application' },
-        difficulty: { value: 'medium', label: 'Medium · adaptive' },
-        count:      { value: 10,       label: '10 questions' },
+        topic:      { value: topicValue,  label: topicLabel },
+        format:     { value: formatValue, label: formatLabel },
+        difficulty: { value: difficultyValue, label: difficultyLabel },
+        count:      { value: count, label: `${count} questions` },
         tagToObjective: { value: true, label: 'Count toward readiness' },
       },
-      estimateMin: 8,
-      startEndpoint: '/api/v1/quizzes/request', // routes into existing v1 quiz path
+      estimateMin: count <= 7 ? 6 : 9,
+      startEndpoint: '/api/v1/quizzes/request',
+      // Personalization rationale — surfaced for tester debugging
+      personalizationReason: weakest
+        ? `Weakest topic: ${weakest.topic} at ${weakest.mastery}%${secondWeak ? `; also weak: ${secondWeak.topic} at ${secondWeak.mastery}%` : ''}`
+        : 'No mastery data yet — defaulting to last 7 days of content',
     },
   };
 }
 
+/**
+ * Personalized interview configurator. Tailors type to objective:
+ *   - Career switch / interview prep → behavioral first (storytelling matters)
+ *   - SDE roles → technical
+ *   - Consulting/case roles → case
+ *   - Otherwise → mixed
+ */
 function interviewConfig({ ctx }) {
-  const targetRole = ctx.objective?.specifics?.targetRole || 'general role';
+  const specifics = ctx.objective?.specifics || {};
+  const targetRole = specifics.targetRole || 'general role';
+  const targetCompany = specifics.targetCompany;
+
+  // Type heuristic by role
+  const role = (targetRole || '').toLowerCase();
+  let typeValue, typeLabel;
+  if (/sde|software|developer|engineer/.test(role) && !/manager|director/.test(role)) {
+    typeValue = 'technical'; typeLabel = 'Technical · DSA + system design';
+  } else if (/consult|strategy|case/.test(role)) {
+    typeValue = 'case_study'; typeLabel = 'Case study · structured';
+  } else if (/product manager|pm\b/.test(role)) {
+    typeValue = 'mixed'; typeLabel = 'Mixed · PM behavioral + case';
+  } else if (/data|analyst|scientist/.test(role)) {
+    typeValue = 'mixed'; typeLabel = 'Mixed · technical + behavioral';
+  } else {
+    typeValue = 'behavioral'; typeLabel = 'Behavioral · stories + STAR';
+  }
+
+  // Seniority from currentLevel
+  const seniorityValue =
+    ctx.objective?.currentLevel === 'advanced' ? 'senior'
+    : ctx.objective?.currentLevel === 'intermediate' ? 'mid'
+    : 'junior';
+  const seniorityLabel =
+    seniorityValue === 'senior' ? 'Senior'
+    : seniorityValue === 'mid' ? 'Mid-level'
+    : 'Junior';
+
+  // Headline reflects the personalization
+  const roleLabel = targetCompany ? `${targetRole} @ ${targetCompany}` : targetRole;
+  const headline = roleLabel && roleLabel !== 'general role'
+    ? `Mock interview for ${roleLabel}. Adjust if you'd like.`
+    : 'Mock interview — adjust if needed.';
+
   return {
     mode: 'interview_config',
     output: {
-      headline: 'Mock interview — adjust if needed.',
+      headline,
       config: {
-        type:        { value: 'behavioral', label: 'Behavioral' },
-        targetRole:  { value: targetRole,   label: targetRole },
-        duration:    { value: 30,           label: '30 min' },
-        seniority:   { value: 'mid',        label: 'Mid-level' },
+        type:        { value: typeValue, label: typeLabel },
+        targetRole:  { value: targetRole, label: roleLabel || targetRole },
+        duration:    { value: 30, label: '30 min' },
+        seniority:   { value: seniorityValue, label: seniorityLabel },
         tagToObjective: { value: true, label: 'Count toward readiness' },
       },
       startEndpoint: '/api/v1/interviews/start',
+      personalizationReason: `Type chosen by role pattern: "${targetRole}". Seniority from currentLevel.`,
     },
   };
 }
@@ -478,6 +627,9 @@ async function insight({ ctx, systemPrompt, userId }) {
     try {
       const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || text);
       if (parsed && Array.isArray(parsed.items)) {
+        // Persist the insight summary so it shows up in conversation history.
+        const summary = parsed.items.map(i => i.text).join(' · ');
+        await appendToThread(userId, 'assistant', summary, { mode: 'insight' });
         return { mode: 'insight', output: parsed };
       }
     } catch (_) { /* fall through to deterministic */ }
@@ -492,6 +644,9 @@ async function insight({ ctx, systemPrompt, userId }) {
         ? `Your weakest topic is ${s.topic}. ${s.detail}`
         : `You're on track. Keep going.`,
   }));
+  await appendToThread(userId, 'assistant',
+    fallbackItems.map(i => i.text).join(' · '),
+    { mode: 'insight' });
   return { mode: 'insight', output: { headline: 'Here\'s what I noticed.', items: fallbackItems } };
 }
 

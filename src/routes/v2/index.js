@@ -20,6 +20,8 @@ router.use('/plan', require('./plan'));
 router.use('/compass', require('./compass'));
 router.use('/insights', require('./insights'));
 router.use('/you', require('./you'));
+router.use('/taxonomy', require('./taxonomy'));
+router.use('/opt-in', require('./optIn'));
 
 router.get('/health', (_req, res) => res.json({ status: 'ok', namespace: 'v2', ts: new Date() }));
 

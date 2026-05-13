@@ -1,11 +1,9 @@
 /**
  * v2 Plan routes.
  *
- * Adds:
  *   GET /api/v2/plan/today — one-hero recommendation + 3 alternatives + trajectory snapshot
  *
- * The one-hero shape is what powers the redesigned v2 Home screen.
- * Reads from v1 plan data — does NOT replace v1 plan routes.
+ * Reads from v1 Plan (weeklySchedule[].tasks[]) — does NOT replace v1 plan routes.
  */
 const express = require('express');
 const auth = require('../../middleware/auth');
@@ -17,31 +15,43 @@ const { predictTaskImpact } = require('../../services/v2/predictedImpactService'
 
 const router = express.Router();
 
+// v1 Plan task `type` → v2 UI taskType + icon
+const TASK_TYPE_MAP = {
+  in_app_content: { uiType: 'watch',           icon: '📺' },
+  quiz:           { uiType: 'quiz',            icon: '🧠' },
+  ai_interview:   { uiType: 'interview',       icon: '🎙️' },
+  external_link:  { uiType: 'external',        icon: '🔗' },
+  competition:    { uiType: 'compete',         icon: '🏆' },
+  manual:         { uiType: 'reflection',      icon: '💭' },
+};
+
+// v1 task type → predictedImpact taskType
+const IMPACT_TYPE_MAP = {
+  in_app_content: 'watch',
+  quiz:           'quiz',
+  ai_interview:   'interview',
+  external_link:  'read',
+  competition:    'quiz',
+  manual:         'reflection',
+};
+
 /**
  * GET /api/v2/plan/today
  *
- * Returns:
+ * Shape (success):
  *   {
- *     greeting: "Hi, Nirpeksh.",
- *     statusLine: "You're on track for August. 74% ready, 11 weeks to go.",
+ *     greeting, statusLine, objectiveLabel,
  *     trajectory: { today, in30Days, atTargetDate, ... },
- *     weekProgress: { done: 3, total: 7, week: 11, totalWeeks: 24 },
+ *     weekProgress: { done, total, week, totalWeeks },
  *     hero: {
- *       taskId, taskType: 'watch', icon: '📺',
- *       title: 'Dynamic Programming — Memoization',
- *       subtitle: 'with Striver',
- *       durationMin: 22,
- *       difficulty: 'hard',
- *       primaryTopic: 'dp',
+ *       taskId, taskType, icon, title, subtitle, durationMin, difficulty, primaryTopic,
+ *       payload: { contentId? quizId? interviewId? url? },  // routes iOS to v1 detail screen
  *       impact: { expectedFrom, expectedTo, expectedGain, whyText }
  *     },
- *     alternatives: [
- *       { taskId, taskType, icon, title, durationMin, primaryTopic, reason },
- *       ...
- *     ]
+ *     alternatives: [ { ...same shape, smaller } ]
  *   }
  *
- * If no plan exists yet, returns a fallback shape with diagnostic CTA.
+ * Fallbacks: no_objective | plan_brewing | day_done
  */
 router.get('/today', auth, async (req, res) => {
   try {
@@ -50,13 +60,13 @@ router.get('/today', auth, async (req, res) => {
     const [user, objective, plan, knowledge] = await Promise.all([
       require('../../models/User').findById(userId).select('firstName').lean(),
       UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
-      Plan.findOne({ userId, status: { $in: ['active', 'ready'] } }).lean(),
+      Plan.findOne({ userId, isActive: true }).lean(),
       KnowledgeProfile.findOne({ userId }).lean(),
     ]);
 
     const greeting = user?.firstName ? `Hi, ${user.firstName}.` : 'Hi.';
+    const objectiveLabel = buildObjectiveLabel(objective);
 
-    // No objective yet — pre-onboarding fallback
     if (!objective) {
       return res.json({
         success: true,
@@ -69,15 +79,8 @@ router.get('/today', auth, async (req, res) => {
       });
     }
 
-    // Compute current readiness — pull from plan or recompute from knowledge profile
-    const currentReadiness =
-      plan?.readinessScore ??
-      Math.round(
-        (knowledge?.topicProfiles
-          ? Array.from(knowledge.topicProfiles.values?.() || []).reduce((s, t) => s + (t.masteryLevel || 0), 0) /
-            Math.max(1, knowledge.topicProfiles.size || 1)
-          : 30)
-      );
+    // Current readiness — pull from knowledge profile if available
+    const currentReadiness = computeReadinessFromKnowledge(knowledge) ?? 30;
 
     const trajectory = forecastTrajectory({
       currentReadiness,
@@ -87,18 +90,14 @@ router.get('/today', auth, async (req, res) => {
       currentLevel: objective.currentLevel,
     });
 
-    const weeksLeft = Math.max(0, trajectory.timelineWeeks - (plan?.currentWeek || 0));
-    const statusLine = trajectory.onTrack
-      ? `You're on track. ${currentReadiness}% ready, ${weeksLeft} weeks to go.`
-      : `Behind pace. ${currentReadiness}% ready, ${weeksLeft} weeks left — let’s tighten up.`;
-
-    // Plan not yet generated — show "plan brewing" alongside content-ready fallback
-    if (!plan || !Array.isArray(plan.tasks) || plan.tasks.length === 0) {
+    // No plan yet — brewing fallback
+    if (!plan || !Array.isArray(plan.weeklySchedule) || plan.weeklySchedule.length === 0) {
       return res.json({
         success: true,
         data: {
           greeting,
-          statusLine: 'Your plan is being personalized. Meanwhile, here’s relevant content.',
+          objectiveLabel,
+          statusLine: 'Your plan is being personalized. Meanwhile, here’s content relevant to your goal.',
           trajectory,
           fallback: 'plan_brewing',
           weekProgress: null,
@@ -106,79 +105,60 @@ router.get('/today', auth, async (req, res) => {
       });
     }
 
-    // Find today's tasks — first incomplete, ranked
-    const today = new Date();
-    const todaysTasks = plan.tasks.filter(t =>
-      !t.completedAt && (!t.scheduledFor || new Date(t.scheduledFor) <= today)
-    );
+    // Find current week from earliest week with any incomplete tasks
+    const currentWeekEntry =
+      plan.weeklySchedule.find(w => w.tasks.some(t => t.progress?.status !== 'complete')) ||
+      plan.weeklySchedule[0];
 
-    if (todaysTasks.length === 0) {
+    const currentWeek = currentWeekEntry.week;
+    const totalWeeks = plan.weeklySchedule.length;
+    const tasksThisWeek = currentWeekEntry.tasks || [];
+    const incompleteThisWeek = tasksThisWeek.filter(t => t.progress?.status !== 'complete');
+    const doneThisWeek = tasksThisWeek.length - incompleteThisWeek.length;
+    const weeksRemaining = Math.max(0, totalWeeks - currentWeek);
+
+    const statusLine = trajectory.onTrack
+      ? `You're on track. ${currentReadiness}% ready, ${weeksRemaining} weeks to go.`
+      : `Behind pace. ${currentReadiness}% ready, ${weeksRemaining} weeks left — let’s tighten up.`;
+
+    if (incompleteThisWeek.length === 0) {
       return res.json({
         success: true,
         data: {
           greeting,
+          objectiveLabel,
           statusLine,
           trajectory,
+          weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
           fallback: 'day_done',
           message: 'You’ve completed everything we recommended today. See you tomorrow.',
         },
       });
     }
 
-    // Take top hero — highest leverage = lowest current mastery on primary topic
-    const topicMastery = (topic) => {
-      const tp = knowledge?.topicProfiles?.[topic];
+    // Rank by lowest current mastery on the task's primary topic
+    const topicMasteryFor = (canonicalName) => {
+      const tp = knowledge?.topicProfiles?.[canonicalName];
       return tp?.masteryLevel ?? 0;
     };
 
-    const ranked = [...todaysTasks].sort((a, b) => topicMastery(a.primaryTopic) - topicMastery(b.primaryTopic));
-    const heroTask = ranked[0];
-    const alternatives = ranked.slice(1, 4);
+    const ranked = [...incompleteThisWeek].sort(
+      (a, b) => topicMasteryFor(a.topic?.canonicalName) - topicMasteryFor(b.topic?.canonicalName)
+    );
 
-    const heroImpact = predictTaskImpact({
-      taskType: heroTask.taskType,
-      primaryTopic: heroTask.primaryTopic || 'this topic',
-      currentMastery: topicMastery(heroTask.primaryTopic),
-      difficulty: heroTask.difficulty || 3,
-    });
-
-    const completedThisWeek = plan.tasks.filter(t =>
-      t.weekNumber === (plan.currentWeek || 1) && t.completedAt
-    ).length;
-    const totalThisWeek = plan.tasks.filter(t => t.weekNumber === (plan.currentWeek || 1)).length;
+    const hero = shapeHero(ranked[0], topicMasteryFor);
+    const alternatives = ranked.slice(1, 4).map(t => shapeAlt(t));
 
     return res.json({
       success: true,
       data: {
         greeting,
+        objectiveLabel,
         statusLine,
         trajectory,
-        weekProgress: {
-          done: completedThisWeek,
-          total: totalThisWeek,
-          week: plan.currentWeek || 1,
-          totalWeeks: plan.totalWeeks || trajectory.timelineWeeks,
-        },
-        hero: {
-          taskId: heroTask._id || heroTask.id,
-          taskType: heroTask.taskType,
-          icon: iconForTaskType(heroTask.taskType),
-          title: heroTask.title,
-          subtitle: heroTask.subtitle || heroTask.creatorName || '',
-          durationMin: heroTask.durationMin || heroTask.estimatedMinutes || 20,
-          difficulty: heroTask.difficulty === 5 ? 'hard' : heroTask.difficulty <= 2 ? 'easy' : 'medium',
-          primaryTopic: heroTask.primaryTopic,
-          impact: heroImpact,
-        },
-        alternatives: alternatives.map(t => ({
-          taskId: t._id || t.id,
-          taskType: t.taskType,
-          icon: iconForTaskType(t.taskType),
-          title: t.title,
-          durationMin: t.durationMin || t.estimatedMinutes || 10,
-          primaryTopic: t.primaryTopic,
-          reason: t.recommendationReason || 'Plan-aligned',
-        })),
+        weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
+        hero,
+        alternatives,
       },
     });
   } catch (err) {
@@ -187,19 +167,91 @@ router.get('/today', auth, async (req, res) => {
   }
 });
 
-function iconForTaskType(t) {
-  return ({
-    watch: '📺',
-    listen: '🎧',
-    read: '📖',
-    quiz: '🧠',
-    interview: '🎙️',
-    mock_exam: '📝',
-    notes_create: '📝',
-    reflection: '💭',
-    conversation: '💬',
-    coding_practice: '📐',
-  })[t] || '✨';
+// ──────────────────────────────────────────────
+// Shaping helpers
+// ──────────────────────────────────────────────
+
+function shapeHero(task, topicMasteryFor) {
+  const map = TASK_TYPE_MAP[task.type] || { uiType: 'manual', icon: '✨' };
+  const impactType = IMPACT_TYPE_MAP[task.type] || 'watch';
+  const primaryTopicKey = task.topic?.canonicalName;
+  const currentMastery = topicMasteryFor(primaryTopicKey);
+
+  // Prefer the baked-in impact (computed at plan generation time). Fall back
+  // to on-the-fly computation for legacy plans that don't have one.
+  const impact = task.payload?.impact || predictTaskImpact({
+    taskType: impactType,
+    primaryTopic: task.topic?.displayName || 'this topic',
+    currentMastery,
+    difficulty: task.payload?.difficulty || 3,
+  });
+
+  return {
+    taskId: String(task._id),
+    taskType: map.uiType,
+    icon: map.icon,
+    title: task.payload?.title || task.topic?.displayName || 'Today’s task',
+    subtitle: task.payload?.creator || task.payload?.source || '',
+    durationMin: task.payload?.estimatedMinutes || 20,
+    difficulty: (task.payload?.difficulty || 3) >= 4 ? 'hard'
+              : (task.payload?.difficulty || 3) <= 2 ? 'easy' : 'medium',
+    primaryTopic: task.topic?.displayName || primaryTopicKey,
+    payload: extractPayload(task),
+    impact,
+  };
+}
+
+function shapeAlt(task) {
+  const map = TASK_TYPE_MAP[task.type] || { uiType: 'manual', icon: '✨' };
+  return {
+    taskId: String(task._id),
+    taskType: map.uiType,
+    icon: map.icon,
+    title: task.payload?.title || task.topic?.displayName || 'Task',
+    durationMin: task.payload?.estimatedMinutes || 10,
+    primaryTopic: task.topic?.displayName,
+    payload: extractPayload(task),
+    reason: task.payload?.reason || 'Plan-aligned',
+  };
+}
+
+/**
+ * Pull out just the routing fields iOS/Android need to open the right detail screen.
+ */
+function extractPayload(task) {
+  const p = task.payload || {};
+  return {
+    contentId: p.contentId || null,
+    quizId:    p.quizId    || null,
+    interviewId: p.interviewId || p.scenarioId || null,
+    url:       p.url       || null,
+  };
+}
+
+function computeReadinessFromKnowledge(knowledge) {
+  if (!knowledge?.topicProfiles) return null;
+  const entries = Object.values(knowledge.topicProfiles || {});
+  if (entries.length === 0) return null;
+  const avg = entries.reduce((s, t) => s + (t.masteryLevel || 0), 0) / entries.length;
+  return Math.round(avg);
+}
+
+function buildObjectiveLabel(obj) {
+  if (!obj) return null;
+  const s = obj.specifics || {};
+  const parts = [];
+  if (s.targetRole) parts.push(s.targetRole);
+  if (s.targetCompany) parts.push(`@ ${s.targetCompany}`);
+  if (s.examName) parts.push(s.examName);
+  if (s.targetSkill && parts.length === 0) parts.push(s.targetSkill);
+
+  const timelineLabel = {
+    '1_month': '1mo', '3_months': '3mo', '6_months': '6mo',
+    '1_year': '12mo', 'no_deadline': '',
+  }[obj.timeline] || '';
+
+  const base = parts.join(' ') || obj.objectiveType.replace(/_/g, ' ');
+  return timelineLabel ? `${base} · ${timelineLabel}` : base;
 }
 
 module.exports = router;
