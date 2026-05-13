@@ -36,8 +36,57 @@ const User = require('../../models/User');
 const UserObjective = require('../../models/UserObjective');
 const KnowledgeProfile = require('../../models/KnowledgeProfile');
 const Plan = require('../../models/Plan');
-const Conversation = require('../../models/Conversation');
+const CompassConversation = require('../../models/CompassConversation');
 const anthropic = require('../../config/anthropic');
+const redis = require('../../config/redis');
+
+// Persistence: max age of the "active" thread before a new one starts.
+const ACTIVE_THREAD_MAX_AGE_MIN = 60 * 12;  // 12 hours
+
+/**
+ * Get the user's active Compass thread, or create a new one.
+ * Threads roll over after a long inactivity window so the context window stays bounded.
+ */
+async function getOrCreateActiveThread(userId) {
+  if (!userId) return null;
+  const cutoff = new Date(Date.now() - ACTIVE_THREAD_MAX_AGE_MIN * 60 * 1000);
+  let thread = await CompassConversation.findOne({
+    userId, isArchived: false, lastMessageAt: { $gte: cutoff },
+  }).sort({ lastMessageAt: -1 });
+  if (!thread) {
+    thread = await CompassConversation.create({ userId });
+  }
+  return thread;
+}
+
+/**
+ * Append a message to the active thread. Best-effort — DB errors do not fail the LLM call.
+ */
+async function appendToThread(userId, role, content, opts = {}) {
+  try {
+    const thread = await getOrCreateActiveThread(userId);
+    if (!thread) return;
+    thread.messages.push({
+      role,
+      content: typeof content === 'string' ? content.slice(0, 8000) : '',
+      mode: opts.mode,
+      followups: opts.followups || [],
+      tokensIn: opts.tokensIn,
+      tokensOut: opts.tokensOut,
+    });
+    thread.messageCount = thread.messages.length;
+    thread.lastMessageAt = new Date();
+    if (!thread.title || thread.title === 'New conversation') {
+      // Auto-title from the first user message
+      if (role === 'user' && content) {
+        thread.title = content.slice(0, 60);
+      }
+    }
+    await thread.save();
+  } catch (err) {
+    console.warn('[compass] failed to persist message', err.message);
+  }
+}
 
 // LLM config — Compass uses Claude Sonnet 4 to match aiProvider.js
 const COMPASS_MODEL = 'claude-sonnet-4-20250514';
@@ -47,19 +96,63 @@ const COMPASS_TEMPERATURE = 0.6;
 /**
  * Per-user daily token budget. Hard cap to protect AI cost per active user.
  * Free tier: 50k tokens/day. Pro tier: 200k tokens/day (TODO: wire to subscription).
+ *
+ * Redis-backed so caps survive server restarts and are consistent across
+ * horizontally-scaled workers. Keys auto-expire at end of day.
  */
 const DAILY_TOKEN_CAP_FREE = 50_000;
-const _tokenBudgets = new Map();  // userId → { date, tokensUsed }
+const DAILY_TOKEN_CAP_PRO  = 200_000;
 
-function checkAndIncrementBudget(userId, estimatedTokens) {
+function budgetKey(userId) {
   const today = new Date().toISOString().split('T')[0];
-  const entry = _tokenBudgets.get(userId);
-  const used = (entry && entry.date === today) ? entry.tokensUsed : 0;
-  if (used + estimatedTokens > DAILY_TOKEN_CAP_FREE) {
-    return false;
+  return `compass:budget:${userId}:${today}`;
+}
+
+function secondsUntilEndOfDayUTC() {
+  const now = new Date();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return Math.max(60, Math.ceil((tomorrow - now) / 1000));
+}
+
+/**
+ * Atomically increment the user's daily token usage in Redis. If the new total
+ * would exceed the cap, decrement back and return false (caller should refuse
+ * the LLM call). Auto-expires the key at midnight UTC.
+ *
+ * Falls open on Redis errors so a Redis outage doesn't break Compass.
+ */
+async function checkAndIncrementBudget(userId, estimatedTokens, cap = DAILY_TOKEN_CAP_FREE) {
+  if (!userId || !estimatedTokens || estimatedTokens <= 0) return true;
+  try {
+    const key = budgetKey(userId);
+    const newTotal = await redis.incrby(key, estimatedTokens);
+    if (newTotal === estimatedTokens) {
+      // First write today — set expiry so the counter rolls over at midnight UTC
+      await redis.expire(key, secondsUntilEndOfDayUTC());
+    }
+    if (newTotal > cap) {
+      // Over-budget: refund the increment we just made so subsequent shorter
+      // requests can still squeak through if the cap is at the edge.
+      await redis.decrby(key, estimatedTokens);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[compass] Redis budget check failed, falling open:', err.message);
+    return true;
   }
-  _tokenBudgets.set(userId, { date: today, tokensUsed: used + estimatedTokens });
-  return true;
+}
+
+/**
+ * Best-effort current usage report (for diagnostics / future Pro upgrade prompt).
+ */
+async function getBudgetUsage(userId) {
+  try {
+    const used = parseInt(await redis.get(budgetKey(userId)) || '0', 10);
+    return { used, cap: DAILY_TOKEN_CAP_FREE };
+  } catch (_) {
+    return { used: 0, cap: DAILY_TOKEN_CAP_FREE };
+  }
 }
 
 /**
@@ -187,7 +280,8 @@ async function handle({ userId, mode, payload = {} }) {
  */
 async function callLLM({ userId, systemPrompt, userPrompt, history = [], maxTokens = COMPASS_MAX_TOKENS }) {
   const estimatedTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4) + maxTokens;
-  if (!checkAndIncrementBudget(userId, estimatedTokens)) {
+  const allowed = await checkAndIncrementBudget(userId, estimatedTokens);
+  if (!allowed) {
     console.warn(`[compass] user ${userId} hit daily token cap`);
     return { text: null, capped: true };
   }
@@ -261,31 +355,39 @@ async function conversation({ ctx, systemPrompt, userId, message, history = [] }
     return { mode: 'conversation', output: { reply: 'Tell me what you need.', followups: [] } };
   }
 
+  // Persist user turn before LLM call so it's recorded even if the model fails.
+  await appendToThread(userId, 'user', message, { mode: 'conversation' });
+
+  // If the client didn't pass history, pull it from the persisted thread so
+  // Compass remembers prior turns even across iOS app cold-starts.
+  let effectiveHistory = history;
+  if (!history || history.length === 0) {
+    try {
+      const thread = await getOrCreateActiveThread(userId);
+      effectiveHistory = (thread?.messages || []).slice(-8, -1).map(m => ({ role: m.role, content: m.content }));
+    } catch (_) {}
+  }
+
   // Append a directive to keep replies tight + offer follow-ups inline
   const extended = systemPrompt + `\n\nReply rules:\n- Be conversational and concise (3-5 sentences max unless the question genuinely requires more).\n- Ground answers in the learner's objective and recent context.\n- End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\` — these will be parsed and shown as chips.\n- Refuse off-topic / harmful / professional-advice requests politely; redirect to learning.`;
 
   const { text, capped } = await callLLM({
-    userId, systemPrompt: extended, userPrompt: message, history,
+    userId, systemPrompt: extended, userPrompt: message, history: effectiveHistory,
     maxTokens: COMPASS_MAX_TOKENS,
   });
 
   if (capped) {
-    return {
-      mode: 'conversation',
-      output: {
-        reply: "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.",
-        followups: [],
-      },
-    };
+    const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
+    await appendToThread(userId, 'assistant', reply, { mode: 'conversation' });
+    return { mode: 'conversation', output: { reply, followups: [] } };
   }
 
   if (!text) {
+    const reply = "I had trouble thinking that through just now. Try again in a moment?";
+    await appendToThread(userId, 'assistant', reply, { mode: 'conversation', followups: ['Retry', 'Try something else'] });
     return {
       mode: 'conversation',
-      output: {
-        reply: "I had trouble thinking that through just now. Try again in a moment?",
-        followups: ['Retry', 'Try something else'],
-      },
+      output: { reply, followups: ['Retry', 'Try something else'] },
     };
   }
 
@@ -300,6 +402,8 @@ async function conversation({ ctx, systemPrompt, userId, message, history = [] }
     } catch (_) {}
     reply = text.replace(jsonMatch[0], '').trim();
   }
+
+  await appendToThread(userId, 'assistant', reply, { mode: 'conversation', followups });
 
   return { mode: 'conversation', output: { reply, followups } };
 }
@@ -391,8 +495,44 @@ async function insight({ ctx, systemPrompt, userId }) {
   return { mode: 'insight', output: { headline: 'Here\'s what I noticed.', items: fallbackItems } };
 }
 
+/**
+ * Fetch the active thread for a user (or empty if none).
+ * Used by the iOS Compass tab when it cold-starts to restore prior messages.
+ */
+async function getActiveThread(userId) {
+  const thread = await getOrCreateActiveThread(userId);
+  if (!thread) return { messages: [] };
+  return {
+    threadId: thread._id,
+    title: thread.title,
+    messageCount: thread.messageCount,
+    lastMessageAt: thread.lastMessageAt,
+    messages: (thread.messages || []).map(m => ({
+      role: m.role,
+      content: m.content,
+      mode: m.mode,
+      followups: m.followups || [],
+      createdAt: m.createdAt,
+    })),
+  };
+}
+
+/**
+ * Archive the current active thread so the next interaction starts fresh.
+ */
+async function resetActiveThread(userId) {
+  await CompassConversation.updateMany(
+    { userId, isArchived: false },
+    { $set: { isArchived: true } }
+  );
+  return { reset: true };
+}
+
 module.exports = {
   handle,
   buildUserContext,
   buildSystemContext,
+  getActiveThread,
+  resetActiveThread,
+  getBudgetUsage,
 };
