@@ -37,6 +37,30 @@ const UserObjective = require('../../models/UserObjective');
 const KnowledgeProfile = require('../../models/KnowledgeProfile');
 const Plan = require('../../models/Plan');
 const Conversation = require('../../models/Conversation');
+const anthropic = require('../../config/anthropic');
+
+// LLM config — Compass uses Claude Sonnet 4 to match aiProvider.js
+const COMPASS_MODEL = 'claude-sonnet-4-20250514';
+const COMPASS_MAX_TOKENS = 800;       // conversational replies stay tight
+const COMPASS_TEMPERATURE = 0.6;
+
+/**
+ * Per-user daily token budget. Hard cap to protect AI cost per active user.
+ * Free tier: 50k tokens/day. Pro tier: 200k tokens/day (TODO: wire to subscription).
+ */
+const DAILY_TOKEN_CAP_FREE = 50_000;
+const _tokenBudgets = new Map();  // userId → { date, tokensUsed }
+
+function checkAndIncrementBudget(userId, estimatedTokens) {
+  const today = new Date().toISOString().split('T')[0];
+  const entry = _tokenBudgets.get(userId);
+  const used = (entry && entry.date === today) ? entry.tokensUsed : 0;
+  if (used + estimatedTokens > DAILY_TOKEN_CAP_FREE) {
+    return false;
+  }
+  _tokenBudgets.set(userId, { date: today, tokensUsed: used + estimatedTokens });
+  return true;
+}
 
 /**
  * Build the user context envelope. Every Compass call uses this.
@@ -122,10 +146,10 @@ async function handle({ userId, mode, payload = {} }) {
 
   switch (mode) {
     case 'greeting':
-      return greeting(ctx);
+      return await greeting({ ctx, systemPrompt, userId });
 
     case 'conversation':
-      return await conversation({ ctx, systemPrompt, message: payload.message, history: payload.history });
+      return await conversation({ ctx, systemPrompt, userId, message: payload.message, history: payload.history });
 
     case 'quiz_config':
       return quizConfig({ ctx, payload });
@@ -134,37 +158,93 @@ async function handle({ userId, mode, payload = {} }) {
       return interviewConfig({ ctx, payload });
 
     case 'note':
-      // Stub — delegates to existing notes processing pipeline
-      return { mode, output: { ack: 'Forwarding to notes pipeline.', delegateTo: 'POST /api/v1/notes/request-upload' } };
+      return { mode, output: { reply: 'Upload a PDF, image, or audio file. I\'ll process it into a summary, mind map, flashcards, and audio narration.', delegateTo: 'POST /api/v1/notes/request-upload' } };
 
     case 'insight':
-      return insight(ctx);
+      return await insight({ ctx, systemPrompt, userId });
 
     case 'mentor':
-      return await conversation({ ctx, systemPrompt: systemPrompt + '\n[Mode: mentor — focus on career strategy.]', message: payload.message, history: payload.history });
+      return await conversation({
+        ctx, userId,
+        systemPrompt: systemPrompt + '\n[Mode: mentor — focus on career strategy, decisions, and long-term moves.]',
+        message: payload.message, history: payload.history,
+      });
 
     case 'coach':
-      return await conversation({ ctx, systemPrompt: systemPrompt + '\n[Mode: coach — be encouraging but honest about progress.]', message: payload.message, history: payload.history });
+      return await conversation({
+        ctx, userId,
+        systemPrompt: systemPrompt + '\n[Mode: coach — be encouraging but honest about progress.]',
+        message: payload.message, history: payload.history,
+      });
 
     default:
       return { mode: 'unknown', error: `Unknown mode: ${mode}` };
   }
 }
 
-function greeting(ctx) {
-  const name = ctx.user?.name || 'there';
-  let msg;
-  if (!ctx.objective) {
-    msg = `Hi ${name} — let's set up your goal first.`;
-  } else if (!ctx.plan) {
-    msg = `Hi ${name} — your plan is being built. Want to chat or explore content while it's brewing?`;
-  } else {
-    msg = `Hi ${name} — what do you want to do?`;
+/**
+ * Single-shot LLM call. Returns text on success, null on failure or budget exhausted.
+ */
+async function callLLM({ userId, systemPrompt, userPrompt, history = [], maxTokens = COMPASS_MAX_TOKENS }) {
+  const estimatedTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4) + maxTokens;
+  if (!checkAndIncrementBudget(userId, estimatedTokens)) {
+    console.warn(`[compass] user ${userId} hit daily token cap`);
+    return { text: null, capped: true };
   }
+
+  try {
+    const messages = [];
+    for (const h of history.slice(-8)) {
+      const role = h.role === 'assistant' ? 'assistant' : 'user';
+      if (typeof h.content === 'string' && h.content.trim()) {
+        messages.push({ role, content: h.content });
+      }
+    }
+    messages.push({ role: 'user', content: userPrompt });
+
+    const response = await anthropic.messages.create({
+      model: COMPASS_MODEL,
+      max_tokens: maxTokens,
+      temperature: COMPASS_TEMPERATURE,
+      system: systemPrompt,
+      messages,
+    });
+
+    const text = response.content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('')
+      .trim();
+
+    return { text: text || null, capped: false };
+  } catch (err) {
+    console.error('[compass] LLM error', err.message);
+    return { text: null, capped: false, error: err.message };
+  }
+}
+
+async function greeting({ ctx, systemPrompt, userId }) {
+  const name = ctx.user?.name || 'there';
+
+  // Use LLM for a context-aware greeting so it reflects the user's state
+  // (no objective yet, plan brewing, behind/ahead of plan, etc.)
+  const userPrompt = `Greet the learner in ONE short sentence (max 20 words). Don't list options — those appear as chips below your message. Make it warm, specific to their state, and prompt them to act.`;
+  const { text } = await callLLM({
+    userId, systemPrompt, userPrompt,
+    maxTokens: 80,
+  });
+
+  // Fallback: deterministic greeting if LLM unavailable or capped
+  const fallback = !ctx.objective
+    ? `Hi ${name} — let's set up your goal first.`
+    : !ctx.plan
+      ? `Hi ${name} — your plan is brewing. Want to chat or browse content while we wait?`
+      : `Hi ${name} — what do you want to do?`;
+
   return {
     mode: 'greeting',
     output: {
-      message: msg,
+      message: text || fallback,
       suggestedActions: [
         { id: 'quiz_me',       label: '⚡ Quiz me',           mode: 'quiz_config' },
         { id: 'interview',     label: '🎙️ Practice interview', mode: 'interview_config' },
@@ -176,21 +256,52 @@ function greeting(ctx) {
   };
 }
 
-async function conversation({ ctx, systemPrompt, message, history = [] }) {
-  // In real impl, delegate to existing aiTutorService or a generic LLM call.
-  // Returning a deterministic stub so iOS can integrate against a stable shape
-  // and the LLM wiring can be plugged behind this without iOS churn.
-  return {
-    mode: 'conversation',
-    output: {
-      reply: `[Compass placeholder reply with full context: ${ctx.objective?.type || 'no objective'}, weak topics: ${ctx.knowledge.weakTopics.map(t => t.topic).join(', ') || 'none'}]\n\nYou said: "${message}"`,
-      followups: [
-        'Tell me more about that',
-        'Quiz me on this',
-        'Move on to something else',
-      ],
-    },
-  };
+async function conversation({ ctx, systemPrompt, userId, message, history = [] }) {
+  if (!message || typeof message !== 'string') {
+    return { mode: 'conversation', output: { reply: 'Tell me what you need.', followups: [] } };
+  }
+
+  // Append a directive to keep replies tight + offer follow-ups inline
+  const extended = systemPrompt + `\n\nReply rules:\n- Be conversational and concise (3-5 sentences max unless the question genuinely requires more).\n- Ground answers in the learner's objective and recent context.\n- End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\` — these will be parsed and shown as chips.\n- Refuse off-topic / harmful / professional-advice requests politely; redirect to learning.`;
+
+  const { text, capped } = await callLLM({
+    userId, systemPrompt: extended, userPrompt: message, history,
+    maxTokens: COMPASS_MAX_TOKENS,
+  });
+
+  if (capped) {
+    return {
+      mode: 'conversation',
+      output: {
+        reply: "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.",
+        followups: [],
+      },
+    };
+  }
+
+  if (!text) {
+    return {
+      mode: 'conversation',
+      output: {
+        reply: "I had trouble thinking that through just now. Try again in a moment?",
+        followups: ['Retry', 'Try something else'],
+      },
+    };
+  }
+
+  // Strip the JSON followups block out of the visible reply and parse it.
+  let reply = text;
+  let followups = [];
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (Array.isArray(parsed.followups)) followups = parsed.followups.slice(0, 3);
+    } catch (_) {}
+    reply = text.replace(jsonMatch[0], '').trim();
+  }
+
+  return { mode: 'conversation', output: { reply, followups } };
 }
 
 function quizConfig({ ctx }) {
@@ -231,22 +342,53 @@ function interviewConfig({ ctx }) {
   };
 }
 
-function insight(ctx) {
+async function insight({ ctx, systemPrompt, userId }) {
   if (!ctx.plan) {
     return { mode: 'insight', output: { headline: 'Plan not yet generated.', items: [] } };
   }
-  const items = [];
+
+  // Compute heuristic signals first — these are deterministic guardrails.
+  const signals = [];
   if (ctx.plan.tasksDoneThisWeek < ctx.plan.tasksTotalThisWeek / 2) {
-    items.push({ severity: 'warn', text: `You're behind on this week's plan — ${ctx.plan.tasksDoneThisWeek}/${ctx.plan.tasksTotalThisWeek} done.` });
+    signals.push({ severity: 'warn', topic: 'plan_progress', detail: `${ctx.plan.tasksDoneThisWeek}/${ctx.plan.tasksTotalThisWeek} tasks done this week.` });
   }
   if (ctx.knowledge.weakTopics[0]) {
     const w = ctx.knowledge.weakTopics[0];
-    items.push({ severity: 'info', text: `Your weakest topic is ${w.topic} at ${w.mastery}%. Want a deep-dive?` });
+    signals.push({ severity: 'info', topic: w.topic, detail: `Mastery ${w.mastery}%.` });
   }
-  if (items.length === 0) {
-    items.push({ severity: 'good', text: 'You\'re on track. Keep going.' });
+  if (signals.length === 0) {
+    signals.push({ severity: 'good', topic: 'on_track', detail: 'On pace this week.' });
   }
-  return { mode: 'insight', output: { headline: 'Here\'s what I noticed.', items } };
+
+  // Ask LLM to phrase the insights warmly and propose 1 concrete next action per signal.
+  const userPrompt = `Given these signals about the learner, write 1-3 short observations in the user's voice (second-person, warm, honest). Return STRICT JSON only:\n{ "headline": "Here's what I noticed.", "items": [ { "severity": "warn|info|good", "text": "..." } ] }\n\nSignals: ${JSON.stringify(signals)}`;
+
+  const { text } = await callLLM({
+    userId,
+    systemPrompt,
+    userPrompt,
+    maxTokens: 400,
+  });
+
+  if (text) {
+    try {
+      const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || text);
+      if (parsed && Array.isArray(parsed.items)) {
+        return { mode: 'insight', output: parsed };
+      }
+    } catch (_) { /* fall through to deterministic */ }
+  }
+
+  // Deterministic fallback — never lets the screen fail to render.
+  const fallbackItems = signals.map(s => ({
+    severity: s.severity,
+    text: s.severity === 'warn'
+      ? `You're behind on this week — ${s.detail}`
+      : s.severity === 'info'
+        ? `Your weakest topic is ${s.topic}. ${s.detail}`
+        : `You're on track. Keep going.`,
+  }));
+  return { mode: 'insight', output: { headline: 'Here\'s what I noticed.', items: fallbackItems } };
 }
 
 module.exports = {
