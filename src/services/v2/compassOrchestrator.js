@@ -71,6 +71,8 @@ async function appendToThread(userId, role, content, opts = {}) {
       content: typeof content === 'string' ? content.slice(0, 8000) : '',
       mode: opts.mode,
       followups: opts.followups || [],
+      contentRef: opts.contentRef,
+      contentTitle: opts.contentTitle,
       tokensIn: opts.tokensIn,
       tokensOut: opts.tokensOut,
     });
@@ -243,6 +245,12 @@ async function handle({ userId, mode, payload = {} }) {
 
     case 'conversation':
       return await conversation({ ctx, systemPrompt, userId, message: payload.message, history: payload.history });
+
+    case 'tutor':
+      // The merged AI Tutor — Compass scoped to a specific piece of content.
+      // Same brain, same unified history (CompassConversation), but the prompt
+      // is grounded in the video/article and the turn is tagged with contentRef.
+      return await tutor({ ctx, systemPrompt, userId, contentId: payload.contentId, message: payload.message, history: payload.history });
 
     case 'quiz_config':
       return quizConfig({ ctx, payload });
@@ -469,6 +477,104 @@ async function conversation({ ctx, systemPrompt, userId, message, history = [] }
   });
 
   return { mode: 'conversation', output: { reply, followups } };
+}
+
+/**
+ * Tutor mode — the merged AI Tutor. Same Compass brain + same unified history,
+ * but the prompt is GROUNDED in a specific piece of content and the turn is
+ * tagged with contentRef so:
+ *   - the iOS history shows "Tutor · <video title>"
+ *   - analytics can attribute tutor usage to content + feed recommendations
+ *   - the learner's full objective/plan context still informs the answer
+ *
+ * Replaces v1's standalone aiTutorService for v2 users — one AI surface.
+ */
+async function tutor({ ctx, systemPrompt, userId, contentId, message, history = [] }) {
+  if (!message || typeof message !== 'string') {
+    return { mode: 'tutor', output: { reply: 'Ask me anything about this lesson.', followups: [] } };
+  }
+
+  // Load the content this tutor turn is scoped to.
+  let content = null;
+  try {
+    const Content = require('../../models/Content');
+    content = await Content.findById(contentId)
+      .select('title description transcript aiData domain topics')
+      .lean();
+  } catch (_) { /* content optional — degrade to general tutoring */ }
+
+  const contentTitle = content?.title || 'this lesson';
+
+  // Persist the user turn (tagged with contentRef) before the LLM call.
+  await appendToThread(userId, 'user', message, {
+    mode: 'tutor', contentRef: contentId, contentTitle,
+  });
+
+  // Pull recent thread history if the client didn't pass any.
+  let effectiveHistory = history;
+  if (!history || history.length === 0) {
+    try {
+      const thread = await getOrCreateActiveThread(userId);
+      effectiveHistory = (thread?.messages || []).slice(-8, -1).map(m => ({ role: m.role, content: m.content }));
+    } catch (_) {}
+  }
+
+  // Build the tutor-scoped system prompt. Grounded in the content, but the
+  // learner's objective/plan context (already in systemPrompt) still applies.
+  const hasTranscript = !!(content?.transcript && content.transcript.length > 50);
+  const grounding = content ? [
+    `\n\n[TUTOR MODE — scoped to: "${contentTitle}"]`,
+    content.description ? `Description: ${content.description}` : '',
+    Array.isArray(content?.aiData?.keyConcepts) && content.aiData.keyConcepts.length
+      ? `Key concepts: ${content.aiData.keyConcepts.join(', ')}` : '',
+    content?.aiData?.summary ? `Summary: ${content.aiData.summary}` : '',
+    hasTranscript
+      ? `Transcript (ground answers in this; cite approximate timestamps when relevant):\n${String(content.transcript).slice(0, 6000)}`
+      : `No full transcript available — answer from the title, description, and key concepts; say "based on this lesson's key concepts" rather than quoting.`,
+  ].filter(Boolean).join('\n') : `\n\n[TUTOR MODE — the learner is asking about a lesson, content details unavailable. Help with the concept, tie it back to their objective.]`;
+
+  const tutorRules = [
+    '\n\nTutor rules:',
+    `- You help the learner understand "${contentTitle}" specifically. Stay scoped to this lesson and tightly-adjacent concepts (prerequisites, examples, clarifications).`,
+    '- If asked something clearly off-topic, decline in 1-2 sentences and redirect to the lesson.',
+    '- Concise (2-4 short paragraphs max unless more is explicitly requested). Friendly, like a sharp study buddy.',
+    '- End with up to 3 short follow-up suggestions as a JSON code block: ```json\n{"followups":["…","…"]}\n```',
+  ].join('\n');
+
+  const fullSystem = systemPrompt + grounding + tutorRules;
+
+  const { text, capped, tokensIn, tokensOut } = await callLLM({
+    userId, systemPrompt: fullSystem, userPrompt: message, history: effectiveHistory,
+    maxTokens: COMPASS_MAX_TOKENS,
+  });
+
+  if (capped) {
+    const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
+    await appendToThread(userId, 'assistant', reply, { mode: 'tutor', contentRef: contentId, contentTitle });
+    return { mode: 'tutor', output: { reply, followups: [], contentTitle } };
+  }
+  if (!text) {
+    const reply = "I had trouble with that just now — ask me again in a moment?";
+    await appendToThread(userId, 'assistant', reply, { mode: 'tutor', contentRef: contentId, contentTitle });
+    return { mode: 'tutor', output: { reply, followups: ['Retry'], contentTitle } };
+  }
+
+  let reply = text;
+  let followups = [];
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (Array.isArray(parsed.followups)) followups = parsed.followups.slice(0, 3);
+    } catch (_) {}
+    reply = text.replace(jsonMatch[0], '').trim();
+  }
+
+  await appendToThread(userId, 'assistant', reply, {
+    mode: 'tutor', contentRef: contentId, contentTitle, followups, tokensIn, tokensOut,
+  });
+
+  return { mode: 'tutor', output: { reply, followups, contentTitle } };
 }
 
 /**

@@ -13,8 +13,12 @@ const mongoose = require('mongoose');
 const compassMessageSchema = new mongoose.Schema({
   role: { type: String, enum: ['user', 'assistant'], required: true },
   content: { type: String, required: true, maxlength: 8000 },
-  mode: { type: String },         // greeting | conversation | quiz_config | insight | mentor | coach
+  mode: { type: String },         // greeting | conversation | quiz_config | insight | mentor | coach | tutor | note
   followups: [String],            // suggested follow-ups for the last assistant turn
+  // tutor mode — the content piece this turn is scoped to (so history shows
+  // "Tutor · <video>" and analytics can attribute tutor usage to content).
+  contentRef: { type: mongoose.Schema.Types.ObjectId, ref: 'Content' },
+  contentTitle: { type: String },
   tokensIn:  { type: Number },    // approx tokens consumed
   tokensOut: { type: Number },
 }, { timestamps: true });
