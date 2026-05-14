@@ -8,8 +8,12 @@ const { predictTaskImpact } = require('../v2/predictedImpactService');
  * Stored on `payload.impact` so iOS Home / v2 "why this matters" can render
  * it without re-computing per request. Best-effort — failures don't block
  * task creation.
+ *
+ * Gated by the V2_API_ENABLED kill switch — when v2 is disabled this returns
+ * null and plans generate exactly as they did in v1.
  */
 function computeTaskImpact(taskType, alloc, displayName, topicResults) {
+  if (process.env.V2_API_ENABLED === 'false') return null;
   try {
     const v1ToImpactType = {
       quiz: 'quiz',

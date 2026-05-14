@@ -20,9 +20,21 @@ router.use('/plan', require('./plan'));
 router.use('/compass', require('./compass'));
 router.use('/insights', require('./insights'));
 router.use('/you', require('./you'));
-router.use('/taxonomy', require('./taxonomy'));
 router.use('/opt-in', require('./optIn'));
 
 router.get('/health', (_req, res) => res.json({ status: 'ok', namespace: 'v2', ts: new Date() }));
+
+// Config probe — clients call this at launch to decide v1 vs v2 routing.
+// When the V2_API_ENABLED kill switch is off, app.js answers this directly
+// (this handler is only reached when v2 IS enabled).
+router.get('/config', (_req, res) => res.json({
+  success: true,
+  data: {
+    v2ApiEnabled: true,
+    // v2ForNewUsers: flip to true (via env) only after the v2 onboarding
+    // rebuild is shipped + tested. Until then fresh users stay on v1.
+    v2ForNewUsers: process.env.V2_FOR_NEW_USERS === 'true',
+  },
+}));
 
 module.exports = router;
