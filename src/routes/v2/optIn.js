@@ -1,11 +1,13 @@
 /**
- * v2 Opt-in sync.
+ * v2 Opt-in.
  *
  *   POST /api/v2/opt-in/v2  { enabled: Boolean }
  *
- * Mirrors the client-side V2FeatureFlag onto the User document so server-side
- * workers (notification cron, etc.) know to demote v1 anti-thesis prompts
- * (streak-panic, generic-trending) for this user.
+ * Called when an existing user accepts the "try v2" prompt. Sets v2OptedIn so
+ * server-side workers demote v1 anti-thesis prompts for them, and sets
+ * v2NeedsOnboarding so the client routes them through the v2 onboarding flow
+ * (re-onboard — their learning history is kept, only the active objective/plan
+ * is replaced). There is no path back to v1 once opted in.
  */
 const express = require('express');
 const auth = require('../../middleware/auth');
@@ -17,16 +19,19 @@ router.post('/v2', auth, async (req, res) => {
   try {
     const { enabled } = req.body || {};
     const userId = req.user.userId;
+    const on = !!enabled;
     await User.updateOne(
       { _id: userId },
       {
         $set: {
-          v2OptedIn: !!enabled,
-          v2OptedInAt: enabled ? new Date() : null,
+          v2OptedIn: on,
+          v2OptedInAt: on ? new Date() : null,
+          // Accepting v2 always means re-onboarding into the v2 flow.
+          v2NeedsOnboarding: on,
         },
       }
     );
-    return res.json({ success: true, data: { v2OptedIn: !!enabled } });
+    return res.json({ success: true, data: { v2OptedIn: on, needsOnboarding: on } });
   } catch (err) {
     console.error('[v2/opt-in/v2] error', err);
     return res.status(500).json({ success: false, message: 'Failed to update opt-in' });

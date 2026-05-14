@@ -21,6 +21,7 @@ router.use('/compass', require('./compass'));
 router.use('/insights', require('./insights'));
 router.use('/you', require('./you'));
 router.use('/opt-in', require('./optIn'));
+router.use('/me', require('./me'));
 
 router.get('/health', (_req, res) => res.json({ status: 'ok', namespace: 'v2', ts: new Date() }));
 

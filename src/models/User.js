@@ -54,6 +54,13 @@ const userSchema = new mongoose.Schema({
   // (streak-panic, generic-trending) so v2 users get the calmer experience.
   v2OptedIn: { type: Boolean, default: false, index: true },
   v2OptedInAt: { type: Date },
+  // True between opting into v2 and finishing the v2 onboarding flow. New
+  // users (no prior data) and existing users who accept the "try v2" prompt
+  // both get this set; it's cleared once the v2 plan is generated.
+  v2NeedsOnboarding: { type: Boolean, default: false },
+  // Last time the existing-user "try v2" prompt was shown — drives the
+  // "ask again later" cooldown so we don't nag on every launch.
+  v2PromptLastShownAt: { type: Date },
 
   // --- Engagement (denormalized counters) ---
   followersCount: { type: Number, default: 0 },
