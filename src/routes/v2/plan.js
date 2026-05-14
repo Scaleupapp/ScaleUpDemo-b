@@ -56,11 +56,14 @@ router.post('/generate', auth, async (req, res) => {
       { attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: 50 }
     );
 
-    // The user has finished the v2 onboarding flow — clear the re-onboard
-    // flag so the next launch routes them straight to v2 Home.
+    // The user has finished the v2 onboarding flow + diagnostic — clear the
+    // re-onboard flag AND guarantee diagnosticComplete is set, so the next
+    // launch routes them straight to v2 Home instead of back into the
+    // diagnostic welcome. (finishAttempt sets diagnosticComplete too, but
+    // belt-and-suspenders here covers any attempt that finished oddly.)
     await require('../../models/User').updateOne(
       { _id: req.user.userId },
-      { $set: { v2NeedsOnboarding: false } }
+      { $set: { v2NeedsOnboarding: false, diagnosticComplete: true } }
     );
 
     return res.json({ success: true, data: { status: 'generating', alreadyTriggered: false } });
