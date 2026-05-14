@@ -42,45 +42,64 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
     const attempt = await DiagnosticAttempt.findOne({ _id: req.params.attemptId, userId });
     if (!attempt) return res.status(404).json({ success: false, message: 'Attempt not found' });
 
-    const topicResults = Array.isArray(attempt.topicResults) ? attempt.topicResults : [];
+    // DiagnosticAttempt stores per-competency results in a Map (`results`)
+    // and the self-rating snapshot in a Map (`selfRatings`). Normalise both
+    // to plain objects so this works whether the doc is lean or hydrated.
+    const resultsMap = attempt.results instanceof Map
+      ? Object.fromEntries(attempt.results)
+      : (attempt.results || {});
+    const selfRatingsMap = attempt.selfRatings instanceof Map
+      ? Object.fromEntries(attempt.selfRatings)
+      : (attempt.selfRatings || {});
 
-    // Self vs actual
+    // Self vs actual — keyed by competency.
     const selfRated = [];
     const actual = [];
     const gap = [];
-    for (const t of topicResults) {
-      const name = t.canonicalName || t.name || 'topic';
-      if (t.selfRating) selfRated.push({ topic: name, level: t.selfRating });
-      if (typeof t.measuredScore === 'number') {
-        actual.push({ topic: name, scorePct: t.measuredScore, band: t.measuredBand || 'unknown' });
+    for (const [competency, r] of Object.entries(resultsMap)) {
+      if (!r) continue;
+      if (typeof r.score === 'number') {
+        actual.push({ topic: competency, scorePct: Math.round(r.score), band: r.assessedBand || 'unknown' });
       }
-      if (typeof t.calibrationDelta === 'number') {
-        gap.push({
-          topic: name,
-          delta: t.calibrationDelta,
-          classification: t.calibrationClass || (t.calibrationDelta < 0 ? 'overestimate' : 'undersell'),
-        });
+      if (typeof r.calibrationDelta === 'number' && r.calibrationDelta !== 0) {
+        // calibrationClass enum: 'well-calibrated' | 'overestimates' | 'undersells'.
+        // Normalise to the singular form the v2 client expects.
+        const cls = r.calibrationClass === 'overestimates'
+          ? 'overestimate'
+          : r.calibrationClass === 'undersells'
+            ? 'undersell'
+            : (r.calibrationDelta < 0 ? 'overestimate' : 'undersell');
+        gap.push({ topic: competency, delta: r.calibrationDelta, classification: cls });
       }
     }
+    for (const [competency, level] of Object.entries(selfRatingsMap)) {
+      if (level && level !== 'unsure') selfRated.push({ topic: competency, level });
+    }
 
-    // Patterns — pulled from cognitive fingerprint if available
+    // Patterns — derived from answer telemetry (the cognitive-fingerprint
+    // signals the v1 engine doesn't attach to the attempt). Best-effort.
     const patterns = [];
-    if (attempt.cognitiveSignals) {
-      const cs = attempt.cognitiveSignals;
-      if (cs.rushesOnQuant) patterns.push('You rush quantitative questions — your accuracy drops when you move fast.');
-      if (cs.overThinksCases) patterns.push('You over-think case questions — accuracy holds but time pressure may hurt you in real interviews.');
-      if (cs.chokingAfterMisses) patterns.push('After 2 wrong in a row, your next answers are 60% likely to be wrong. Build an active recovery technique.');
-      if (cs.strongOnConceptual) patterns.push('You’re consistently strong on conceptual recall, weaker on applied problems.');
+    const answers = Array.isArray(attempt.answers) ? attempt.answers : [];
+    if (answers.length) {
+      const hard = answers.filter(a => a.difficulty === 'hard');
+      const hardAcc = hard.length ? hard.filter(a => a.isCorrect).length / hard.length : null;
+      const fast = answers.filter(a => (a.timeTaken || 0) > 0 && a.timeTaken < 15);
+      const fastAcc = fast.length ? fast.filter(a => a.isCorrect).length / fast.length : null;
+      if (fastAcc !== null && fast.length >= 3 && fastAcc < 0.5) {
+        patterns.push('You move fast on questions and accuracy drops — slowing down a little would help.');
+      }
+      if (hardAcc !== null && hard.length >= 3 && hardAcc >= 0.6) {
+        patterns.push('You hold up well on the harder questions — your ceiling is higher than your average.');
+      }
     }
     if (patterns.length === 0) {
       patterns.push('Your performance was reasonably steady across question types.');
     }
 
-    // Baseline readiness — from attempt results or default
-    const baselineReadiness =
-      attempt.computedReadiness ??
-      attempt.aggregateScore ??
-      Math.round(actual.reduce((s, a) => s + (a.scorePct || 0), 0) / Math.max(1, actual.length));
+    // Baseline readiness — average of measured competency scores.
+    const baselineReadiness = actual.length
+      ? Math.round(actual.reduce((s, a) => s + (a.scorePct || 0), 0) / actual.length)
+      : 0;
 
     // Trajectory — pull primary objective to forecast against
     const objective = await UserObjective.findOne({ userId, status: 'active', isPrimary: true });
@@ -95,16 +114,24 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
       });
     }
 
-    // Top 3 leverage actions — highest-impact gaps
+    // Top 3 leverage actions — highest-impact gaps. calibrationDelta is in
+    // band units (-3..+3); a negative delta means the user overestimated.
     const sortedGaps = gap
-      .filter(g => g.classification === 'overestimate' || g.delta < -10)
+      .filter(g => g.classification === 'overestimate')
       .sort((a, b) => a.delta - b.delta)
       .slice(0, 3);
 
-    const topActions = sortedGaps.map((g, i) => ({
+    // If calibration gaps are thin, fall back to the lowest measured scores.
+    const lowScoreActions = actual
+      .filter(a => a.scorePct < 60)
+      .sort((a, b) => a.scorePct - b.scorePct)
+      .map(a => ({ topic: a.topic }));
+
+    const gapTopics = (sortedGaps.length ? sortedGaps : lowScoreActions).slice(0, 3);
+    const topActions = gapTopics.map((g, i) => ({
       rank: i + 1,
       title: `Focus ${g.topic} from foundation`,
-      reason: i === 0 ? 'Your highest-leverage gap' : `Calibration gap of ${Math.abs(g.delta)} pts`,
+      reason: i === 0 ? 'Your highest-leverage gap' : 'A measured weak spot',
       action: { type: 'topic', topic: g.topic },
     }));
 
@@ -121,11 +148,15 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
       }
     }
 
-    // Summary sentence about the biggest gap
-    const striking = gap.sort((a, b) => a.delta - b.delta)[0];
-    const calibSummary = striking && striking.delta < -10
-      ? `You rated yourself ${selfRated.find(s => s.topic === striking.topic)?.level || 'higher'} on ${striking.topic}. You scored ${actual.find(a => a.topic === striking.topic)?.scorePct || 0}%. That's a significant gap.`
-      : 'You’re reasonably well-calibrated overall.';
+    // Summary sentence about the biggest overestimate.
+    const striking = gap
+      .filter(g => g.classification === 'overestimate')
+      .sort((a, b) => a.delta - b.delta)[0];
+    const calibSummary = striking
+      ? `You rated yourself ${selfRated.find(s => s.topic === striking.topic)?.level || 'higher'} on ${striking.topic}, but scored ${actual.find(a => a.topic === striking.topic)?.scorePct ?? 0}% — worth a closer look.`
+      : (actual.length
+          ? 'You’re reasonably well-calibrated overall.'
+          : 'Complete the diagnostic to see your calibration.');
 
     return res.json({
       success: true,

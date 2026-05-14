@@ -95,10 +95,15 @@ const completeOnboarding = async function completeOnboarding(req, res) {
 
   // Mark User as onboarded so the app advances past the onboarding flow.
   // Best-effort: don't fail the response if this somehow errors.
+  // v2NeedsOnboarding is cleared here too — once the objective is saved the
+  // user has finished the v2 onboarding flow; the diagnostic + reality check
+  // + plan are tracked separately, so a relaunch routes them forward, not
+  // back into onboarding.
   try {
     await User.findByIdAndUpdate(userId, {
       onboardingComplete: true,
       onboardingStep: 5,
+      v2NeedsOnboarding: false,
     });
   } catch (err) {
     console.warn('[onboarding.complete] failed to flip User flags:', err.message);
