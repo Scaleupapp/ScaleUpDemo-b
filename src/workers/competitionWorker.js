@@ -122,7 +122,28 @@ const competitionWorker = new Worker('competition', async (job) => {
       const challengeIds = challenges.map(c => c._id);
 
       const profiles = await CompetitionProfile.find({ currentChallengeStreak: { $gte: 1 } });
+
+      // v2 anti-thesis cleanup: skip streak-panic notifications for v2 users.
+      // Gated by the same kill switch as the v2 API — when V2_API_ENABLED=false
+      // this whole behavior reverts and v1 users (everyone) get the reminder.
+      const v2Enabled = process.env.V2_API_ENABLED !== 'false';
+      let v2UserIds = new Set();
+      if (v2Enabled) {
+        const User = require('../models/User');
+        v2UserIds = new Set(
+          (await User.find({
+            _id: { $in: profiles.map(p => p.userId) },
+            v2OptedIn: true,
+          }).select('_id').lean()).map(u => String(u._id))
+        );
+      }
+
+      let suppressed = 0;
       for (const profile of profiles) {
+        if (v2UserIds.has(String(profile.userId))) {
+          suppressed += 1;
+          continue;
+        }
         const todayAttempt = await ChallengeAttempt.findOne({
           userId: profile.userId,
           challengeId: { $in: challengeIds },
@@ -137,7 +158,7 @@ const competitionWorker = new Worker('competition', async (job) => {
           });
         }
       }
-      return { checked: profiles.length };
+      return { checked: profiles.length, suppressedV2: suppressed };
     }
 
     case 'openLiveEventLobby': {

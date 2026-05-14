@@ -646,18 +646,52 @@ async function finishAttempt(attemptId) {
     latencyMs: attempt.insightsLatencyMs,
   });
 
+  // Plan-generation trigger.
+  //
+  // v1 behaviour (unchanged): enqueue plan generation right here at
+  //   diagnostic finish.
+  // v2 behaviour: the v2 onboarding order is
+  //   Diagnostic → Reality Check → Plan Creation — so for v2 users we DEFER
+  //   the enqueue. The v2 Reality Check screen calls POST /api/v2/plan/generate
+  //   once the user confirms their weekly commitment, and THAT triggers it.
+  //
+  // Gated by the V2_API_ENABLED kill switch: if v2 is disabled, every user
+  // (including v2OptedIn ones) falls back to the v1 auto-enqueue here.
+  let deferForV2 = false;
   try {
-    await DiagnosticAttempt.updateOne(
-      { _id: attempt._id },
-      { $set: { planGenerationStatus: 'generating' } }
-    );
-    await planGenerationQueue.add(
-      'generate',
-      { attemptId: String(attempt._id) },
-      { attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: 50 }
-    );
+    if (process.env.V2_API_ENABLED !== 'false') {
+      const User = require('../models/User');
+      const u = await User.findById(attempt.userId).select('v2OptedIn').lean();
+      deferForV2 = !!(u && u.v2OptedIn);
+    }
   } catch (err) {
-    console.warn('[diagnosticService] failed to enqueue plan generation:', err.message);
+    console.warn('[diagnosticService] v2 user check failed, defaulting to v1 enqueue:', err.message);
+  }
+
+  if (deferForV2) {
+    // Mark it pending — the v2 Reality Check will enqueue it.
+    try {
+      await DiagnosticAttempt.updateOne(
+        { _id: attempt._id },
+        { $set: { planGenerationStatus: 'awaiting_reality_check' } }
+      );
+    } catch (err) {
+      console.warn('[diagnosticService] failed to mark awaiting_reality_check:', err.message);
+    }
+  } else {
+    try {
+      await DiagnosticAttempt.updateOne(
+        { _id: attempt._id },
+        { $set: { planGenerationStatus: 'generating' } }
+      );
+      await planGenerationQueue.add(
+        'generate',
+        { attemptId: String(attempt._id) },
+        { attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: 50 }
+      );
+    } catch (err) {
+      console.warn('[diagnosticService] failed to enqueue plan generation:', err.message);
+    }
   }
 
   return _resultsObjectFromAttempt(attempt, displayByCanonical);

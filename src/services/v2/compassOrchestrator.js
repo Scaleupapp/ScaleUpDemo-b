@@ -1,0 +1,799 @@
+/**
+ * Compass Orchestrator (v2)
+ *
+ * The single AI entry that consolidates v1's 11 fragmented features:
+ *   - AI Tutor (in player)
+ *   - Quiz generation
+ *   - Flashcard generation
+ *   - Mind map generation
+ *   - Audio summary generation
+ *   - Interview evaluation
+ *   - Diagnostic insights
+ *   - OCR
+ *   - Conversational chat
+ *
+ * One entry point. Mode-routed. Always carries full user context.
+ *
+ * User context = objective + plan progress + recent content + recent quiz performance
+ *                + recent conversations + behavioral signals.
+ *
+ * Modes:
+ *   - tutor         (in-content explanation)
+ *   - conversation  (free-form on topic)
+ *   - quiz_config   (configurator for quiz)
+ *   - interview_config
+ *   - note          (process uploaded material)
+ *   - insight       (proactive — "here's what I noticed")
+ *   - mentor        (career strategy)
+ *   - coach         (encouragement / reality check)
+ *
+ * This file is the dispatcher. Heavy lifting is delegated to existing v1 services
+ * (quizGenerationService, aiTutorService, etc.) — Compass just gives them a
+ * consistent context envelope and a unified response shape.
+ */
+
+const User = require('../../models/User');
+const UserObjective = require('../../models/UserObjective');
+const KnowledgeProfile = require('../../models/KnowledgeProfile');
+const Plan = require('../../models/Plan');
+const CompassConversation = require('../../models/CompassConversation');
+const anthropic = require('../../config/anthropic');
+const redis = require('../../config/redis');
+
+// Persistence: max age of the "active" thread before a new one starts.
+const ACTIVE_THREAD_MAX_AGE_MIN = 60 * 12;  // 12 hours
+
+/**
+ * Get the user's active Compass thread, or create a new one.
+ * Threads roll over after a long inactivity window so the context window stays bounded.
+ */
+async function getOrCreateActiveThread(userId) {
+  if (!userId) return null;
+  const cutoff = new Date(Date.now() - ACTIVE_THREAD_MAX_AGE_MIN * 60 * 1000);
+  let thread = await CompassConversation.findOne({
+    userId, isArchived: false, lastMessageAt: { $gte: cutoff },
+  }).sort({ lastMessageAt: -1 });
+  if (!thread) {
+    thread = await CompassConversation.create({ userId });
+  }
+  return thread;
+}
+
+/**
+ * Append a message to the active thread. Best-effort — DB errors do not fail the LLM call.
+ */
+async function appendToThread(userId, role, content, opts = {}) {
+  try {
+    const thread = await getOrCreateActiveThread(userId);
+    if (!thread) return;
+    thread.messages.push({
+      role,
+      content: typeof content === 'string' ? content.slice(0, 8000) : '',
+      mode: opts.mode,
+      followups: opts.followups || [],
+      contentRef: opts.contentRef,
+      contentTitle: opts.contentTitle,
+      tokensIn: opts.tokensIn,
+      tokensOut: opts.tokensOut,
+    });
+    thread.messageCount = thread.messages.length;
+    thread.lastMessageAt = new Date();
+    if (!thread.title || thread.title === 'New conversation') {
+      // Auto-title from the first user message
+      if (role === 'user' && content) {
+        thread.title = content.slice(0, 60);
+      }
+    }
+    await thread.save();
+  } catch (err) {
+    console.warn('[compass] failed to persist message', err.message);
+  }
+}
+
+// LLM config — Compass uses Claude Sonnet 4 to match aiProvider.js
+const COMPASS_MODEL = 'claude-sonnet-4-20250514';
+const COMPASS_MAX_TOKENS = 800;       // conversational replies stay tight
+const COMPASS_TEMPERATURE = 0.6;
+
+/**
+ * Per-user daily token budget. Hard cap to protect AI cost per active user.
+ * Free tier: 50k tokens/day. Pro tier: 200k tokens/day (TODO: wire to subscription).
+ *
+ * Redis-backed so caps survive server restarts and are consistent across
+ * horizontally-scaled workers. Keys auto-expire at end of day.
+ */
+const DAILY_TOKEN_CAP_FREE = 50_000;
+const DAILY_TOKEN_CAP_PRO  = 200_000;
+
+function budgetKey(userId) {
+  const today = new Date().toISOString().split('T')[0];
+  return `compass:budget:${userId}:${today}`;
+}
+
+function secondsUntilEndOfDayUTC() {
+  const now = new Date();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return Math.max(60, Math.ceil((tomorrow - now) / 1000));
+}
+
+/**
+ * Atomically increment the user's daily token usage in Redis. If the new total
+ * would exceed the cap, decrement back and return false (caller should refuse
+ * the LLM call). Auto-expires the key at midnight UTC.
+ *
+ * Falls open on Redis errors so a Redis outage doesn't break Compass.
+ */
+async function checkAndIncrementBudget(userId, estimatedTokens, cap = DAILY_TOKEN_CAP_FREE) {
+  if (!userId || !estimatedTokens || estimatedTokens <= 0) return true;
+  try {
+    const key = budgetKey(userId);
+    const newTotal = await redis.incrby(key, estimatedTokens);
+    if (newTotal === estimatedTokens) {
+      // First write today — set expiry so the counter rolls over at midnight UTC
+      await redis.expire(key, secondsUntilEndOfDayUTC());
+    }
+    if (newTotal > cap) {
+      // Over-budget: refund the increment we just made so subsequent shorter
+      // requests can still squeak through if the cap is at the edge.
+      await redis.decrby(key, estimatedTokens);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[compass] Redis budget check failed, falling open:', err.message);
+    return true;
+  }
+}
+
+/**
+ * Best-effort current usage report (for diagnostics / future Pro upgrade prompt).
+ */
+async function getBudgetUsage(userId) {
+  try {
+    const used = parseInt(await redis.get(budgetKey(userId)) || '0', 10);
+    return { used, cap: DAILY_TOKEN_CAP_FREE };
+  } catch (_) {
+    return { used: 0, cap: DAILY_TOKEN_CAP_FREE };
+  }
+}
+
+/**
+ * Build the user context envelope. Every Compass call uses this.
+ * Cached for the duration of a single request — fetched fresh per request.
+ */
+async function buildUserContext(userId) {
+  const [user, objective, plan, knowledge] = await Promise.all([
+    User.findById(userId).select('firstName education workExperience').lean(),
+    UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
+    Plan.findOne({ userId, status: { $in: ['active', 'ready'] } }).lean(),
+    KnowledgeProfile.findOne({ userId }).lean(),
+  ]);
+
+  const topicMastery = knowledge?.topicProfiles
+    ? Object.entries(knowledge.topicProfiles)
+        .map(([topic, t]) => ({ topic, mastery: t.masteryLevel || 0, trend: t.trend || 'flat' }))
+        .sort((a, b) => b.mastery - a.mastery)
+    : [];
+
+  return {
+    user: {
+      name: user?.firstName || 'there',
+    },
+    objective: objective ? {
+      type: objective.objectiveType,
+      specifics: objective.specifics,
+      timeline: objective.timeline,
+      targetDate: objective.targetDate,
+      currentLevel: objective.currentLevel,
+    } : null,
+    plan: plan ? {
+      currentWeek: plan.currentWeek,
+      totalWeeks: plan.totalWeeks,
+      readiness: plan.readinessScore,
+      tasksDoneThisWeek: (plan.tasks || []).filter(t => t.weekNumber === plan.currentWeek && t.completedAt).length,
+      tasksTotalThisWeek: (plan.tasks || []).filter(t => t.weekNumber === plan.currentWeek).length,
+    } : null,
+    knowledge: {
+      strongTopics: topicMastery.slice(0, 3),
+      weakTopics:   topicMastery.slice(-3).reverse(),
+    },
+  };
+}
+
+/**
+ * Build a system prompt block from user context.
+ * Inject this into every LLM call across Compass modes.
+ */
+function buildSystemContext(ctx) {
+  const lines = [];
+  lines.push(`You are Compass, ScaleUp's AI companion. Be concise, warm, honest.`);
+  lines.push(`Identify as AI when asked. Refuse off-topic / harmful / professional-advice requests; redirect to learning.`);
+  if (ctx.user?.name) lines.push(`The learner's name is ${ctx.user.name}.`);
+  if (ctx.objective) {
+    lines.push(`Their active objective: ${ctx.objective.type} — ${JSON.stringify(ctx.objective.specifics)}, timeline ${ctx.objective.timeline}, currently ${ctx.objective.currentLevel}.`);
+  }
+  if (ctx.plan) {
+    lines.push(`Plan progress: week ${ctx.plan.currentWeek}/${ctx.plan.totalWeeks}, readiness ${ctx.plan.readiness}%, ${ctx.plan.tasksDoneThisWeek}/${ctx.plan.tasksTotalThisWeek} tasks done this week.`);
+  }
+  if (ctx.knowledge.strongTopics.length) {
+    lines.push(`Strong topics: ${ctx.knowledge.strongTopics.map(t => `${t.topic} (${t.mastery}%)`).join(', ')}`);
+  }
+  if (ctx.knowledge.weakTopics.length) {
+    lines.push(`Weak topics: ${ctx.knowledge.weakTopics.map(t => `${t.topic} (${t.mastery}%)`).join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Dispatch a Compass request by mode.
+ *
+ * @param {Object} args
+ * @param {String} args.userId
+ * @param {String} args.mode    - tutor | conversation | quiz_config | interview_config | note | insight | mentor | coach
+ * @param {Object} args.payload - mode-specific input
+ *
+ * @returns {Object} mode-specific response shape, but always with:
+ *   { mode, context: { hasObjective, hasPlan, ... }, output: {...} }
+ */
+async function handle({ userId, mode, payload = {} }) {
+  const ctx = await buildUserContext(userId);
+  const systemPrompt = buildSystemContext(ctx);
+
+  switch (mode) {
+    case 'greeting':
+      return await greeting({ ctx, systemPrompt, userId, contextHint: payload.message });
+
+    case 'conversation':
+      return await conversation({ ctx, systemPrompt, userId, message: payload.message, history: payload.history });
+
+    case 'tutor':
+      // The merged AI Tutor — Compass scoped to a specific piece of content.
+      // Same brain, same unified history (CompassConversation), but the prompt
+      // is grounded in the video/article and the turn is tagged with contentRef.
+      return await tutor({ ctx, systemPrompt, userId, contentId: payload.contentId, message: payload.message, history: payload.history });
+
+    case 'quiz_config':
+      return quizConfig({ ctx, payload });
+
+    case 'interview_config':
+      return interviewConfig({ ctx, payload });
+
+    case 'note': {
+      // Note mode: tells the iOS client to launch the v1 upload flow.
+      // We don't directly proxy the multipart upload from Compass — the client
+      // hits /api/v1/notes/request-upload to get a presigned S3 URL, then
+      // uploads, then completes. We persist the user intent into the thread.
+      const reply = "I can turn an upload into a summary, mind map, flashcards, and audio narration. Choose a file (PDF, image, or audio) to get started.";
+      await appendToThread(userId, 'assistant', reply, { mode: 'note' });
+      return {
+        mode: 'note',
+        output: {
+          reply,
+          action: {
+            type: 'open_note_upload',
+            // iOS observes `action.type` and presents its v1 CreateNotesView /
+            // file picker. Provide the API endpoints so the iOS client doesn't
+            // need to hard-code them.
+            endpoints: {
+              requestUpload: 'POST /api/v1/notes/request-upload',
+              completeUpload: 'POST /api/v1/notes/complete-upload',
+            },
+          },
+        },
+      };
+    }
+
+    case 'insight':
+      return await insight({ ctx, systemPrompt, userId });
+
+    case 'mentor':
+      return await conversation({
+        ctx, userId,
+        systemPrompt: systemPrompt + '\n[Mode: mentor — focus on career strategy, decisions, and long-term moves.]',
+        message: payload.message, history: payload.history,
+      });
+
+    case 'coach':
+      return await conversation({
+        ctx, userId,
+        systemPrompt: systemPrompt + '\n[Mode: coach — be encouraging but honest about progress.]',
+        message: payload.message, history: payload.history,
+      });
+
+    default:
+      return { mode: 'unknown', error: `Unknown mode: ${mode}` };
+  }
+}
+
+/**
+ * Single-shot LLM call. Returns text on success, null on failure or budget exhausted.
+ */
+async function callLLM({ userId, systemPrompt, userPrompt, history = [], maxTokens = COMPASS_MAX_TOKENS }) {
+  // Estimate first — Anthropic charges by total tokens; we approximate at 4 chars/token.
+  const estimatedTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4) + maxTokens;
+  const allowed = await checkAndIncrementBudget(userId, estimatedTokens);
+  if (!allowed) {
+    console.warn(`[compass] user ${userId} hit daily token cap`);
+    return { text: null, capped: true };
+  }
+
+  try {
+    const messages = [];
+    for (const h of history.slice(-8)) {
+      const role = h.role === 'assistant' ? 'assistant' : 'user';
+      if (typeof h.content === 'string' && h.content.trim()) {
+        messages.push({ role, content: h.content });
+      }
+    }
+    messages.push({ role: 'user', content: userPrompt });
+
+    const response = await anthropic.messages.create({
+      model: COMPASS_MODEL,
+      max_tokens: maxTokens,
+      temperature: COMPASS_TEMPERATURE,
+      system: systemPrompt,
+      messages,
+    });
+
+    const text = response.content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('')
+      .trim();
+
+    // Reconcile: deduct the estimate, then charge actual usage.
+    // Anthropic returns response.usage = { input_tokens, output_tokens }.
+    const actualTokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+    const delta = actualTokens - estimatedTokens;
+    if (delta !== 0) {
+      // delta > 0 → actual exceeded estimate; charge the difference.
+      // delta < 0 → estimate was too high; refund.
+      await adjustBudget(userId, delta);
+    }
+
+    return {
+      text: text || null,
+      capped: false,
+      tokensIn: response.usage?.input_tokens || 0,
+      tokensOut: response.usage?.output_tokens || 0,
+    };
+  } catch (err) {
+    // Refund the estimate since the call didn't actually consume tokens.
+    await adjustBudget(userId, -estimatedTokens);
+    console.error('[compass] LLM error', err.message);
+    return { text: null, capped: false, error: err.message };
+  }
+}
+
+/**
+ * Adjust today's budget counter by `delta` (positive = charge more, negative = refund).
+ * Used for actual-vs-estimate reconciliation.
+ */
+async function adjustBudget(userId, delta) {
+  if (!userId || delta === 0) return;
+  try {
+    const key = budgetKey(userId);
+    await redis.incrby(key, delta);
+  } catch (err) {
+    console.warn('[compass] Redis budget adjust failed:', err.message);
+  }
+}
+
+async function greeting({ ctx, systemPrompt, userId, contextHint }) {
+  const name = ctx.user?.name || 'there';
+
+  // LLM-generated greeting, optionally adapted by the screen the user came from.
+  const userPrompt = contextHint
+    ? `${contextHint}\n\nGreet the learner in ONE short sentence (max 20 words) tailored to that context. Don't list options — those appear as chips below.`
+    : `Greet the learner in ONE short sentence (max 20 words). Don't list options — those appear as chips below your message. Make it warm, specific to their state, and prompt them to act.`;
+  const { text } = await callLLM({
+    userId, systemPrompt, userPrompt,
+    maxTokens: 80,
+  });
+
+  // Fallback: deterministic greeting if LLM unavailable or capped
+  const fallback = !ctx.objective
+    ? `Hi ${name} — let's set up your goal first.`
+    : !ctx.plan
+      ? `Hi ${name} — your plan is brewing. Want to chat or browse content while we wait?`
+      : `Hi ${name} — what do you want to do?`;
+
+  const greetingText = text || fallback;
+
+  // Persist greeting so conversation history is coherent across cold-starts.
+  await appendToThread(userId, 'assistant', greetingText, { mode: 'greeting' });
+
+  return {
+    mode: 'greeting',
+    output: {
+      message: greetingText,
+      suggestedActions: [
+        { id: 'quiz_me',       label: '⚡ Quiz me',           mode: 'quiz_config' },
+        { id: 'interview',     label: '🎙️ Practice interview', mode: 'interview_config' },
+        { id: 'note',          label: '📝 Make a note',       mode: 'note' },
+        { id: 'plan_next',     label: '↗ Plan my next 2 days', mode: 'conversation' },
+        { id: 'explain',       label: '🤔 Explain something',  mode: 'conversation' },
+      ],
+    },
+  };
+}
+
+async function conversation({ ctx, systemPrompt, userId, message, history = [] }) {
+  if (!message || typeof message !== 'string') {
+    return { mode: 'conversation', output: { reply: 'Tell me what you need.', followups: [] } };
+  }
+
+  // Persist user turn before LLM call so it's recorded even if the model fails.
+  await appendToThread(userId, 'user', message, { mode: 'conversation' });
+
+  // If the client didn't pass history, pull it from the persisted thread so
+  // Compass remembers prior turns even across iOS app cold-starts.
+  let effectiveHistory = history;
+  if (!history || history.length === 0) {
+    try {
+      const thread = await getOrCreateActiveThread(userId);
+      effectiveHistory = (thread?.messages || []).slice(-8, -1).map(m => ({ role: m.role, content: m.content }));
+    } catch (_) {}
+  }
+
+  // Append a directive to keep replies tight + offer follow-ups inline
+  const extended = systemPrompt + `\n\nReply rules:\n- Be conversational and concise (3-5 sentences max unless the question genuinely requires more).\n- Ground answers in the learner's objective and recent context.\n- End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\` — these will be parsed and shown as chips.\n- Refuse off-topic / harmful / professional-advice requests politely; redirect to learning.`;
+
+  const llmResult = await callLLM({
+    userId, systemPrompt: extended, userPrompt: message, history: effectiveHistory,
+    maxTokens: COMPASS_MAX_TOKENS,
+  });
+  const { text, capped, tokensIn, tokensOut } = llmResult;
+
+  if (capped) {
+    const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
+    await appendToThread(userId, 'assistant', reply, { mode: 'conversation' });
+    return { mode: 'conversation', output: { reply, followups: [] } };
+  }
+
+  if (!text) {
+    const reply = "I had trouble thinking that through just now. Try again in a moment?";
+    await appendToThread(userId, 'assistant', reply, { mode: 'conversation', followups: ['Retry', 'Try something else'] });
+    return {
+      mode: 'conversation',
+      output: { reply, followups: ['Retry', 'Try something else'] },
+    };
+  }
+
+  // Strip the JSON followups block out of the visible reply and parse it.
+  let reply = text;
+  let followups = [];
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (Array.isArray(parsed.followups)) followups = parsed.followups.slice(0, 3);
+    } catch (_) {}
+    reply = text.replace(jsonMatch[0], '').trim();
+  }
+
+  await appendToThread(userId, 'assistant', reply, {
+    mode: 'conversation', followups, tokensIn, tokensOut,
+  });
+
+  return { mode: 'conversation', output: { reply, followups } };
+}
+
+/**
+ * Tutor mode — the merged AI Tutor. Same Compass brain + same unified history,
+ * but the prompt is GROUNDED in a specific piece of content and the turn is
+ * tagged with contentRef so:
+ *   - the iOS history shows "Tutor · <video title>"
+ *   - analytics can attribute tutor usage to content + feed recommendations
+ *   - the learner's full objective/plan context still informs the answer
+ *
+ * Replaces v1's standalone aiTutorService for v2 users — one AI surface.
+ */
+async function tutor({ ctx, systemPrompt, userId, contentId, message, history = [] }) {
+  if (!message || typeof message !== 'string') {
+    return { mode: 'tutor', output: { reply: 'Ask me anything about this lesson.', followups: [] } };
+  }
+
+  // Load the content this tutor turn is scoped to.
+  let content = null;
+  try {
+    const Content = require('../../models/Content');
+    content = await Content.findById(contentId)
+      .select('title description transcript aiData domain topics')
+      .lean();
+  } catch (_) { /* content optional — degrade to general tutoring */ }
+
+  const contentTitle = content?.title || 'this lesson';
+
+  // Persist the user turn (tagged with contentRef) before the LLM call.
+  await appendToThread(userId, 'user', message, {
+    mode: 'tutor', contentRef: contentId, contentTitle,
+  });
+
+  // Pull recent thread history if the client didn't pass any.
+  let effectiveHistory = history;
+  if (!history || history.length === 0) {
+    try {
+      const thread = await getOrCreateActiveThread(userId);
+      effectiveHistory = (thread?.messages || []).slice(-8, -1).map(m => ({ role: m.role, content: m.content }));
+    } catch (_) {}
+  }
+
+  // Build the tutor-scoped system prompt. Grounded in the content, but the
+  // learner's objective/plan context (already in systemPrompt) still applies.
+  const hasTranscript = !!(content?.transcript && content.transcript.length > 50);
+  const grounding = content ? [
+    `\n\n[TUTOR MODE — scoped to: "${contentTitle}"]`,
+    content.description ? `Description: ${content.description}` : '',
+    Array.isArray(content?.aiData?.keyConcepts) && content.aiData.keyConcepts.length
+      ? `Key concepts: ${content.aiData.keyConcepts.join(', ')}` : '',
+    content?.aiData?.summary ? `Summary: ${content.aiData.summary}` : '',
+    hasTranscript
+      ? `Transcript (ground answers in this; cite approximate timestamps when relevant):\n${String(content.transcript).slice(0, 6000)}`
+      : `No full transcript available — answer from the title, description, and key concepts; say "based on this lesson's key concepts" rather than quoting.`,
+  ].filter(Boolean).join('\n') : `\n\n[TUTOR MODE — the learner is asking about a lesson, content details unavailable. Help with the concept, tie it back to their objective.]`;
+
+  const tutorRules = [
+    '\n\nTutor rules:',
+    `- You help the learner understand "${contentTitle}" specifically. Stay scoped to this lesson and tightly-adjacent concepts (prerequisites, examples, clarifications).`,
+    '- If asked something clearly off-topic, decline in 1-2 sentences and redirect to the lesson.',
+    '- Concise (2-4 short paragraphs max unless more is explicitly requested). Friendly, like a sharp study buddy.',
+    '- End with up to 3 short follow-up suggestions as a JSON code block: ```json\n{"followups":["…","…"]}\n```',
+  ].join('\n');
+
+  const fullSystem = systemPrompt + grounding + tutorRules;
+
+  const { text, capped, tokensIn, tokensOut } = await callLLM({
+    userId, systemPrompt: fullSystem, userPrompt: message, history: effectiveHistory,
+    maxTokens: COMPASS_MAX_TOKENS,
+  });
+
+  if (capped) {
+    const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
+    await appendToThread(userId, 'assistant', reply, { mode: 'tutor', contentRef: contentId, contentTitle });
+    return { mode: 'tutor', output: { reply, followups: [], contentTitle } };
+  }
+  if (!text) {
+    const reply = "I had trouble with that just now — ask me again in a moment?";
+    await appendToThread(userId, 'assistant', reply, { mode: 'tutor', contentRef: contentId, contentTitle });
+    return { mode: 'tutor', output: { reply, followups: ['Retry'], contentTitle } };
+  }
+
+  let reply = text;
+  let followups = [];
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (Array.isArray(parsed.followups)) followups = parsed.followups.slice(0, 3);
+    } catch (_) {}
+    reply = text.replace(jsonMatch[0], '').trim();
+  }
+
+  await appendToThread(userId, 'assistant', reply, {
+    mode: 'tutor', contentRef: contentId, contentTitle, followups, tokensIn, tokensOut,
+  });
+
+  return { mode: 'tutor', output: { reply, followups, contentTitle } };
+}
+
+/**
+ * Personalized quiz configurator. Uses the learner's actual weakest topic +
+ * recent activity to suggest a focused config the user can still override.
+ */
+function quizConfig({ ctx }) {
+  const weakest    = ctx.knowledge.weakTopics[0];
+  const secondWeak = ctx.knowledge.weakTopics[1];
+
+  // Pick topic
+  const topicValue = weakest ? weakest.topic : 'last_7_days';
+  const topicLabel = weakest
+    ? `${weakest.topic} (your weakest, ${weakest.mastery}%)`
+    : 'Last 7 days of content';
+
+  // Pick format based on mastery level — beginners get recall, mid gets application, advanced gets case
+  const masteryFloor = weakest?.mastery ?? 40;
+  const formatValue =
+    masteryFloor < 30 ? 'recall'
+    : masteryFloor < 60 ? 'application'
+    : 'case_study';
+  const formatLabel =
+    formatValue === 'recall' ? 'Recall · foundations first'
+    : formatValue === 'application' ? 'Application · real-world scenarios'
+    : 'Case study · multi-part';
+
+  // Difficulty matches the topic's mastery level
+  const difficultyValue =
+    masteryFloor < 30 ? 'easy'
+    : masteryFloor < 60 ? 'medium'
+    : 'hard';
+  const difficultyLabel =
+    difficultyValue === 'easy' ? 'Easy · build confidence'
+    : difficultyValue === 'medium' ? 'Medium · stretch you'
+    : 'Hard · pressure-test';
+
+  // Count: more for weak topics so you actually learn
+  const count = masteryFloor < 40 ? 10 : 7;
+
+  // Headline reflects the personalization
+  const headline = weakest
+    ? `I'd focus on ${weakest.topic} — that's your biggest gap. Adjust anything below.`
+    : 'Got it. Here\'s how I\'d set it up — change anything you want.';
+
+  return {
+    mode: 'quiz_config',
+    output: {
+      headline,
+      config: {
+        topic:      { value: topicValue,  label: topicLabel },
+        format:     { value: formatValue, label: formatLabel },
+        difficulty: { value: difficultyValue, label: difficultyLabel },
+        count:      { value: count, label: `${count} questions` },
+        tagToObjective: { value: true, label: 'Count toward readiness' },
+      },
+      estimateMin: count <= 7 ? 6 : 9,
+      startEndpoint: '/api/v1/quizzes/request',
+      // Personalization rationale — surfaced for tester debugging
+      personalizationReason: weakest
+        ? `Weakest topic: ${weakest.topic} at ${weakest.mastery}%${secondWeak ? `; also weak: ${secondWeak.topic} at ${secondWeak.mastery}%` : ''}`
+        : 'No mastery data yet — defaulting to last 7 days of content',
+    },
+  };
+}
+
+/**
+ * Personalized interview configurator. Tailors type to objective:
+ *   - Career switch / interview prep → behavioral first (storytelling matters)
+ *   - SDE roles → technical
+ *   - Consulting/case roles → case
+ *   - Otherwise → mixed
+ */
+function interviewConfig({ ctx }) {
+  const specifics = ctx.objective?.specifics || {};
+  const targetRole = specifics.targetRole || 'general role';
+  const targetCompany = specifics.targetCompany;
+
+  // Type heuristic by role
+  const role = (targetRole || '').toLowerCase();
+  let typeValue, typeLabel;
+  if (/sde|software|developer|engineer/.test(role) && !/manager|director/.test(role)) {
+    typeValue = 'technical'; typeLabel = 'Technical · DSA + system design';
+  } else if (/consult|strategy|case/.test(role)) {
+    typeValue = 'case_study'; typeLabel = 'Case study · structured';
+  } else if (/product manager|pm\b/.test(role)) {
+    typeValue = 'mixed'; typeLabel = 'Mixed · PM behavioral + case';
+  } else if (/data|analyst|scientist/.test(role)) {
+    typeValue = 'mixed'; typeLabel = 'Mixed · technical + behavioral';
+  } else {
+    typeValue = 'behavioral'; typeLabel = 'Behavioral · stories + STAR';
+  }
+
+  // Seniority from currentLevel
+  const seniorityValue =
+    ctx.objective?.currentLevel === 'advanced' ? 'senior'
+    : ctx.objective?.currentLevel === 'intermediate' ? 'mid'
+    : 'junior';
+  const seniorityLabel =
+    seniorityValue === 'senior' ? 'Senior'
+    : seniorityValue === 'mid' ? 'Mid-level'
+    : 'Junior';
+
+  // Headline reflects the personalization
+  const roleLabel = targetCompany ? `${targetRole} @ ${targetCompany}` : targetRole;
+  const headline = roleLabel && roleLabel !== 'general role'
+    ? `Mock interview for ${roleLabel}. Adjust if you'd like.`
+    : 'Mock interview — adjust if needed.';
+
+  return {
+    mode: 'interview_config',
+    output: {
+      headline,
+      config: {
+        type:        { value: typeValue, label: typeLabel },
+        targetRole:  { value: targetRole, label: roleLabel || targetRole },
+        duration:    { value: 30, label: '30 min' },
+        seniority:   { value: seniorityValue, label: seniorityLabel },
+        tagToObjective: { value: true, label: 'Count toward readiness' },
+      },
+      startEndpoint: '/api/v1/interviews/start',
+      personalizationReason: `Type chosen by role pattern: "${targetRole}". Seniority from currentLevel.`,
+    },
+  };
+}
+
+async function insight({ ctx, systemPrompt, userId }) {
+  if (!ctx.plan) {
+    return { mode: 'insight', output: { headline: 'Plan not yet generated.', items: [] } };
+  }
+
+  // Compute heuristic signals first — these are deterministic guardrails.
+  const signals = [];
+  if (ctx.plan.tasksDoneThisWeek < ctx.plan.tasksTotalThisWeek / 2) {
+    signals.push({ severity: 'warn', topic: 'plan_progress', detail: `${ctx.plan.tasksDoneThisWeek}/${ctx.plan.tasksTotalThisWeek} tasks done this week.` });
+  }
+  if (ctx.knowledge.weakTopics[0]) {
+    const w = ctx.knowledge.weakTopics[0];
+    signals.push({ severity: 'info', topic: w.topic, detail: `Mastery ${w.mastery}%.` });
+  }
+  if (signals.length === 0) {
+    signals.push({ severity: 'good', topic: 'on_track', detail: 'On pace this week.' });
+  }
+
+  // Ask LLM to phrase the insights warmly and propose 1 concrete next action per signal.
+  const userPrompt = `Given these signals about the learner, write 1-3 short observations in the user's voice (second-person, warm, honest). Return STRICT JSON only:\n{ "headline": "Here's what I noticed.", "items": [ { "severity": "warn|info|good", "text": "..." } ] }\n\nSignals: ${JSON.stringify(signals)}`;
+
+  const { text } = await callLLM({
+    userId,
+    systemPrompt,
+    userPrompt,
+    maxTokens: 400,
+  });
+
+  if (text) {
+    try {
+      const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || text);
+      if (parsed && Array.isArray(parsed.items)) {
+        // Persist the insight summary so it shows up in conversation history.
+        const summary = parsed.items.map(i => i.text).join(' · ');
+        await appendToThread(userId, 'assistant', summary, { mode: 'insight' });
+        return { mode: 'insight', output: parsed };
+      }
+    } catch (_) { /* fall through to deterministic */ }
+  }
+
+  // Deterministic fallback — never lets the screen fail to render.
+  const fallbackItems = signals.map(s => ({
+    severity: s.severity,
+    text: s.severity === 'warn'
+      ? `You're behind on this week — ${s.detail}`
+      : s.severity === 'info'
+        ? `Your weakest topic is ${s.topic}. ${s.detail}`
+        : `You're on track. Keep going.`,
+  }));
+  await appendToThread(userId, 'assistant',
+    fallbackItems.map(i => i.text).join(' · '),
+    { mode: 'insight' });
+  return { mode: 'insight', output: { headline: 'Here\'s what I noticed.', items: fallbackItems } };
+}
+
+/**
+ * Fetch the active thread for a user (or empty if none).
+ * Used by the iOS Compass tab when it cold-starts to restore prior messages.
+ */
+async function getActiveThread(userId) {
+  const thread = await getOrCreateActiveThread(userId);
+  if (!thread) return { messages: [] };
+  return {
+    threadId: thread._id,
+    title: thread.title,
+    messageCount: thread.messageCount,
+    lastMessageAt: thread.lastMessageAt,
+    messages: (thread.messages || []).map(m => ({
+      role: m.role,
+      content: m.content,
+      mode: m.mode,
+      followups: m.followups || [],
+      createdAt: m.createdAt,
+    })),
+  };
+}
+
+/**
+ * Archive the current active thread so the next interaction starts fresh.
+ */
+async function resetActiveThread(userId) {
+  await CompassConversation.updateMany(
+    { userId, isArchived: false },
+    { $set: { isArchived: true } }
+  );
+  return { reset: true };
+}
+
+module.exports = {
+  handle,
+  buildUserContext,
+  buildSystemContext,
+  getActiveThread,
+  resetActiveThread,
+  getBudgetUsage,
+};

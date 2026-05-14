@@ -104,7 +104,9 @@ const diagnosticAttemptSchema = new mongoose.Schema({
   insightsLatencyMs: { type: Number, default: null },
   planGenerationStatus: {
     type: String,
-    enum: ['pending', 'generating', 'ready', 'failed'],
+    // 'awaiting_reality_check' — v2 only: diagnostic done, plan generation
+    // deferred until the user confirms hours on the v2 Reality Check screen.
+    enum: ['pending', 'awaiting_reality_check', 'generating', 'ready', 'failed'],
     default: 'pending',
     index: true,
   },

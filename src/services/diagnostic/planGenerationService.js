@@ -1,6 +1,42 @@
 const openai = require('../../config/openai');
 const taskCatalogService = require('../plan/taskCatalogService');
 const externalContentJudgeService = require('../plan/externalContentJudgeService');
+const { predictTaskImpact } = require('../v2/predictedImpactService');
+
+/**
+ * Compute the predicted-impact payload for a task at generation time.
+ * Stored on `payload.impact` so iOS Home / v2 "why this matters" can render
+ * it without re-computing per request. Best-effort — failures don't block
+ * task creation.
+ *
+ * Gated by the V2_API_ENABLED kill switch — when v2 is disabled this returns
+ * null and plans generate exactly as they did in v1.
+ */
+function computeTaskImpact(taskType, alloc, displayName, topicResults) {
+  if (process.env.V2_API_ENABLED === 'false') return null;
+  try {
+    const v1ToImpactType = {
+      quiz: 'quiz',
+      in_app_content: 'watch',
+      ai_interview: 'interview',
+      external_link: 'read',
+      competition: 'quiz',
+      manual: 'reflection',
+    };
+    const impactType = v1ToImpactType[taskType] || 'watch';
+    const baseline = (topicResults || []).find(t => t.canonicalName === alloc.topicCanonicalName);
+    const currentMastery = baseline?.measuredScore ?? 30;
+    return predictTaskImpact({
+      taskType: impactType,
+      primaryTopic: displayName,
+      currentMastery,
+      difficulty: 3,
+    });
+  } catch (err) {
+    console.warn('[planGeneration] impact predict failed:', err.message);
+    return null;
+  }
+}
 
 const BUFFER_FACTOR = 0.85;
 const OVERESTIMATES_BUMP = 1.20;
@@ -308,7 +344,11 @@ async function generate(input) {
         tasks.push({
           type: 'quiz',
           topic: topicShape,
-          payload: { quizId: resolved.quizId, estimatedMinutes: resolved.quizMinutes },
+          payload: {
+            quizId: resolved.quizId,
+            estimatedMinutes: resolved.quizMinutes,
+            impact: computeTaskImpact('quiz', alloc, displayName, input.topicResults),
+          },
           completion: { mode: 'auto', requiresSelfRating: false },
           progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
         });
@@ -321,6 +361,7 @@ async function generate(input) {
             contentId: resolved.contentId,
             contentType: resolved.contentType,
             estimatedMinutes: resolved.contentMinutes,
+            impact: computeTaskImpact('in_app_content', alloc, displayName, input.topicResults),
           },
           completion: { mode: 'auto', requiresSelfRating: false },
           progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
@@ -331,14 +372,16 @@ async function generate(input) {
       tasks.push({
         type: 'competition',
         topic: topicShape,
-        payload: { topicCanonicalName: alloc.topicCanonicalName, estimatedMinutes: 8 },
+        payload: {
+          topicCanonicalName: alloc.topicCanonicalName,
+          estimatedMinutes: 8,
+          impact: computeTaskImpact('competition', alloc, displayName, input.topicResults),
+        },
         completion: { mode: 'auto', requiresSelfRating: false },
         progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
       });
 
       // manual fallback — only when nothing else resolved for this topic.
-      // (Per-week ai_interview is emitted at the objective level below; it does
-      // not "cover" a specific topic, so it does not satisfy this guard.)
       const emittedNonCompetition = !!resolved.quizId || !!resolved.contentId;
       if (!emittedNonCompetition) {
         tasks.push({
@@ -348,6 +391,7 @@ async function generate(input) {
             title: `Practice ${displayName} on your own`,
             description: `Spend ~30 minutes deepening your understanding of ${displayName}. Reading, exercises, or applying it to a real problem all count.`,
             estimatedMinutes: 30,
+            impact: computeTaskImpact('manual', alloc, displayName, input.topicResults),
           },
           completion: { mode: 'manual', requiresSelfRating: true },
           progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },

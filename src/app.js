@@ -86,6 +86,23 @@ app.use('/api/v1/audio-summaries', require('./routes/audioSummaries'));
 app.use('/api/v1/note-requests', require('./routes/noteRequests'));
 app.use('/api/v1/interviews', require('./routes/interviews'));
 
+// --- v2 API namespace (parallel rollout) ---
+// v2 lives alongside v1. v1 routes above are never touched.
+//
+// KILL SWITCH: set V2_API_ENABLED=false in the environment and restart to
+// fully disable v2 — the /api/v2/* routes stop responding and /api/v2/config
+// reports disabled, so every client falls back to v1. No code change or
+// redeploy needed for rollback. Default (unset) = enabled.
+const V2_API_ENABLED = process.env.V2_API_ENABLED !== 'false';
+if (V2_API_ENABLED) {
+  app.use('/api/v2', require('./routes/v2'));
+} else {
+  // Even when disabled, answer the config probe so clients know to use v1.
+  app.get('/api/v2/config', (_req, res) =>
+    res.json({ success: true, data: { v2ApiEnabled: false, v2ForNewUsers: false } })
+  );
+}
+
 // --- Health Check ---
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 

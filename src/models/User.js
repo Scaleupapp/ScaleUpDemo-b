@@ -49,6 +49,12 @@ const userSchema = new mongoose.Schema({
   onboardingComplete: { type: Boolean, default: false },
   onboardingStep: { type: Number, default: 0 },
 
+  // --- v2 redesign opt-in (synced from iOS/Android client flag) ---
+  // When true, server-side workers suppress v1 anti-thesis notifications
+  // (streak-panic, generic-trending) so v2 users get the calmer experience.
+  v2OptedIn: { type: Boolean, default: false, index: true },
+  v2OptedInAt: { type: Date },
+
   // --- Engagement (denormalized counters) ---
   followersCount: { type: Number, default: 0 },
   followingCount: { type: Number, default: 0 },
