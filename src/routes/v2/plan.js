@@ -1,7 +1,9 @@
 /**
  * v2 Plan routes.
  *
- *   GET /api/v2/plan/today — one-hero recommendation + 3 alternatives + trajectory snapshot
+ *   GET  /api/v2/plan/today    — one-hero recommendation + alternatives + trajectory
+ *   POST /api/v2/plan/generate — trigger plan generation AFTER the Reality Check
+ *                                (v2 order: Diagnostic → Reality Check → Plan Creation)
  *
  * Reads from v1 Plan (weeklySchedule[].tasks[]) — does NOT replace v1 plan routes.
  */
@@ -10,10 +12,81 @@ const auth = require('../../middleware/auth');
 const UserObjective = require('../../models/UserObjective');
 const Plan = require('../../models/Plan');
 const KnowledgeProfile = require('../../models/KnowledgeProfile');
+const DiagnosticAttempt = require('../../models/DiagnosticAttempt');
+const { planGenerationQueue } = require('../../config/queue');
 const { forecastTrajectory } = require('../../services/v2/trajectoryService');
 const { predictTaskImpact } = require('../../services/v2/predictedImpactService');
 
 const router = express.Router();
+
+/**
+ * POST /api/v2/plan/generate
+ * Body: { attemptId }
+ *
+ * Triggers plan generation for a v2 user, AFTER they've confirmed their weekly
+ * commitment on the Reality Check screen. For v2 users the diagnostic-finish
+ * leaves planGenerationStatus = 'awaiting_reality_check'; this endpoint moves
+ * it to 'generating' and enqueues the job.
+ *
+ * Idempotent — if the plan is already generating/ready, it's a no-op success.
+ */
+router.post('/generate', auth, async (req, res) => {
+  const { attemptId } = req.body || {};
+  if (!attemptId) {
+    return res.status(400).json({ success: false, message: 'attemptId is required' });
+  }
+  try {
+    const attempt = await DiagnosticAttempt.findOne({ _id: attemptId, userId: req.user.userId });
+    if (!attempt) {
+      return res.status(404).json({ success: false, message: 'Diagnostic attempt not found' });
+    }
+
+    // Already moving / done — idempotent no-op.
+    if (['generating', 'ready'].includes(attempt.planGenerationStatus)) {
+      return res.json({ success: true, data: { status: attempt.planGenerationStatus, alreadyTriggered: true } });
+    }
+
+    await DiagnosticAttempt.updateOne(
+      { _id: attempt._id },
+      { $set: { planGenerationStatus: 'generating' } }
+    );
+    await planGenerationQueue.add(
+      'generate',
+      { attemptId: String(attempt._id) },
+      { attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: 50 }
+    );
+
+    return res.json({ success: true, data: { status: 'generating', alreadyTriggered: false } });
+  } catch (err) {
+    console.error('[v2/plan/generate] error', err);
+    return res.status(500).json({ success: false, message: 'Failed to start plan generation' });
+  }
+});
+
+/**
+ * GET /api/v2/plan/generation-status?attemptId=...
+ * Lightweight poll for the Plan Creation screen.
+ */
+router.get('/generation-status', auth, async (req, res) => {
+  const attemptId = req.query.attemptId;
+  if (!attemptId) {
+    return res.status(400).json({ success: false, message: 'attemptId is required' });
+  }
+  try {
+    const attempt = await DiagnosticAttempt.findOne({ _id: attemptId, userId: req.user.userId })
+      .select('planGenerationStatus planId').lean();
+    if (!attempt) {
+      return res.status(404).json({ success: false, message: 'Diagnostic attempt not found' });
+    }
+    return res.json({
+      success: true,
+      data: { status: attempt.planGenerationStatus, planId: attempt.planId || null },
+    });
+  } catch (err) {
+    console.error('[v2/plan/generation-status] error', err);
+    return res.status(500).json({ success: false, message: 'Failed to read status' });
+  }
+});
 
 // v1 Plan task `type` → v2 UI taskType + icon
 const TASK_TYPE_MAP = {
