@@ -108,20 +108,28 @@ const IMPACT_TYPE_MAP = {
   manual:         'reflection',
 };
 
+// How many tasks make up "today's structured set".
+const TODAYS_TASK_COUNT = 5;
+
 /**
  * GET /api/v2/plan/today
+ *
+ * Returns the STRUCTURED DAY — a set of plan-aligned tasks, not a single hero.
  *
  * Shape (success):
  *   {
  *     greeting, statusLine, objectiveLabel,
  *     trajectory: { today, in30Days, atTargetDate, ... },
  *     weekProgress: { done, total, week, totalWeeks },
- *     hero: {
- *       taskId, taskType, icon, title, subtitle, durationMin, difficulty, primaryTopic,
- *       payload: { contentId? quizId? interviewId? url? },  // routes iOS to v1 detail screen
+ *     todaysTasks: [ {
+ *       taskId, taskType, icon, title, subtitle, durationMin, difficulty,
+ *       primaryTopic, reason,
+ *       payload: { contentId? quizId? interviewId? url? },
  *       impact: { expectedFrom, expectedTo, expectedGain, whyText }
- *     },
- *     alternatives: [ { ...same shape, smaller } ]
+ *     } ],
+ *     totalDurationMin,         // sum across todaysTasks
+ *     hasMoreThisWeek: Bool,    // are there incomplete tasks beyond today's set?
+ *     skippedCount: Int         // skipped tasks in the current week (for Reshuffle affordance)
  *   }
  *
  * Fallbacks: no_objective | plan_brewing | day_done
@@ -186,15 +194,20 @@ router.get('/today', auth, async (req, res) => {
     const currentWeek = currentWeekEntry.week;
     const totalWeeks = plan.weeklySchedule.length;
     const tasksThisWeek = currentWeekEntry.tasks || [];
-    const incompleteThisWeek = tasksThisWeek.filter(t => t.progress?.status !== 'complete');
-    const doneThisWeek = tasksThisWeek.length - incompleteThisWeek.length;
+    // "available" = not completed and not skipped — these are eligible for today's set
+    const availableThisWeek = tasksThisWeek.filter(
+      t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped'
+    );
+    const doneThisWeek = tasksThisWeek.filter(t => t.progress?.status === 'complete').length;
+    const skippedCount = tasksThisWeek.filter(t => t.progress?.status === 'skipped').length;
     const weeksRemaining = Math.max(0, totalWeeks - currentWeek);
 
     const statusLine = trajectory.onTrack
       ? `You're on track. ${currentReadiness}% ready, ${weeksRemaining} weeks to go.`
       : `Behind pace. ${currentReadiness}% ready, ${weeksRemaining} weeks left — let’s tighten up.`;
 
-    if (incompleteThisWeek.length === 0) {
+    if (availableThisWeek.length === 0) {
+      // Either everything's done, or everything left is skipped — offer Reshuffle.
       return res.json({
         success: true,
         data: {
@@ -204,23 +217,29 @@ router.get('/today', auth, async (req, res) => {
           trajectory,
           weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
           fallback: 'day_done',
-          message: 'You’ve completed everything we recommended today. See you tomorrow.',
+          skippedCount,
+          message: skippedCount > 0
+            ? 'You’ve skipped the rest of this week’s tasks. Reshuffle to bring them back.'
+            : 'You’ve completed everything for this week. See you tomorrow.',
         },
       });
     }
 
-    // Rank by lowest current mastery on the task's primary topic
+    // Rank by lowest current mastery — weakest topics first.
     const topicMasteryFor = (canonicalName) => {
       const tp = knowledge?.topicProfiles?.[canonicalName];
       return tp?.masteryLevel ?? 0;
     };
-
-    const ranked = [...incompleteThisWeek].sort(
+    const ranked = [...availableThisWeek].sort(
       (a, b) => topicMasteryFor(a.topic?.canonicalName) - topicMasteryFor(b.topic?.canonicalName)
     );
 
-    const hero = shapeHero(ranked[0], topicMasteryFor);
-    const alternatives = ranked.slice(1, 4).map(t => shapeAlt(t));
+    // The structured day = the top N available tasks. Mix types so it's not
+    // 5 videos in a row — interleave by taskType where possible.
+    const todaysTasks = pickStructuredDay(ranked, TODAYS_TASK_COUNT)
+      .map(t => shapeTask(t, topicMasteryFor));
+
+    const totalDurationMin = todaysTasks.reduce((s, t) => s + (t.durationMin || 0), 0);
 
     return res.json({
       success: true,
@@ -230,8 +249,10 @@ router.get('/today', auth, async (req, res) => {
         statusLine,
         trajectory,
         weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
-        hero,
-        alternatives,
+        todaysTasks,
+        totalDurationMin,
+        hasMoreThisWeek: ranked.length > todaysTasks.length,
+        skippedCount,
       },
     });
   } catch (err) {
@@ -240,11 +261,99 @@ router.get('/today', auth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/v2/plan/task/:taskId/skip
+ * Marks a task skipped → it drops out of today's set, the next one slots in.
+ */
+router.post('/task/:taskId/skip', auth, (req, res) =>
+  setTaskStatus(req, res, 'skipped'));
+
+/**
+ * POST /api/v2/plan/task/:taskId/complete
+ * Tap-completion — flips the plan task to complete when the user finishes it.
+ */
+router.post('/task/:taskId/complete', auth, (req, res) =>
+  setTaskStatus(req, res, 'complete'));
+
+/**
+ * Shared mutator — surgically updates one task's progress.status inside the
+ * nested weeklySchedule[].tasks[] array, scoped to the user's active plan.
+ */
+async function setTaskStatus(req, res, status) {
+  try {
+    const userId = req.user.userId;
+    const { taskId } = req.params;
+    const update = {
+      'weeklySchedule.$[].tasks.$[t].progress.status': status,
+    };
+    if (status === 'complete') {
+      update['weeklySchedule.$[].tasks.$[t].progress.completedAt'] = new Date();
+    }
+    const result = await Plan.updateOne(
+      { userId, isActive: true },
+      { $set: update },
+      { arrayFilters: [{ 't._id': taskId }] }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: 'Active plan not found' });
+    }
+    return res.json({ success: true, data: { taskId, status } });
+  } catch (err) {
+    console.error('[v2/plan/task status] error', err);
+    return res.status(500).json({ success: false, message: 'Failed to update task' });
+  }
+}
+
+/**
+ * POST /api/v2/plan/reshuffle
+ * Un-skips every skipped task in the current week — "show me the full set again".
+ */
+router.post('/reshuffle', auth, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const result = await Plan.updateOne(
+      { userId, isActive: true },
+      { $set: { 'weeklySchedule.$[].tasks.$[t].progress.status': 'pending' } },
+      { arrayFilters: [{ 't.progress.status': 'skipped' }] }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: 'Active plan not found' });
+    }
+    return res.json({ success: true, data: { reshuffled: true } });
+  } catch (err) {
+    console.error('[v2/plan/reshuffle] error', err);
+    return res.status(500).json({ success: false, message: 'Failed to reshuffle' });
+  }
+});
+
+/**
+ * Pick a varied set of N tasks: greedily interleave by taskType so the day
+ * isn't "5 of the same thing". Falls back to plain rank order if needed.
+ */
+function pickStructuredDay(rankedTasks, n) {
+  if (rankedTasks.length <= n) return rankedTasks;
+  const picked = [];
+  const pool = [...rankedTasks];
+  let lastType = null;
+  while (picked.length < n && pool.length > 0) {
+    // Prefer the highest-ranked task whose type differs from the last pick.
+    let idx = pool.findIndex(t => t.type !== lastType);
+    if (idx === -1) idx = 0; // all same type left — just take the top
+    const [task] = pool.splice(idx, 1);
+    picked.push(task);
+    lastType = task.type;
+  }
+  return picked;
+}
+
 // ──────────────────────────────────────────────
 // Shaping helpers
 // ──────────────────────────────────────────────
 
-function shapeHero(task, topicMasteryFor) {
+/**
+ * Unified task shaper — one shape for every task in the structured day.
+ */
+function shapeTask(task, topicMasteryFor) {
   const map = TASK_TYPE_MAP[task.type] || { uiType: 'manual', icon: '✨' };
   const impactType = IMPACT_TYPE_MAP[task.type] || 'watch';
   const primaryTopicKey = task.topic?.canonicalName;
@@ -263,28 +372,15 @@ function shapeHero(task, topicMasteryFor) {
     taskId: String(task._id),
     taskType: map.uiType,
     icon: map.icon,
-    title: task.payload?.title || task.topic?.displayName || 'Today’s task',
+    title: task.payload?.title || task.topic?.displayName || 'Task',
     subtitle: task.payload?.creator || task.payload?.source || '',
-    durationMin: task.payload?.estimatedMinutes || 20,
+    durationMin: task.payload?.estimatedMinutes || 15,
     difficulty: (task.payload?.difficulty || 3) >= 4 ? 'hard'
               : (task.payload?.difficulty || 3) <= 2 ? 'easy' : 'medium',
     primaryTopic: task.topic?.displayName || primaryTopicKey,
+    reason: task.payload?.reason || `Builds your ${task.topic?.displayName || 'skills'}`,
     payload: extractPayload(task),
     impact,
-  };
-}
-
-function shapeAlt(task) {
-  const map = TASK_TYPE_MAP[task.type] || { uiType: 'manual', icon: '✨' };
-  return {
-    taskId: String(task._id),
-    taskType: map.uiType,
-    icon: map.icon,
-    title: task.payload?.title || task.topic?.displayName || 'Task',
-    durationMin: task.payload?.estimatedMinutes || 10,
-    primaryTopic: task.topic?.displayName,
-    payload: extractPayload(task),
-    reason: task.payload?.reason || 'Plan-aligned',
   };
 }
 
