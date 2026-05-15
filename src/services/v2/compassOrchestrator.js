@@ -39,6 +39,7 @@ const Plan = require('../../models/Plan');
 const CompassConversation = require('../../models/CompassConversation');
 const anthropic = require('../../config/anthropic');
 const redis = require('../../config/redis');
+const userContextService = require('../userContextService');
 
 // Persistence: max age of the "active" thread before a new one starts.
 const ACTIVE_THREAD_MAX_AGE_MIN = 60 * 12;  // 12 hours
@@ -162,11 +163,12 @@ async function getBudgetUsage(userId) {
  * Cached for the duration of a single request — fetched fresh per request.
  */
 async function buildUserContext(userId) {
-  const [user, objective, plan, knowledge] = await Promise.all([
+  const [user, objective, plan, knowledge, deepContext] = await Promise.all([
     User.findById(userId).select('firstName education workExperience').lean(),
     UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
     Plan.findOne({ userId, status: { $in: ['active', 'ready'] } }).lean(),
     KnowledgeProfile.findOne({ userId }).lean(),
+    userContextService.getUserContext(userId).catch(() => null),
   ]);
 
   const topicMastery = knowledge?.topicProfiles
@@ -197,6 +199,13 @@ async function buildUserContext(userId) {
       strongTopics: topicMastery.slice(0, 3),
       weakTopics:   topicMastery.slice(-3).reverse(),
     },
+    deep: deepContext ? {
+      misconceptions: (deepContext.misconceptions || []).slice(0, 3),
+      dueForReview:   (deepContext.dueForReview || []).slice(0, 3),
+      recentTopics:   (deepContext.recentTopicsTouched || []).slice(0, 5),
+      recentTutor:    (deepContext.recentAITutor?.topicsCovered || []).slice(0, 3),
+      lastTutorQs:    (deepContext.recentAITutor?.openQuestions || []).slice(0, 2),
+    } : null,
   };
 }
 
@@ -220,6 +229,28 @@ function buildSystemContext(ctx) {
   }
   if (ctx.knowledge.weakTopics.length) {
     lines.push(`Weak topics: ${ctx.knowledge.weakTopics.map(t => `${t.topic} (${t.mastery}%)`).join(', ')}`);
+  }
+  // Cross-context signals — what the user recently struggled with, what's
+  // overdue for review, what they asked the tutor. Makes the AI feel like it
+  // remembers them instead of starting from zero every turn.
+  if (ctx.deep) {
+    if (ctx.deep.recentTopics?.length) {
+      lines.push(`Recently practiced/quizzed on: ${ctx.deep.recentTopics.join(', ')}.`);
+    }
+    if (ctx.deep.misconceptions?.length) {
+      lines.push(`Known recurring misconceptions: ${ctx.deep.misconceptions.map(m => `${m.tag} (${m.explanation})`).join('; ')}.`);
+    }
+    if (ctx.deep.dueForReview?.length) {
+      lines.push(`Overdue for spaced review: ${ctx.deep.dueForReview.map(d => d.concept).join(', ')}.`);
+    }
+    if (ctx.deep.recentTutor?.length) {
+      lines.push(`Recently asked the tutor about: ${ctx.deep.recentTutor.join(', ')}.`);
+    }
+    if (ctx.deep.lastTutorQs?.length) {
+      const qs = ctx.deep.lastTutorQs.map(q => `"${q.question}"`).join(' / ');
+      lines.push(`Recent tutor questions still open: ${qs}.`);
+    }
+    lines.push(`Use this context to make responses feel personal — don't ask the learner to repeat what we already know.`);
   }
   return lines.join('\n');
 }

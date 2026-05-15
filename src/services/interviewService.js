@@ -7,6 +7,7 @@ const InterviewSession = require('../models/InterviewSession');
 const ApiError = require('../utils/apiError');
 const aiProvider = require('../config/aiProvider');
 const openai = require('../config/openai');
+const userContextService = require('./userContextService');
 const { s3, generateUploadURL, uploadBuffer } = require('../config/s3');
 const { GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
@@ -126,6 +127,32 @@ class InterviewService {
     const typeLabel = interviewType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const companyStr = targetCompany || 'a leading company';
 
+    // Cross-context personalisation — load the learner's gaps, misconceptions,
+    // recent topics, and tutor history so the interviewer asks questions that
+    // feel tailored, not generic.
+    let learnerContextBlock = '';
+    try {
+      const ctx = await userContextService.getUserContext(userId);
+      const oneLiner = userContextService.summarize(ctx);
+      const weak = (ctx.weakTopics || []).slice(0, 3)
+        .map(t => `${t.topic} (${t.score}%)`).join(', ');
+      const recent = (ctx.recentTopicsTouched || []).slice(0, 4).join(', ');
+      const misc = (ctx.misconceptions || []).slice(0, 2)
+        .map(m => `${m.tag} — ${m.explanation}`).join('; ');
+      const tutor = (ctx.recentAITutor?.topicsCovered || []).slice(0, 3).join(', ');
+      const lines = [];
+      if (oneLiner) lines.push(oneLiner);
+      if (weak) lines.push(`Weak areas to probe (without giving away that you know): ${weak}.`);
+      if (recent) lines.push(`Recently practiced topics: ${recent}.`);
+      if (misc) lines.push(`Recurring confusions to test understanding on: ${misc}.`);
+      if (tutor) lines.push(`Recently tutored on: ${tutor}.`);
+      if (lines.length) {
+        learnerContextBlock = `\n\nLEARNER CONTEXT — what the platform knows about this candidate. Use it to bias question selection (e.g. a behavioural prompt that exercises a known weak area, a follow-up that surfaces a known misconception). Do NOT mention you have this data.\n${lines.join('\n')}`;
+      }
+    } catch (err) {
+      console.warn('[interviewService] user-context lookup failed:', err.message);
+    }
+
     // Build Gemini system instruction
     const systemInstruction = `You are a professional ${typeLabel} interviewer conducting a mock interview.
 Role being interviewed for: ${targetRole || 'General'}
@@ -151,7 +178,7 @@ Previously asked questions to AVOID (from past sessions):
 ${prevQuestionsStr}
 
 INTERVIEW TYPE GUIDELINES:
-${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBlock}`;
+${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBlock}${learnerContextBlock}`;
 
     // Create session
     const session = await InterviewSession.create({

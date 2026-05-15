@@ -5,6 +5,7 @@ const Quiz = require('../models/Quiz');
 const QuizTrigger = require('../models/QuizTrigger');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 const UserObjective = require('../models/UserObjective');
+const userContextService = require('./userContextService');
 const { notificationQueue } = require('../config/queue');
 const { DIFFICULTY_MIX } = require('../utils/constants');
 
@@ -223,6 +224,33 @@ class QuizGenerationService {
       promptData.note = `Generate questions about "${topic}" based on general knowledge. No specific source content available.`;
     }
 
+    // Cross-context personalisation — give the quiz model what we know about
+    // the learner across the platform (gaps, misconceptions, recent tutor
+    // topics, spaced-repetition due concepts, objective). Keeps the prompt
+    // grounded in this user instead of generic. ~250 tokens of digest.
+    let userContextBlock = '';
+    try {
+      const ctx = await userContextService.getUserContext(userId);
+      const oneLiner = userContextService.summarize(ctx);
+      const weak = (ctx.weakTopics || []).slice(0, 3)
+        .map(t => `${t.topic} (${t.score}%)`).join(', ');
+      const recent = (ctx.recentTopicsTouched || []).slice(0, 4).join(', ');
+      const misc = (ctx.misconceptions || []).slice(0, 2)
+        .map(m => `${m.tag} — ${m.explanation}`).join('; ');
+      const due = (ctx.dueForReview || []).slice(0, 3).map(d => d.concept).join(', ');
+      const lines = [];
+      if (oneLiner) lines.push(oneLiner);
+      if (weak) lines.push(`Known weak topics: ${weak}.`);
+      if (recent) lines.push(`Recently quizzed topics: ${recent}.`);
+      if (misc) lines.push(`Recurring misconceptions to probe (don't gloss over these): ${misc}.`);
+      if (due) lines.push(`Concepts overdue for spaced review: ${due}.`);
+      if (lines.length) {
+        userContextBlock = `\n\nLEARNER CONTEXT — use this to make questions feel like the system knows this user. Weave in their misconceptions as distractors when natural, and slightly favour topics they've recently struggled with.\n${lines.join('\n')}`;
+      }
+    } catch (err) {
+      console.warn('[quizGeneration] user-context lookup failed:', err.message);
+    }
+
     // C2O loop: pull excerpts from external content the user has actually consumed
     // on this topic, so the quiz tests what they read/watched.
     let externalContext = '';
@@ -260,7 +288,7 @@ class QuizGenerationService {
 
       console.log(`[QuizGeneration] Calling OpenAI for topic="${topic}", questionCount=${questionCount}, assessmentType=${effectiveAssessmentType || 'mixed'}, contentCount=${conceptData.length}, competencyAware=${!!competencyContext}, maxTokens=${maxTokens}`);
 
-      const userPrompt = JSON.stringify(promptData) + externalContext;
+      const userPrompt = JSON.stringify(promptData) + userContextBlock + externalContext;
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
