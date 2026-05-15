@@ -76,10 +76,45 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
       if (level && level !== 'unsure') selfRated.push({ topic: competency, level });
     }
 
-    // Patterns — derived from answer telemetry (the cognitive-fingerprint
-    // signals the v1 engine doesn't attach to the attempt). Best-effort.
-    const patterns = [];
+    // Per-competency performance breakdown — time, accuracy, score, band —
+    // so users can see HOW the readiness was computed, not just the number.
     const answers = Array.isArray(attempt.answers) ? attempt.answers : [];
+    const perCompetency = new Map();
+    for (const a of answers) {
+      const c = a.competency;
+      if (!c) continue;
+      const entry = perCompetency.get(c) || {
+        topic: c,
+        questionsAnswered: 0,
+        correct: 0,
+        totalTimeSec: 0,
+        hard: 0,
+        hardCorrect: 0,
+      };
+      entry.questionsAnswered += 1;
+      if (a.isCorrect) entry.correct += 1;
+      entry.totalTimeSec += (a.timeTaken || 0);
+      if (a.difficulty === 'hard') {
+        entry.hard += 1;
+        if (a.isCorrect) entry.hardCorrect += 1;
+      }
+      perCompetency.set(c, entry);
+    }
+    const performance = Array.from(perCompetency.values()).map(e => {
+      const r = resultsMap[e.topic] || {};
+      return {
+        topic: e.topic,
+        score: typeof r.score === 'number' ? Math.round(r.score) : null,
+        band: r.assessedBand || null,
+        accuracyPct: e.questionsAnswered ? Math.round((e.correct / e.questionsAnswered) * 100) : 0,
+        avgTimeSec: e.questionsAnswered ? Math.round(e.totalTimeSec / e.questionsAnswered) : 0,
+        questionsAnswered: e.questionsAnswered,
+        hardAccuracyPct: e.hard ? Math.round((e.hardCorrect / e.hard) * 100) : null,
+      };
+    }).sort((a, b) => (a.score ?? 999) - (b.score ?? 999));
+
+    // Patterns — derived from per-competency performance + answer telemetry.
+    const patterns = [];
     if (answers.length) {
       const hard = answers.filter(a => a.difficulty === 'hard');
       const hardAcc = hard.length ? hard.filter(a => a.isCorrect).length / hard.length : null;
@@ -89,7 +124,25 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
         patterns.push('You move fast on questions and accuracy drops — slowing down a little would help.');
       }
       if (hardAcc !== null && hard.length >= 3 && hardAcc >= 0.6) {
-        patterns.push('You hold up well on the harder questions — your ceiling is higher than your average.');
+        patterns.push('You hold up well on harder questions — your ceiling is higher than your average.');
+      }
+      // Per-competency strongest / weakest call-outs.
+      const scored = performance.filter(p => p.score !== null);
+      if (scored.length >= 2) {
+        const best = scored.reduce((m, p) => (p.score > m.score ? p : m), scored[0]);
+        const worst = scored.reduce((m, p) => (p.score < m.score ? p : m), scored[0]);
+        if (best.score - worst.score >= 25) {
+          patterns.push(`Strongest area: ${best.topic} (${best.score}%). Weakest: ${worst.topic} (${worst.score}%).`);
+        }
+      }
+      // Time gap — slowest vs fastest topic by avg time.
+      const timed = performance.filter(p => p.avgTimeSec > 0);
+      if (timed.length >= 2) {
+        const slowest = timed.reduce((m, p) => (p.avgTimeSec > m.avgTimeSec ? p : m), timed[0]);
+        const fastest = timed.reduce((m, p) => (p.avgTimeSec < m.avgTimeSec ? p : m), timed[0]);
+        if (slowest.avgTimeSec >= fastest.avgTimeSec * 1.8 && slowest.avgTimeSec >= 30) {
+          patterns.push(`You spend much longer on ${slowest.topic} (${slowest.avgTimeSec}s avg) than on ${fastest.topic} (${fastest.avgTimeSec}s) — pacing room to gain there.`);
+        }
       }
     }
     if (patterns.length === 0) {
@@ -128,12 +181,22 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
       .map(a => ({ topic: a.topic }));
 
     const gapTopics = (sortedGaps.length ? sortedGaps : lowScoreActions).slice(0, 3);
-    const topActions = gapTopics.map((g, i) => ({
-      rank: i + 1,
-      title: `Focus ${g.topic} from foundation`,
-      reason: i === 0 ? 'Your highest-leverage gap' : 'A measured weak spot',
-      action: { type: 'topic', topic: g.topic },
-    }));
+    const topActions = gapTopics.map((g, i) => {
+      // Build a concrete, calculated reason so users see WHY this is on the list.
+      const perf = performance.find(p => p.topic === g.topic);
+      let reason = i === 0 ? 'Your highest-leverage gap' : 'A measured weak spot';
+      if (perf && perf.score !== null) {
+        reason = i === 0
+          ? `You scored ${perf.score}% on ${g.topic} (accuracy ${perf.accuracyPct}%) — the biggest lift available.`
+          : `Scored ${perf.score}% on ${g.topic}.`;
+      }
+      return {
+        rank: i + 1,
+        title: `Focus ${g.topic} from foundation`,
+        reason,
+        action: { type: 'topic', topic: g.topic },
+      };
+    });
 
     // Fill to 3 with generic high-leverage actions if not enough gaps
     if (topActions.length < 3) {
@@ -166,6 +229,7 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
           headline: `Your baseline readiness: ${baselineReadiness}%`,
         },
         calibration: { selfRated, actual, gap, summary: calibSummary },
+        performance,
         patterns,
         trajectory,
         topActions,
