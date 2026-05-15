@@ -148,7 +148,7 @@ router.get('/today', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [user, objective, plan, knowledge, latestAttempt] = await Promise.all([
+    const [user, objective, plan, knowledge, latestAttempt, competition, weekActivity] = await Promise.all([
       require('../../models/User').findById(userId).select('firstName').lean(),
       UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
       Plan.findOne({ userId, isActive: true }).lean(),
@@ -157,6 +157,8 @@ router.get('/today', auth, async (req, res) => {
         .findOne({ userId, status: 'completed' })
         .sort({ completedAt: -1 })
         .lean(),
+      require('../../models/CompetitionProfile').findOne({ userId }).lean(),
+      computeWeekActivity(userId),
     ]);
 
     const greeting = user?.firstName ? `Hi, ${user.firstName}.` : 'Hi.';
@@ -190,6 +192,12 @@ router.get('/today', auth, async (req, res) => {
       currentLevel: objective.currentLevel,
     });
 
+    const topGap = diagnosticTopGap(latestAttempt);
+    const streak = {
+      current: competition?.currentStreak || 0,
+      longest: competition?.longestStreak || 0,
+    };
+
     // No plan yet — brewing fallback
     if (!plan || !Array.isArray(plan.weeklySchedule) || plan.weeklySchedule.length === 0) {
       return res.json({
@@ -221,9 +229,17 @@ router.get('/today', auth, async (req, res) => {
     const skippedCount = tasksThisWeek.filter(t => t.progress?.status === 'skipped').length;
     const weeksRemaining = Math.max(0, totalWeeks - currentWeek);
 
-    const statusLine = trajectory.onTrack
-      ? `You're on track. ${currentReadiness}% ready, ${weeksRemaining} weeks to go.`
-      : `Behind pace. ${currentReadiness}% ready, ${weeksRemaining} weeks left — let’s tighten up.`;
+    // Prefer a personal, specific status line — anchor on the user's
+    // biggest measured gap when available. Falls back to the generic line.
+    let statusLine;
+    if (topGap && topGap.score < 50) {
+      const prettyTopic = topGap.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      statusLine = `Your biggest lift is ${prettyTopic} (${topGap.score}%). Today's set chips away at it.`;
+    } else if (trajectory.onTrack) {
+      statusLine = `You're on track. ${currentReadiness}% ready, ${weeksRemaining} weeks to go.`;
+    } else {
+      statusLine = `Behind pace. ${currentReadiness}% ready, ${weeksRemaining} weeks left — let’s tighten up.`;
+    }
 
     if (availableThisWeek.length === 0) {
       // Either everything's done, or everything left is skipped — offer Reshuffle.
@@ -235,6 +251,9 @@ router.get('/today', auth, async (req, res) => {
           statusLine,
           trajectory,
           weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
+          streak,
+          weekActivity,
+          topGap,
           fallback: 'day_done',
           skippedCount,
           message: skippedCount > 0
@@ -268,6 +287,9 @@ router.get('/today', auth, async (req, res) => {
         statusLine,
         trajectory,
         weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
+        streak,
+        weekActivity,
+        topGap,
         todaysTasks,
         totalDurationMin,
         hasMoreThisWeek: ranked.length > todaysTasks.length,
@@ -439,6 +461,71 @@ function diagnosticBaselineReadiness(attempt) {
     .filter(s => s !== null);
   if (scores.length === 0) return null;
   return Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
+}
+
+/**
+ * Top gap from the diagnostic — the competency with the lowest measured
+ * score. Powers the Home "why today matters" status line and the streak/grid.
+ */
+function diagnosticTopGap(attempt) {
+  if (!attempt) return null;
+  const resultsMap = attempt.results instanceof Map
+    ? Object.fromEntries(attempt.results)
+    : (attempt.results || {});
+  let lowest = null;
+  for (const [topic, r] of Object.entries(resultsMap)) {
+    if (!r || typeof r.score !== 'number') continue;
+    if (!lowest || r.score < lowest.score) {
+      lowest = { topic, score: Math.round(r.score), band: r.assessedBand || null };
+    }
+  }
+  return lowest;
+}
+
+/**
+ * "Did the user complete anything on this day this week?" — Monday→Sunday.
+ * Used by Home's weekly-grid streak strip.
+ */
+async function computeWeekActivity(userId) {
+  const QuizAttempt = require('../../models/QuizAttempt');
+  const ContentProgress = require('../../models/ContentProgress');
+  const InterviewSession = require('../../models/InterviewSession');
+
+  // Start of this week (Monday 00:00 local-ish, server time is fine for a 7-bucket grid).
+  const now = new Date();
+  const monday = new Date(now);
+  const dayOfWeek = (monday.getDay() + 6) % 7; // 0 = Monday
+  monday.setDate(monday.getDate() - dayOfWeek);
+  monday.setHours(0, 0, 0, 0);
+
+  const since = monday;
+  const [quizzes, content, interviews] = await Promise.all([
+    QuizAttempt.find({ userId, status: 'completed', completedAt: { $gte: since } })
+      .select('completedAt').lean(),
+    ContentProgress.find({ userId, isCompleted: true, completedAt: { $gte: since } })
+      .select('completedAt').lean(),
+    InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] }, completedAt: { $gte: since } })
+      .select('completedAt').lean(),
+  ]);
+
+  // Build a 7-element bool array — Mon..Sun.
+  const buckets = Array.from({ length: 7 }, () => false);
+  const stamp = (d) => {
+    if (!d) return;
+    const idx = (new Date(d).getDay() + 6) % 7;
+    if (idx >= 0 && idx < 7) buckets[idx] = true;
+  };
+  quizzes.forEach(q => stamp(q.completedAt));
+  content.forEach(c => stamp(c.completedAt));
+  interviews.forEach(i => stamp(i.completedAt));
+
+  const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const todayIdx = (now.getDay() + 6) % 7;
+  return labels.map((label, idx) => ({
+    label,
+    hadActivity: buckets[idx],
+    isToday: idx === todayIdx,
+  }));
 }
 
 function buildObjectiveLabel(obj) {
