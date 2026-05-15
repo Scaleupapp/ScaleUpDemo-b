@@ -9,10 +9,18 @@ async function resolveTopic({ topicCanonicalName, objectiveType, objectiveId, us
   const key = canonicalize(topicCanonicalName);
   if (!key) return { quizId: null, contentId: null };
 
-  let quiz = await Quiz.findOne({ topic: key, objectiveId }).sort({ createdAt: -1 }).lean();
-  if (!quiz) {
-    quiz = await Quiz.findOne({ topic: key }).sort({ createdAt: -1 }).lean();
+  // Quizzes are user-scoped — GET /quizzes/:id does Quiz.findOne({ _id, userId }).
+  // So the plan must only ever reference quizzes THIS user owns; otherwise the
+  // task opens to "Quiz not found". Previously this matched any user's quiz by
+  // {topic, objectiveId} (or globally by topic), which is exactly that bug.
+  let quiz = null;
+  if (userId) {
+    quiz = await Quiz.findOne({ topic: key, objectiveId, userId }).sort({ createdAt: -1 }).lean();
+    if (!quiz) {
+      quiz = await Quiz.findOne({ topic: key, userId }).sort({ createdAt: -1 }).lean();
+    }
   }
+  // No user-owned quiz → fall through to lazy generation below.
 
   // Phase 7: lazy quiz generation. If no quiz exists for this topic+objective,
   // synchronously generate one via the existing quizGenerationService.

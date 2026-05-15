@@ -148,11 +148,15 @@ router.get('/today', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [user, objective, plan, knowledge] = await Promise.all([
+    const [user, objective, plan, knowledge, latestAttempt] = await Promise.all([
       require('../../models/User').findById(userId).select('firstName').lean(),
       UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
       Plan.findOne({ userId, isActive: true }).lean(),
       KnowledgeProfile.findOne({ userId }).lean(),
+      require('../../models/DiagnosticAttempt')
+        .findOne({ userId, status: 'completed' })
+        .sort({ completedAt: -1 })
+        .lean(),
     ]);
 
     const greeting = user?.firstName ? `Hi, ${user.firstName}.` : 'Hi.';
@@ -170,8 +174,13 @@ router.get('/today', auth, async (req, res) => {
       });
     }
 
-    // Current readiness — pull from knowledge profile if available
-    const currentReadiness = computeReadinessFromKnowledge(knowledge) ?? 30;
+    // Current readiness — keep this consistent with the Calibration screen
+    // (/diagnostic/:id/insights). Prefer the diagnostic baseline (average of
+    // measured competency scores), then the knowledge profile, then a floor.
+    const currentReadiness =
+      diagnosticBaselineReadiness(latestAttempt) ??
+      computeReadinessFromKnowledge(knowledge) ??
+      30;
 
     const trajectory = forecastTrajectory({
       currentReadiness,
@@ -413,6 +422,23 @@ function computeReadinessFromKnowledge(knowledge) {
   if (entries.length === 0) return null;
   const avg = entries.reduce((s, t) => s + (t.masteryLevel || 0), 0) / entries.length;
   return Math.round(avg);
+}
+
+/**
+ * Baseline readiness from a completed diagnostic — the average of measured
+ * competency scores in `attempt.results`. MUST match the calculation in
+ * /diagnostic/:id/insights so Home and the Calibration screen agree.
+ */
+function diagnosticBaselineReadiness(attempt) {
+  if (!attempt) return null;
+  const resultsMap = attempt.results instanceof Map
+    ? Object.fromEntries(attempt.results)
+    : (attempt.results || {});
+  const scores = Object.values(resultsMap)
+    .map(r => (r && typeof r.score === 'number' ? r.score : null))
+    .filter(s => s !== null);
+  if (scores.length === 0) return null;
+  return Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
 }
 
 function buildObjectiveLabel(obj) {
