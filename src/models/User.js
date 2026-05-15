@@ -48,6 +48,11 @@ const userSchema = new mongoose.Schema({
   // --- Onboarding ---
   onboardingComplete: { type: Boolean, default: false },
   onboardingStep: { type: Number, default: 0 },
+  // Diagnostic completion — read by the client at launch to route past the
+  // diagnostic. Written by diagnosticService.finishAttempt and the v2
+  // plan-generate route. (Was missing from the schema, so strict mode
+  // silently dropped every write — the cause of the re-onboarding loop.)
+  diagnosticComplete: { type: Boolean, default: false },
 
   // --- v2 redesign opt-in (synced from iOS/Android client flag) ---
   // When true, server-side workers suppress v1 anti-thesis notifications
