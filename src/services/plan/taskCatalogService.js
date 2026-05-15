@@ -1,9 +1,68 @@
 const Quiz = require('../../models/Quiz');
 const Content = require('../../models/Content');
+const UserObjective = require('../../models/UserObjective');
 const { canonicalize } = require('../diagnostic/topicTaxonomyService');
 
 const DEFAULT_QUIZ_MINUTES = 8;
 const DEFAULT_CONTENT_MINUTES = 12;
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Resolve a published Content item for a plan topic.
+ *
+ * Content.topics is tagged with broad display phrases ("mba preparation")
+ * while plan topics are fine-grained canonical slugs ("critical-reasoning"),
+ * so an exact `topics: key` match almost never hits. We therefore:
+ *   1. try the exact canonical topic,
+ *   2. fall back to a fuzzy slug match across the candidate's topics,
+ *   3. fall back to the objective's own terms (exam / role / skill / domain)
+ *      across title + topics + domain — which is what actually surfaces the
+ *      GMAT content for a GMAT objective.
+ */
+async function resolveContentForTopic(key, objectiveId) {
+  let content = await Content.findOne({ topics: key, status: 'published' })
+    .sort({ publishedAt: -1 })
+    .lean();
+  if (content) return content;
+
+  // Fuzzy: a topic phrase whose slug equals (or contains) the key.
+  const keyRx = new RegExp(escapeRegex(key.replace(/-/g, '[ -]?')), 'i');
+  content = await Content.findOne({ status: 'published', topics: keyRx })
+    .sort({ publishedAt: -1 })
+    .lean();
+  if (content) return content;
+
+  // Objective-term fallback — surfaces objective-relevant content even when
+  // it isn't tagged with the granular topic.
+  if (objectiveId) {
+    try {
+      const obj = await UserObjective.findById(objectiveId)
+        .select('specifics')
+        .lean();
+      const terms = [
+        obj?.specifics?.examName,
+        obj?.specifics?.targetRole,
+        obj?.specifics?.targetSkill,
+        obj?.specifics?.toDomain,
+      ].filter(Boolean);
+      if (terms.length) {
+        const rx = new RegExp(terms.map(escapeRegex).join('|'), 'i');
+        content = await Content.findOne({
+          status: 'published',
+          $or: [{ title: rx }, { topics: rx }, { domain: rx }],
+        })
+          .sort({ publishedAt: -1 })
+          .lean();
+      }
+    } catch (err) {
+      console.warn('[taskCatalogService] objective content fallback failed:', err.message);
+    }
+  }
+  return content;
+}
 
 async function resolveTopic({ topicCanonicalName, objectiveType, objectiveId, userId }) {
   const key = canonicalize(topicCanonicalName);
@@ -58,9 +117,7 @@ async function resolveTopic({ topicCanonicalName, objectiveType, objectiveId, us
     }
   }
 
-  const content = await Content.findOne({ topics: key, status: 'published' })
-    .sort({ publishedAt: -1 })
-    .lean();
+  const content = await resolveContentForTopic(key, objectiveId);
 
   return {
     quizId: quiz ? String(quiz._id) : null,
