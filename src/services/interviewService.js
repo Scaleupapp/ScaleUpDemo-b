@@ -64,11 +64,13 @@ class InterviewService {
    * Start a new interview session
    */
   async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null }) {
-    // Check user doesn't have an existing in_progress session
-    const existing = await InterviewSession.findOne({ userId, status: 'in_progress' });
-    if (existing) {
-      throw new ApiError(409, 'You already have an interview in progress. Complete or abandon it before starting a new one.');
-    }
+    // Auto-abandon any stale in-progress session — users were trapped if a
+    // previous interview was force-quit or crashed. The diagnostic engine
+    // does the same on startAttempt.
+    await InterviewSession.updateMany(
+      { userId, status: 'in_progress' },
+      { $set: { status: 'abandoned', completedAt: new Date() } }
+    );
 
     // Phase 6: bias topic selection from KnowledgeProfile.topicInterviewMastery.
     // Lower historical scores → more questions on that topic next session.

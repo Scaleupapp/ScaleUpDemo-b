@@ -192,14 +192,17 @@ class CreatorService {
   // ─── Public Creator Profile ──────────────────────────────────────
 
   async getCreatorPublicProfile(creatorId, currentUserId) {
-    // First check if a creator profile exists for this user
-    const creatorProfile = await CreatorProfile.findOne({ userId: creatorId }).lean();
-    if (!creatorProfile) throw new ApiError(404, 'Creator profile not found');
-
-    const user = await User.findOne({ _id: creatorId, role: { $in: ['creator', 'admin'] }, isActive: true, isBanned: false })
-      .select('firstName lastName username profilePicture bio followersCount followingCount createdAt education workExperience skills')
+    // Lots of content is uploaded by users (e.g. admins) who don't have a
+    // dedicated CreatorProfile doc — instead of 404-ing, fall back to a
+    // basic user profile so tapping the byline always shows something.
+    // Role gate is dropped here for the same reason; the User search below
+    // still requires active/non-banned.
+    const user = await User.findOne({ _id: creatorId, isActive: true, isBanned: false })
+      .select('firstName lastName username profilePicture bio followersCount followingCount createdAt education workExperience skills role')
       .lean();
     if (!user) throw new ApiError(404, 'Creator not found');
+
+    const creatorProfile = await CreatorProfile.findOne({ userId: creatorId }).lean();
 
     const [isFollowing, mutualFollowers] = await Promise.all([
       currentUserId ? socialService.checkFollowStatus(currentUserId, creatorId) : false,
@@ -208,7 +211,15 @@ class CreatorService {
 
     return {
       ...user,
-      creatorProfile,
+      // Always return a creatorProfile shape so clients can decode it; empty
+      // when the user hasn't published a creator profile yet.
+      creatorProfile: creatorProfile || {
+        userId: creatorId,
+        bio: user.bio || '',
+        topics: [],
+        tier: 'core',
+        totalContent: 0,
+      },
       isFollowing,
       mutualFollowers,
     };
