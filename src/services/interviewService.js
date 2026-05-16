@@ -744,44 +744,46 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
       throw new ApiError(400, 'Session is not in progress');
     }
 
-    // Pin to a stable model — the generic `gpt-4o-realtime-preview` alias has
-    // intermittently returned errors. The dated snapshot is guaranteed stable.
-    // Override via env REALTIME_MODEL if we need to upgrade without a deploy.
-    const realtimeModel = process.env.REALTIME_MODEL || 'gpt-4o-realtime-preview-2024-12-17';
-    const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
+    // GA Realtime API — the legacy /v1/realtime/sessions Beta endpoint was
+    // sunset in May 2026 ("Please use /v1/realtime for the GA API"). The new
+    // GA flow mints an ephemeral client secret via /v1/realtime/client_secrets
+    // and uses the `gpt-realtime` model. Override via REALTIME_MODEL if needed.
+    const realtimeModel = process.env.REALTIME_MODEL || 'gpt-realtime';
+    const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
-        // OpenAI Realtime sessions require this beta header.
-        'OpenAI-Beta': 'realtime=v1',
       },
       body: JSON.stringify({
-        model: realtimeModel,
-        voice: 'alloy',
-        instructions: session.systemInstruction,
-        input_audio_format: 'pcm16',
-        output_audio_format: 'pcm16',
-        input_audio_transcription: { model: 'whisper-1' },
-        turn_detection: null,
-        tools: [
-          {
-            type: 'function',
-            name: 'report_question_meta',
-            description: 'Report metadata about the question you just asked. Call this EVERY time you ask a question or follow-up.',
-            parameters: {
-              type: 'object',
-              properties: {
-                question_number: { type: 'integer', description: 'Current question number (starts at 1)' },
-                is_follow_up: { type: 'boolean', description: 'True if this is a follow-up to the previous question' },
-                is_complete: { type: 'boolean', description: 'True if you have concluded the interview' },
-                question_text: { type: 'string', description: 'The exact question you asked' },
-              },
-              required: ['question_number', 'is_follow_up', 'is_complete', 'question_text'],
-              additionalProperties: false,
-            },
+        session: {
+          type: 'realtime',
+          model: realtimeModel,
+          instructions: session.systemInstruction,
+          audio: {
+            input:  { format: { type: 'audio/pcm', rate: 24000 }, transcription: { model: 'whisper-1' } },
+            output: { format: { type: 'audio/pcm', rate: 24000 }, voice: 'alloy' },
           },
-        ],
+          tools: [
+            {
+              type: 'function',
+              name: 'report_question_meta',
+              description: 'Report metadata about the question you just asked. Call this EVERY time you ask a question or follow-up.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  question_number: { type: 'integer', description: 'Current question number (starts at 1)' },
+                  is_follow_up:    { type: 'boolean', description: 'True if this is a follow-up to the previous question' },
+                  is_complete:     { type: 'boolean', description: 'True if you have concluded the interview' },
+                  question_text:   { type: 'string',  description: 'The exact question you asked' },
+                },
+                required: ['question_number', 'is_follow_up', 'is_complete', 'question_text'],
+                additionalProperties: false,
+              },
+            },
+          ],
+        },
+        expires_after: { anchor: 'created_at', seconds: 600 },
       }),
     });
 
@@ -800,10 +802,15 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
 
     const data = await response.json();
 
-    return {
-      token: data.client_secret.value,
-      expiresAt: data.client_secret.expires_at,
-    };
+    // GA response shape: { value, expires_at, session }. Legacy Beta nested
+    // the same fields under data.client_secret; fall back so we work either way.
+    const tokenValue = data.value || data.client_secret?.value;
+    const expires    = data.expires_at || data.client_secret?.expires_at;
+    if (!tokenValue) {
+      console.error('[RealtimeToken] missing token in response:', JSON.stringify(data).slice(0, 300));
+      throw new ApiError(502, 'Voice service returned an unexpected response.');
+    }
+    return { token: tokenValue, expiresAt: expires, model: realtimeModel };
   }
 }
 
