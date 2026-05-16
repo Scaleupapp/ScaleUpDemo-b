@@ -26,6 +26,10 @@ const competencyResultSchema = new mongoose.Schema({
   calibrationDelta: { type: Number },           // -3..+3
   calibrationClass: { type: String, enum: ['well-calibrated', 'overestimates', 'undersells'], default: 'well-calibrated' },
   questionsAsked:   { type: Number, default: 0 },
+  // True when the user declared this topic but zero questions were available
+  // in the pool (bank empty + LLM gen failed). Sentinel entry only — score
+  // and band are absent. Client should render "Not tested" rather than "—".
+  notTested:        { type: Boolean, default: false },
 }, { _id: false });
 
 const diagnosticAttemptSchema = new mongoose.Schema({

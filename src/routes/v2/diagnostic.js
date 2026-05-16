@@ -60,6 +60,11 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
       if (!r) continue;
       if (typeof r.score === 'number') {
         actual.push({ topic: competency, scorePct: Math.round(r.score), band: r.assessedBand || 'unknown' });
+      } else if (r.notTested) {
+        // Sentinel: user declared this topic but no questions were in the pool.
+        // Pass through so the client can render "Not tested" instead of silently
+        // dropping the row (which made 7/9 topics appear as "—").
+        actual.push({ topic: competency, scorePct: null, band: null, notTested: true });
       }
       if (typeof r.calibrationDelta === 'number' && r.calibrationDelta !== 0) {
         // calibrationClass enum: 'well-calibrated' | 'overestimates' | 'undersells'.

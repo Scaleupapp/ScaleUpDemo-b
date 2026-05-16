@@ -543,8 +543,26 @@ async function finishAttempt(attemptId) {
     }
   } catch (_) { /* fall back to canonical */ }
 
+  // Fill sentinel entries for topics the user declared interest in (via
+  // selfRatings) but that ended up with zero questions in the pool (bank
+  // empty + LLM gen failed). Without this, the calibration screen can't
+  // distinguish "untested" from "data missing", leaving the user confused
+  // why most topics show no score.
+  for (const [canonical] of ratingsMap.entries()) {
+    if (!byCanonical.has(canonical)) {
+      byCanonical.set(canonical, { correct: 0, total: 0, notTested: true });
+    }
+  }
+
   // Spec §10.2 — use calibration utility for delta/class consistency
   for (const [canonical, stats] of byCanonical.entries()) {
+    if (stats.notTested) {
+      attempt.results.set(canonical, {
+        questionsAsked: 0,
+        notTested: true,
+      });
+      continue;
+    }
     const score = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
     const band = calibration.scoreToBand(score).toLowerCase();
     // selfRatings stored lowercase per Plan 2a — calibration utility is case-insensitive
