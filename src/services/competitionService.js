@@ -210,10 +210,19 @@ class CompetitionService {
     for (const answer of attempt.answers) {
       let canonicalQuestionIdx = answer.questionIndex;
       let canonicalLabel = answer.selectedAnswer;
-      if (shuffle.questionOrder.length === challenge.questions.length && shuffle.optionLabelMap.length > 0) {
-        const t = shuffleService.translateAnswer(shuffle, answer.questionIndex, answer.selectedAnswer);
-        canonicalQuestionIdx = t.originalQuestionIdx;
-        canonicalLabel = t.originalLabel;
+      if (shuffle.questionOrder.length === challenge.questions.length && answer.selectedAnswer) {
+        if (shuffle.optionLabelMap.length > 0) {
+          // New per-user shuffle path.
+          const t = shuffleService.translateAnswer(shuffle, answer.questionIndex, answer.selectedAnswer);
+          canonicalQuestionIdx = t.originalQuestionIdx;
+          canonicalLabel = t.originalLabel;
+        } else if (attempt.optionOrders && attempt.optionOrders.length === challenge.questions.length) {
+          // Legacy path: attempt was started before the per-user shuffle migration.
+          canonicalQuestionIdx = attempt.questionOrder[answer.questionIndex];
+          const optOrder = attempt.optionOrders[answer.questionIndex];
+          const ansIdx = ['A', 'B', 'C', 'D'].indexOf(answer.selectedAnswer);
+          canonicalLabel = optOrder && optOrder[ansIdx] ? optOrder[ansIdx] : null;
+        }
       }
       const question = challenge.questions[canonicalQuestionIdx];
       if (canonicalLabel === question.correctAnswer) correct++;
@@ -376,16 +385,18 @@ class CompetitionService {
         const shuffle = hasShuffle
           ? { questionOrder: attempt.questionOrder, optionLabelMap: attempt.optionLabelMap }
           : null;
-        return attempt.answers.filter((a, idx) => {
-          const origIdx = attempt.questionOrder[idx];
+        return attempt.answers.filter((a) => {
+          if (!a.selectedAnswer) return false;
+          const origIdx = attempt.questionOrder[a.questionIndex];
           const q = challenge.questions[origIdx];
           if (shuffle) {
-            const t = shuffleService.translateAnswer(shuffle, idx, a.selectedAnswer);
+            const t = shuffleService.translateAnswer(shuffle, a.questionIndex, a.selectedAnswer);
             return t.originalLabel === q.correctAnswer;
           }
-          const optOrder = attempt.optionOrders[idx];
+          // Legacy: pre-shuffle attempts used optionOrders[questionIndex] as the mapping.
+          const optOrder = attempt.optionOrders[a.questionIndex];
           const ansIdx = ['A', 'B', 'C', 'D'].indexOf(a.selectedAnswer);
-          return optOrder[ansIdx] === q.correctAnswer;
+          return optOrder && optOrder[ansIdx] === q.correctAnswer;
         }).length;
       })(),
       total: challenge.questions.length,
