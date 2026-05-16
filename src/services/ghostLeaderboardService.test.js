@@ -35,10 +35,13 @@ test('compose: ghosts never occupy #1 when real entries exist', () => {
     `top spot should be a real user when reals exist; got ${JSON.stringify(out[0])}`);
 });
 
-test('compose: sorts by handicappedScore descending', () => {
+test('compose: sorts by handicappedScore descending from position 1', () => {
   const real = [{ userId: 'u1', handicappedScore: 50, ghostKind: null }];
   const out = svc.compose({ cohort, realEntries: real, weekStart: new Date('2026-05-11') });
-  for (let i = 1; i < out.length; i++) {
+  // Position 0 is reserved by the #1-honesty rule for the top real user
+  // even when ghosts have higher scores. From position 1 onwards the list
+  // is sorted descending.
+  for (let i = 2; i < out.length; i++) {
     assert.ok(out[i - 1].handicappedScore >= out[i].handicappedScore,
       `unsorted at ${i}: ${out[i-1].handicappedScore} < ${out[i].handicappedScore}`);
   }

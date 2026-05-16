@@ -52,15 +52,14 @@ function compose({ cohort, realEntries, weekStart }) {
   let combined = [...reals, ...ghosts].sort((a, b) => b.handicappedScore - a.handicappedScore);
 
   // #1 honesty rule: if a ghost outranks the top real and reals exist,
-  // promote the top real to position 0, boosting its displayed score to match
-  // the top ghost so the descending-sort invariant is preserved.
+  // promote the top real (by score) to position 0. The user's actual
+  // score is preserved — the leaderboard above position 0 may show
+  // higher-scoring ghosts at positions 1+, which is correct behavior.
   if (reals.length > 0 && combined[0].ghostKind != null) {
-    const topGhostScore = combined[0].handicappedScore;
     const topRealIdx = combined.findIndex(e => e.ghostKind == null);
     if (topRealIdx > 0) {
       const [topReal] = combined.splice(topRealIdx, 1);
-      combined.sort((a, b) => b.handicappedScore - a.handicappedScore);
-      combined.unshift({ ...topReal, handicappedScore: Math.max(topReal.handicappedScore, topGhostScore) });
+      combined.unshift(topReal);
     }
   }
 
