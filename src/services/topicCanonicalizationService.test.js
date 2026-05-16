@@ -1,13 +1,19 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-// Stub openai before requiring the service.
+// Stub openai before requiring the service. Guarded so we don't clobber
+// a stub installed by a sibling test file when run together via the
+// project's test runner (scripts/run-tests.js).
 const openaiPath = require.resolve('../config/openai');
-let mockOpenAICreate;
-require.cache[openaiPath] = {
-  exports: { chat: { completions: { create: (...args) => mockOpenAICreate(...args) } } },
-  loaded: true, id: openaiPath,
-};
+// Safe default — if a test runs before any explicit override, calls
+// resolve to an empty choices array instead of throwing.
+let mockOpenAICreate = async () => ({ choices: [] });
+if (!require.cache[openaiPath]) {
+  require.cache[openaiPath] = {
+    exports: { chat: { completions: { create: (...args) => mockOpenAICreate(...args) } } },
+    loaded: true, id: openaiPath,
+  };
+}
 
 const svc = require('./topicCanonicalizationService');
 
