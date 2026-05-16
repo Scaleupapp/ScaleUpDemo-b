@@ -253,24 +253,13 @@ const getRelevantForUser = async (req, res, next) => {
     const UserObjective = require('../models/UserObjective');
     const DailyChallenge = require('../models/DailyChallenge');
 
-    // Resolve the user's primary objective topic (re-uses the same logic
-    // getObjectiveTopic exposes — duplicated inline so we make one DB hit).
+    // Resolve the user's primary objective topic via canonicalTopic (single DB hit).
     const objective = await UserObjective.findOne(
       { userId: req.user.userId, status: 'active', isPrimary: true },
-      { objectiveType: 1, specifics: 1, topicsOfInterest: 1 }
+      { canonicalTopic: 1, objectiveType: 1 }
     ).lean();
 
-    let objectiveTopic = null;
-    if (objective) {
-      switch (objective.objectiveType) {
-        case 'upskilling':            objectiveTopic = objective.specifics?.targetSkill; break;
-        case 'interview_preparation': objectiveTopic = objective.specifics?.targetRole;  break;
-        case 'exam_preparation':      objectiveTopic = objective.specifics?.examName;    break;
-        case 'career_switch':         objectiveTopic = objective.specifics?.toDomain;    break;
-        default:                      objectiveTopic = objective.topicsOfInterest?.[0];
-      }
-    }
-    const objectiveTopicLower = (objectiveTopic || '').toLowerCase();
+    const canonicalTopic = objective?.canonicalTopic || null;
 
     // Today's challenges + upcoming events in parallel.
     const [allToday, upcomingEvents] = await Promise.all([
@@ -280,11 +269,11 @@ const getRelevantForUser = async (req, res, next) => {
         : Promise.resolve([]),
     ]);
 
-    // Prefer the challenge that matches the user's objective topic — falls
-    // back to any active challenge so we always offer something.
-    const matchByTopic = (allToday || []).find(c =>
-      c.topic && objectiveTopicLower && c.topic.toLowerCase().includes(objectiveTopicLower)
-    );
+    // Prefer the challenge whose topic exactly matches the user's canonicalTopic
+    // — falls back to any active challenge so we always offer something.
+    const matchByTopic = canonicalTopic
+      ? (allToday || []).find(c => c.topic === canonicalTopic)
+      : null;
     const challenge = matchByTopic || (allToday && allToday[0]) || null;
 
     // Has the user already attempted today's challenge? (only meaningful when
@@ -297,6 +286,21 @@ const getRelevantForUser = async (req, res, next) => {
       }));
     }
 
+    // Cohort hints surfaced under the iOS challenge card.
+    const CohortDirectory = require('../models/CohortDirectory');
+    let cohortMemberCount = 0;
+    let cohortPlayedToday = 0;
+    if (canonicalTopic) {
+      const dir = await CohortDirectory.findOne({ canonicalTopic }).select('memberCount').lean();
+      cohortMemberCount = dir?.memberCount || 0;
+      if (challenge) {
+        const ChallengeAttempt = require('../models/ChallengeAttempt');
+        cohortPlayedToday = await ChallengeAttempt.countDocuments({
+          challengeId: challenge._id, status: 'completed',
+        });
+      }
+    }
+
     // Status flag for the iOS waiting screen. challenge=null means today's
     // batch hasn't been generated yet (cron hasn't fired, or the topic pool
     // is empty for this user's objective).
@@ -306,8 +310,10 @@ const getRelevantForUser = async (req, res, next) => {
 
     return res.json(apiResponse.success({
       status,
-      objectiveTopic: objectiveTopic || null,
+      objectiveTopic: canonicalTopic,
       topicMatch: !!matchByTopic,
+      cohortMemberCount,
+      cohortPlayedToday,
       todayChallenge: challenge ? {
         _id: challenge._id,
         title: challenge.title,
