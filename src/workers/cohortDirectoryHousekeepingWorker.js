@@ -16,6 +16,47 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 async function run() {
   const t0 = Date.now();
 
+  // Retry any UserObjective rows where the pre-save canonicalizer fell
+  // back (LLM unavailable, etc.) — these are flagged needsReview=true.
+  // Cap at 200 per pass so a single nightly run can't blow the LLM budget.
+  const topicCanonicalizationService = require('../services/topicCanonicalizationService');
+  const flagged = await UserObjective.find(
+    { canonicalTopic_needsReview: true, status: 'active' },
+    { _id: 1, objectiveType: 1, specifics: 1, topicsOfInterest: 1 }
+  ).limit(200).lean();
+
+  let retried = 0;
+  let retryResolved = 0;
+  for (const obj of flagged) {
+    retried++;
+    const derivedRaw =
+      obj.specifics?.targetRole ||
+      obj.specifics?.examName ||
+      obj.specifics?.targetSkill ||
+      obj.specifics?.toDomain ||
+      (obj.topicsOfInterest && obj.topicsOfInterest[0]) ||
+      obj.objectiveType;
+    try {
+      const r = await topicCanonicalizationService.canonicalize(derivedRaw, obj.objectiveType);
+      await UserObjective.updateOne(
+        { _id: obj._id },
+        {
+          $set: {
+            canonicalTopic: r.canonicalTopic,
+            canonicalTopic_needsReview: r.source === 'fallback',
+            canonicalTopic_lastResolvedAt: new Date(),
+          },
+        }
+      );
+      if (r.source !== 'fallback') retryResolved++;
+    } catch (err) {
+      console.warn(`[Housekeeping retry] ${obj._id} failed: ${err.message}`);
+    }
+  }
+  if (retried > 0) {
+    console.log(`[CohortDirectoryHousekeeping] retry pass: ${retryResolved}/${retried} resolved`);
+  }
+
   const memberAgg = await UserObjective.aggregate([
     { $match: { status: 'active', isPrimary: true, canonicalTopic: { $exists: true, $ne: null, $ne: '' } } },
     { $group: { _id: '$canonicalTopic', count: { $sum: 1 } } },
