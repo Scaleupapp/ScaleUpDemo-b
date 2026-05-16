@@ -1,5 +1,5 @@
 const openai = require('../config/openai');
-const { CANONICAL_TOPICS, topicsForObjectiveType, findBySlug } = require('../config/canonicalTopics');
+const { topicsForObjectiveType } = require('../config/canonicalTopics');
 const normalizeTopic = require('../utils/normalizeTopic');
 
 const CACHE_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
@@ -19,7 +19,17 @@ function _cacheGet(key) {
   return entry.value;
 }
 
+function _sweepExpired() {
+  const now = Date.now();
+  for (const [k, v] of _cache) {
+    if (v.expiresAt < now) _cache.delete(k);
+  }
+}
+
 function _cacheSet(key, value) {
+  // Sweep expired entries first so the size check + eviction doesn't
+  // count dead rows. Cheap at our scale (cap 5000) and called only on writes.
+  _sweepExpired();
   if (_cache.size >= CACHE_MAX_ENTRIES) {
     // Simple eviction: drop the oldest 10%.
     const drop = Math.floor(CACHE_MAX_ENTRIES * 0.1);
@@ -97,7 +107,7 @@ async function canonicalize(rawText, objectiveType) {
   // Validate the returned slug against the allowed taxonomy for this type.
   const allowed = new Set(topicsForObjectiveType(objectiveType).map(t => t.slug));
   if (!allowed.has(parsed.canonicalTopic)) {
-    const result = { canonicalTopic: 'general-learning', confidence: Number(parsed.confidence) || 0.3, source: 'llm-coerced' };
+    const result = { canonicalTopic: 'general-learning', confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0.3)), source: 'llm-coerced' };
     _cacheSet(cacheKey, result);
     return result;
   }
