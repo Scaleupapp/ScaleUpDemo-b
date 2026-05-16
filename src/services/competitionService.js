@@ -71,28 +71,54 @@ class CompetitionService {
     const attempt = await ChallengeAttempt.findOne({ userId, challengeId, completedAt: { $ne: null } });
     if (!attempt) throw new Error('No completed attempt found');
 
+    const shuffleService = require('./challengeShuffleService');
+    const hasShuffle = attempt.optionLabelMap && attempt.optionLabelMap.length > 0;
+    const shuffle = hasShuffle
+      ? { questionOrder: attempt.questionOrder, optionLabelMap: attempt.optionLabelMap }
+      : null;
+
     // Walk questions in the randomized order so indices match the user's answers
     const questions = attempt.questionOrder.map((origIdx, displayIdx) => {
       const q = challenge.questions[origIdx];
       const userAnswer = attempt.answers.find(a => a.questionIndex === displayIdx);
-      const optOrder = attempt.optionOrders[displayIdx];
 
       // De-randomize the user's selected answer back to the original label
       let isCorrect = false;
       let originalSelectedLabel = null;
       if (userAnswer?.selectedAnswer && userAnswer.selectedAnswer !== 'skipped') {
-        const ansIdx = ['A', 'B', 'C', 'D'].indexOf(userAnswer.selectedAnswer);
-        if (ansIdx >= 0) {
-          originalSelectedLabel = optOrder[ansIdx];
-          isCorrect = originalSelectedLabel === q.correctAnswer;
+        if (shuffle) {
+          const t = shuffleService.translateAnswer(shuffle, displayIdx, userAnswer.selectedAnswer);
+          originalSelectedLabel = t.originalLabel;
+        } else {
+          // Legacy: use optionOrders
+          const optOrder = attempt.optionOrders[displayIdx];
+          const ansIdx = ['A', 'B', 'C', 'D'].indexOf(userAnswer.selectedAnswer);
+          if (ansIdx >= 0) originalSelectedLabel = optOrder[ansIdx];
         }
+        if (originalSelectedLabel) isCorrect = originalSelectedLabel === q.correctAnswer;
       }
 
-      // Return options in the randomized order the user saw them
-      const shuffledOptions = optOrder.map((label, i) => {
-        const opt = q.options.find(o => o.label === label);
-        return { label: ['A', 'B', 'C', 'D'][i], text: opt?.text || '' };
-      });
+      // Return options in the shuffled order the user saw them
+      let shuffledOptions;
+      if (shuffle) {
+        const map = shuffle.optionLabelMap[origIdx];
+        // map[canonicalLabel] = userFacingLabel; build options with user-facing labels sorted A/B/C/D
+        shuffledOptions = q.options.map(opt => ({
+          label: map[opt.label],
+          text: opt.text,
+        })).sort((a, b) => ['A', 'B', 'C', 'D'].indexOf(a.label) - ['A', 'B', 'C', 'D'].indexOf(b.label));
+      } else {
+        const optOrder = attempt.optionOrders[displayIdx];
+        shuffledOptions = optOrder.map((label, i) => {
+          const opt = q.options.find(o => o.label === label);
+          return { label: ['A', 'B', 'C', 'D'][i], text: opt?.text || '' };
+        });
+      }
+
+      // correctAnswer in user-facing label space
+      const correctAnswerUserFacing = shuffle
+        ? shuffle.optionLabelMap[origIdx][q.correctAnswer]
+        : ['A', 'B', 'C', 'D'][attempt.optionOrders[displayIdx].indexOf(q.correctAnswer)];
 
       return {
         questionIndex: displayIdx,
@@ -100,7 +126,7 @@ class CompetitionService {
         concept: q.concept || null,
         options: shuffledOptions,
         selectedAnswer: userAnswer?.selectedAnswer || null,
-        correctAnswer: ['A', 'B', 'C', 'D'][optOrder.indexOf(q.correctAnswer)],
+        correctAnswer: correctAnswerUserFacing,
         isCorrect,
         explanation: q.explanation || null,
         timeSpent: userAnswer?.timeSpent || 0,
@@ -132,29 +158,26 @@ class CompetitionService {
       throw new Error('Already attempted this challenge');
     }
 
-    const questionOrder = this.generateQuestionOrder(userId, challengeId, challenge.questions.length);
-    const optionOrders = this.generateOptionOrders(userId, challengeId, challenge.questions);
+    const shuffleService = require('./challengeShuffleService');
+    const shuffle = shuffleService.buildShuffle(
+      userId.toString(),
+      challengeId.toString(),
+      challenge.questions.length
+    );
 
     const attempt = await ChallengeAttempt.create({
-      userId, challengeId, questionOrder, optionOrders, answers: [],
+      userId,
+      challengeId,
+      questionOrder: shuffle.questionOrder,
+      optionLabelMap: shuffle.optionLabelMap,
+      answers: [],
     });
 
     await DailyChallenge.findByIdAndUpdate(challengeId, { $inc: { participantCount: 1 } });
 
-    const randomizedQuestions = questionOrder.map((origIdx, newIdx) => {
-      const q = challenge.questions[origIdx];
-      const optOrder = optionOrders[newIdx];
-      const shuffledOptions = optOrder.map(label => q.options.find(o => o.label === label));
-      return {
-        questionIndex: newIdx,
-        questionText: q.questionText,
-        questionType: q.questionType,
-        concept: q.concept,
-        options: shuffledOptions.map((opt, i) => ({ label: ['A', 'B', 'C', 'D'][i], text: opt.text })),
-      };
-    });
+    const serveQuestions = shuffleService.applyShuffleForServe(challenge.questions, shuffle);
 
-    return { attemptId: attempt._id, questions: randomizedQuestions, timeLimitSeconds: challenge.timeLimitSeconds };
+    return { attemptId: attempt._id, questions: serveQuestions, timeLimitSeconds: challenge.timeLimitSeconds };
   }
 
   async submitAnswer(userId, challengeId, questionIndex, selectedAnswer, timeSpent) {
@@ -177,14 +200,23 @@ class CompetitionService {
     const topicMastery = profile?.topicMastery?.find(t => t.topic === challenge.topic);
     const userLevel = topicMastery?.level || 'beginner';
 
+    const shuffleService = require('./challengeShuffleService');
+    const shuffle = {
+      questionOrder: attempt.questionOrder || [],
+      optionLabelMap: attempt.optionLabelMap || [],
+    };
+
     let correct = 0;
     for (const answer of attempt.answers) {
-      const origQuestionIdx = attempt.questionOrder[answer.questionIndex];
-      const question = challenge.questions[origQuestionIdx];
-      const optOrder = attempt.optionOrders[answer.questionIndex];
-      const answerIdx = ['A', 'B', 'C', 'D'].indexOf(answer.selectedAnswer);
-      const originalLabel = optOrder[answerIdx];
-      if (originalLabel === question.correctAnswer) correct++;
+      let canonicalQuestionIdx = answer.questionIndex;
+      let canonicalLabel = answer.selectedAnswer;
+      if (shuffle.questionOrder.length === challenge.questions.length && shuffle.optionLabelMap.length > 0) {
+        const t = shuffleService.translateAnswer(shuffle, answer.questionIndex, answer.selectedAnswer);
+        canonicalQuestionIdx = t.originalQuestionIdx;
+        canonicalLabel = t.originalLabel;
+      }
+      const question = challenge.questions[canonicalQuestionIdx];
+      if (canonicalLabel === question.correctAnswer) correct++;
     }
 
     const handicappedScore = this.calculateScore(correct, userLevel);
@@ -338,13 +370,24 @@ class CompetitionService {
       handicappedScore: attempt.handicappedScore,
       timeTaken: attempt.timeTaken,
       isPersonalBest: attempt.isPersonalBest,
-      correct: attempt.answers.filter((a, idx) => {
-        const origIdx = attempt.questionOrder[idx];
-        const q = challenge.questions[origIdx];
-        const optOrder = attempt.optionOrders[idx];
-        const ansIdx = ['A', 'B', 'C', 'D'].indexOf(a.selectedAnswer);
-        return optOrder[ansIdx] === q.correctAnswer;
-      }).length,
+      correct: (() => {
+        const shuffleService = require('./challengeShuffleService');
+        const hasShuffle = attempt.optionLabelMap && attempt.optionLabelMap.length > 0;
+        const shuffle = hasShuffle
+          ? { questionOrder: attempt.questionOrder, optionLabelMap: attempt.optionLabelMap }
+          : null;
+        return attempt.answers.filter((a, idx) => {
+          const origIdx = attempt.questionOrder[idx];
+          const q = challenge.questions[origIdx];
+          if (shuffle) {
+            const t = shuffleService.translateAnswer(shuffle, idx, a.selectedAnswer);
+            return t.originalLabel === q.correctAnswer;
+          }
+          const optOrder = attempt.optionOrders[idx];
+          const ansIdx = ['A', 'B', 'C', 'D'].indexOf(a.selectedAnswer);
+          return optOrder[ansIdx] === q.correctAnswer;
+        }).length;
+      })(),
       total: challenge.questions.length,
       rank,
       percentile,

@@ -16,6 +16,7 @@ const challengeAttemptSchema = new mongoose.Schema({
   completedAt: { type: Date },
   questionOrder: [{ type: Number }],
   optionOrders: [[{ type: String }]],
+  optionLabelMap: { type: [mongoose.Schema.Types.Mixed], default: [] },
 }, { timestamps: true });
 
 challengeAttemptSchema.index({ userId: 1, challengeId: 1 }, { unique: true });
