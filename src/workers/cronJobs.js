@@ -113,6 +113,12 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 17. Cohort directory housekeeping — Daily 02:30 IST (21:00 UTC prev day).
+  cronQueue.add('cohortDirectoryHousekeeping', {}, {
+    repeat: { pattern: '0 21 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -212,6 +218,9 @@ function startCronJobs() {
         break;
       case 'dailyTopGapQuizzes':
         await runDailyTopGapQuizzes();
+        break;
+      case 'cohortDirectoryHousekeeping':
+        await require('./cohortDirectoryHousekeepingWorker').run();
         break;
     }
   }, { connection });
