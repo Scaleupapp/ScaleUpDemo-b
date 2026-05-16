@@ -6,6 +6,116 @@ const { journeyAdaptationQueue } = require('../config/queue');
 class KnowledgeService {
 
   /**
+   * Update topic mastery from a quiz-like attempt.
+   *
+   * This is the shared core used by updateFromQuizAttempt (source='quiz')
+   * and by completeChallenge (source='competition').  Callers that don't
+   * care about weighting can omit opts entirely — defaults preserve the
+   * existing 60/40 blend behaviour.
+   *
+   * @param {string} userId
+   * @param {Array<{topic: string, correct: number, total: number, percentage: number}>} topicBreakdown
+   * @param {{
+   *   source?: 'quiz'|'competition'|'interview',
+   *   weight?: number,
+   *   quizRef?: object,        // { _id, objectiveId, topic } — passed in by updateFromQuizAttempt
+   *   incrementQuizCount?: boolean,
+   *   triggerAdaptation?: boolean,
+   *   adaptationPayload?: object,
+   * }} [opts]
+   *   - source: documents where the update came from (logged only).
+   *   - weight: multiplier on the new-score contribution.
+   *       Defaults: quiz=1.0, interview=1.0, competition=0.5, unknown=1.0
+   *       At weight=1.0 the formula is the original 60% new / 40% old.
+   *       At weight=0.5 the new score pulls only half as hard:
+   *         blended = (newScore * 0.6 * w + oldScore * 0.4) / (0.6 * w + 0.4)
+   */
+  async updateMastery(userId, topicBreakdown, opts = {}) {
+    const source = opts.source || 'quiz';
+    const defaultWeight = source === 'competition' ? 0.5 : 1.0;
+    const weight = typeof opts.weight === 'number' ? opts.weight : defaultWeight;
+    const quizRef = opts.quizRef || null;        // { _id, objectiveId, topic }
+    const incrementQuizCount = opts.incrementQuizCount !== false;
+
+    console.log(`[KnowledgeService] updateMastery source=${source} weight=${weight} userId=${userId} topics=${topicBreakdown.length}`);
+
+    let profile = await KnowledgeProfile.findOne({ userId });
+    if (!profile) {
+      profile = await KnowledgeProfile.create({ userId, topicMastery: [], _processedAttempts: [] });
+    }
+
+    // Update per-topic mastery from the topic breakdown
+    for (const breakdown of (topicBreakdown || [])) {
+      const newScore = breakdown.percentage;
+      let topicEntry = profile.topicMastery.find(t => t.topic === breakdown.topic);
+
+      if (topicEntry) {
+        // Weighted blend: normally 60% new / 40% old.  The `weight` multiplier
+        // scales how much this attempt's score contributes to the blend.
+        // Formula: (newScore * 0.6 * w + oldScore * 0.4) / (0.6 * w + 0.4)
+        const oldScore = topicEntry.score;
+        const newContrib = 0.6 * weight;
+        topicEntry.score = Math.round((newScore * newContrib + oldScore * 0.4) / (newContrib + 0.4));
+        topicEntry.level = this._scoreToLevel(topicEntry.score);
+        topicEntry.quizzesTaken += 1;
+        topicEntry.lastAssessedAt = new Date();
+        topicEntry.scoreHistory.push({
+          score: newScore,
+          date: new Date(),
+          quizId: quizRef ? quizRef._id : null,
+          objectiveId: quizRef ? (quizRef.objectiveId || null) : null,
+          source,
+        });
+        // Keep last 20 history entries
+        if (topicEntry.scoreHistory.length > 20) {
+          topicEntry.scoreHistory = topicEntry.scoreHistory.slice(-20);
+        }
+        topicEntry.trend = this._calculateTrend(topicEntry.scoreHistory);
+      } else {
+        // First encounter: for weight < 1, scale the initial score proportionally
+        // so a low-confidence source doesn't anchor the topic at full value.
+        const initialScore = weight < 1.0 ? Math.round(newScore * weight) : newScore;
+        profile.topicMastery.push({
+          topic: breakdown.topic,
+          score: initialScore,
+          level: this._scoreToLevel(initialScore),
+          quizzesTaken: 1,
+          lastAssessedAt: new Date(),
+          scoreHistory: [{
+            score: newScore,
+            date: new Date(),
+            quizId: quizRef ? quizRef._id : null,
+            objectiveId: quizRef ? (quizRef.objectiveId || null) : null,
+            source,
+          }],
+          trend: 'stable',
+          objectiveId: quizRef ? (quizRef.objectiveId || null) : null,
+        });
+      }
+    }
+
+    // Recalculate aggregates
+    const allTopics = profile.topicMastery;
+    profile.totalTopicsCovered = allTopics.length;
+    if (incrementQuizCount) profile.totalQuizzesTaken += 1;
+    profile.overallScore = allTopics.length > 0
+      ? Math.round(allTopics.reduce((sum, t) => sum + t.score, 0) / allTopics.length)
+      : 0;
+    profile.strengths = allTopics
+      .filter(t => t.score >= 70)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10)
+      .map(t => t.topic);
+    profile.weaknesses = allTopics
+      .filter(t => t.score < 50 && t.quizzesTaken > 0)
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 10)
+      .map(t => t.topic);
+
+    return { profile, allTopics };
+  }
+
+  /**
    * Called after a quiz is scored (via quizAnalyzer worker).
    * Updates the user's KnowledgeProfile based on quiz results.
    */
@@ -28,87 +138,21 @@ class KnowledgeService {
       return profile;
     }
 
-    // Update per-topic mastery from the attempt's topic breakdown
-    for (const breakdown of (attempt.topicBreakdown || [])) {
-      const newScore = breakdown.percentage;
-      let topicEntry = profile.topicMastery.find(t => t.topic === breakdown.topic);
-
-      if (topicEntry) {
-        // Weighted average: 60% new score, 40% old score
-        const oldScore = topicEntry.score;
-        topicEntry.score = Math.round(newScore * 0.6 + oldScore * 0.4);
-        topicEntry.level = this._scoreToLevel(topicEntry.score);
-        topicEntry.quizzesTaken += 1;
-        topicEntry.lastAssessedAt = new Date();
-        topicEntry.scoreHistory.push({
-          score: newScore,
-          date: new Date(),
-          quizId: quiz._id,
-          objectiveId: quiz.objectiveId || null,
-        });
-        // Keep last 20 history entries
-        if (topicEntry.scoreHistory.length > 20) {
-          topicEntry.scoreHistory = topicEntry.scoreHistory.slice(-20);
-        }
-        topicEntry.trend = this._calculateTrend(topicEntry.scoreHistory);
-      } else {
-        profile.topicMastery.push({
-          topic: breakdown.topic,
-          score: newScore,
-          level: this._scoreToLevel(newScore),
-          quizzesTaken: 1,
-          lastAssessedAt: new Date(),
-          scoreHistory: [{ score: newScore, date: new Date(), quizId: quiz._id, objectiveId: quiz.objectiveId || null }],
-          trend: 'stable',
-          objectiveId: quiz.objectiveId || null,
-        });
-      }
-    }
-
-    // Also update for the quiz's main topic if not already covered
+    // Build the full topicBreakdown: per-topic rows + quiz main topic if missing
+    let breakdown = [...(attempt.topicBreakdown || [])];
     const mainTopic = quiz.topic;
-    if (mainTopic && !attempt.topicBreakdown?.some(t => t.topic === mainTopic)) {
-      let topicEntry = profile.topicMastery.find(t => t.topic === mainTopic);
+    if (mainTopic && !breakdown.some(t => t.topic === mainTopic)) {
       const score = attempt.score?.percentage || 0;
-
-      if (topicEntry) {
-        topicEntry.score = Math.round(score * 0.6 + topicEntry.score * 0.4);
-        topicEntry.level = this._scoreToLevel(topicEntry.score);
-        topicEntry.quizzesTaken += 1;
-        topicEntry.lastAssessedAt = new Date();
-        topicEntry.scoreHistory.push({ score, date: new Date(), quizId: quiz._id, objectiveId: quiz.objectiveId || null });
-        topicEntry.trend = this._calculateTrend(topicEntry.scoreHistory);
-      } else {
-        profile.topicMastery.push({
-          topic: mainTopic,
-          score,
-          level: this._scoreToLevel(score),
-          quizzesTaken: 1,
-          lastAssessedAt: new Date(),
-          scoreHistory: [{ score, date: new Date(), quizId: quiz._id, objectiveId: quiz.objectiveId || null }],
-          trend: 'stable',
-          objectiveId: quiz.objectiveId || null,
-        });
-      }
+      breakdown.push({ topic: mainTopic, correct: 0, total: 0, percentage: score });
     }
 
-    // Recalculate aggregates
-    const allTopics = profile.topicMastery;
-    profile.totalTopicsCovered = allTopics.length;
-    profile.totalQuizzesTaken += 1;
-    profile.overallScore = allTopics.length > 0
-      ? Math.round(allTopics.reduce((sum, t) => sum + t.score, 0) / allTopics.length)
-      : 0;
-    profile.strengths = allTopics
-      .filter(t => t.score >= 70)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10)
-      .map(t => t.topic);
-    profile.weaknesses = allTopics
-      .filter(t => t.score < 50 && t.quizzesTaken > 0)
-      .sort((a, b) => a.score - b.score)
-      .slice(0, 10)
-      .map(t => t.topic);
+    // Delegate to updateMastery (source='quiz', weight=1.0 — original behaviour)
+    ({ profile } = await this.updateMastery(userId, breakdown, {
+      source: 'quiz',
+      weight: 1.0,
+      quizRef: { _id: quiz._id, objectiveId: quiz.objectiveId, topic: quiz.topic },
+      incrementQuizCount: true,
+    }));
 
     // ── Compute Learning Velocity ────────────────────────────────────
     await this._computeLearningVelocity(profile, userId);
