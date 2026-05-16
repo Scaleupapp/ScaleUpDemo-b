@@ -22,16 +22,13 @@ const competitionWorker = new Worker('competition', async (job) => {
 
       // Send notifications for activated daily challenges
       const UserObjective = require('../models/UserObjective');
-      const normalizeTopic = require('../utils/normalizeTopic');
-      const challengeGenService = require('../services/challengeGenerationService');
       for (const { topic, challengeId } of result.daily) {
-        const allObjectives = await UserObjective.find(
-          { status: 'active' },
-          { objectiveType: 1, specifics: 1, topicsOfInterest: 1, userId: 1 }
-        ).lean();
-        const matchingUserIds = allObjectives
-          .filter(obj => normalizeTopic(challengeGenService._deriveObjectiveTopic(obj)) === topic)
-          .map(obj => obj.userId);
+        const matchingObjectives = await UserObjective.find({
+          status: 'active',
+          isPrimary: true,
+          canonicalTopic: topic,
+        }, { userId: 1 }).lean();
+        const matchingUserIds = matchingObjectives.map(obj => obj.userId);
         for (const userId of matchingUserIds) {
           await notificationQueue.add('send', {
             userId: userId.toString(),
@@ -238,16 +235,13 @@ const competitionWorker = new Worker('competition', async (job) => {
         },
       });
       const UserObjective2 = require('../models/UserObjective');
-      const normalizeTopic2 = require('../utils/normalizeTopic');
-      const challengeGenService2 = require('../services/challengeGenerationService');
       for (const event of events) {
-        const allObjectives = await UserObjective2.find(
-          { status: 'active' },
-          { objectiveType: 1, specifics: 1, topicsOfInterest: 1, userId: 1 }
-        ).lean();
-        const matchingUserIds = allObjectives
-          .filter(obj => normalizeTopic2(challengeGenService2._deriveObjectiveTopic(obj)) === event.topic)
-          .map(obj => obj.userId);
+        const matchingObjectives2 = await UserObjective2.find({
+          status: 'active',
+          isPrimary: true,
+          canonicalTopic: event.topic,
+        }, { userId: 1 }).lean();
+        const matchingUserIds = matchingObjectives2.map(obj => obj.userId);
         for (const userId of matchingUserIds) {
           await notificationQueue.add('send', {
             userId: userId.toString(),

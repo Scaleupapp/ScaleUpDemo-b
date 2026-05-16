@@ -282,7 +282,7 @@ const getRelevantForUser = async (req, res, next) => {
     if (challenge) {
       const ChallengeAttempt = require('../models/ChallengeAttempt');
       alreadyPlayed = !!(await ChallengeAttempt.exists({
-        userId: req.user.userId, challengeId: challenge._id, status: 'completed',
+        userId: req.user.userId, challengeId: challenge._id, completedAt: { $ne: null },
       }));
     }
 
@@ -296,7 +296,7 @@ const getRelevantForUser = async (req, res, next) => {
       if (challenge) {
         const ChallengeAttempt = require('../models/ChallengeAttempt');
         cohortPlayedToday = await ChallengeAttempt.countDocuments({
-          challengeId: challenge._id, status: 'completed',
+          challengeId: challenge._id, completedAt: { $ne: null },
         });
       }
     }

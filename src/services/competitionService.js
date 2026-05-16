@@ -369,8 +369,18 @@ class CompetitionService {
         topic,
         weekStart: ws,
         weekEnd,
-        entries: composed,
-        totalParticipants: board ? (board.participantCount ?? board.totalParticipants ?? rawEntries.length) : 0,
+        entries: composed.map(e => ({
+          userId: e.ghostKind
+            ? { _id: e.userId, firstName: null, lastName: null, username: e.displayName, profilePicture: null }
+            : e.userId,
+          totalHandicappedScore: e.handicappedScore,
+          challengesCompleted: e.ghostKind ? 1 : (e.challengesCompleted ?? 1),
+          bestDayScore: e.handicappedScore,
+          ghostKind: e.ghostKind,
+          displayName: e.displayName,
+        })),
+        finalized: board ? (board.finalized ?? false) : false,
+        participantCount: realRows.length,
       };
     }
 
