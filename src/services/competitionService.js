@@ -274,6 +274,55 @@ class CompetitionService {
       console.warn('[competitionService] planProgressService.onCompetitionPlayed failed:', err.message);
     }
 
+    // Bridge competition result → KnowledgeProfile mastery so completing
+    // a challenge visibly moves the Home readiness number.
+    try {
+      const knowledgeService = require('./knowledgeService');
+      const byConcept = new Map();
+      for (const answer of attempt.answers) {
+        let canonicalQuestionIdx = answer.questionIndex;
+        let canonicalLabel = answer.selectedAnswer;
+        if (shuffle.questionOrder.length === challenge.questions.length && answer.selectedAnswer) {
+          if (shuffle.optionLabelMap.length > 0) {
+            const t = shuffleService.translateAnswer(shuffle, answer.questionIndex, answer.selectedAnswer);
+            canonicalQuestionIdx = t.originalQuestionIdx;
+            canonicalLabel = t.originalLabel;
+          } else if (attempt.optionOrders && attempt.optionOrders.length === challenge.questions.length) {
+            canonicalQuestionIdx = attempt.questionOrder[answer.questionIndex];
+            const optOrder = attempt.optionOrders[answer.questionIndex];
+            const ansIdx = ['A', 'B', 'C', 'D'].indexOf(answer.selectedAnswer);
+            canonicalLabel = optOrder && optOrder[ansIdx] ? optOrder[ansIdx] : null;
+          }
+        }
+        const q = challenge.questions[canonicalQuestionIdx];
+        if (!q) continue;
+        const conceptKey = (q.concept || challenge.topic || '').toString();
+        if (!conceptKey) continue;
+        const isCorrect = canonicalLabel === q.correctAnswer;
+        const entry = byConcept.get(conceptKey) || { topic: conceptKey, correct: 0, total: 0 };
+        entry.total += 1;
+        if (isCorrect) entry.correct += 1;
+        byConcept.set(conceptKey, entry);
+      }
+      const topicBreakdown = [...byConcept.values()].map(e => ({
+        ...e,
+        percentage: e.total ? Math.round((e.correct / e.total) * 100) : 0,
+      }));
+      if (topicBreakdown.length > 0) {
+        await knowledgeService.updateMastery(userId, topicBreakdown, {
+          source: 'competition',
+          weight: 0.5,
+        });
+      }
+
+      // Also bump CohortDirectory.weeklyAttempts so the directory stays warm.
+      const cohortDirectoryService = require('./cohortDirectoryService');
+      await cohortDirectoryService.recordAttempt(challenge.topic).catch(() => null);
+    } catch (err) {
+      // Non-fatal — the user has already finished, scoring is persisted.
+      console.warn('[completeChallenge] mastery bridge failed:', err.message);
+    }
+
     return {
       handicappedScore, timeTaken, isPersonalBest,
       correct, total: challenge.questions.length,
