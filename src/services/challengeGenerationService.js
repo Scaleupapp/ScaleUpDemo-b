@@ -52,14 +52,25 @@ class ChallengeGenerationService {
 
     const today = this._todayIST();
 
-    // Generate display titles for all topics in parallel
+    // Use cached displayName from CohortDirectory when present; otherwise
+    // call the LLM titler and write the result back so we never re-pay.
+    const CohortDirectory = require('../models/CohortDirectory');
     const titleMap = {};
     await Promise.all(objectives.map(async (objective) => {
       try {
-        titleMap[objective] = await this._generateDisplayTitle(objective);
+        const dir = await CohortDirectory.findOne({ canonicalTopic: objective }).select('displayName').lean();
+        if (dir?.displayName && dir.displayName !== objective) {
+          titleMap[objective] = dir.displayName;
+        } else {
+          titleMap[objective] = await this._generateDisplayTitle(objective);
+          await CohortDirectory.updateOne(
+            { canonicalTopic: objective },
+            { $set: { displayName: titleMap[objective] } }
+          );
+        }
       } catch (err) {
-        console.error(`[ChallengeGen] Title generation failed for "${objective}":`, err.message);
-        titleMap[objective] = this._fallbackTitleCase(objective);
+        console.warn(`[ChallengeGen] title failed for ${objective}: ${err.message}`);
+        titleMap[objective] = objective;
       }
     }));
 
@@ -79,6 +90,11 @@ class ChallengeGenerationService {
           activatesAt: today,
           closesAt: new Date(today.getTime() + 24 * 60 * 60 * 1000 - 1),
         });
+
+        await CohortDirectory.updateOne(
+          { canonicalTopic: objective },
+          { $set: { lastChallengeDate: today } }
+        ).catch(() => null);
 
         results.daily.push({ topic: objective, challengeId: challenge._id });
         console.log(`[ChallengeGen] Daily challenge created for "${objective}" → "${titleMap[objective]}"`);
@@ -143,17 +159,12 @@ class ChallengeGenerationService {
   }
 
   async _getActiveObjectives() {
-    const objectives = await UserObjective.find(
-      { status: 'active' },
-      { objectiveType: 1, specifics: 1, topicsOfInterest: 1 }
+    const CohortDirectory = require('../models/CohortDirectory');
+    const docs = await CohortDirectory.find(
+      { isActive: true, memberCount: { $gt: 0 } },
+      { canonicalTopic: 1, displayName: 1 }
     ).lean();
-
-    const topics = new Set();
-    for (const obj of objectives) {
-      const topic = normalizeTopic(this._deriveObjectiveTopic(obj));
-      if (topic) topics.add(topic);
-    }
-    return [...topics];
+    return docs.map(d => d.canonicalTopic);
   }
 
   async _getSubTopicsForObjective(objective) {
