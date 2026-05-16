@@ -287,6 +287,44 @@ class CompetitionService {
     const ws = weekStart || this._currentWeekStartIST();
     const board = await WeeklyLeaderboard.findOne({ topic, weekStart: ws })
       .populate('entries.userId', 'firstName lastName username profilePicture');
+
+    // Ghost composition: only when a CohortDirectory entry exists for this topic.
+    const ghostLeaderboardService = require('./ghostLeaderboardService');
+    const CohortDirectory = require('../models/CohortDirectory');
+    const cohort = await CohortDirectory.findOne({ canonicalTopic: topic }).lean();
+    if (cohort) {
+      const weekEnd = board
+        ? board.weekEnd
+        : new Date(ws.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+      const rawEntries = board ? board.entries : [];
+      const realRows = rawEntries.map(r => {
+        const user = r.userId && typeof r.userId === 'object' ? r.userId : null;
+        const displayName = user
+          ? (user.firstName && user.lastName
+              ? `${user.firstName} ${user.lastName}`
+              : user.username || 'Unknown')
+          : 'Unknown';
+        return {
+          userId: String(r.userId?._id ?? r.userId),
+          handicappedScore: r.totalHandicappedScore ?? r.handicappedScore ?? 0,
+          displayName,
+          ghostKind: null,
+        };
+      });
+      const composed = ghostLeaderboardService.compose({
+        cohort,
+        realEntries: realRows,
+        weekStart: ws,
+      });
+      return {
+        topic,
+        weekStart: ws,
+        weekEnd,
+        entries: composed,
+        totalParticipants: board ? (board.participantCount ?? board.totalParticipants ?? rawEntries.length) : 0,
+      };
+    }
+
     if (board) return board;
 
     // No board exists yet this week — return a well-formed empty shell so the
