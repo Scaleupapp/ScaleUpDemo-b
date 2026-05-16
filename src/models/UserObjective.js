@@ -147,6 +147,8 @@ userObjectiveSchema.pre('save', async function preResolveCanonicalTopic(next) {
       return next();
     }
     const topicCanonicalizationService = require('../services/topicCanonicalizationService');
+    const cohortDirectoryService = require('../services/cohortDirectoryService');
+
     const derivedRaw =
       this.specifics?.targetRole ||
       this.specifics?.examName ||
@@ -154,10 +156,21 @@ userObjectiveSchema.pre('save', async function preResolveCanonicalTopic(next) {
       this.specifics?.toDomain ||
       (this.topicsOfInterest && this.topicsOfInterest[0]) ||
       this.objectiveType;
+
+    const oldCanonical = this.canonicalTopic;
     const result = await topicCanonicalizationService.canonicalize(derivedRaw, this.objectiveType);
     this.canonicalTopic = result.canonicalTopic;
     this.canonicalTopic_needsReview = result.source === 'fallback';
     this.canonicalTopic_lastResolvedAt = new Date();
+
+    // Directory bookkeeping — only when the canonical topic actually changes
+    // and only for primary+active objectives (they're the cohort-eligible ones).
+    if (this.status === 'active' && this.isPrimary && this.canonicalTopic !== oldCanonical) {
+      if (oldCanonical) {
+        await cohortDirectoryService.recordMemberLeave(oldCanonical).catch(() => null);
+      }
+      await cohortDirectoryService.recordMemberJoin(this.canonicalTopic, this.objectiveType).catch(() => null);
+    }
     return next();
   } catch (err) {
     // Non-fatal: log and proceed. The lazy backfill or housekeeping job
