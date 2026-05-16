@@ -60,7 +60,7 @@ class QuizTriggerService {
   /**
    * On-demand quiz request from the user.
    */
-  async triggerOnDemand(userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment }) {
+  async triggerOnDemand(userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective }) {
     // Validate and cap question count (1-20, default decided by generation service)
     const validatedCount = questionCount ? Math.min(Math.max(Math.round(Number(questionCount)), 1), 20) : undefined;
 
@@ -97,6 +97,7 @@ class QuizTriggerService {
       assessmentType: assessmentType || undefined,
       objectiveId: objectiveId || undefined,
       isSkillAssessment: isSkillAssessment || false,
+      noObjective: noObjective === true,
     }, {
       attempts: 2,
       backoff: { type: 'exponential', delay: 10000 },

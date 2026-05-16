@@ -28,15 +28,15 @@ const getHistory = async (req, res, next) => {
   try {
     const attempts = await QuizAttempt.find({ userId: req.user.userId, status: 'completed' })
       .sort({ completedAt: -1 })
-      .populate('quizId', 'title topic type');
+      .populate('quizId', 'title topic type objectiveId');
     res.json(apiResponse.success(attempts));
   } catch (err) { next(err); }
 };
 
 const requestOnDemand = async (req, res, next) => {
   try {
-    const { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment } = req.body;
-    const trigger = await quizTriggerService.triggerOnDemand(req.user.userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment });
+    const { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective } = req.body;
+    const trigger = await quizTriggerService.triggerOnDemand(req.user.userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective });
     res.json(apiResponse.success({
       triggerId: trigger._id,
       status: trigger.status,

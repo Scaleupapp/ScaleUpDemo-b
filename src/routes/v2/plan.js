@@ -268,9 +268,25 @@ router.get('/today', auth, async (req, res) => {
       const tp = knowledge?.topicProfiles?.[canonicalName];
       return tp?.masteryLevel ?? 0;
     };
-    const ranked = [...availableThisWeek].sort(
-      (a, b) => topicMasteryFor(a.topic?.canonicalName) - topicMasteryFor(b.topic?.canonicalName)
-    );
+    // Day-rotation seed: within a single day the set is stable, but the next
+    // day surfaces a different slice from the same week's pool. Stops Home
+    // from looking identical across days when the user hasn't completed
+    // anything yet.
+    const daySeed = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+    const dayJitter = (canonical) => {
+      if (!canonical) return 0;
+      // Deterministic small jitter per (topic, day) — keeps weakest first but
+      // shuffles within ~5pt mastery bands across days.
+      let h = 0;
+      const s = `${canonical}:${daySeed}`;
+      for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+      return Math.abs(h % 5);
+    };
+    const ranked = [...availableThisWeek].sort((a, b) => {
+      const am = topicMasteryFor(a.topic?.canonicalName) + dayJitter(a.topic?.canonicalName);
+      const bm = topicMasteryFor(b.topic?.canonicalName) + dayJitter(b.topic?.canonicalName);
+      return am - bm;
+    });
 
     // The structured day = the top N available tasks. Mix types so it's not
     // 5 videos in a row — interleave by taskType where possible.

@@ -128,7 +128,7 @@ const TRIGGER_TO_QUIZ_TYPE = {
 
 class QuizGenerationService {
 
-  async generateQuiz({ triggerId, userId, topic, contentIds, type, questionCount: requestedCount, objectiveId, assessmentType, isSkillAssessment, suppressNotification }) {
+  async generateQuiz({ triggerId, userId, topic, contentIds, type, questionCount: requestedCount, objectiveId, assessmentType, isSkillAssessment, suppressNotification, noObjective }) {
     const quizType = isSkillAssessment ? 'competency_assessment' : (TRIGGER_TO_QUIZ_TYPE[type] || 'topic_consolidation');
 
     // Resolve content — contentIds may be empty for on-demand topic quizzes
@@ -153,15 +153,20 @@ class QuizGenerationService {
                           quizType === 'milestone_assessment' ? 15 : 10;
     const questionCount = requestedCount || defaultCount;
 
-    // Check if user has an active objective with competency analysis
+    // Check if user has an active objective with competency analysis.
+    // When `noObjective` is set (user generated a "for fun" quiz), skip the
+    // lookup entirely so the quiz isn't tagged to their goal or counted
+    // toward objective progress.
     let competencyContext = null;
     let linkedCompetencies = [];
     // User's explicit choice always takes priority
     let effectiveAssessmentType = assessmentType || null;
     try {
-      const objective = objectiveId
-        ? await UserObjective.findById(objectiveId)
-        : await UserObjective.findOne({ userId, status: 'active', isPrimary: true });
+      const objective = noObjective
+        ? null
+        : (objectiveId
+            ? await UserObjective.findById(objectiveId)
+            : await UserObjective.findOne({ userId, status: 'active', isPrimary: true }));
 
       if (objective?.analysis?.competencies?.length > 0) {
         // Find competencies relevant to this topic
@@ -421,7 +426,8 @@ class QuizGenerationService {
       timePerQuestion,
       assessmentType: effectiveAssessmentType || undefined,
       linkedCompetencies: linkedCompetencies.length > 0 ? linkedCompetencies : undefined,
-      objectiveId: objectiveId || undefined,
+      // Honor noObjective — for-fun quizzes don't get linked to the user's goal.
+      objectiveId: noObjective ? undefined : (objectiveId || undefined),
       status: 'ready',
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       generatedAt: new Date(),

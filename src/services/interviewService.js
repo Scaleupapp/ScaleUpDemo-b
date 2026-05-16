@@ -744,14 +744,20 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
       throw new ApiError(400, 'Session is not in progress');
     }
 
+    // Pin to a stable model — the generic `gpt-4o-realtime-preview` alias has
+    // intermittently returned errors. The dated snapshot is guaranteed stable.
+    // Override via env REALTIME_MODEL if we need to upgrade without a deploy.
+    const realtimeModel = process.env.REALTIME_MODEL || 'gpt-4o-realtime-preview-2024-12-17';
     const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
+        // OpenAI Realtime sessions require this beta header.
+        'OpenAI-Beta': 'realtime=v1',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-realtime-preview',
+        model: realtimeModel,
         voice: 'alloy',
         instructions: session.systemInstruction,
         input_audio_format: 'pcm16',
@@ -781,8 +787,15 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
 
     if (!response.ok) {
       const errBody = await response.text();
-      console.error('[RealtimeToken] OpenAI error:', errBody);
-      throw new ApiError(502, 'Failed to create realtime session token');
+      console.error(`[RealtimeToken] OpenAI ${response.status} model=${realtimeModel} body=${errBody}`);
+      // Bubble up OpenAI's message so iOS shows the user something actionable
+      // instead of a generic "please try again".
+      let upstreamMsg = 'Voice service is unavailable. Please try again in a moment.';
+      try {
+        const parsed = JSON.parse(errBody);
+        if (parsed?.error?.message) upstreamMsg = `Voice service error: ${parsed.error.message}`;
+      } catch (_) {}
+      throw new ApiError(502, upstreamMsg);
     }
 
     const data = await response.json();
