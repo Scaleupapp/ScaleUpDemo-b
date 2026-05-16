@@ -113,6 +113,13 @@ const userObjectiveSchema = new mongoose.Schema({
     analyzedAt: Date,
     aiModel: String,
   },
+
+  // Canonical cohort key — resolved by topicCanonicalizationService from
+  // (specifics, objectiveType). Used as the (DailyChallenge.topic) value
+  // and the CohortDirectory.canonicalTopic key. Lowercase, indexed.
+  canonicalTopic: { type: String, lowercase: true, index: true },
+  canonicalTopic_needsReview: { type: Boolean, default: false },
+  canonicalTopic_lastResolvedAt: { type: Date },
 }, { timestamps: true });
 
 userObjectiveSchema.index({ userId: 1, status: 1 });
@@ -127,6 +134,38 @@ userObjectiveSchema.pre('save', function (next) {
     this.targetDate = d;
   }
   next();
+});
+
+/**
+ * Resolve canonicalTopic whenever objectiveType or specifics changes.
+ * Failure is non-fatal — the canonicalizer's own fallback ensures we
+ * always have a string to store.
+ */
+userObjectiveSchema.pre('save', async function preResolveCanonicalTopic(next) {
+  try {
+    if (!this.isModified('objectiveType') && !this.isModified('specifics') && this.canonicalTopic) {
+      return next();
+    }
+    const topicCanonicalizationService = require('../services/topicCanonicalizationService');
+    const derivedRaw =
+      this.specifics?.targetRole ||
+      this.specifics?.examName ||
+      this.specifics?.targetSkill ||
+      this.specifics?.toDomain ||
+      (this.topicsOfInterest && this.topicsOfInterest[0]) ||
+      this.objectiveType;
+    const result = await topicCanonicalizationService.canonicalize(derivedRaw, this.objectiveType);
+    this.canonicalTopic = result.canonicalTopic;
+    this.canonicalTopic_needsReview = result.source === 'fallback';
+    this.canonicalTopic_lastResolvedAt = new Date();
+    return next();
+  } catch (err) {
+    // Non-fatal: log and proceed. The lazy backfill or housekeeping job
+    // will pick this up on the next read.
+    console.warn('[UserObjective.preSave] canonicalize failed:', err.message);
+    this.canonicalTopic_needsReview = true;
+    return next();
+  }
 });
 
 module.exports = mongoose.model('UserObjective', userObjectiveSchema);
