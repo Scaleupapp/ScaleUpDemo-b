@@ -761,7 +761,11 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
           model: realtimeModel,
           instructions: session.systemInstruction,
           audio: {
-            input:  { format: { type: 'audio/pcm', rate: 24000 }, transcription: { model: 'whisper-1' } },
+            // turn_detection: null disables server-side VAD so the server never
+            // auto-commits the input buffer or fires a new response on silence.
+            // iOS drives push-to-talk turn-taking exclusively client-side via
+            // input_audio_buffer.commit + response.create.
+            input:  { format: { type: 'audio/pcm', rate: 24000 }, transcription: { model: 'whisper-1' }, turn_detection: null },
             output: { format: { type: 'audio/pcm', rate: 24000 }, voice: 'alloy' },
           },
           tools: [
