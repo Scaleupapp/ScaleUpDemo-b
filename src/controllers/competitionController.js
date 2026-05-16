@@ -256,10 +256,38 @@ const getRelevantForUser = async (req, res, next) => {
     // Resolve the user's primary objective topic via canonicalTopic (single DB hit).
     const objective = await UserObjective.findOne(
       { userId: req.user.userId, status: 'active', isPrimary: true },
-      { canonicalTopic: 1, objectiveType: 1 }
+      { canonicalTopic: 1, objectiveType: 1, specifics: 1, topicsOfInterest: 1 }
     ).lean();
 
     const canonicalTopic = objective?.canonicalTopic || null;
+
+    // Lazy backfill: if the user's objective predates the canonicalization
+    // migration, fire-and-forget the resolve so the next /competition/relevant
+    // request picks up a matched cohort. We don't await — the current request
+    // already has its (null) topic and will fall through to "any available
+    // challenge" as before.
+    if (objective && !objective.canonicalTopic) {
+      const topicCanonicalizationService = require('../services/topicCanonicalizationService');
+      const derivedRaw =
+        objective.specifics?.targetRole ||
+        objective.specifics?.examName ||
+        objective.specifics?.targetSkill ||
+        objective.specifics?.toDomain ||
+        (objective.topicsOfInterest && objective.topicsOfInterest[0]) ||
+        objective.objectiveType;
+      topicCanonicalizationService.canonicalize(derivedRaw, objective.objectiveType)
+        .then(r => UserObjective.updateOne(
+          { _id: objective._id },
+          {
+            $set: {
+              canonicalTopic: r.canonicalTopic,
+              canonicalTopic_needsReview: r.source === 'fallback',
+              canonicalTopic_lastResolvedAt: new Date(),
+            },
+          }
+        ))
+        .catch(err => console.warn('[competition.relevant] lazy backfill failed:', err.message));
+    }
 
     // Today's challenges + upcoming events in parallel.
     const [allToday, upcomingEvents] = await Promise.all([
