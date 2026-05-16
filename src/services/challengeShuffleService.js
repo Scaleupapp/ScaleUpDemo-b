@@ -73,7 +73,7 @@ function translateAnswer(shuffle, shuffledQuestionIdx, userFacingLabel) {
  * The correctAnswer field is NOT included.
  */
 function applyShuffleForServe(questions, shuffle) {
-  return shuffle.questionOrder.map((origIdx) => {
+  return shuffle.questionOrder.map((origIdx, displayIdx) => {
     const q = questions[origIdx];
     const map = shuffle.optionLabelMap[origIdx];
     const newOptions = q.options.map(opt => ({
@@ -83,6 +83,9 @@ function applyShuffleForServe(questions, shuffle) {
     // Sort by new label so options render A/B/C/D in order.
     newOptions.sort((a, b) => LABELS.indexOf(a.label) - LABELS.indexOf(b.label));
     const out = { ...(q.toObject ? q.toObject() : q), options: newOptions };
+    // iOS ChallengeQuestion requires this field; matches submitAnswer's
+    // user-space (questionIndex) which is the position in the served array.
+    out.questionIndex = displayIdx;
     delete out.correctAnswer;
     delete out.explanation;  // hide until results page
     return out;
