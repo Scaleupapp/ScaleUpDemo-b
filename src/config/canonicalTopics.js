@@ -60,7 +60,7 @@ const CANONICAL_TOPICS = [
 
   // Universal fallback bucket — never user-facing as a goal, but used when
   // the LLM can't find a confident match for the user's free-text input.
-  { slug: 'general-learning', display: 'General Learning', objectiveTypes: ['exam_preparation', 'interview_preparation', 'upskilling', 'career_switch'], aliases: [] },
+  { slug: 'general-learning', display: 'General Learning', objectiveTypes: ['exam_preparation', 'interview_preparation', 'upskilling', 'career_switch', 'networking', 'academic_excellence', 'casual_learning'], aliases: [] },
 ];
 
 function topicsForObjectiveType(objectiveType) {
