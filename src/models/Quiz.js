@@ -41,6 +41,8 @@ const quizSchema = new mongoose.Schema({
       'topic_consolidation', 'weekly_review', 'milestone_assessment',
       'retention_check', 'on_demand', 'playlist_mastery',
       'competency_assessment', 'applied_scenario', 'exam_simulation',
+      // Daily top-gap quizzes seeded by the midnight cron (3/day per user).
+      'daily_top_gap',
     ],
     required: true,
   },

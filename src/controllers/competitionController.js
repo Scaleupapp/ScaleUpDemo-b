@@ -234,6 +234,98 @@ const getObjectiveTopic = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * V2: "What's relevant for this user RIGHT NOW?"
+ *
+ * Returns the best matching today-challenge for the user's objective topic
+ * (or any available challenge if no topic match), the next upcoming live
+ * event, and a status flag the iOS client uses to decide between rendering
+ * the entry point or a "building today's challenge" waiting state.
+ *
+ * Used by:
+ *   - Home (when surfacing competition as a today task)
+ *   - Compass "Compete" chip
+ *   - Competition Home destination
+ */
+const getRelevantForUser = async (req, res, next) => {
+  try {
+    const competitionService = require('../services/competitionService');
+    const UserObjective = require('../models/UserObjective');
+    const DailyChallenge = require('../models/DailyChallenge');
+
+    // Resolve the user's primary objective topic (re-uses the same logic
+    // getObjectiveTopic exposes — duplicated inline so we make one DB hit).
+    const objective = await UserObjective.findOne(
+      { userId: req.user.userId, status: 'active', isPrimary: true },
+      { objectiveType: 1, specifics: 1, topicsOfInterest: 1 }
+    ).lean();
+
+    let objectiveTopic = null;
+    if (objective) {
+      switch (objective.objectiveType) {
+        case 'upskilling':            objectiveTopic = objective.specifics?.targetSkill; break;
+        case 'interview_preparation': objectiveTopic = objective.specifics?.targetRole;  break;
+        case 'exam_preparation':      objectiveTopic = objective.specifics?.examName;    break;
+        case 'career_switch':         objectiveTopic = objective.specifics?.toDomain;    break;
+        default:                      objectiveTopic = objective.topicsOfInterest?.[0];
+      }
+    }
+    const objectiveTopicLower = (objectiveTopic || '').toLowerCase();
+
+    // Today's challenges + upcoming events in parallel.
+    const [allToday, upcomingEvents] = await Promise.all([
+      competitionService.getTodayChallenges(),
+      competitionService.getUpcomingEvents
+        ? competitionService.getUpcomingEvents({ limit: 1 }).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+
+    // Prefer the challenge that matches the user's objective topic — falls
+    // back to any active challenge so we always offer something.
+    const matchByTopic = (allToday || []).find(c =>
+      c.topic && objectiveTopicLower && c.topic.toLowerCase().includes(objectiveTopicLower)
+    );
+    const challenge = matchByTopic || (allToday && allToday[0]) || null;
+
+    // Has the user already attempted today's challenge? (only meaningful when
+    // one is available — used to hide it from "today's tasks" once played.)
+    let alreadyPlayed = false;
+    if (challenge) {
+      const ChallengeAttempt = require('../models/ChallengeAttempt');
+      alreadyPlayed = !!(await ChallengeAttempt.exists({
+        userId: req.user.userId, challengeId: challenge._id, status: 'completed',
+      }));
+    }
+
+    // Status flag for the iOS waiting screen. challenge=null means today's
+    // batch hasn't been generated yet (cron hasn't fired, or the topic pool
+    // is empty for this user's objective).
+    const status = challenge
+      ? (alreadyPlayed ? 'played' : 'available')
+      : 'building';
+
+    return res.json(apiResponse.success({
+      status,
+      objectiveTopic: objectiveTopic || null,
+      topicMatch: !!matchByTopic,
+      todayChallenge: challenge ? {
+        _id: challenge._id,
+        title: challenge.title,
+        topic: challenge.topic,
+        difficulty: challenge.difficulty,
+        questionCount: challenge.questions?.length || 0,
+        durationSeconds: challenge.totalDurationSeconds || (challenge.questions?.length || 0) * 30,
+      } : null,
+      nextLiveEvent: (upcomingEvents && upcomingEvents[0]) ? {
+        _id: upcomingEvents[0]._id,
+        scheduledFor: upcomingEvents[0].scheduledStartAt || upcomingEvents[0].startsAt,
+        title: upcomingEvents[0].title,
+        topic: upcomingEvents[0].topic,
+      } : null,
+    }));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getTodayChallenges, getChallengeById, startChallenge, submitChallengeAnswer,
   completeChallenge, getChallengeResults, getChallengeReview,
@@ -243,4 +335,5 @@ module.exports = {
   getCurrentQuestion, submitLiveAnswer, getQuestionResults, getEventResults,
   getChallengeCandidates, approveCandidates, triggerGeneration,
   getObjectiveTopic,
+  getRelevantForUser,
 };

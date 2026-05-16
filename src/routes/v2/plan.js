@@ -221,6 +221,16 @@ router.get('/today', auth, async (req, res) => {
     const currentWeek = currentWeekEntry.week;
     const totalWeeks = plan.weeklySchedule.length;
     const tasksThisWeek = currentWeekEntry.tasks || [];
+
+    // Calendar-vs-plan drift. If the plan started 3 weeks ago but the user is
+    // still showing week 1 tasks, they're 2 weeks behind — surface that so
+    // Home can show a "Catching up" banner instead of pretending we're fine.
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const planStartedAt = plan.createdAt || plan.startedAt;
+    const expectedWeek = planStartedAt
+      ? Math.max(1, Math.floor((Date.now() - new Date(planStartedAt).getTime()) / (7 * DAY_MS)) + 1)
+      : currentWeek;
+    const behindByWeeks = Math.max(0, expectedWeek - currentWeek);
     // "available" = not completed and not skipped — these are eligible for today's set
     const availableThisWeek = tasksThisWeek.filter(
       t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped'
@@ -232,7 +242,13 @@ router.get('/today', auth, async (req, res) => {
     // Prefer a personal, specific status line — anchor on the user's
     // biggest measured gap when available. Falls back to the generic line.
     let statusLine;
-    if (topGap && topGap.score < 50) {
+    if (behindByWeeks > 0) {
+      // Backlog takes precedence — the user needs to know they're behind
+      // before we tell them anything else cheerful.
+      statusLine = behindByWeeks === 1
+        ? `You're a week behind. Catch up so you stay on track for your goal.`
+        : `You're ${behindByWeeks} weeks behind. Today's tasks + the backlog below will get you back on pace.`;
+    } else if (topGap && topGap.score < 50) {
       const prettyTopic = topGap.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
       statusLine = `Your biggest lift is ${prettyTopic} (${topGap.score}%). Today's set chips away at it.`;
     } else if (trajectory.onTrack) {
@@ -241,8 +257,21 @@ router.get('/today', auth, async (req, res) => {
       statusLine = `Behind pace. ${currentReadiness}% ready, ${weeksRemaining} weeks left — let’s tighten up.`;
     }
 
+    // "Get ahead" pool — next week's first 3 tasks, ALWAYS shaped so iOS can
+    // surface them when the user finishes today's set (so there's always
+    // something to do). Pulled from the very next non-complete week.
+    const nextWeekEntry = plan.weeklySchedule.find(
+      w => w.week > currentWeek && (w.tasks || []).some(t => t.progress?.status !== 'complete')
+    );
+    const nextWeekAvailable = nextWeekEntry
+      ? (nextWeekEntry.tasks || []).filter(t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped')
+      : [];
+
     if (availableThisWeek.length === 0) {
-      // Either everything's done, or everything left is skipped — offer Reshuffle.
+      // Week done — but always offer "get ahead" so the user has something
+      // actionable instead of being told to come back tomorrow.
+      const getAheadShaped = nextWeekAvailable.slice(0, 3)
+        .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
       return res.json({
         success: true,
         data: {
@@ -256,9 +285,14 @@ router.get('/today', auth, async (req, res) => {
           topGap,
           fallback: 'day_done',
           skippedCount,
+          behindByWeeks,
+          getAheadTasks: getAheadShaped,
+          getAheadWeek: nextWeekEntry?.week,
           message: skippedCount > 0
             ? 'You’ve skipped the rest of this week’s tasks. Reshuffle to bring them back.'
-            : 'You’ve completed everything for this week. See you tomorrow.',
+            : (getAheadShaped.length > 0
+                ? 'Week ' + currentWeek + ' done — get a head start on week ' + nextWeekEntry.week + '.'
+                : 'You’ve completed everything for this week. See you tomorrow.'),
         },
       });
     }
@@ -295,6 +329,19 @@ router.get('/today', auth, async (req, res) => {
 
     const totalDurationMin = todaysTasks.reduce((s, t) => s + (t.durationMin || 0), 0);
 
+    // Pending = everything in the current pool that isn't in today's set.
+    // These are the "carryover" tasks from prior days the user hasn't done
+    // yet — surfaced under a separate "Pending from previous days" section.
+    const todaysIds = new Set(todaysTasks.map(t => t.taskId));
+    const pendingPriorTasks = ranked
+      .filter(t => !todaysIds.has(String(t._id)))
+      .map(t => shapeTask(t, topicMasteryFor));
+
+    // Always include get-ahead so the iOS client can show "More to do" once
+    // the user finishes today's set without round-tripping for /plan/today.
+    const getAheadTasks = nextWeekAvailable.slice(0, 3)
+      .map(t => shapeTask(t, topicMasteryFor));
+
     return res.json({
       success: true,
       data: {
@@ -310,6 +357,12 @@ router.get('/today', auth, async (req, res) => {
         totalDurationMin,
         hasMoreThisWeek: ranked.length > todaysTasks.length,
         skippedCount,
+        // New: backlog + get-ahead surfaces (Home renders these as their own sections)
+        behindByWeeks,
+        pendingPriorTasks,
+        pendingPriorCount: pendingPriorTasks.length,
+        getAheadTasks,
+        getAheadWeek: nextWeekEntry?.week,
       },
     });
   } catch (err) {

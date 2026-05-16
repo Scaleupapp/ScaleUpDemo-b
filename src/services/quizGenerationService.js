@@ -124,6 +124,7 @@ const TRIGGER_TO_QUIZ_TYPE = {
   plan_milestone: 'milestone_assessment',
   retention_check: 'retention_check',
   on_demand: 'on_demand',
+  daily_top_gap: 'daily_top_gap',
 };
 
 class QuizGenerationService {

@@ -20,6 +20,8 @@ router.get('/leaderboard/alltime', auth, c.getAllTimeLeaderboard);
 
 // Objective Topic
 router.get('/objective-topic', auth, c.getObjectiveTopic);
+// V2: per-user "what's relevant right now" — challenge + next live event.
+router.get('/relevant', auth, c.getRelevantForUser);
 
 // Profile & Stats
 router.get('/profile', auth, c.getCompetitionProfile);

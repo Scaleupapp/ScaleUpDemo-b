@@ -346,6 +346,21 @@ const getPendingQuizzes = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * Self-serve "make sure I have today's quizzes" — called by iOS Quiz Home on
+ * open so a user who skipped midnight doesn't see an empty pending list.
+ * Idempotent: the cron and this endpoint share the same dedup logic.
+ */
+const ensureDailyQuizzes = async (req, res, next) => {
+  try {
+    const { ensureDailyTopGapQuizzesForUser } = require('../workers/cronJobs');
+    const result = await ensureDailyTopGapQuizzesForUser(req.user.userId);
+    res.json(apiResponse.success(result, result.queued > 0
+      ? `Queued ${result.queued} new ${result.queued === 1 ? 'quiz' : 'quizzes'}.`
+      : 'Already up to date.'));
+  } catch (err) { next(err); }
+};
+
 const getSkillAssessments = async (req, res, next) => {
   try {
     const quizzes = await Quiz.find({
@@ -357,4 +372,4 @@ const getSkillAssessments = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { listQuizzes, getHistory, requestOnDemand, getQuiz, startAttempt, submitAnswer, completeQuiz, getResults, getTriggerStatus, getPendingQuizzes, getSkillAssessments };
+module.exports = { listQuizzes, getHistory, requestOnDemand, getQuiz, startAttempt, submitAnswer, completeQuiz, getResults, getTriggerStatus, getPendingQuizzes, getSkillAssessments, ensureDailyQuizzes };

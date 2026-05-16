@@ -105,6 +105,14 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 16. Daily Top-Gap Quizzes — Daily 00:15 IST (18:45 UTC prev day).
+  // Seeds 3 ten-question quizzes per active user, targeted at their
+  // weakest measured topics so they always have something to take.
+  cronQueue.add('dailyTopGapQuizzes', {}, {
+    repeat: { pattern: '45 18 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -201,6 +209,9 @@ function startCronJobs() {
         break;
       case 'weeklyAutoCalibration':
         await require('./weeklyAutoCalibrationWorker').runWeeklyAutoCalibration();
+        break;
+      case 'dailyTopGapQuizzes':
+        await runDailyTopGapQuizzes();
         break;
     }
   }, { connection });
@@ -451,4 +462,133 @@ async function sendFlashcardReminder(set, message) {
   } catch {}
 }
 
-module.exports = { startCronJobs };
+/**
+ * Daily seed: 3 ten-question quizzes per active user on their weakest topics.
+ *
+ * The user kept hitting an empty "Pending" — we had no continuous source of
+ * fresh quizzes. This cron fires once per day (00:15 IST) and:
+ *   1. Walks active V2 users with a KnowledgeProfile.
+ *   2. Picks the 3 weakest topics (score asc) that the user has actually been
+ *      assessed on (quizzesTaken >= 1) — no quizzes on topics we have no
+ *      signal about yet.
+ *   3. Skips topics that already have a pending daily quiz from the last 24h
+ *      (dedup, so we don't generate the same thing twice on a re-run).
+ *   4. Caps total pending daily quizzes per user at 3 so we never spam.
+ */
+async function runDailyTopGapQuizzes() {
+  const DAILY_CAP = 3;
+  const QUESTIONS_PER_QUIZ = 10;
+  const NOW = new Date();
+  const yesterday = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);
+
+  // Active V2 users only — keeps token cost bounded to the active cohort.
+  const users = await User.find({
+    isActive: true, isBanned: false, v2OptedIn: true,
+  }).select('_id').lean();
+
+  let queued = 0;
+  for (const u of users) {
+    try {
+      const profile = await KnowledgeProfile.findOne({ userId: u._id }).lean();
+      if (!profile?.topicMastery?.length) continue;
+
+      // How many active daily quizzes does the user already have?
+      const existingDaily = await Quiz.countDocuments({
+        userId: u._id,
+        type: 'daily_top_gap',
+        status: { $in: ['ready', 'delivered'] },
+        expiresAt: { $gt: NOW },
+      });
+      const slots = Math.max(0, DAILY_CAP - existingDaily);
+      if (slots === 0) continue;
+
+      // Topics already seeded in the last day — skip.
+      const recentDailyTopics = await Quiz.distinct('topic', {
+        userId: u._id,
+        type: 'daily_top_gap',
+        createdAt: { $gte: yesterday },
+      });
+      const seen = new Set(recentDailyTopics);
+
+      const weakest = (profile.topicMastery || [])
+        .filter(t => (t.quizzesTaken || 0) >= 1 && !seen.has(t.topic))
+        .sort((a, b) => (a.score || 0) - (b.score || 0))
+        .slice(0, slots);
+
+      for (const t of weakest) {
+        await quizGenerationQueue.add('generate', {
+          userId: u._id.toString(),
+          topic: t.topic,
+          contentIds: [],
+          type: 'daily_top_gap',
+          questionCount: QUESTIONS_PER_QUIZ,
+          triggerId: null,
+          suppressNotification: true,  // batch — one push later, not per quiz
+        }, { attempts: 2, backoff: { type: 'exponential', delay: 10000 } });
+        queued++;
+      }
+
+      // Single batch notification per user, not one per quiz.
+      if (weakest.length > 0) {
+        await notificationQueue.add('send', {
+          userId: u._id,
+          title: 'Today\'s quizzes are ready',
+          body: `${weakest.length} new ${weakest.length === 1 ? 'quiz' : 'quizzes'} on your weak spots: ${weakest.map(w => w.topic).join(', ')}.`,
+          data: { type: 'daily_top_gap_ready' },
+        });
+      }
+    } catch (err) {
+      console.warn(`[DailyTopGap] user ${u._id} failed:`, err.message);
+    }
+  }
+  console.log(`[DailyTopGap] queued ${queued} quizzes across ${users.length} users`);
+}
+
+/**
+ * Same logic as the cron but for a single user. Exposed so the API can
+ * "ensure" a user has their daily quizzes when they open Quiz Home, instead
+ * of forcing them to wait for the next midnight tick.
+ */
+async function ensureDailyTopGapQuizzesForUser(userId) {
+  const DAILY_CAP = 3;
+  const QUESTIONS_PER_QUIZ = 10;
+  const NOW = new Date();
+  const yesterday = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);
+
+  const profile = await KnowledgeProfile.findOne({ userId }).lean();
+  if (!profile?.topicMastery?.length) return { queued: 0, reason: 'no_mastery' };
+
+  const existingDaily = await Quiz.countDocuments({
+    userId, type: 'daily_top_gap',
+    status: { $in: ['ready', 'delivered'] },
+    expiresAt: { $gt: NOW },
+  });
+  const slots = Math.max(0, DAILY_CAP - existingDaily);
+  if (slots === 0) return { queued: 0, reason: 'already_at_cap' };
+
+  const recentDailyTopics = await Quiz.distinct('topic', {
+    userId, type: 'daily_top_gap',
+    createdAt: { $gte: yesterday },
+  });
+  const seen = new Set(recentDailyTopics);
+
+  const weakest = (profile.topicMastery || [])
+    .filter(t => (t.quizzesTaken || 0) >= 1 && !seen.has(t.topic))
+    .sort((a, b) => (a.score || 0) - (b.score || 0))
+    .slice(0, slots);
+
+  for (const t of weakest) {
+    await quizGenerationQueue.add('generate', {
+      userId: userId.toString(),
+      topic: t.topic,
+      contentIds: [],
+      type: 'daily_top_gap',
+      questionCount: QUESTIONS_PER_QUIZ,
+      triggerId: null,
+      suppressNotification: true,
+    }, { attempts: 2, backoff: { type: 'exponential', delay: 10000 } });
+  }
+  return { queued: weakest.length, topics: weakest.map(w => w.topic) };
+}
+
+module.exports = { startCronJobs, runDailyTopGapQuizzes, ensureDailyTopGapQuizzesForUser };

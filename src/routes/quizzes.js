@@ -8,6 +8,7 @@ router.get('/', ctrl.listQuizzes);
 router.get('/history', ctrl.getHistory);
 router.post('/request', ctrl.requestOnDemand);
 router.get('/pending', ctrl.getPendingQuizzes);
+router.post('/ensure-daily', ctrl.ensureDailyQuizzes);
 router.get('/skill-assessments', ctrl.getSkillAssessments);
 router.get('/trigger/:triggerId', ctrl.getTriggerStatus);
 router.get('/:id', ctrl.getQuiz);
