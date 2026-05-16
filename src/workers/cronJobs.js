@@ -524,7 +524,29 @@ async function runDailyTopGapQuizzes() {
         .sort((a, b) => (a.score || 0) - (b.score || 0))
         .slice(0, slots);
 
-      for (const t of weakest) {
+      // After picking from existing mastery, if slots remain, seed from
+      // topicsOfInterest — topics the user added but has never been quizzed on.
+      // This is the "user told us they care, but we have no data yet" case.
+      const remaining = slots - weakest.length;
+      let interestSeeds = [];
+      if (remaining > 0) {
+        const UserObjective = require('../models/UserObjective');
+        const objective = await UserObjective.findOne({
+          userId: u._id,
+          status: 'active', isPrimary: true,
+        }).select('topicsOfInterest').lean();
+        const interestTopics = (objective?.topicsOfInterest || []).map(t => t.toString().toLowerCase());
+        const masteryTopics = new Set((profile.topicMastery || []).map(t => t.topic.toLowerCase()));
+        interestSeeds = interestTopics
+          .filter(t => t && !seen.has(t) && !masteryTopics.has(t))
+          .slice(0, remaining)
+          .map(topic => ({ topic, _isSeed: true }));
+      }
+
+      const combined = [...weakest, ...interestSeeds];
+      console.log(`[DailyTopGap] user ${u._id}: ${weakest.length} from mastery + ${interestSeeds.length} from interests`);
+
+      for (const t of combined) {
         await quizGenerationQueue.add('generate', {
           userId: u._id.toString(),
           topic: t.topic,
@@ -538,11 +560,11 @@ async function runDailyTopGapQuizzes() {
       }
 
       // Single batch notification per user, not one per quiz.
-      if (weakest.length > 0) {
+      if (combined.length > 0) {
         await notificationQueue.add('send', {
           userId: u._id,
           title: 'Today\'s quizzes are ready',
-          body: `${weakest.length} new ${weakest.length === 1 ? 'quiz' : 'quizzes'} on your weak spots: ${weakest.map(w => w.topic).join(', ')}.`,
+          body: `${combined.length} new ${combined.length === 1 ? 'quiz' : 'quizzes'} ready: ${combined.map(w => w.topic).join(', ')}.`,
           data: { type: 'daily_top_gap_ready' },
         });
       }
@@ -586,7 +608,29 @@ async function ensureDailyTopGapQuizzesForUser(userId) {
     .sort((a, b) => (a.score || 0) - (b.score || 0))
     .slice(0, slots);
 
-  for (const t of weakest) {
+  // After picking from existing mastery, if slots remain, seed from
+  // topicsOfInterest — topics the user added but has never been quizzed on.
+  // This is the "user told us they care, but we have no data yet" case.
+  const remaining = slots - weakest.length;
+  let interestSeeds = [];
+  if (remaining > 0) {
+    const UserObjective = require('../models/UserObjective');
+    const objective = await UserObjective.findOne({
+      userId,
+      status: 'active', isPrimary: true,
+    }).select('topicsOfInterest').lean();
+    const interestTopics = (objective?.topicsOfInterest || []).map(t => t.toString().toLowerCase());
+    const masteryTopics = new Set((profile.topicMastery || []).map(t => t.topic.toLowerCase()));
+    interestSeeds = interestTopics
+      .filter(t => t && !seen.has(t) && !masteryTopics.has(t))
+      .slice(0, remaining)
+      .map(topic => ({ topic, _isSeed: true }));
+  }
+
+  const combined = [...weakest, ...interestSeeds];
+  console.log(`[DailyTopGap] user ${userId}: ${weakest.length} from mastery + ${interestSeeds.length} from interests`);
+
+  for (const t of combined) {
     await quizGenerationQueue.add('generate', {
       userId: userId.toString(),
       topic: t.topic,
@@ -597,7 +641,7 @@ async function ensureDailyTopGapQuizzesForUser(userId) {
       suppressNotification: true,
     }, { attempts: 2, backoff: { type: 'exponential', delay: 10000 } });
   }
-  return { queued: weakest.length, topics: weakest.map(w => w.topic) };
+  return { queued: combined.length, topics: combined.map(w => w.topic) };
 }
 
 module.exports = { startCronJobs, runDailyTopGapQuizzes, ensureDailyTopGapQuizzesForUser };
