@@ -40,27 +40,68 @@ function projectReadiness({ currentReadiness, hoursPerWeek, hoursTotalNeeded, we
  * @param {Object} args.specifics
  * @param {String} args.timeline
  * @param {String} args.currentLevel
+ * @param {String} [args.userId]          - optional; enables velocity measurement
+ * @param {Object} [args.plan]            - optional; the user's active Plan doc (in-memory)
  *
- * @returns {Object} { today, in30Days, in60Days, in90Days, atTargetDate, weeklyDelta, onTrack }
+ * @returns {Object} { today, in30Days, in60Days, in90Days, atTargetDate, weeklyDelta,
+ *                     onTrack, velocitySource, realTasksPerWeek, points, headline }
  */
-function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeline, currentLevel = 'beginner' }) {
+function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeline, currentLevel = 'beginner', userId, plan }) {
   const required = computeRequiredTime({ objectiveType, specifics, timeline, currentLevel });
 
   const baseline = Math.max(0, Math.min(100, currentReadiness ?? 0));
-  const hoursPerWeek = required.requiredHoursPerWeek;
-  const hoursTotalNeeded = required.totalHoursRemaining;
   const timelineWeeks = required.timelineWeeks;
 
-  const at = (weeks) => projectReadiness({ currentReadiness: baseline, hoursPerWeek, hoursTotalNeeded, weeksElapsed: weeks });
+  // Static fallback delta — how many readiness % points per week if we have
+  // no measured pace yet. Derived from the hours-based model:
+  // gap / timelineWeeks, floored at 1.
+  const staticDelta = Math.max(1, Math.round((TARGET_READINESS - baseline) / Math.max(1, timelineWeeks)));
 
-  const today = baseline;
-  const in30Days  = at(4);
-  const in60Days  = at(8);
-  const in90Days  = at(13);
-  const atTargetDate = at(timelineWeeks);
+  // ── Velocity measurement ─────────────────────────────────────────────────
+  // Walk the in-memory plan doc (no extra DB hit) and count tasks completed
+  // in the last 28 days. If there are >=7 we have a meaningful sample.
+  let realDelta = null;
+  let velocitySource = 'estimated';
+  let realTasksPerWeek = null;
 
-  const weeklyDelta = Math.max(1, Math.round((TARGET_READINESS - baseline) / Math.max(1, timelineWeeks)));
-  const onTrack = atTargetDate >= TARGET_READINESS;
+  if (userId && plan && Array.isArray(plan.weeklySchedule)) {
+    const FOUR_WEEKS_MS = 28 * 24 * 60 * 60 * 1000;
+    const cutoff = new Date(Date.now() - FOUR_WEEKS_MS);
+
+    const completed = plan.weeklySchedule
+      .flatMap(w => w.tasks || [])
+      .filter(t =>
+        t.progress?.status === 'complete' &&
+        t.progress?.completedAt &&
+        new Date(t.progress.completedAt) >= cutoff
+      );
+
+    if (completed.length >= 7) {
+      const tasksPerWk = completed.length / 4; // spread over 4 calendar weeks
+      // Calibration: 1 completed task ≈ 1% readiness gain per week on average.
+      // Floor at 0.5 so the curve never looks flat/discouraging.
+      realDelta = Math.max(0.5, tasksPerWk * 1.0);
+      velocitySource = 'measured';
+      realTasksPerWeek = Math.round(tasksPerWk * 10) / 10;
+    }
+  }
+
+  const effectiveDelta = realDelta !== null ? realDelta : staticDelta;
+
+  // ── Forecast curve ───────────────────────────────────────────────────────
+  // Build readiness at each horizon from the effective weekly delta,
+  // capped at TARGET_READINESS so we never promise more than the goal.
+  const project = (weeks) =>
+    Math.min(TARGET_READINESS, Math.round(baseline + effectiveDelta * weeks));
+
+  const today        = baseline;
+  const in30Days     = project(4);
+  const in60Days     = project(8);
+  const in90Days     = project(12);
+  const atTargetDate = project(timelineWeeks);
+
+  const weeklyDelta = Math.round(effectiveDelta * 10) / 10;
+  const onTrack = effectiveDelta >= staticDelta * 0.8;
 
   return {
     today,
@@ -72,12 +113,14 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
     timelineWeeks,
     weeklyDelta,
     onTrack,
+    velocitySource,
+    realTasksPerWeek,
     points: [
-      { whenLabel: 'Today',         readiness: today,         weeks: 0 },
-      { whenLabel: '30 days',       readiness: in30Days,      weeks: 4 },
-      { whenLabel: '60 days',       readiness: in60Days,      weeks: 8 },
-      { whenLabel: '90 days',       readiness: in90Days,      weeks: 13 },
-      { whenLabel: 'Target',        readiness: atTargetDate,  weeks: timelineWeeks },
+      { whenLabel: 'Today',   readiness: today,        weeks: 0 },
+      { whenLabel: '30 days', readiness: in30Days,     weeks: 4 },
+      { whenLabel: '60 days', readiness: in60Days,     weeks: 8 },
+      { whenLabel: '90 days', readiness: in90Days,     weeks: 12 },
+      { whenLabel: 'Target',  readiness: atTargetDate, weeks: timelineWeeks },
     ],
     headline: onTrack
       ? `You can reach ~${atTargetDate}% readiness by your target. On track.`

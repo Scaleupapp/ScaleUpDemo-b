@@ -169,7 +169,7 @@ router.get('/today', auth, async (req, res) => {
         success: true,
         data: {
           greeting,
-          statusLine: 'Let’s set you up — about 10 minutes.',
+          statusLine: "Let's set you up — about 10 minutes.",
           fallback: 'no_objective',
           cta: { label: 'Start diagnostic', deeplink: 'scaleup://onboarding' },
         },
@@ -190,6 +190,8 @@ router.get('/today', auth, async (req, res) => {
       specifics: objective.specifics || {},
       timeline: objective.timeline,
       currentLevel: objective.currentLevel,
+      userId,   // enables velocity measurement
+      plan,     // in-memory doc — no extra DB hit
     });
 
     const topGap = diagnosticTopGap(latestAttempt);
@@ -205,7 +207,7 @@ router.get('/today', auth, async (req, res) => {
         data: {
           greeting,
           objectiveLabel,
-          statusLine: 'Your plan is being personalized. Meanwhile, here’s content relevant to your goal.',
+          statusLine: "Your plan is being personalized. Meanwhile, here's content relevant to your goal.",
           trajectory,
           fallback: 'plan_brewing',
           weekProgress: null,
@@ -260,7 +262,7 @@ router.get('/today', auth, async (req, res) => {
     } else if (trajectory.onTrack) {
       statusLine = `You're on track. ${currentReadiness}% ready, ${weeksRemaining} weeks to go.`;
     } else {
-      statusLine = `Behind pace. ${currentReadiness}% ready, ${weeksRemaining} weeks left — let’s tighten up.`;
+      statusLine = `Behind pace. ${currentReadiness}% ready, ${weeksRemaining} weeks left — let's tighten up.`;
     }
 
     // "Get ahead" pool — next week's first 3 tasks, ALWAYS shaped so iOS can
@@ -278,6 +280,7 @@ router.get('/today', auth, async (req, res) => {
       // actionable instead of being told to come back tomorrow.
       const getAheadShaped = nextWeekAvailable.slice(0, 3)
         .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
+      const weeklyInsightDayDone = buildWeeklyInsight({ topGap, todaysTasks: [], weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
       return res.json({
         success: true,
         data: {
@@ -294,11 +297,12 @@ router.get('/today', auth, async (req, res) => {
           behindByWeeks,
           getAheadTasks: getAheadShaped,
           getAheadWeek: nextWeekEntry?.week,
+          weeklyInsight: weeklyInsightDayDone,
           message: skippedCount > 0
-            ? 'You’ve skipped the rest of this week’s tasks. Reshuffle to bring them back.'
+            ? 'You\'ve skipped the rest of this week\'s tasks. Reshuffle to bring them back.'
             : (getAheadShaped.length > 0
                 ? 'Week ' + currentWeek + ' done — get a head start on week ' + nextWeekEntry.week + '.'
-                : 'You’ve completed everything for this week. See you tomorrow.'),
+                : 'You\'ve completed everything for this week. See you tomorrow.'),
         },
       });
     }
@@ -380,6 +384,8 @@ router.get('/today', auth, async (req, res) => {
     const getAheadTasks = nextWeekAvailable.slice(0, 3)
       .map(t => shapeTask(t, topicMasteryFor));
 
+    const weeklyInsight = buildWeeklyInsight({ topGap, todaysTasks, weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
+
     return res.json({
       success: true,
       data: {
@@ -401,11 +407,12 @@ router.get('/today', auth, async (req, res) => {
         pendingPriorCount: pendingPriorTasks.length,
         getAheadTasks,
         getAheadWeek: nextWeekEntry?.week,
+        weeklyInsight,
       },
     });
   } catch (err) {
     console.error('[v2/plan/today] error', err);
-    return res.status(500).json({ success: false, message: 'Failed to load today’s plan' });
+    return res.status(500).json({ success: false, message: "Failed to load today's plan" });
   }
 });
 
@@ -645,6 +652,37 @@ async function computeWeekActivity(userId) {
     hadActivity: buckets[idx],
     isToday: idx === todayIdx,
   }));
+}
+
+/**
+ * Single-sentence, rule-based insight for why this week matters.
+ * No LLM call — deterministic and fast.
+ *
+ * @param {Object} args
+ * @param {Object|null} args.topGap       - { topic, score } from diagnosticTopGap
+ * @param {Array}       args.todaysTasks  - shaped tasks array (may be empty for day_done)
+ * @param {Object}      args.weekProgress - { done, total, week, totalWeeks }
+ * @param {Object}      args.trajectory   - forecastTrajectory result
+ * @returns {string|null}
+ */
+function buildWeeklyInsight({ topGap, todaysTasks, weekProgress, trajectory }) {
+  if (!topGap) return null;
+
+  const prettyTopic = topGap.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const matchingTaskCount = (todaysTasks || []).filter(t =>
+    (t.primaryTopic || '').toLowerCase() === topGap.topic.toLowerCase()
+  ).length;
+
+  if (matchingTaskCount > 0) {
+    const taskWord = matchingTaskCount === 1
+      ? "Today's quiz on it"
+      : `Today's ${matchingTaskCount} tasks on it`;
+    return `${prettyTopic} is your biggest gap (${topGap.score}%). ${taskWord} can lift your readiness by ~${matchingTaskCount * 2}% this week.`;
+  } else if (trajectory?.velocitySource === 'measured' && trajectory.realTasksPerWeek < 3) {
+    return `${prettyTopic} is your biggest gap (${topGap.score}%). You averaged ${trajectory.realTasksPerWeek} tasks/week — pushing to 5+ this week will measurably move your readiness.`;
+  } else {
+    return `${prettyTopic} is your biggest gap (${topGap.score}%). Add a quiz on it via Compass to start chipping away.`;
+  }
 }
 
 function buildObjectiveLabel(obj) {
