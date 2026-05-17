@@ -163,6 +163,7 @@ router.get('/today', auth, async (req, res) => {
 
     const greeting = user?.firstName ? `Hi, ${user.firstName}.` : 'Hi.';
     const objectiveLabel = buildObjectiveLabel(objective);
+    const objectiveName = buildObjectiveName(objective);
 
     if (!objective) {
       return res.json({
@@ -207,10 +208,13 @@ router.get('/today', auth, async (req, res) => {
         data: {
           greeting,
           objectiveLabel,
+          objectiveName,
           statusLine: "Your plan is being personalized. Meanwhile, here's content relevant to your goal.",
           trajectory,
           fallback: 'plan_brewing',
           weekProgress: null,
+          planSchedule: [],
+          bonusTasks: [],
         },
       });
     }
@@ -339,16 +343,26 @@ router.get('/today', auth, async (req, res) => {
         const totalDurationMin = todaysTasks.reduce((s, t) => s + (t.durationMin || 0), 0);
         const weeklyInsightBonus = buildWeeklyInsight({ topGap, todaysTasks, weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
 
+        // Surface any additional bonus tasks not picked into today's set as the
+        // "Push Harder" pool (capped at 3 so the chip stays digestible).
+        const pickedIds = new Set(todaysTasks.map(t => t.taskId));
+        const bonusShaped = bonusRanked
+          .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)))
+          .filter(t => !pickedIds.has(t.taskId))
+          .slice(0, 3);
+
         return res.json({
           success: true,
           data: {
             greeting,
             objectiveLabel,
+            objectiveName,
             statusLine: allDone
               ? `Week ${currentWeek} wrapped. Bonus picks below — keep the momentum.`
               : statusLine,
             trajectory,
             weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
+            planSchedule: buildPlanSchedule(plan, currentWeek),
             streak,
             weekActivity,
             topGap,
@@ -361,6 +375,7 @@ router.get('/today', auth, async (req, res) => {
             pendingPriorCount: 0,
             getAheadTasks: getAheadShaped,
             getAheadWeek: nextWeekEntry?.week,
+            bonusTasks: bonusShaped,
             weeklyInsight: weeklyInsightBonus,
           },
         });
@@ -389,9 +404,11 @@ router.get('/today', auth, async (req, res) => {
         data: {
           greeting,
           objectiveLabel,
+          objectiveName,
           statusLine,
           trajectory,
           weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
+          planSchedule: buildPlanSchedule(plan, currentWeek),
           streak,
           weekActivity,
           topGap,
@@ -400,6 +417,7 @@ router.get('/today', auth, async (req, res) => {
           behindByWeeks,
           getAheadTasks: getAheadShaped,
           getAheadWeek: nextWeekEntry?.week,
+          bonusTasks: [],
           weeklyInsight: weeklyInsightDayDone,
           message: weekDoneMessage,
         },
@@ -498,14 +516,28 @@ router.get('/today', auth, async (req, res) => {
     // ("Talk to Coach") so the user can invoke it anytime, with a scope
     // chooser (This Week / This Month / Since Start / By Topic).
 
+    // ── "Push Harder" pool ───────────────────────────────────────────────────
+    // Always synthesise a small bonus list (today's daily challenge + weak-topic
+    // quizzes) so the V2 Home "Push Harder" chip has something to reveal even
+    // when the user has plenty of plan tasks. Capped at 3.
+    let bonusTasks = [];
+    try {
+      const bonus = await synthesizeBonusTasks({ userId, objective, knowledge });
+      bonusTasks = bonus.slice(0, 3).map(t => shapeTask(t, topicMasteryFor));
+    } catch (bonusErr) {
+      console.warn('[v2/plan/today] bonus synthesis failed (non-fatal):', bonusErr.message);
+    }
+
     return res.json({
       success: true,
       data: {
         greeting,
         objectiveLabel,
+        objectiveName,
         statusLine,
         trajectory,
         weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
+        planSchedule: buildPlanSchedule(plan, currentWeek),
         streak,
         weekActivity,
         topGap,
@@ -519,6 +551,7 @@ router.get('/today', auth, async (req, res) => {
         pendingPriorCount: pendingPriorTasks.length,
         getAheadTasks,
         getAheadWeek: nextWeekEntry?.week,
+        bonusTasks,
         weeklyInsight,
       },
     });
@@ -963,6 +996,43 @@ function buildObjectiveLabel(obj) {
 
   const base = parts.join(' ') || obj.objectiveType.replace(/_/g, ' ');
   return timelineLabel ? `${base} · ${timelineLabel}` : base;
+}
+
+/**
+ * Short, uppercase objective name for the V2 Home status-bar eyebrow.
+ * E.g. "GMAT", "SDE @ GOOGLE". Capped at 12 chars to keep the
+ * "{OBJECTIVE} READINESS" line on one line on small phones.
+ */
+function buildObjectiveName(obj) {
+  if (!obj) return null;
+  const s = obj.specifics || {};
+  let raw = s.examName || s.targetRole || s.targetSkill || obj.objectiveType || '';
+  raw = String(raw).replace(/_/g, ' ').trim();
+  if (s.targetRole && s.targetCompany) {
+    raw = `${s.targetRole} @ ${s.targetCompany}`;
+  }
+  const upper = raw.toUpperCase();
+  return upper.length > 12 ? upper.slice(0, 12) : upper;
+}
+
+/**
+ * Derive a compact per-week summary across the entire plan for the V2 Home
+ * "YOUR PLAN" timeline. Each entry is { week, total, done, skipped, isCurrent }.
+ */
+function buildPlanSchedule(plan, currentWeek) {
+  if (!plan || !Array.isArray(plan.weeklySchedule)) return [];
+  return plan.weeklySchedule.map(w => {
+    const tasks = w.tasks || [];
+    const done = tasks.filter(t => t.progress?.status === 'complete').length;
+    const skipped = tasks.filter(t => t.progress?.status === 'skipped').length;
+    return {
+      week: w.week,
+      total: tasks.length,
+      done,
+      skipped,
+      isCurrent: w.week === currentWeek,
+    };
+  });
 }
 
 module.exports = router;
