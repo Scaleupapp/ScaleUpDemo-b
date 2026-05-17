@@ -296,6 +296,7 @@ const getResults = async (req, res, next) => {
       recommendedContent,
       journeyImpact,
       nextActions,
+      difficultyUpgrades: attempt.difficultyUpgrades || [],
     };
 
     res.json(apiResponse.success(enrichedResult));

@@ -3,6 +3,27 @@ const QuizAttempt = require('../models/QuizAttempt');
 const Quiz = require('../models/Quiz');
 const { journeyAdaptationQueue } = require('../config/queue');
 
+const DIFFICULTY_ORDER = ['easy', 'medium', 'hard'];
+
+/**
+ * Bump or drop a topic's targetDifficulty based on the per-topic quiz percentage.
+ * ≥85% → upgrade (capped at 'hard')
+ * ≤40% → downgrade (floored at 'easy')
+ * Otherwise → unchanged
+ */
+function adjustTargetDifficulty(currentDifficulty, percentage) {
+  const current = currentDifficulty || 'medium';
+  const idx = DIFFICULTY_ORDER.indexOf(current);
+  if (idx < 0) return current;
+  if (percentage >= 85 && idx < DIFFICULTY_ORDER.length - 1) {
+    return DIFFICULTY_ORDER[idx + 1];
+  }
+  if (percentage <= 40 && idx > 0) {
+    return DIFFICULTY_ORDER[idx - 1];
+  }
+  return current;
+}
+
 class KnowledgeService {
 
   /**
@@ -45,6 +66,7 @@ class KnowledgeService {
     }
 
     // Update per-topic mastery from the topic breakdown
+    const difficultyUpgrades = [];
     for (const breakdown of (topicBreakdown || [])) {
       const newScore = breakdown.percentage;
       let topicEntry = profile.topicMastery.find(t => t.topic === breakdown.topic);
@@ -71,10 +93,19 @@ class KnowledgeService {
           topicEntry.scoreHistory = topicEntry.scoreHistory.slice(-20);
         }
         topicEntry.trend = this._calculateTrend(topicEntry.scoreHistory);
+
+        // Adjust targetDifficulty based on this quiz's per-topic score
+        const oldTargetDifficulty = topicEntry.targetDifficulty || 'medium';
+        const newTargetDifficulty = adjustTargetDifficulty(oldTargetDifficulty, newScore);
+        topicEntry.targetDifficulty = newTargetDifficulty;
+        if (newTargetDifficulty !== oldTargetDifficulty) {
+          difficultyUpgrades.push({ topic: breakdown.topic, from: oldTargetDifficulty, to: newTargetDifficulty });
+        }
       } else {
         // First encounter: for weight < 1, scale the initial score proportionally
         // so a low-confidence source doesn't anchor the topic at full value.
         const initialScore = weight < 1.0 ? Math.round(newScore * weight) : newScore;
+        const initialDifficulty = adjustTargetDifficulty('medium', newScore);
         profile.topicMastery.push({
           topic: breakdown.topic,
           score: initialScore,
@@ -90,7 +121,11 @@ class KnowledgeService {
           }],
           trend: 'stable',
           objectiveId: quizRef ? (quizRef.objectiveId || null) : null,
+          targetDifficulty: initialDifficulty,
         });
+        if (initialDifficulty !== 'medium') {
+          difficultyUpgrades.push({ topic: breakdown.topic, from: 'medium', to: initialDifficulty });
+        }
       }
     }
 
@@ -112,7 +147,7 @@ class KnowledgeService {
       .slice(0, 10)
       .map(t => t.topic);
 
-    return { profile, allTopics };
+    return { profile, allTopics, difficultyUpgrades };
   }
 
   /**
@@ -147,12 +182,21 @@ class KnowledgeService {
     }
 
     // Delegate to updateMastery (source='quiz', weight=1.0 — original behaviour)
-    ({ profile } = await this.updateMastery(userId, breakdown, {
+    let difficultyUpgrades;
+    ({ profile, difficultyUpgrades } = await this.updateMastery(userId, breakdown, {
       source: 'quiz',
       weight: 1.0,
       quizRef: { _id: quiz._id, objectiveId: quiz.objectiveId, topic: quiz.topic },
       incrementQuizCount: true,
     }));
+
+    // Persist upgrades onto the attempt so getResults can surface them to the client
+    if (difficultyUpgrades && difficultyUpgrades.length > 0) {
+      await QuizAttempt.findByIdAndUpdate(attemptId, {
+        $set: { difficultyUpgrades },
+      });
+      console.log(`[KnowledgeService] difficultyUpgrades for attempt ${attemptIdStr}:`, JSON.stringify(difficultyUpgrades));
+    }
 
     // ── Compute Learning Velocity ────────────────────────────────────
     await this._computeLearningVelocity(profile, userId);

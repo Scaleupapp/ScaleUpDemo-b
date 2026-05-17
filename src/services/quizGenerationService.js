@@ -147,7 +147,22 @@ class QuizGenerationService {
     const profile = await KnowledgeProfile.findOne({ userId });
     const topicMastery = profile?.topicMastery.find(t => t.topic === topic);
     const level = topicMastery?.level || 'beginner';
-    const difficultyMix = DIFFICULTY_MIX[level] || DIFFICULTY_MIX.beginner;
+    const targetDifficulty = topicMastery?.targetDifficulty || 'medium';
+
+    // Start from the level-based mix, then bias toward targetDifficulty.
+    // Mix values are percentages (0-100).  Shift +30 into the target bucket,
+    // taking -20 from medium and -10 from the remaining bucket (clamped at 0).
+    let difficultyMix = { ...(DIFFICULTY_MIX[level] || DIFFICULTY_MIX.beginner) };
+    if (targetDifficulty === 'hard') {
+      difficultyMix.hard  = Math.min(100, (difficultyMix.hard  || 0) + 30);
+      difficultyMix.medium = Math.max(0,  (difficultyMix.medium || 0) - 20);
+      difficultyMix.easy   = Math.max(0,  (difficultyMix.easy   || 0) - 10);
+    } else if (targetDifficulty === 'easy') {
+      difficultyMix.easy   = Math.min(100, (difficultyMix.easy   || 0) + 30);
+      difficultyMix.medium = Math.max(0,   (difficultyMix.medium || 0) - 20);
+      difficultyMix.hard   = Math.max(0,   (difficultyMix.hard   || 0) - 10);
+    }
+    // 'medium' uses the level-default mix unchanged
 
     const defaultCount = quizType === 'retention_check' ? 5 :
                           quizType === 'weekly_review' ? 12 :

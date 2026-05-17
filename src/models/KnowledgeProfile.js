@@ -29,6 +29,12 @@ const knowledgeProfileSchema = new mongoose.Schema({
       ref: 'UserObjective',
       default: null
     }, // null = legacy/global entry, set = objective-specific
+    targetDifficulty: {
+      type: String,
+      enum: ['easy', 'medium', 'hard'],
+      default: 'medium',
+    },
+
     // Day-1 Diagnostic additions (additive, optional). Captured at the
     // proficiency check; downstream services use them for calibration-
     // aware framing in Insights cards.

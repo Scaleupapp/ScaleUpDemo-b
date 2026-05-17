@@ -60,6 +60,14 @@ const quizAttemptSchema = new mongoose.Schema({
     level: String,
   }],
 
+  // Difficulty auto-upgrade signals computed on quiz completion.
+  // Each entry records a topic whose targetDifficulty changed due to this attempt.
+  difficultyUpgrades: [{
+    topic: String,
+    from: { type: String, enum: ['easy', 'medium', 'hard'] },
+    to:   { type: String, enum: ['easy', 'medium', 'hard'] },
+  }],
+
   startedAt: Date,
   completedAt: Date,
   totalTime: Number,
