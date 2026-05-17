@@ -69,6 +69,11 @@ const planSchema = new mongoose.Schema({
   supersededAt: { type: Date, default: null },
   supersededByPlanId: { type: mongoose.Schema.Types.ObjectId, ref: 'Plan', default: null },
   isActive: { type: Boolean, default: true, index: true },
+  // Weekly Compass review — tracks which plan-week numbers the user has
+  // already completed the "coach review with Compass" ritual for, so the
+  // /plan/today response doesn't keep re-surfacing the synthetic task once
+  // it's been done for the week.
+  reviewedWeeks: { type: [Number], default: [] },
 }, { timestamps: true });
 
 planSchema.index({ userId: 1, isActive: 1 });

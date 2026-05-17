@@ -26,6 +26,8 @@
  *   - insight       (proactive — "here's what I noticed")
  *   - mentor        (career strategy)
  *   - coach         (encouragement / reality check)
+ *   - review_week   (weekly retrospective — summarize the last 7 days,
+ *                    surface biggest gaps, suggest focus for the coming week)
  *
  * This file is the dispatcher. Heavy lifting is delegated to existing v1 services
  * (quizGenerationService, aiTutorService, etc.) — Compass just gives them a
@@ -330,6 +332,19 @@ async function handle({ userId, mode, payload = {} }) {
         systemPrompt: systemPrompt + '\n[Mode: coach — be encouraging but honest about progress.]',
         message: payload.message, history: payload.history,
       });
+
+    case 'review_week':
+      // First turn: synthesize the retrospective opening. Subsequent turns
+      // (when the client passes a `message`) flow through conversation with
+      // the review framing pinned to the system prompt.
+      if (payload.message) {
+        return await conversation({
+          ctx, userId,
+          systemPrompt: systemPrompt + '\n[Mode: review_week — this is a weekly retrospective. Reference the past 7 days of activity, the biggest gaps, and the suggested focus. Help the learner reflect and commit to next week.]',
+          message: payload.message, history: payload.history,
+        });
+      }
+      return await reviewWeek({ ctx, systemPrompt, userId, weekNumber: payload.weekNumber });
 
     default:
       return { mode: 'unknown', error: `Unknown mode: ${mode}` };
@@ -785,6 +800,152 @@ async function insight({ ctx, systemPrompt, userId }) {
     fallbackItems.map(i => i.text).join(' · '),
     { mode: 'insight' });
   return { mode: 'insight', output: { headline: 'Here\'s what I noticed.', items: fallbackItems } };
+}
+
+/**
+ * Compute "last 7 days of activity" for the weekly retrospective.
+ * Pulls completed quiz attempts, completed content, interview sessions, and
+ * the topics touched across them. Deterministic — feeds the LLM real data.
+ */
+async function computeLast7DaysActivity(userId) {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const QuizAttempt = require('../../models/QuizAttempt');
+  const ContentProgress = require('../../models/ContentProgress');
+  const InterviewSession = require('../../models/InterviewSession');
+
+  const [quizzes, contentDone, interviews] = await Promise.all([
+    QuizAttempt.find({ userId, status: 'completed', completedAt: { $gte: since } })
+      .select('score topicBreakdown completedAt').lean().catch(() => []),
+    ContentProgress.find({ userId, isCompleted: true, completedAt: { $gte: since } })
+      .select('contentId completedAt').lean().catch(() => []),
+    InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] }, completedAt: { $gte: since } })
+      .select('completedAt').lean().catch(() => []),
+  ]);
+
+  const topicsTouched = new Set();
+  let scoreSum = 0, scoreCount = 0;
+  for (const q of quizzes) {
+    if (typeof q.score === 'number') { scoreSum += q.score; scoreCount += 1; }
+    for (const tb of (q.topicBreakdown || [])) {
+      if (tb?.topic) topicsTouched.add(tb.topic);
+    }
+  }
+  const avgQuizScore = scoreCount ? Math.round(scoreSum / scoreCount) : null;
+
+  return {
+    quizzesTaken: quizzes.length,
+    contentCompleted: contentDone.length,
+    interviewsTaken: interviews.length,
+    avgQuizScore,
+    topicsTouched: Array.from(topicsTouched).slice(0, 8),
+    totalActivities: quizzes.length + contentDone.length + interviews.length,
+  };
+}
+
+/**
+ * Weekly retrospective opener. Compass summarizes the user's last 7 days,
+ * names the 1-2 biggest mastery gaps, and proposes a focus for next week.
+ * Subsequent turns flow through `conversation` with the review framing pinned.
+ */
+async function reviewWeek({ ctx, systemPrompt, userId, weekNumber }) {
+  const activity = await computeLast7DaysActivity(userId);
+
+  // Weakest topics for "biggest gaps" line — already on ctx, but ensure
+  // we have at least one fallback even when topicProfiles is sparse.
+  const gaps = (ctx.knowledge?.weakTopics || []).slice(0, 2);
+
+  // Build a deterministic data envelope the LLM grounds its message in.
+  // We deliberately give it the numbers and ask it to phrase them warmly —
+  // hallucinated stats would defeat the point of a retrospective.
+  const dataBlock = {
+    weekNumber: weekNumber || ctx.plan?.currentWeek || null,
+    last7Days: activity,
+    biggestGaps: gaps.map(g => ({ topic: g.topic, mastery: g.mastery })),
+    planProgress: ctx.plan ? {
+      week: ctx.plan.currentWeek,
+      totalWeeks: ctx.plan.totalWeeks,
+      tasksDoneThisWeek: ctx.plan.tasksDoneThisWeek,
+      tasksTotalThisWeek: ctx.plan.tasksTotalThisWeek,
+      readiness: ctx.plan.readiness,
+    } : null,
+    recentlyAskedTutorAbout: ctx.deep?.recentTutor || [],
+    overdueForReview: (ctx.deep?.dueForReview || []).slice(0, 3),
+  };
+
+  const userPrompt = [
+    `Write the OPENING message of a weekly Compass retrospective for the learner.`,
+    `Ground every number in the data below — DO NOT invent stats.`,
+    `Structure (use short paragraphs, no bullet headers):`,
+    `1) One warm sentence acknowledging the week.`,
+    `2) A 1-2 sentence recap of what they did (use the real counts; if zero, be honest — "this was a quiet week").`,
+    `3) Their 1-2 biggest gaps from biggestGaps (name the topic + mastery %).`,
+    `4) ONE concrete suggested focus for next week tied to the biggest gap.`,
+    `5) End with an open question inviting them to reflect ("How did this week feel?" / "What got in the way?" / "What do you want to lock in next week?").`,
+    ``,
+    `Keep total length 4-6 short sentences. Warm, honest, conversational.`,
+    `End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\``,
+    ``,
+    `DATA:\n${JSON.stringify(dataBlock, null, 2)}`,
+  ].join('\n');
+
+  const { text, capped, tokensIn, tokensOut } = await callLLM({
+    userId,
+    systemPrompt: systemPrompt + '\n[Mode: review_week — weekly retrospective. Reference real numbers from the DATA block. Be warm but honest.]',
+    userPrompt,
+    maxTokens: 700,
+  });
+
+  // Deterministic fallback when LLM is capped/unavailable — still useful.
+  const fallback = () => {
+    const a = activity;
+    const recap = a.totalActivities === 0
+      ? "This was a quiet week — no quizzes, content, or interviews logged."
+      : `You completed ${a.quizzesTaken} quiz${a.quizzesTaken === 1 ? '' : 'zes'}, ${a.contentCompleted} piece${a.contentCompleted === 1 ? '' : 's'} of content, and ${a.interviewsTaken} interview${a.interviewsTaken === 1 ? '' : 's'}${a.avgQuizScore !== null ? ` (avg quiz score ${a.avgQuizScore}%)` : ''}.`;
+    const gapLine = gaps[0]
+      ? `Your biggest gap is still ${gaps[0].topic} at ${gaps[0].mastery}%${gaps[1] ? `, with ${gaps[1].topic} (${gaps[1].mastery}%) close behind` : ''}.`
+      : `We don't have enough data to call out a gap yet.`;
+    const focus = gaps[0]
+      ? `Next week, let's put one focused session on ${gaps[0].topic} — even 15 minutes would move the needle.`
+      : `Next week, get one solid quiz in so we can spot where to focus.`;
+    return `Here's your week, in honest terms. ${recap} ${gapLine} ${focus} How did this week actually feel?`;
+  };
+
+  let reply;
+  let followups = [];
+  if (capped || !text) {
+    reply = fallback();
+    followups = ['It went well', 'I got blocked', 'Plan next week with me'];
+  } else {
+    reply = text;
+    const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[1]);
+        if (Array.isArray(parsed.followups)) followups = parsed.followups.slice(0, 3);
+      } catch (_) {}
+      reply = text.replace(jsonMatch[0], '').trim();
+    }
+    if (followups.length === 0) {
+      followups = ['It went well', 'I got blocked', 'Plan next week with me'];
+    }
+  }
+
+  await appendToThread(userId, 'assistant', reply, {
+    mode: 'review_week', followups, tokensIn, tokensOut,
+  });
+
+  return {
+    mode: 'review_week',
+    output: {
+      reply,
+      followups,
+      summary: {
+        weekNumber: dataBlock.weekNumber,
+        activity,
+        biggestGaps: dataBlock.biggestGaps,
+      },
+    },
+  };
 }
 
 /**

@@ -327,6 +327,28 @@ router.get('/today', auth, async (req, res) => {
       const getAheadShaped = nextWeekAvailable.slice(0, 3)
         .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
       const weeklyInsightDayDone = buildWeeklyInsight({ topGap, todaysTasks: [], weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
+
+      // Surface the weekly Compass review here too — when the user lands on
+      // day_done with allDone=true, this is the ideal moment to invite them
+      // into the retrospective before they jump ahead. Stuff it into
+      // getAheadTasks so iOS surfaces it without a brand-new field.
+      const reviewedWeeksDoneBranch = Array.isArray(plan.reviewedWeeks) ? plan.reviewedWeeks : [];
+      if (allDone && !reviewedWeeksDoneBranch.includes(currentWeek)) {
+        getAheadShaped.unshift({
+          taskId: `review-week-${currentWeek}`,
+          taskType: 'compass_review',
+          icon: '🧭',
+          title: 'Weekly coach review with Compass',
+          subtitle: 'Reflect on the week & plan ahead',
+          durationMin: 5,
+          difficulty: 'easy',
+          primaryTopic: null,
+          reason: 'Lock in what you learned this week',
+          payload: { weekNumber: currentWeek },
+          impact: null,
+        });
+      }
+
       return res.json({
         success: true,
         data: {
@@ -538,6 +560,31 @@ router.get('/today', auth, async (req, res) => {
 
     const weeklyInsight = buildWeeklyInsight({ topGap, todaysTasks, weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
 
+    // ── Weekly Compass review ritual ─────────────────────────────────────────
+    // Once per plan-week, prepend a "Coach review with Compass" task. Trigger:
+    // user has done >= 5 tasks of the current week, OR the current week is
+    // fully complete. We only surface it if Plan.reviewedWeeks doesn't already
+    // include this week (so completing it removes it for the rest of the week).
+    const reviewedWeeks = Array.isArray(plan.reviewedWeeks) ? plan.reviewedWeeks : [];
+    const triggerByCount = doneThisWeek >= 5;
+    const triggerByWeekDone = tasksThisWeek.length > 0 && doneThisWeek === tasksThisWeek.length;
+    const reviewAlreadyDone = reviewedWeeks.includes(currentWeek);
+    if (!reviewAlreadyDone && (triggerByCount || triggerByWeekDone)) {
+      todaysTasks.unshift({
+        taskId: `review-week-${currentWeek}`,
+        taskType: 'compass_review',
+        icon: '🧭',
+        title: 'Weekly coach review with Compass',
+        subtitle: 'Reflect on the week & plan ahead',
+        durationMin: 5,
+        difficulty: 'easy',
+        primaryTopic: null,
+        reason: 'Lock in what you learned this week',
+        payload: { weekNumber: currentWeek },
+        impact: null,
+      });
+    }
+
     return res.json({
       success: true,
       data: {
@@ -590,6 +637,34 @@ async function setTaskStatus(req, res, status) {
   try {
     const userId = req.user.userId;
     const { taskId } = req.params;
+
+    // Synthetic taskIds (not stored on weeklySchedule.tasks[]) — handled
+    // out-of-band. Today: the weekly Compass review (`review-week-<N>`)
+    // toggles a flag on Plan.reviewedWeeks so we don't re-surface it.
+    const reviewMatch = /^review-week-(\d+)$/.exec(taskId);
+    if (reviewMatch) {
+      if (status === 'complete') {
+        const weekNum = parseInt(reviewMatch[1], 10);
+        const r = await Plan.updateOne(
+          { userId, isActive: true },
+          { $addToSet: { reviewedWeeks: weekNum } }
+        );
+        if (r.matchedCount === 0) {
+          return res.status(404).json({ success: false, message: 'Active plan not found' });
+        }
+      }
+      // Skip on a review is a soft no-op (we still don't want to re-surface
+      // it the same day) — mark it done so the user isn't nagged.
+      if (status === 'skipped') {
+        const weekNum = parseInt(reviewMatch[1], 10);
+        await Plan.updateOne(
+          { userId, isActive: true },
+          { $addToSet: { reviewedWeeks: weekNum } }
+        );
+      }
+      return res.json({ success: true, data: { taskId, status } });
+    }
+
     const update = {
       'weeklySchedule.$[].tasks.$[t].progress.status': status,
     };
