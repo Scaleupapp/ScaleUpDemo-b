@@ -417,6 +417,70 @@ router.get('/today', auth, async (req, res) => {
 
     const planExhausted = ranked.length === 0;
     if (planExhausted) {
+      // Bonus item #1 (when available): today's unplayed daily competition
+      // for the user's canonical cohort. Honest contract — this IS today's
+      // cohort challenge, not a per-subtopic claim. Strong engagement signal
+      // for fast users who've cleared their plan.
+      if (objective?.canonicalTopic) {
+        try {
+          const DailyChallenge = require('../../models/DailyChallenge');
+          const ChallengeAttempt = require('../../models/ChallengeAttempt');
+          const todayIST = (() => {
+            // Match the existing _todayIST convention used by competitionService.
+            const d = new Date();
+            d.setUTCHours(d.getUTCHours() + 5, d.getUTCMinutes() + 30, 0, 0);
+            d.setUTCHours(0, 0, 0, 0);
+            return d;
+          })();
+          const challenge = await DailyChallenge.findOne({
+            topic: objective.canonicalTopic,
+            date: todayIST,
+            status: 'active',
+          }).lean().catch(() => null);
+          if (challenge) {
+            const alreadyPlayed = await ChallengeAttempt.exists({
+              userId, challengeId: challenge._id, completedAt: { $ne: null },
+            }).catch(() => null);
+            if (!alreadyPlayed) {
+              ranked.unshift({
+                _id: `bonus-compete:${challenge._id}`,
+                type: 'competition',
+                _isBonusCompete: true,
+                topic: {
+                  canonicalName: objective.canonicalTopic,
+                  displayName: prettyTopicName(objective.canonicalTopic),
+                },
+                payload: {
+                  title: `Today's challenge: ${prettyTopicName(objective.canonicalTopic)}`,
+                  creator: 'Timed · ranked · 30 sec per question',
+                  estimatedMinutes: Math.ceil((challenge.totalDurationSeconds || (challenge.questions?.length || 15) * 30) / 60),
+                  difficulty: challenge.difficulty === 'hard' ? 4 : challenge.difficulty === 'easy' ? 2 : 3,
+                  reason: 'Bonus — compete with the rest of your cohort today.',
+                  impact: {
+                    expectedFrom: null,
+                    expectedTo: null,
+                    expectedGain: null,
+                    whyText: 'Daily challenge against your cohort.',
+                    scope: 'competition',
+                  },
+                  quizId: null,
+                  contentId: null,
+                  interviewId: null,
+                  url: null,
+                  challengeId: String(challenge._id),
+                  topic: objective.canonicalTopic,
+                },
+                progress: { status: 'pending' },
+              });
+            }
+          }
+        } catch (compErr) {
+          // Non-critical — bonus plan still works without the competition injection.
+          console.warn('[v2/plan/today] bonus competition injection failed (non-fatal):', compErr.message);
+        }
+      }
+
+      // Then the existing weakTopic bonus quizzes (Fix 4 in 32b8bf3).
       const weakTopics = (knowledge?.topicMastery || [])
         .filter(t => (t.quizzesTaken || 0) >= 1)
         .sort((a, b) => (a.score || 0) - (b.score || 0))
@@ -652,6 +716,7 @@ function extractPayload(task) {
     interviewId: p.interviewId || p.scenarioId || null,
     url:         p.url         || null,
     topic:       p.topic       || null,
+    challengeId: p.challengeId || null,
   };
 }
 

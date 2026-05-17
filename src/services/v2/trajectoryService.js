@@ -88,6 +88,26 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
 
   const effectiveDelta = realDelta !== null ? realDelta : staticDelta;
 
+  // ── Pace classification + ETA fields ────────────────────────────────────
+  const paceCategory =
+    effectiveDelta >= staticDelta * 1.5 ? 'ahead' :
+    effectiveDelta < staticDelta * 0.8  ? 'behind' :
+    'on_track';
+
+  const weeksToTarget = effectiveDelta > 0
+    ? Math.min(999, Math.ceil((TARGET_READINESS - baseline) / effectiveDelta))
+    : 999;
+
+  const projectedTargetDate = weeksToTarget < 999
+    ? new Date(Date.now() + weeksToTarget * 7 * 24 * 60 * 60 * 1000).toISOString()
+    : null;
+
+  const earlyByWeeks = (paceCategory === 'ahead' && timelineWeeks > 0)
+    ? Math.max(0, timelineWeeks - weeksToTarget)
+    : null;
+
+  const targetHit = baseline >= TARGET_READINESS;
+
   // ── Forecast curve ───────────────────────────────────────────────────────
   // Build readiness at each horizon from the effective weekly delta,
   // capped at TARGET_READINESS so we never promise more than the goal.
@@ -131,6 +151,12 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
     headline: onTrack
       ? `You can reach ~${atTargetDate}% readiness by your target. On track.`
       : `At current pace you'd reach ~${atTargetDate}% by target. Below the ${TARGET_READINESS}% line.`,
+    // ── Adaptive ETA fields (v2) ──────────────────────────────────────────
+    paceCategory,
+    weeksToTarget,
+    projectedTargetDate,
+    earlyByWeeks,
+    targetHit,
   };
 }
 
