@@ -25,9 +25,11 @@
  *   - note          (process uploaded material)
  *   - insight       (proactive — "here's what I noticed")
  *   - mentor        (career strategy)
- *   - coach         (encouragement / reality check)
- *   - review_week   (weekly retrospective — summarize the last 7 days,
- *                    surface biggest gaps, suggest focus for the coming week)
+ *   - coach         (general-purpose retrospective + reflection — scoped by
+ *                    the caller to a window (week | month | all_time | topic).
+ *                    Replaces the old `review_week` mode; `review_week` still
+ *                    accepted as an alias that maps to scope='week' for
+ *                    back-compat with older iOS builds.)
  *
  * This file is the dispatcher. Heavy lifting is delegated to existing v1 services
  * (quizGenerationService, aiTutorService, etc.) — Compass just gives them a
@@ -327,24 +329,23 @@ async function handle({ userId, mode, payload = {} }) {
       });
 
     case 'coach':
-      return await conversation({
-        ctx, userId,
-        systemPrompt: systemPrompt + '\n[Mode: coach — be encouraging but honest about progress.]',
-        message: payload.message, history: payload.history,
-      });
-
-    case 'review_week':
+    case 'review_week': {
+      // Back-compat: `review_week` is an alias for `coach` with scope='week'.
+      // Older iOS builds (TestFlight 151 and earlier) still send `review_week`.
+      const scope = normalizeScope(payload.scope) || (mode === 'review_week' ? 'week' : 'week');
+      const topic = typeof payload.topic === 'string' ? payload.topic.trim() : null;
       // First turn: synthesize the retrospective opening. Subsequent turns
       // (when the client passes a `message`) flow through conversation with
-      // the review framing pinned to the system prompt.
+      // the coach framing pinned to the system prompt.
       if (payload.message) {
         return await conversation({
           ctx, userId,
-          systemPrompt: systemPrompt + '\n[Mode: review_week — this is a weekly retrospective. Reference the past 7 days of activity, the biggest gaps, and the suggested focus. Help the learner reflect and commit to next week.]',
+          systemPrompt: systemPrompt + `\n[Mode: coach — ${coachFramingForScope(scope, topic)} Help the learner reflect and commit to a concrete next move.]`,
           message: payload.message, history: payload.history,
         });
       }
-      return await reviewWeek({ ctx, systemPrompt, userId, weekNumber: payload.weekNumber });
+      return await coachOpener({ ctx, systemPrompt, userId, scope, topic, weekNumber: payload.weekNumber });
+    }
 
     default:
       return { mode: 'unknown', error: `Unknown mode: ${mode}` };
@@ -803,31 +804,95 @@ async function insight({ ctx, systemPrompt, userId }) {
 }
 
 /**
- * Compute "last 7 days of activity" for the weekly retrospective.
+ * Normalize incoming scope value from the client. Accepts the canonical
+ * scopes plus a couple of common variants. Falls back to null when invalid.
+ */
+function normalizeScope(scope) {
+  if (!scope || typeof scope !== 'string') return null;
+  const s = scope.toLowerCase().trim();
+  if (s === 'week'     || s === 'this_week'  || s === 'last_week') return 'week';
+  if (s === 'month'    || s === 'this_month' || s === 'last_month') return 'month';
+  if (s === 'all_time' || s === 'all'        || s === 'since_start') return 'all_time';
+  if (s === 'topic'    || s === 'by_topic')   return 'topic';
+  return null;
+}
+
+/**
+ * Window in days for a given scope. `all_time` uses null (no lower bound).
+ */
+function windowDaysForScope(scope) {
+  switch (scope) {
+    case 'week':    return 7;
+    case 'month':   return 30;
+    case 'all_time':return null;
+    case 'topic':   return 30; // topic mode defaults to a 30d window unless caller overrides
+    default:        return 7;
+  }
+}
+
+/**
+ * Human-readable label for a scope — used in the LLM framing prompt.
+ */
+function coachFramingForScope(scope, topic) {
+  switch (scope) {
+    case 'week':     return 'this is a retrospective over the past week. Reference the last 7 days of activity, biggest gaps, and a suggested focus for next week.';
+    case 'month':    return 'this is a retrospective over the past month. Reference the last 30 days of activity, biggest gaps, and patterns/streaks.';
+    case 'all_time': return 'this is a retrospective across the learner\'s entire journey. Reference cumulative activity, where they\'ve grown, and where they\'re still soft.';
+    case 'topic':    return `this is a focused coaching session on the topic "${topic || 'their chosen topic'}". Reference their performance on this topic and what to practice next.`;
+    default:         return 'this is a coaching conversation. Reference recent activity.';
+  }
+}
+
+/**
+ * Compute activity for a window. `windowDays` may be a number (last N days) or
+ * null (all-time). Optionally filtered by `topic` — restricts QuizAttempts
+ * and contents to those tagged with the topic.
+ *
  * Pulls completed quiz attempts, completed content, interview sessions, and
  * the topics touched across them. Deterministic — feeds the LLM real data.
  */
-async function computeLast7DaysActivity(userId) {
-  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+async function computeActivity(userId, { windowDays = 7, topic = null } = {}) {
   const QuizAttempt = require('../../models/QuizAttempt');
   const ContentProgress = require('../../models/ContentProgress');
   const InterviewSession = require('../../models/InterviewSession');
 
+  const dateFilter = windowDays
+    ? { $gte: new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000) }
+    : null;
+
+  const quizQuery = { userId, status: 'completed' };
+  const contentQuery = { userId, isCompleted: true };
+  const interviewQuery = { userId, status: { $in: ['completed', 'evaluated'] } };
+  if (dateFilter) {
+    quizQuery.completedAt = dateFilter;
+    contentQuery.completedAt = dateFilter;
+    interviewQuery.completedAt = dateFilter;
+  }
+
+  // Topic filter — best effort. QuizAttempt has topicBreakdown.topic; we
+  // narrow by querying for it. Content filtering by topic is done post-fetch
+  // since ContentProgress doesn't carry topic — we use the linked Content.
+  if (topic) {
+    quizQuery['topicBreakdown.topic'] = topic;
+  }
+
   const [quizzes, contentDone, interviews] = await Promise.all([
-    QuizAttempt.find({ userId, status: 'completed', completedAt: { $gte: since } })
-      .select('score topicBreakdown completedAt').lean().catch(() => []),
-    ContentProgress.find({ userId, isCompleted: true, completedAt: { $gte: since } })
-      .select('contentId completedAt').lean().catch(() => []),
-    InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] }, completedAt: { $gte: since } })
-      .select('completedAt').lean().catch(() => []),
+    QuizAttempt.find(quizQuery).select('score topicBreakdown completedAt').lean().catch(() => []),
+    ContentProgress.find(contentQuery).select('contentId completedAt').lean().catch(() => []),
+    InterviewSession.find(interviewQuery).select('completedAt').lean().catch(() => []),
   ]);
 
   const topicsTouched = new Set();
   let scoreSum = 0, scoreCount = 0;
+  let topicScoreSum = 0, topicScoreCount = 0;
   for (const q of quizzes) {
     if (typeof q.score === 'number') { scoreSum += q.score; scoreCount += 1; }
     for (const tb of (q.topicBreakdown || [])) {
       if (tb?.topic) topicsTouched.add(tb.topic);
+      if (topic && tb?.topic === topic && typeof tb.score === 'number') {
+        topicScoreSum += tb.score;
+        topicScoreCount += 1;
+      }
     }
   }
   const avgQuizScore = scoreCount ? Math.round(scoreSum / scoreCount) : null;
@@ -837,29 +902,53 @@ async function computeLast7DaysActivity(userId) {
     contentCompleted: contentDone.length,
     interviewsTaken: interviews.length,
     avgQuizScore,
-    topicsTouched: Array.from(topicsTouched).slice(0, 8),
+    topicAvgScore: topicScoreCount ? Math.round(topicScoreSum / topicScoreCount) : null,
+    topicsTouched: Array.from(topicsTouched).slice(0, 10),
     totalActivities: quizzes.length + contentDone.length + interviews.length,
   };
 }
 
 /**
- * Weekly retrospective opener. Compass summarizes the user's last 7 days,
- * names the 1-2 biggest mastery gaps, and proposes a focus for next week.
- * Subsequent turns flow through `conversation` with the review framing pinned.
+ * Back-compat shim for any caller still using the 7-day name.
  */
-async function reviewWeek({ ctx, systemPrompt, userId, weekNumber }) {
-  const activity = await computeLast7DaysActivity(userId);
+async function computeLast7DaysActivity(userId) {
+  return computeActivity(userId, { windowDays: 7 });
+}
+
+/**
+ * Coach opener. Generalized retrospective — Compass summarizes the user's
+ * activity over the chosen scope (week | month | all_time | topic), names
+ * the 1-2 biggest mastery gaps (or topic-specific gaps), and proposes a
+ * focused next move. Subsequent turns flow through `conversation` with the
+ * coach framing pinned for the same scope.
+ */
+async function coachOpener({ ctx, systemPrompt, userId, scope = 'week', topic = null, weekNumber }) {
+  const windowDays = windowDaysForScope(scope);
+  const activity = await computeActivity(userId, { windowDays, topic: scope === 'topic' ? topic : null });
 
   // Weakest topics for "biggest gaps" line — already on ctx, but ensure
   // we have at least one fallback even when topicProfiles is sparse.
+  // For topic scope, anchor to the chosen topic.
   const gaps = (ctx.knowledge?.weakTopics || []).slice(0, 2);
 
+  // Window label for the prompt + summary
+  const windowLabel = (() => {
+    switch (scope) {
+      case 'week':     return 'past 7 days';
+      case 'month':    return 'past 30 days';
+      case 'all_time': return 'entire journey so far';
+      case 'topic':    return `recent activity on "${topic || 'this topic'}"`;
+      default:         return 'recent activity';
+    }
+  })();
+
   // Build a deterministic data envelope the LLM grounds its message in.
-  // We deliberately give it the numbers and ask it to phrase them warmly —
-  // hallucinated stats would defeat the point of a retrospective.
   const dataBlock = {
+    scope,
+    topic: topic || null,
+    windowLabel,
     weekNumber: weekNumber || ctx.plan?.currentWeek || null,
-    last7Days: activity,
+    activity,
     biggestGaps: gaps.map(g => ({ topic: g.topic, mastery: g.mastery })),
     planProgress: ctx.plan ? {
       week: ctx.plan.currentWeek,
@@ -872,15 +961,26 @@ async function reviewWeek({ ctx, systemPrompt, userId, weekNumber }) {
     overdueForReview: (ctx.deep?.dueForReview || []).slice(0, 3),
   };
 
+  const openingHint = (() => {
+    switch (scope) {
+      case 'week':     return `"Looking at your last week…"`;
+      case 'month':    return `"Looking at your last month…"`;
+      case 'all_time': return `"Across your whole journey so far…"`;
+      case 'topic':    return `"Focusing on ${topic || 'this topic'}…"`;
+      default:         return `"Here's what I see…"`;
+    }
+  })();
+
   const userPrompt = [
-    `Write the OPENING message of a weekly Compass retrospective for the learner.`,
+    `Write the OPENING message of a Compass Coach session for the learner. Scope: ${scope}${topic ? ` (topic: ${topic})` : ''}.`,
+    `Open with a phrase like ${openingHint}`,
     `Ground every number in the data below — DO NOT invent stats.`,
-    `Structure (use short paragraphs, no bullet headers):`,
-    `1) One warm sentence acknowledging the week.`,
-    `2) A 1-2 sentence recap of what they did (use the real counts; if zero, be honest — "this was a quiet week").`,
-    `3) Their 1-2 biggest gaps from biggestGaps (name the topic + mastery %).`,
-    `4) ONE concrete suggested focus for next week tied to the biggest gap.`,
-    `5) End with an open question inviting them to reflect ("How did this week feel?" / "What got in the way?" / "What do you want to lock in next week?").`,
+    `Structure (short paragraphs, no bullet headers):`,
+    `1) One warm sentence acknowledging the ${windowLabel}.`,
+    `2) A 1-2 sentence recap of what they did (real counts; if zero, be honest — "this was a quiet stretch").`,
+    `3) Their 1-2 biggest gaps from biggestGaps (name the topic + mastery %). For topic scope, focus on their performance on ${topic || 'the chosen topic'} specifically.`,
+    `4) ONE concrete suggested next move tied to the biggest gap (or the topic for topic scope).`,
+    `5) End with an open question inviting them to reflect (e.g. "How did this stretch feel?" / "What got in the way?" / "What do you want to lock in next?").`,
     ``,
     `Keep total length 4-6 short sentences. Warm, honest, conversational.`,
     `End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\``,
@@ -890,7 +990,7 @@ async function reviewWeek({ ctx, systemPrompt, userId, weekNumber }) {
 
   const { text, capped, tokensIn, tokensOut } = await callLLM({
     userId,
-    systemPrompt: systemPrompt + '\n[Mode: review_week — weekly retrospective. Reference real numbers from the DATA block. Be warm but honest.]',
+    systemPrompt: systemPrompt + `\n[Mode: coach — ${coachFramingForScope(scope, topic)} Reference real numbers from the DATA block. Be warm but honest.]`,
     userPrompt,
     maxTokens: 700,
   });
@@ -899,22 +999,28 @@ async function reviewWeek({ ctx, systemPrompt, userId, weekNumber }) {
   const fallback = () => {
     const a = activity;
     const recap = a.totalActivities === 0
-      ? "This was a quiet week — no quizzes, content, or interviews logged."
+      ? `This was a quiet ${scope === 'all_time' ? 'stretch' : scope} — no quizzes, content, or interviews logged.`
       : `You completed ${a.quizzesTaken} quiz${a.quizzesTaken === 1 ? '' : 'zes'}, ${a.contentCompleted} piece${a.contentCompleted === 1 ? '' : 's'} of content, and ${a.interviewsTaken} interview${a.interviewsTaken === 1 ? '' : 's'}${a.avgQuizScore !== null ? ` (avg quiz score ${a.avgQuizScore}%)` : ''}.`;
-    const gapLine = gaps[0]
-      ? `Your biggest gap is still ${gaps[0].topic} at ${gaps[0].mastery}%${gaps[1] ? `, with ${gaps[1].topic} (${gaps[1].mastery}%) close behind` : ''}.`
-      : `We don't have enough data to call out a gap yet.`;
-    const focus = gaps[0]
-      ? `Next week, let's put one focused session on ${gaps[0].topic} — even 15 minutes would move the needle.`
-      : `Next week, get one solid quiz in so we can spot where to focus.`;
-    return `Here's your week, in honest terms. ${recap} ${gapLine} ${focus} How did this week actually feel?`;
+    const gapLine = scope === 'topic' && topic
+      ? (a.topicAvgScore !== null
+          ? `On ${topic} specifically, your average is ${a.topicAvgScore}%.`
+          : `We don't have enough data on ${topic} yet to call out where you stand.`)
+      : (gaps[0]
+          ? `Your biggest gap is still ${gaps[0].topic} at ${gaps[0].mastery}%${gaps[1] ? `, with ${gaps[1].topic} (${gaps[1].mastery}%) close behind` : ''}.`
+          : `We don't have enough data to call out a gap yet.`);
+    const focus = scope === 'topic' && topic
+      ? `Try one focused 15-minute quiz on ${topic} to move the needle.`
+      : (gaps[0]
+          ? `Next, let's put one focused session on ${gaps[0].topic} — even 15 minutes would move the needle.`
+          : `Get one solid quiz in next so we can spot where to focus.`);
+    return `${openingHint.replace(/[""]/g, '')} ${recap} ${gapLine} ${focus} How did this stretch actually feel?`;
   };
 
   let reply;
   let followups = [];
   if (capped || !text) {
     reply = fallback();
-    followups = ['It went well', 'I got blocked', 'Plan next week with me'];
+    followups = ['It went well', 'I got blocked', 'Plan what\'s next'];
   } else {
     reply = text;
     const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
@@ -926,21 +1032,24 @@ async function reviewWeek({ ctx, systemPrompt, userId, weekNumber }) {
       reply = text.replace(jsonMatch[0], '').trim();
     }
     if (followups.length === 0) {
-      followups = ['It went well', 'I got blocked', 'Plan next week with me'];
+      followups = ['It went well', 'I got blocked', 'Plan what\'s next'];
     }
   }
 
   await appendToThread(userId, 'assistant', reply, {
-    mode: 'review_week', followups, tokensIn, tokensOut,
+    mode: 'coach', followups, tokensIn, tokensOut,
   });
 
   return {
-    mode: 'review_week',
+    mode: 'coach',
     output: {
       reply,
       followups,
+      scope,
+      topic: topic || null,
       summary: {
         weekNumber: dataBlock.weekNumber,
+        windowLabel,
         activity,
         biggestGaps: dataBlock.biggestGaps,
       },

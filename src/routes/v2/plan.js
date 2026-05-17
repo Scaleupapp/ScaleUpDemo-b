@@ -325,34 +325,16 @@ router.get('/today', auth, async (req, res) => {
       const getAheadShaped = nextWeekAvailable.slice(0, 3)
         .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
 
-      // Compass weekly review — surface in BOTH the bonus and pure-day_done
-      // branches when the user has earned it. Triggers: ≥5 tasks done OR week
-      // fully complete. Suppressed if already reviewed this week.
-      const reviewedWeeksDoneBranch = Array.isArray(plan.reviewedWeeks) ? plan.reviewedWeeks : [];
-      const earnedReview = (doneThisWeek >= 5 || allDone) &&
-        !reviewedWeeksDoneBranch.includes(currentWeek);
+      // Coach mode is now a top-level, always-available entry point on Home —
+      // no longer auto-surfaced as a plan task here. See V2HomeView "Talk to
+      // Coach" card. The synthetic compass_review task is intentionally not
+      // inserted in either branch below.
 
       if (bonusRanked.length > 0) {
         // Build a structured day from bonus tasks + falling through into the
         // normal response shape so iOS renders the cards instead of celebration.
         const todaysTasks = pickStructuredDay(bonusRanked, TODAYS_TASK_COUNT)
           .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
-
-        if (earnedReview) {
-          todaysTasks.unshift({
-            taskId: `review-week-${currentWeek}`,
-            taskType: 'compass_review',
-            icon: '🧭',
-            title: 'Weekly coach review with Compass',
-            subtitle: 'Reflect on the week & plan ahead',
-            durationMin: 5,
-            difficulty: 'easy',
-            primaryTopic: null,
-            reason: 'Lock in what you learned this week',
-            payload: { weekNumber: currentWeek },
-            impact: null,
-          });
-        }
 
         const totalDurationMin = todaysTasks.reduce((s, t) => s + (t.durationMin || 0), 0);
         const weeklyInsightBonus = buildWeeklyInsight({ topGap, todaysTasks, weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
@@ -398,21 +380,9 @@ router.get('/today', auth, async (req, res) => {
 
       const weeklyInsightDayDone = buildWeeklyInsight({ topGap, todaysTasks: [], weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
 
-      if (earnedReview) {
-        getAheadShaped.unshift({
-          taskId: `review-week-${currentWeek}`,
-          taskType: 'compass_review',
-          icon: '🧭',
-          title: 'Weekly coach review with Compass',
-          subtitle: 'Reflect on the week & plan ahead',
-          durationMin: 5,
-          difficulty: 'easy',
-          primaryTopic: null,
-          reason: 'Lock in what you learned this week',
-          payload: { weekNumber: currentWeek },
-          impact: null,
-        });
-      }
+      // Coach mode is now an always-available top-level entry on Home —
+      // no longer auto-surfaced as a synthetic plan task in the day_done
+      // celebration path either.
 
       return res.json({
         success: true,
@@ -523,30 +493,10 @@ router.get('/today', auth, async (req, res) => {
 
     const weeklyInsight = buildWeeklyInsight({ topGap, todaysTasks, weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
 
-    // ── Weekly Compass review ritual ─────────────────────────────────────────
-    // Once per plan-week, prepend a "Coach review with Compass" task. Trigger:
-    // user has done >= 5 tasks of the current week, OR the current week is
-    // fully complete. We only surface it if Plan.reviewedWeeks doesn't already
-    // include this week (so completing it removes it for the rest of the week).
-    const reviewedWeeks = Array.isArray(plan.reviewedWeeks) ? plan.reviewedWeeks : [];
-    const triggerByCount = doneThisWeek >= 5;
-    const triggerByWeekDone = tasksThisWeek.length > 0 && doneThisWeek === tasksThisWeek.length;
-    const reviewAlreadyDone = reviewedWeeks.includes(currentWeek);
-    if (!reviewAlreadyDone && (triggerByCount || triggerByWeekDone)) {
-      todaysTasks.unshift({
-        taskId: `review-week-${currentWeek}`,
-        taskType: 'compass_review',
-        icon: '🧭',
-        title: 'Weekly coach review with Compass',
-        subtitle: 'Reflect on the week & plan ahead',
-        durationMin: 5,
-        difficulty: 'easy',
-        primaryTopic: null,
-        reason: 'Lock in what you learned this week',
-        payload: { weekNumber: currentWeek },
-        impact: null,
-      });
-    }
+    // Coach mode (formerly "Weekly Compass review") is no longer surfaced
+    // as a synthetic plan task. It's a top-level entry point on V2HomeView
+    // ("Talk to Coach") so the user can invoke it anytime, with a scope
+    // chooser (This Week / This Month / Since Start / By Topic).
 
     return res.json({
       success: true,
