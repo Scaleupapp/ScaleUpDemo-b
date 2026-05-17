@@ -231,10 +231,16 @@ router.get('/today', auth, async (req, res) => {
       ? Math.max(1, Math.floor((Date.now() - new Date(planStartedAt).getTime()) / (7 * DAY_MS)) + 1)
       : currentWeek;
     const behindByWeeks = Math.max(0, expectedWeek - currentWeek);
-    // "available" = not completed and not skipped — these are eligible for today's set
-    const availableThisWeek = tasksThisWeek.filter(
+    // "available" = not completed and not skipped — these are eligible for today's set.
+    // Remove compete tasks — they're surfaced via Compass / Competition Home,
+    // not the daily structured plan. Plan compete tasks have a misleading
+    // contract: their title implies a specific subtopic but they all point
+    // to the same cohort-wide daily challenge.
+    const COMPETE_V1_TYPES = new Set(['competition']);
+    const filterCompete = (arr) => (arr || []).filter(t => !COMPETE_V1_TYPES.has(t.type));
+    const availableThisWeek = filterCompete(tasksThisWeek.filter(
       t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped'
-    );
+    ));
     const doneThisWeek = tasksThisWeek.filter(t => t.progress?.status === 'complete').length;
     const skippedCount = tasksThisWeek.filter(t => t.progress?.status === 'skipped').length;
     const weeksRemaining = Math.max(0, totalWeeks - currentWeek);
@@ -264,7 +270,7 @@ router.get('/today', auth, async (req, res) => {
       w => w.week > currentWeek && (w.tasks || []).some(t => t.progress?.status !== 'complete')
     );
     const nextWeekAvailable = nextWeekEntry
-      ? (nextWeekEntry.tasks || []).filter(t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped')
+      ? filterCompete((nextWeekEntry.tasks || []).filter(t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped'))
       : [];
 
     if (availableThisWeek.length === 0) {
