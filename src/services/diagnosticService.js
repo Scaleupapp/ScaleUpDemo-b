@@ -429,16 +429,44 @@ async function nextQuestion(attemptId) {
   const attempt = await DiagnosticAttempt.findById(attemptId);
   if (!attempt) throw new Error('attempt not found');
 
+  // Bug 1 hard-cap: never serve more questions than the plan promised the client.
+  // totalEstimatedQuestions is computed at startAttempt time from the selector
+  // plan (PLAN_BY_RATING sums). The assembled pool can be larger because the bank
+  // may return more docs than the plan slots; without this guard the progress
+  // counter overflows ("Question 64 of 39").
+  const totalPlanned = attempt.totalEstimatedQuestions || null;
+  if (totalPlanned !== null && attempt.answers.length >= totalPlanned) {
+    return {
+      done: true,
+      progress: { current: attempt.answers.length, total: totalPlanned },
+    };
+  }
+
   const pool = await _ensureAttemptPool(attempt);
   const questions = pool.questions || [];
 
-  const answeredIds = new Set((attempt.answers || []).map(a => String(a.questionId)));
-  const remaining = questions.filter(q => !answeredIds.has(String(q._id)));
+  // Deduplicate pool by _id so a question that appears in two bank result-sets
+  // (e.g. same doc fetched for two difficulty slots) is only offered once.
+  const seen = new Set();
+  const uniqueQuestions = questions.filter(q => {
+    const id = String(q._id);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 
-  if (remaining.length === 0) {
+  const answeredIds = new Set((attempt.answers || []).map(a => String(a.questionId)));
+  const remaining = uniqueQuestions.filter(q => !answeredIds.has(String(q._id)));
+
+  // Respect the plan cap even when the pool has more unanswered questions left.
+  const effectiveTotal = totalPlanned !== null
+    ? totalPlanned
+    : uniqueQuestions.length;
+
+  if (remaining.length === 0 || attempt.answers.length >= effectiveTotal) {
     return {
       done: true,
-      progress: { current: attempt.answers.length, total: questions.length },
+      progress: { current: attempt.answers.length, total: effectiveTotal },
     };
   }
 
@@ -469,7 +497,7 @@ async function nextQuestion(attemptId) {
       options: (next.options || []).map(o => ({ key: o.label || o.key, text: o.text })),
       type: next.requiresVoice ? 'voice' : 'mcq',
     },
-    progress: { current: attempt.answers.length + 1, total: questions.length },
+    progress: { current: attempt.answers.length + 1, total: effectiveTotal },
   };
 }
 
@@ -512,12 +540,19 @@ async function finishAttempt(attemptId) {
     : new Map(Object.entries(attempt.selfRatings || {}));
 
   // Aggregate by canonicalCompetency (stored on answer.competency in v2).
+  // Bug 2 fix: normalize the competency key before grouping so that legacy
+  // bank entries tagged "Databases" and canonical entries tagged "database"
+  // (or any other casing/spacing variation) collapse into a single bucket.
+  // canonicalize() lowercases + kebab-cases; competencyNormalize.normalize()
+  // additionally resolves known aliases.
+  const { normalize: normalizeCompetency } = require('./competencyNormalizer');
   const byCanonical = new Map();
   for (const ans of attempt.answers || []) {
     const c = ans.competency;
     if (!c) continue;
-    if (!byCanonical.has(c)) byCanonical.set(c, { correct: 0, total: 0 });
-    const stats = byCanonical.get(c);
+    const key = normalizeCompetency(c) || c;
+    if (!byCanonical.has(key)) byCanonical.set(key, { correct: 0, total: 0 });
+    const stats = byCanonical.get(key);
     stats.total += 1;
     if (ans.isCorrect) stats.correct += 1;
   }
@@ -548,10 +583,20 @@ async function finishAttempt(attemptId) {
   // empty + LLM gen failed). Without this, the calibration screen can't
   // distinguish "untested" from "data missing", leaving the user confused
   // why most topics show no score.
+  // Bug 2 fix continued: normalize the key from ratingsMap too so sentinels
+  // land in the same bucket as any real answers under the same topic.
   for (const [canonical] of ratingsMap.entries()) {
-    if (!byCanonical.has(canonical)) {
-      byCanonical.set(canonical, { correct: 0, total: 0, notTested: true });
+    const key = normalizeCompetency(canonical) || canonical;
+    if (!byCanonical.has(key)) {
+      byCanonical.set(key, { correct: 0, total: 0, notTested: true });
     }
+  }
+
+  // Bug 2 fix: build a normalized view of ratingsMap so lookups work even when
+  // the stored key ("Databases") differs from the normalized bucket key ("database").
+  const normalizedRatingsMap = new Map();
+  for (const [k, v] of ratingsMap.entries()) {
+    normalizedRatingsMap.set(normalizeCompetency(k) || k, v);
   }
 
   // Spec §10.2 — use calibration utility for delta/class consistency
@@ -566,7 +611,8 @@ async function finishAttempt(attemptId) {
     const score = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
     const band = calibration.scoreToBand(score).toLowerCase();
     // selfRatings stored lowercase per Plan 2a — calibration utility is case-insensitive
-    const selfRating = ratingsMap.get(canonical);
+    // Use normalizedRatingsMap so "database" finds the rating stored as "Databases".
+    const selfRating = normalizedRatingsMap.get(canonical) || ratingsMap.get(canonical);
     let calibrationDelta = 0;
     let calibrationClass = 'well-calibrated';
     try {

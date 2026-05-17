@@ -118,6 +118,17 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
       };
     }).sort((a, b) => (a.score ?? 999) - (b.score ?? 999));
 
+    // Bug 4 fix: pretty-print canonical slug → "Data Structures" form for use
+    // in all human-readable strings served to iOS. Hyphens/underscores → spaces,
+    // each word title-cased. Applied to patterns, calibSummary, and topActions.
+    const prettyTopic = (slug) => String(slug || '')
+      .replace(/[-_]+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean)
+      .map((w) => w[0].toUpperCase() + w.slice(1))
+      .join(' ');
+
     // Patterns — derived from per-competency performance + answer telemetry.
     const patterns = [];
     if (answers.length) {
@@ -137,7 +148,7 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
         const best = scored.reduce((m, p) => (p.score > m.score ? p : m), scored[0]);
         const worst = scored.reduce((m, p) => (p.score < m.score ? p : m), scored[0]);
         if (best.score - worst.score >= 25) {
-          patterns.push(`Strongest area: ${best.topic} (${best.score}%). Weakest: ${worst.topic} (${worst.score}%).`);
+          patterns.push(`Strongest area: ${prettyTopic(best.topic)} (${best.score}%). Weakest: ${prettyTopic(worst.topic)} (${worst.score}%).`);
         }
       }
       // Time gap — slowest vs fastest topic by avg time.
@@ -146,7 +157,7 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
         const slowest = timed.reduce((m, p) => (p.avgTimeSec > m.avgTimeSec ? p : m), timed[0]);
         const fastest = timed.reduce((m, p) => (p.avgTimeSec < m.avgTimeSec ? p : m), timed[0]);
         if (slowest.avgTimeSec >= fastest.avgTimeSec * 1.8 && slowest.avgTimeSec >= 30) {
-          patterns.push(`You spend much longer on ${slowest.topic} (${slowest.avgTimeSec}s avg) than on ${fastest.topic} (${fastest.avgTimeSec}s) — pacing room to gain there.`);
+          patterns.push(`You spend much longer on ${prettyTopic(slowest.topic)} (${slowest.avgTimeSec}s avg) than on ${prettyTopic(fastest.topic)} (${fastest.avgTimeSec}s) — pacing room to gain there.`);
         }
       }
     }
@@ -189,15 +200,16 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
     const topActions = gapTopics.map((g, i) => {
       // Build a concrete, calculated reason so users see WHY this is on the list.
       const perf = performance.find(p => p.topic === g.topic);
+      const prettyName = prettyTopic(g.topic);
       let reason = i === 0 ? 'Your highest-leverage gap' : 'A measured weak spot';
       if (perf && perf.score !== null) {
         reason = i === 0
-          ? `You scored ${perf.score}% on ${g.topic} (accuracy ${perf.accuracyPct}%) — the biggest lift available.`
-          : `Scored ${perf.score}% on ${g.topic}.`;
+          ? `You scored ${perf.score}% on ${prettyName} (accuracy ${perf.accuracyPct}%) — the biggest lift available.`
+          : `Scored ${perf.score}% on ${prettyName}.`;
       }
       return {
         rank: i + 1,
-        title: `Focus ${g.topic} from foundation`,
+        title: `Focus ${prettyName} from foundation`,
         reason,
         action: { type: 'topic', topic: g.topic },
       };
@@ -221,7 +233,7 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
       .filter(g => g.classification === 'overestimate')
       .sort((a, b) => a.delta - b.delta)[0];
     const calibSummary = striking
-      ? `You rated yourself ${selfRated.find(s => s.topic === striking.topic)?.level || 'higher'} on ${striking.topic}, but scored ${actual.find(a => a.topic === striking.topic)?.scorePct ?? 0}% — worth a closer look.`
+      ? `You rated yourself ${selfRated.find(s => s.topic === striking.topic)?.level || 'higher'} on ${prettyTopic(striking.topic)}, but scored ${actual.find(a => a.topic === striking.topic)?.scorePct ?? 0}% — worth a closer look.`
       : (actual.length
           ? 'You’re reasonably well-calibrated overall.'
           : 'Complete the diagnostic to see your calibration.');
