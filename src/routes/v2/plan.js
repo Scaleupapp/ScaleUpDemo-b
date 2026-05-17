@@ -216,13 +216,15 @@ router.get('/today', auth, async (req, res) => {
     }
 
     // Find current week from earliest week with any incomplete tasks
-    const currentWeekEntry =
+    // These are declared with `let` so the auto-promote block (below) can
+    // shadow them with the next week's values when the current week is clean-done.
+    let currentWeekEntry =
       plan.weeklySchedule.find(w => w.tasks.some(t => t.progress?.status !== 'complete')) ||
       plan.weeklySchedule[0];
 
-    const currentWeek = currentWeekEntry.week;
+    let currentWeek = currentWeekEntry.week;
     const totalWeeks = plan.weeklySchedule.length;
-    const tasksThisWeek = currentWeekEntry.tasks || [];
+    let tasksThisWeek = currentWeekEntry.tasks || [];
 
     // Calendar-vs-plan drift. If the plan started 3 weeks ago but the user is
     // still showing week 1 tasks, they're 2 weeks behind — surface that so
@@ -240,11 +242,12 @@ router.get('/today', auth, async (req, res) => {
     // to the same cohort-wide daily challenge.
     const COMPETE_V1_TYPES = new Set(['competition']);
     const filterCompete = (arr) => (arr || []).filter(t => !COMPETE_V1_TYPES.has(t.type));
-    const availableThisWeek = filterCompete(tasksThisWeek.filter(
+    // Declared with `let` so the auto-promote block can reassign them.
+    let availableThisWeek = filterCompete(tasksThisWeek.filter(
       t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped'
     ));
-    const doneThisWeek = tasksThisWeek.filter(t => t.progress?.status === 'complete').length;
-    const skippedCount = tasksThisWeek.filter(t => t.progress?.status === 'skipped').length;
+    let doneThisWeek = tasksThisWeek.filter(t => t.progress?.status === 'complete').length;
+    let skippedCount = tasksThisWeek.filter(t => t.progress?.status === 'skipped').length;
     const weeksRemaining = Math.max(0, totalWeeks - currentWeek);
 
     // Prefer a personal, specific status line — anchor on the user's
@@ -268,16 +271,59 @@ router.get('/today', auth, async (req, res) => {
     // "Get ahead" pool — next week's first 3 tasks, ALWAYS shaped so iOS can
     // surface them when the user finishes today's set (so there's always
     // something to do). Pulled from the very next non-complete week.
-    const nextWeekEntry = plan.weeklySchedule.find(
+    // Declared with `let` so the auto-promote block can advance them.
+    let nextWeekEntry = plan.weeklySchedule.find(
       w => w.week > currentWeek && (w.tasks || []).some(t => t.progress?.status !== 'complete')
     );
-    const nextWeekAvailable = nextWeekEntry
+    let nextWeekAvailable = nextWeekEntry
       ? filterCompete((nextWeekEntry.tasks || []).filter(t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped'))
       : [];
 
+    // ── Auto-promote next week (Fix 3) ───────────────────────────────────────
+    // When the current week is fully complete (nothing skipped, nothing left)
+    // AND the next week has available tasks, silently promote them into
+    // today's structured set instead of showing a 'come back tomorrow' wall.
+    // We mutate the local variables only — the plan doc in DB is untouched.
+    {
+      const allCurrentDone = doneThisWeek === tasksThisWeek.length;
+      if (availableThisWeek.length === 0 && allCurrentDone && nextWeekEntry && nextWeekAvailable.length > 0) {
+        // Advance to next week's data.
+        currentWeekEntry = nextWeekEntry;
+        currentWeek = nextWeekEntry.week;
+        tasksThisWeek = nextWeekEntry.tasks || [];
+        availableThisWeek = filterCompete(tasksThisWeek.filter(
+          t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped'
+        ));
+        doneThisWeek = tasksThisWeek.filter(t => t.progress?.status === 'complete').length;
+        skippedCount = tasksThisWeek.filter(t => t.progress?.status === 'skipped').length;
+
+        // Advance the get-ahead pool to the week after the promoted one.
+        const nextNextWeekEntry = plan.weeklySchedule.find(
+          w => w.week > nextWeekEntry.week && (w.tasks || []).some(t => t.progress?.status !== 'complete')
+        );
+        nextWeekEntry = nextNextWeekEntry || null;
+        nextWeekAvailable = nextNextWeekEntry
+          ? filterCompete((nextNextWeekEntry.tasks || []).filter(t => t.progress?.status !== 'complete' && t.progress?.status !== 'skipped'))
+          : [];
+      }
+    }
+
     if (availableThisWeek.length === 0) {
-      // Week done — but always offer "get ahead" so the user has something
-      // actionable instead of being told to come back tomorrow.
+      // Week done (or plan exhausted). Fix 2: distinguish truly complete vs skipped.
+      const allDone = doneThisWeek === tasksThisWeek.length;
+      const someSkipped = skippedCount > 0;
+
+      let weekDoneMessage;
+      if (allDone) {
+        weekDoneMessage = nextWeekEntry
+          ? `Week ${currentWeek} done — get a head start on week ${nextWeekEntry.week}.`
+          : `Week ${currentWeek} done. See you tomorrow.`;
+      } else if (someSkipped) {
+        weekDoneMessage = `${doneThisWeek} of ${tasksThisWeek.length} done this week · ${skippedCount} skipped. Reshuffle to bring them back.`;
+      } else {
+        weekDoneMessage = `Done for now. See you tomorrow.`;
+      }
+
       const getAheadShaped = nextWeekAvailable.slice(0, 3)
         .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
       const weeklyInsightDayDone = buildWeeklyInsight({ topGap, todaysTasks: [], weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
@@ -298,11 +344,7 @@ router.get('/today', auth, async (req, res) => {
           getAheadTasks: getAheadShaped,
           getAheadWeek: nextWeekEntry?.week,
           weeklyInsight: weeklyInsightDayDone,
-          message: skippedCount > 0
-            ? 'You\'ve skipped the rest of this week\'s tasks. Reshuffle to bring them back.'
-            : (getAheadShaped.length > 0
-                ? 'Week ' + currentWeek + ' done — get a head start on week ' + nextWeekEntry.week + '.'
-                : 'You\'ve completed everything for this week. See you tomorrow.'),
+          message: weekDoneMessage,
         },
       });
     }
@@ -361,6 +403,52 @@ router.get('/today', auth, async (req, res) => {
     } catch (recErr) {
       // Non-critical — daily plan still works without the content injection.
       console.warn('[v2/plan/today] content injection failed (non-fatal):', recErr.message);
+    }
+
+    // ── Fix 4: Bonus tasks when the plan is fully exhausted ──────────────────
+    // At this point auto-promote has already run, so if availableThisWeek is
+    // still non-empty we're fine. But if somehow we reach here with an empty
+    // ranked pool (all plan weeks done, content injection also empty) we
+    // synthesise 2 bonus quiz tasks on the user's weakest topics so Home
+    // always has something actionable. These piggyback on the existing ranked
+    // pool and are shaped by the same pickStructuredDay path.
+    const prettyTopicName = (s) =>
+      (s || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    const planExhausted = ranked.length === 0;
+    if (planExhausted) {
+      const weakTopics = (knowledge?.topicMastery || [])
+        .filter(t => (t.quizzesTaken || 0) >= 1)
+        .sort((a, b) => (a.score || 0) - (b.score || 0))
+        .slice(0, 2);
+      for (let i = 0; i < weakTopics.length; i++) {
+        const t = weakTopics[i];
+        ranked.push({
+          _id: `bonus-quiz:${t.topic}:${Date.now()}-${i}`,
+          type: 'quiz',
+          _isBonusQuiz: true,
+          topic: { canonicalName: t.topic, displayName: prettyTopicName(t.topic) },
+          payload: {
+            title: `Quiz: ${prettyTopicName(t.topic)}`,
+            estimatedMinutes: 8,
+            difficulty: 2,
+            reason: 'Bonus — plan complete, keep the momentum.',
+            impact: {
+              expectedFrom: t.score || 0,
+              expectedTo: Math.min(100, (t.score || 0) + 5),
+              expectedGain: 5,
+              whyText: 'Bonus quiz on a topic you can still sharpen.',
+              scope: 'topic',
+            },
+            quizId: null,
+            contentId: null,
+            interviewId: null,
+            url: null,
+            topic: t.topic,
+          },
+          progress: { status: 'pending' },
+        });
+      }
     }
 
     // The structured day = the top N available tasks. Mix types so it's not
@@ -553,14 +641,17 @@ function shapeTask(task, topicMasteryFor) {
 
 /**
  * Pull out just the routing fields iOS/Android need to open the right detail screen.
+ * `topic` is included so bonus quiz tasks (taskType='quiz', quizId=null) can
+ * route through V2QuizRequestLoaderSheet via the on-demand quiz flow.
  */
 function extractPayload(task) {
   const p = task.payload || {};
   return {
-    contentId: p.contentId || null,
-    quizId:    p.quizId    || null,
+    contentId:   p.contentId   || null,
+    quizId:      p.quizId      || null,
     interviewId: p.interviewId || p.scenarioId || null,
-    url:       p.url       || null,
+    url:         p.url         || null,
+    topic:       p.topic       || null,
   };
 }
 

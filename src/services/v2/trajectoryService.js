@@ -103,6 +103,18 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
   const weeklyDelta = Math.round(effectiveDelta * 10) / 10;
   const onTrack = effectiveDelta >= staticDelta * 0.8;
 
+  // Chart-only forward projection — Today, 30d, 60d, 90d.
+  // Target is exposed separately via targetReadiness; including it in points
+  // can produce a visual dip when the target date is closer than 90d (the
+  // Target point would sit at a lower readiness value than the 60d/90d points,
+  // causing iOS Charts to draw a downward slope at the end of the line).
+  const points = [
+    { whenLabel: 'Today',   readiness: today,    weeks: 0 },
+    { whenLabel: '30 days', readiness: in30Days, weeks: 4 },
+    { whenLabel: '60 days', readiness: in60Days, weeks: 8 },
+    { whenLabel: '90 days', readiness: in90Days, weeks: 12 },
+  ].sort((a, b) => a.weeks - b.weeks);
+
   return {
     today,
     in30Days,
@@ -115,13 +127,7 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
     onTrack,
     velocitySource,
     realTasksPerWeek,
-    points: [
-      { whenLabel: 'Today',   readiness: today,        weeks: 0 },
-      { whenLabel: '30 days', readiness: in30Days,     weeks: 4 },
-      { whenLabel: '60 days', readiness: in60Days,     weeks: 8 },
-      { whenLabel: '90 days', readiness: in90Days,     weeks: 12 },
-      { whenLabel: 'Target',  readiness: atTargetDate, weeks: timelineWeeks },
-    ],
+    points,
     headline: onTrack
       ? `You can reach ~${atTargetDate}% readiness by your target. On track.`
       : `At current pace you'd reach ~${atTargetDate}% by target. Below the ${TARGET_READINESS}% line.`,
