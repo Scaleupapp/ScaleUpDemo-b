@@ -302,28 +302,60 @@ router.get('/today', auth, async (req, res) => {
       const tp = knowledge?.topicProfiles?.[canonicalName];
       return tp?.masteryLevel ?? 0;
     };
-    // Day-rotation seed: within a single day the set is stable, but the next
-    // day surfaces a different slice from the same week's pool. Stops Home
-    // from looking identical across days when the user hasn't completed
-    // anything yet.
-    const daySeed = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
-    const dayJitter = (canonical) => {
-      if (!canonical) return 0;
-      // Deterministic small jitter per (topic, day) — keeps weakest first but
-      // shuffles within ~5pt mastery bands across days.
-      let h = 0;
-      const s = `${canonical}:${daySeed}`;
-      for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-      return Math.abs(h % 5);
-    };
     const ranked = [...availableThisWeek].sort((a, b) => {
-      const am = topicMasteryFor(a.topic?.canonicalName) + dayJitter(a.topic?.canonicalName);
-      const bm = topicMasteryFor(b.topic?.canonicalName) + dayJitter(b.topic?.canonicalName);
+      const am = topicMasteryFor(a.topic?.canonicalName);
+      const bm = topicMasteryFor(b.topic?.canonicalName);
       return am - bm;
     });
 
+    // ── Issue B: inject up to 1 content recommendation into the pool ─────────
+    // The plan task pool is all-assessment (quiz/compete/interview). Inject
+    // one content piece (video/article/notes) so the day has learning mixed in.
+    // We cap at 1 so it doesn't crowd out plan tasks on short weeks.
+    try {
+      const recommendationService = require('../../services/recommendationService');
+      const recResult = await recommendationService.getPersonalizedFeed(userId, { page: 1, limit: 3 });
+      const recItems = recResult?.items || [];
+      if (recItems.length > 0) {
+        const pick = recItems[0]; // highest-scored recommendation
+        const contentTypeToTaskType = {
+          video:       { type: 'in_app_content', uiType: 'watch', icon: '📺' },
+          article:     { type: 'external_link',  uiType: 'read',  icon: '📄' },
+          notes:       { type: 'in_app_content', uiType: 'read',  icon: '🧠' },
+          infographic: { type: 'in_app_content', uiType: 'watch', icon: '📺' },
+        };
+        const ctMap = contentTypeToTaskType[pick.contentType] || contentTypeToTaskType.video;
+        const durationMin = pick.duration ? Math.ceil(pick.duration / 60) : 10;
+        // Shape as a pseudo-plan task so it flows through pickStructuredDay and
+        // the existing ranked.filter pendingPriorTasks logic unmodified.
+        const syntheticTask = {
+          _id: `content:${pick._id}`,
+          type: ctMap.type,
+          _isContentInjection: true,
+          topic: {
+            canonicalName: (pick.topics || [])[0] || null,
+            displayName: (pick.topics || [])[0] || 'Learning',
+          },
+          payload: {
+            contentId: String(pick._id),
+            title: pick.title,
+            creator: pick.creator || pick.creatorId?.username || '',
+            estimatedMinutes: durationMin,
+            difficulty: 2, // treat as medium (maps to 'medium' in shapeTask)
+            reason: `Recommended for your ${(pick.topics || [])[0] || 'goal'}`,
+          },
+          progress: { status: 'pending' },
+        };
+        ranked.push(syntheticTask);
+      }
+    } catch (recErr) {
+      // Non-critical — daily plan still works without the content injection.
+      console.warn('[v2/plan/today] content injection failed (non-fatal):', recErr.message);
+    }
+
     // The structured day = the top N available tasks. Mix types so it's not
-    // 5 videos in a row — interleave by taskType where possible.
+    // 5 of the same thing — interleave by taskType, with day-of-year rotation
+    // so consecutive days surface different starting slices (Issue A).
     const todaysTasks = pickStructuredDay(ranked, TODAYS_TASK_COUNT)
       .map(t => shapeTask(t, topicMasteryFor));
 
@@ -437,16 +469,28 @@ router.post('/reshuffle', auth, async (req, res) => {
 });
 
 /**
- * Pick a varied set of N tasks: greedily interleave by taskType so the day
- * isn't "5 of the same thing". Falls back to plain rank order if needed.
+ * Pick a varied set of N tasks: rotate the start position by day-of-year so
+ * consecutive days see a different slice of the same week's pool (Issue A),
+ * then greedily interleave by taskType to avoid runs of identical types.
  */
 function pickStructuredDay(rankedTasks, n) {
   if (rankedTasks.length <= n) return rankedTasks;
+
+  // Rotate the starting index by day-of-year so each day surfaces a
+  // different starting point in the ranked pool. Within a single day the
+  // pick is stable; the next day a different offset is used.
+  const dayOfYear = Math.floor(
+    (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) /
+    (24 * 60 * 60 * 1000)
+  );
+  const start = dayOfYear % rankedTasks.length;
+  const rotated = [...rankedTasks.slice(start), ...rankedTasks.slice(0, start)];
+
+  // Greedy type-interleave on the rotated pool (existing behaviour).
   const picked = [];
-  const pool = [...rankedTasks];
+  const pool = [...rotated];
   let lastType = null;
   while (picked.length < n && pool.length > 0) {
-    // Prefer the highest-ranked task whose type differs from the last pick.
     let idx = pool.findIndex(t => t.type !== lastType);
     if (idx === -1) idx = 0; // all same type left — just take the top
     const [task] = pool.splice(idx, 1);
