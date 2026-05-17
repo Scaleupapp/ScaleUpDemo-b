@@ -26,6 +26,8 @@ router.get('/relevant', auth, c.getRelevantForUser);
 // Profile & Stats
 router.get('/profile', auth, c.getCompetitionProfile);
 router.get('/stats', auth, c.getCompetitionStats);
+// V2: user's past competition attempts, newest first.
+router.get('/history', auth, c.getCompetitionHistory);
 
 // Live Events
 router.get('/live-events/upcoming', auth, c.getUpcomingEvents);

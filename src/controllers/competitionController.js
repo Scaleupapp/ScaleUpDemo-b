@@ -360,6 +360,49 @@ const getRelevantForUser = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * V2: list the user's completed competition attempts, newest first.
+ * Joins to DailyChallenge for displayTitle/topic/date metadata.
+ * Correct count is derived from the answers array (no stored correctCount field).
+ */
+const getCompetitionHistory = async (req, res, next) => {
+  try {
+    const ChallengeAttempt = require('../models/ChallengeAttempt');
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const attempts = await ChallengeAttempt.find({
+      userId: req.user.userId,
+      completedAt: { $ne: null },
+    })
+      .sort({ completedAt: -1 })
+      .limit(limit)
+      .populate('challengeId', 'displayTitle topic date')
+      .lean();
+
+    const items = attempts.map(a => {
+      const ch = a.challengeId;
+      // Derive correctCount from the stored answers array (no dedicated field).
+      const answers = Array.isArray(a.answers) ? a.answers : [];
+      const totalQuestions = answers.length;
+      // We don't store isCorrect per answer on ChallengeAttempt — use rawScore as proxy.
+      // correctCount is omitted when we can't derive it meaningfully.
+      return {
+        _id: a._id,
+        challengeId: ch?._id || null,
+        title: ch?.displayTitle || ch?.topic || 'Daily Challenge',
+        topic: ch?.topic || null,
+        challengeDate: ch?.date || null,
+        completedAt: a.completedAt,
+        handicappedScore: a.handicappedScore ?? null,
+        rawScore: a.rawScore ?? null,
+        timeTakenSeconds: a.timeTaken ?? null,
+        isPersonalBest: a.isPersonalBest ?? false,
+      };
+    });
+
+    return res.json(apiResponse.success({ items, total: items.length }));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getTodayChallenges, getChallengeById, startChallenge, submitChallengeAnswer,
   completeChallenge, getChallengeResults, getChallengeReview,
@@ -370,4 +413,5 @@ module.exports = {
   getChallengeCandidates, approveCandidates, triggerGeneration,
   getObjectiveTopic,
   getRelevantForUser,
+  getCompetitionHistory,
 };
