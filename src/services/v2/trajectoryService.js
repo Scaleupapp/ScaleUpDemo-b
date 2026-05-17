@@ -108,6 +108,14 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
 
   const targetHit = baseline >= TARGET_READINESS;
 
+  // Deadline-relative ETA. If the projected weeksToTarget exceeds the user's
+  // chosen timeline, surface that gap so the UI can say "X weeks past your
+  // deadline" instead of an unbounded "in 25 weeks".
+  const projectedAfterDeadline = !targetHit && weeksToTarget > timelineWeeks;
+  const weeksLateVsDeadline = projectedAfterDeadline
+    ? weeksToTarget - timelineWeeks
+    : null;
+
   // ── Forecast curve ───────────────────────────────────────────────────────
   // Build readiness at each horizon from the effective weekly delta,
   // capped at TARGET_READINESS so we never promise more than the goal.
@@ -123,17 +131,36 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
   const weeklyDelta = Math.round(effectiveDelta * 10) / 10;
   const onTrack = effectiveDelta >= staticDelta * 0.8;
 
-  // Chart-only forward projection — Today, 30d, 60d, 90d.
-  // Target is exposed separately via targetReadiness; including it in points
-  // can produce a visual dip when the target date is closer than 90d (the
-  // Target point would sit at a lower readiness value than the 60d/90d points,
-  // causing iOS Charts to draw a downward slope at the end of the line).
-  const points = [
-    { whenLabel: 'Today',   readiness: today,    weeks: 0 },
-    { whenLabel: '30 days', readiness: in30Days, weeks: 4 },
-    { whenLabel: '60 days', readiness: in60Days, weeks: 8 },
-    { whenLabel: '90 days', readiness: in90Days, weeks: 12 },
-  ].sort((a, b) => a.weeks - b.weeks);
+  // ── Timeline-aware chart points ──────────────────────────────────────────
+  // For short timelines (1mo, 3mo) the 30/60/90-day curve runs WAY past the
+  // user's deadline and confuses the story ("why am I seeing 90 days when my
+  // plan is 4 weeks?"). So we scale the horizons to the actual timeline:
+  //   ≤6 weeks  → Today + weekly milestones up to the target date
+  //   7-12 wks  → Today + midpoint + target date
+  //   >12 wks   → keep the existing 30/60/90 view (still under the deadline)
+  let points;
+  if (timelineWeeks > 0 && timelineWeeks <= 6) {
+    points = [{ whenLabel: 'Today', readiness: today, weeks: 0 }];
+    for (let w = 1; w <= timelineWeeks; w++) {
+      const label = w === timelineWeeks ? 'Target' : `Wk ${w}`;
+      points.push({ whenLabel: label, readiness: project(w), weeks: w });
+    }
+  } else if (timelineWeeks > 6 && timelineWeeks <= 12) {
+    const mid = Math.round(timelineWeeks / 2);
+    points = [
+      { whenLabel: 'Today',           readiness: today,             weeks: 0 },
+      { whenLabel: `Wk ${mid}`,       readiness: project(mid),      weeks: mid },
+      { whenLabel: 'Target',          readiness: project(timelineWeeks), weeks: timelineWeeks },
+    ];
+  } else {
+    points = [
+      { whenLabel: 'Today',   readiness: today,    weeks: 0 },
+      { whenLabel: '30 days', readiness: in30Days, weeks: 4 },
+      { whenLabel: '60 days', readiness: in60Days, weeks: 8 },
+      { whenLabel: '90 days', readiness: in90Days, weeks: 12 },
+    ];
+  }
+  points.sort((a, b) => a.weeks - b.weeks);
 
   return {
     today,
@@ -157,6 +184,8 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
     projectedTargetDate,
     earlyByWeeks,
     targetHit,
+    projectedAfterDeadline,
+    weeksLateVsDeadline,
   };
 }
 

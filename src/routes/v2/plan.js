@@ -309,10 +309,82 @@ router.get('/today', auth, async (req, res) => {
     }
 
     if (availableThisWeek.length === 0) {
-      // Week done (or plan exhausted). Fix 2: distinguish truly complete vs skipped.
+      // Week is "done" by status (everything is complete OR skipped) but the
+      // user shouldn't hit a wall. Synthesise bonus tasks (today's daily
+      // challenge + weak-topic quizzes) so there's always something to grab.
+      // If we end up with any bonus tasks, fall through to the normal
+      // structured-day response with them as todaysTasks. Otherwise fall back
+      // to the day_done celebration.
       const allDone = doneThisWeek === tasksThisWeek.length;
       const someSkipped = skippedCount > 0;
 
+      const bonusRanked = await synthesizeBonusTasks({
+        userId, objective, knowledge,
+      });
+
+      const getAheadShaped = nextWeekAvailable.slice(0, 3)
+        .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
+
+      // Compass weekly review — surface in BOTH the bonus and pure-day_done
+      // branches when the user has earned it. Triggers: ≥5 tasks done OR week
+      // fully complete. Suppressed if already reviewed this week.
+      const reviewedWeeksDoneBranch = Array.isArray(plan.reviewedWeeks) ? plan.reviewedWeeks : [];
+      const earnedReview = (doneThisWeek >= 5 || allDone) &&
+        !reviewedWeeksDoneBranch.includes(currentWeek);
+
+      if (bonusRanked.length > 0) {
+        // Build a structured day from bonus tasks + falling through into the
+        // normal response shape so iOS renders the cards instead of celebration.
+        const todaysTasks = pickStructuredDay(bonusRanked, TODAYS_TASK_COUNT)
+          .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
+
+        if (earnedReview) {
+          todaysTasks.unshift({
+            taskId: `review-week-${currentWeek}`,
+            taskType: 'compass_review',
+            icon: '🧭',
+            title: 'Weekly coach review with Compass',
+            subtitle: 'Reflect on the week & plan ahead',
+            durationMin: 5,
+            difficulty: 'easy',
+            primaryTopic: null,
+            reason: 'Lock in what you learned this week',
+            payload: { weekNumber: currentWeek },
+            impact: null,
+          });
+        }
+
+        const totalDurationMin = todaysTasks.reduce((s, t) => s + (t.durationMin || 0), 0);
+        const weeklyInsightBonus = buildWeeklyInsight({ topGap, todaysTasks, weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
+
+        return res.json({
+          success: true,
+          data: {
+            greeting,
+            objectiveLabel,
+            statusLine: allDone
+              ? `Week ${currentWeek} wrapped. Bonus picks below — keep the momentum.`
+              : statusLine,
+            trajectory,
+            weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks },
+            streak,
+            weekActivity,
+            topGap,
+            todaysTasks,
+            totalDurationMin,
+            hasMoreThisWeek: false,
+            skippedCount,
+            behindByWeeks,
+            pendingPriorTasks: [],
+            pendingPriorCount: 0,
+            getAheadTasks: getAheadShaped,
+            getAheadWeek: nextWeekEntry?.week,
+            weeklyInsight: weeklyInsightBonus,
+          },
+        });
+      }
+
+      // Genuine day_done: no bonus material available either. Celebration path.
       let weekDoneMessage;
       if (allDone) {
         weekDoneMessage = nextWeekEntry
@@ -324,16 +396,9 @@ router.get('/today', auth, async (req, res) => {
         weekDoneMessage = `Done for now. See you tomorrow.`;
       }
 
-      const getAheadShaped = nextWeekAvailable.slice(0, 3)
-        .map(t => shapeTask(t, (canonical) => (knowledge?.topicProfiles?.[canonical]?.masteryLevel ?? 0)));
       const weeklyInsightDayDone = buildWeeklyInsight({ topGap, todaysTasks: [], weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
 
-      // Surface the weekly Compass review here too — when the user lands on
-      // day_done with allDone=true, this is the ideal moment to invite them
-      // into the retrospective before they jump ahead. Stuff it into
-      // getAheadTasks so iOS surfaces it without a brand-new field.
-      const reviewedWeeksDoneBranch = Array.isArray(plan.reviewedWeeks) ? plan.reviewedWeeks : [];
-      if (allDone && !reviewedWeeksDoneBranch.includes(currentWeek)) {
+      if (earnedReview) {
         getAheadShaped.unshift({
           taskId: `review-week-${currentWeek}`,
           taskType: 'compass_review',
@@ -427,114 +492,12 @@ router.get('/today', auth, async (req, res) => {
       console.warn('[v2/plan/today] content injection failed (non-fatal):', recErr.message);
     }
 
-    // ── Fix 4: Bonus tasks when the plan is fully exhausted ──────────────────
-    // At this point auto-promote has already run, so if availableThisWeek is
-    // still non-empty we're fine. But if somehow we reach here with an empty
-    // ranked pool (all plan weeks done, content injection also empty) we
-    // synthesise 2 bonus quiz tasks on the user's weakest topics so Home
-    // always has something actionable. These piggyback on the existing ranked
-    // pool and are shaped by the same pickStructuredDay path.
-    const prettyTopicName = (s) =>
-      (s || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-
-    const planExhausted = ranked.length === 0;
-    if (planExhausted) {
-      // Bonus item #1 (when available): today's unplayed daily competition
-      // for the user's canonical cohort. Honest contract — this IS today's
-      // cohort challenge, not a per-subtopic claim. Strong engagement signal
-      // for fast users who've cleared their plan.
-      if (objective?.canonicalTopic) {
-        try {
-          const DailyChallenge = require('../../models/DailyChallenge');
-          const ChallengeAttempt = require('../../models/ChallengeAttempt');
-          const todayIST = (() => {
-            // Match the existing _todayIST convention used by competitionService.
-            const d = new Date();
-            d.setUTCHours(d.getUTCHours() + 5, d.getUTCMinutes() + 30, 0, 0);
-            d.setUTCHours(0, 0, 0, 0);
-            return d;
-          })();
-          const challenge = await DailyChallenge.findOne({
-            topic: objective.canonicalTopic,
-            date: todayIST,
-            status: 'active',
-          }).lean().catch(() => null);
-          if (challenge) {
-            const alreadyPlayed = await ChallengeAttempt.exists({
-              userId, challengeId: challenge._id, completedAt: { $ne: null },
-            }).catch(() => null);
-            if (!alreadyPlayed) {
-              ranked.unshift({
-                _id: `bonus-compete:${challenge._id}`,
-                type: 'competition',
-                _isBonusCompete: true,
-                topic: {
-                  canonicalName: objective.canonicalTopic,
-                  displayName: prettyTopicName(objective.canonicalTopic),
-                },
-                payload: {
-                  title: `Today's challenge: ${prettyTopicName(objective.canonicalTopic)}`,
-                  creator: 'Timed · ranked · 30 sec per question',
-                  estimatedMinutes: Math.ceil((challenge.totalDurationSeconds || (challenge.questions?.length || 15) * 30) / 60),
-                  difficulty: challenge.difficulty === 'hard' ? 4 : challenge.difficulty === 'easy' ? 2 : 3,
-                  reason: 'Bonus — compete with the rest of your cohort today.',
-                  impact: {
-                    expectedFrom: null,
-                    expectedTo: null,
-                    expectedGain: null,
-                    whyText: 'Daily challenge against your cohort.',
-                    scope: 'competition',
-                  },
-                  quizId: null,
-                  contentId: null,
-                  interviewId: null,
-                  url: null,
-                  challengeId: String(challenge._id),
-                  topic: objective.canonicalTopic,
-                },
-                progress: { status: 'pending' },
-              });
-            }
-          }
-        } catch (compErr) {
-          // Non-critical — bonus plan still works without the competition injection.
-          console.warn('[v2/plan/today] bonus competition injection failed (non-fatal):', compErr.message);
-        }
-      }
-
-      // Then the existing weakTopic bonus quizzes (Fix 4 in 32b8bf3).
-      const weakTopics = (knowledge?.topicMastery || [])
-        .filter(t => (t.quizzesTaken || 0) >= 1)
-        .sort((a, b) => (a.score || 0) - (b.score || 0))
-        .slice(0, 2);
-      for (let i = 0; i < weakTopics.length; i++) {
-        const t = weakTopics[i];
-        ranked.push({
-          _id: `bonus-quiz:${t.topic}:${Date.now()}-${i}`,
-          type: 'quiz',
-          _isBonusQuiz: true,
-          topic: { canonicalName: t.topic, displayName: prettyTopicName(t.topic) },
-          payload: {
-            title: `Quiz: ${prettyTopicName(t.topic)}`,
-            estimatedMinutes: 8,
-            difficulty: 2,
-            reason: 'Bonus — plan complete, keep the momentum.',
-            impact: {
-              expectedFrom: t.score || 0,
-              expectedTo: Math.min(100, (t.score || 0) + 5),
-              expectedGain: 5,
-              whyText: 'Bonus quiz on a topic you can still sharpen.',
-              scope: 'topic',
-            },
-            quizId: null,
-            contentId: null,
-            interviewId: null,
-            url: null,
-            topic: t.topic,
-          },
-          progress: { status: 'pending' },
-        });
-      }
+    // ── Fix 4: Bonus tasks when the ranked pool is empty ─────────────────────
+    // At this point auto-promote has already run. If we still have nothing,
+    // synthesise bonus material so Home always has something to do.
+    if (ranked.length === 0) {
+      const bonus = await synthesizeBonusTasks({ userId, objective, knowledge });
+      ranked.push(...bonus);
     }
 
     // The structured day = the top N available tasks. Mix types so it's not
@@ -914,6 +877,124 @@ function buildWeeklyInsight({ topGap, todaysTasks, weekProgress, trajectory }) {
   } else {
     return `${prettyTopic} is your biggest gap (${topGap.score}%). Add a quiz on it via Compass to start chipping away.`;
   }
+}
+
+/**
+ * Bonus task synthesis — used in two places:
+ *  (1) the structured-day path when the ranked pool ends up empty after the
+ *      content-injection step
+ *  (2) the day_done branch so users who finish (or skip-out) of the week
+ *      still see actionable tasks instead of a celebration wall
+ *
+ * Returns plan-shaped task objects (NOT shaped UI tasks) — caller maps them
+ * through `shapeTask`. Returns at most 1 daily-challenge bonus + N weak-topic
+ * quizzes.
+ */
+async function synthesizeBonusTasks({ userId, objective, knowledge }) {
+  const out = [];
+  const prettyTopicName = (s) =>
+    (s || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+  // (1) Today's unplayed daily challenge for the user's cohort.
+  if (objective?.canonicalTopic) {
+    try {
+      const DailyChallenge = require('../../models/DailyChallenge');
+      const ChallengeAttempt = require('../../models/ChallengeAttempt');
+      const todayIST = (() => {
+        const d = new Date();
+        d.setUTCHours(d.getUTCHours() + 5, d.getUTCMinutes() + 30, 0, 0);
+        d.setUTCHours(0, 0, 0, 0);
+        return d;
+      })();
+      const challenge = await DailyChallenge.findOne({
+        topic: objective.canonicalTopic,
+        date: todayIST,
+        status: 'active',
+      }).lean().catch(() => null);
+      if (challenge) {
+        const alreadyPlayed = await ChallengeAttempt.exists({
+          userId, challengeId: challenge._id, completedAt: { $ne: null },
+        }).catch(() => null);
+        if (!alreadyPlayed) {
+          out.push({
+            _id: `bonus-compete:${challenge._id}`,
+            type: 'competition',
+            _isBonusCompete: true,
+            topic: {
+              canonicalName: objective.canonicalTopic,
+              displayName: prettyTopicName(objective.canonicalTopic),
+            },
+            payload: {
+              title: `Today's challenge: ${prettyTopicName(objective.canonicalTopic)}`,
+              creator: 'Timed · ranked · 30 sec per question',
+              estimatedMinutes: Math.ceil((challenge.totalDurationSeconds || (challenge.questions?.length || 15) * 30) / 60),
+              difficulty: challenge.difficulty === 'hard' ? 4 : challenge.difficulty === 'easy' ? 2 : 3,
+              reason: 'Bonus — compete with the rest of your cohort today.',
+              impact: {
+                expectedFrom: null,
+                expectedTo: null,
+                expectedGain: null,
+                whyText: 'Daily challenge against your cohort.',
+                scope: 'competition',
+              },
+              quizId: null,
+              contentId: null,
+              interviewId: null,
+              url: null,
+              challengeId: String(challenge._id),
+              topic: objective.canonicalTopic,
+            },
+            progress: { status: 'pending' },
+          });
+        }
+      }
+    } catch (compErr) {
+      console.warn('[v2/plan/today] bonus competition injection failed (non-fatal):', compErr.message);
+    }
+  }
+
+  // (2) Weakest-topic bonus quizzes — falls back to objective.canonicalTopic
+  // for users who haven't taken a quiz on anything yet (otherwise the filter
+  // below excludes them and we surface no quizzes at all).
+  let weakTopics = (knowledge?.topicMastery || [])
+    .filter(t => (t.quizzesTaken || 0) >= 1)
+    .sort((a, b) => (a.score || 0) - (b.score || 0))
+    .slice(0, 2);
+
+  if (weakTopics.length === 0 && objective?.canonicalTopic) {
+    weakTopics = [{ topic: objective.canonicalTopic, score: 0 }];
+  }
+
+  for (let i = 0; i < weakTopics.length; i++) {
+    const t = weakTopics[i];
+    out.push({
+      _id: `bonus-quiz:${t.topic}:${Date.now()}-${i}`,
+      type: 'quiz',
+      _isBonusQuiz: true,
+      topic: { canonicalName: t.topic, displayName: prettyTopicName(t.topic) },
+      payload: {
+        title: `Quiz: ${prettyTopicName(t.topic)}`,
+        estimatedMinutes: 8,
+        difficulty: 2,
+        reason: 'Bonus — keep the momentum going.',
+        impact: {
+          expectedFrom: t.score || 0,
+          expectedTo: Math.min(100, (t.score || 0) + 5),
+          expectedGain: 5,
+          whyText: 'Bonus quiz on a topic you can still sharpen.',
+          scope: 'topic',
+        },
+        quizId: null,
+        contentId: null,
+        interviewId: null,
+        url: null,
+        topic: t.topic,
+      },
+      progress: { status: 'pending' },
+    });
+  }
+
+  return out;
 }
 
 function buildObjectiveLabel(obj) {
