@@ -292,9 +292,15 @@ const getRelevantForUser = async (req, res, next) => {
     // Today's challenges + upcoming events in parallel.
     const [allToday, upcomingEvents] = await Promise.all([
       competitionService.getTodayChallenges(),
-      competitionService.getUpcomingEvents
-        ? competitionService.getUpcomingEvents({ limit: 1 }).catch(() => [])
-        : Promise.resolve([]),
+      // FIXED: getUpcomingEvents lives on liveEventService, not competitionService.
+      // Filter to the user's canonicalTopic when present; fall back to any upcoming event.
+      liveEventService.getUpcomingEvents().then(evs => {
+        if (!Array.isArray(evs) || evs.length === 0) return [];
+        const topicMatch = canonicalTopic
+          ? evs.filter(e => e.topic === canonicalTopic)
+          : [];
+        return topicMatch.length > 0 ? topicMatch.slice(0, 1) : evs.slice(0, 1);
+      }).catch(() => []),
     ]);
 
     // Prefer the challenge whose topic exactly matches the user's canonicalTopic
