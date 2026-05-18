@@ -143,20 +143,47 @@ router.get('/overview', auth, async (req, res) => {
 });
 
 function computeReadinessFromKnowledge(knowledge) {
-  if (!knowledge?.topicProfiles) return null;
-  const entries = Object.values(knowledge.topicProfiles || {});
-  if (entries.length === 0) return null;
-  const avg = entries.reduce((s, t) => s + (t.masteryLevel || 0), 0) / entries.length;
-  return Math.round(avg);
+  if (!knowledge) return null;
+  // Prefer the precomputed overall score on the document (this is what the
+  // analytics view displays as "Overall knowledge"). Fall back to averaging
+  // topicMastery entries when overallScore hasn't been populated yet.
+  if (typeof knowledge.overallScore === 'number' && knowledge.overallScore > 0) {
+    return Math.round(knowledge.overallScore);
+  }
+  if (Array.isArray(knowledge.topicMastery) && knowledge.topicMastery.length > 0) {
+    const sum = knowledge.topicMastery.reduce((s, t) => s + (t.score || 0), 0);
+    return Math.round(sum / knowledge.topicMastery.length);
+  }
+  // Legacy: some older docs may have a `topicProfiles` map.
+  if (knowledge.topicProfiles) {
+    const entries = Object.values(knowledge.topicProfiles);
+    if (entries.length > 0) {
+      const avg = entries.reduce((s, t) => s + (t.masteryLevel || 0), 0) / entries.length;
+      return Math.round(avg);
+    }
+  }
+  return null;
 }
 
 function pickTopGap(knowledge) {
-  if (!knowledge?.topicProfiles) return null;
-  const entries = Object.entries(knowledge.topicProfiles || {})
-    .map(([topic, t]) => ({ topic, mastery: t.masteryLevel || 0 }))
-    .filter(t => t.mastery < 70)
-    .sort((a, b) => a.mastery - b.mastery);
-  return entries[0] || null;
+  if (!knowledge) return null;
+  // topicMastery is the canonical array shape (matches KnowledgeProfile model).
+  if (Array.isArray(knowledge.topicMastery) && knowledge.topicMastery.length > 0) {
+    const candidates = knowledge.topicMastery
+      .map(t => ({ topic: t.topic, mastery: t.score || 0 }))
+      .filter(t => t.topic && t.mastery < 70)
+      .sort((a, b) => a.mastery - b.mastery);
+    if (candidates.length > 0) return candidates[0];
+  }
+  // Legacy: topicProfiles map.
+  if (knowledge.topicProfiles) {
+    const entries = Object.entries(knowledge.topicProfiles)
+      .map(([topic, t]) => ({ topic, mastery: t.masteryLevel || 0 }))
+      .filter(t => t.mastery < 70)
+      .sort((a, b) => a.mastery - b.mastery);
+    return entries[0] || null;
+  }
+  return null;
 }
 
 function buildObjectiveLabel(obj) {

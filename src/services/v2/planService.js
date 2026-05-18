@@ -105,12 +105,17 @@ function buildPhases({ plan, objective }) {
   return buckets.map(([startWeek, endWeek], i) => {
     const range = [];
     for (let w = startWeek; w <= endWeek; w++) range.push(w);
-    // Compute focus from the topics covered in this phase
+    // Compute focus from the topics covered in this phase. Filter out
+    // placeholder topic names (_objective, _general, empty/null) so the UI
+    // doesn't display raw template tokens to the user.
     const topics = new Set();
     for (const w of range) {
       const wk = plan.weeklySchedule.find(x => x.week === w);
       for (const t of (wk?.tasks || [])) {
-        if (t.topic?.canonicalName) topics.add(t.topic.canonicalName);
+        const name = t.topic?.canonicalName;
+        if (name && !name.startsWith('_') && name.trim().length > 0) {
+          topics.add(name);
+        }
       }
     }
     const topicList = Array.from(topics).slice(0, 3).map(prettyTopicName).join(', ');
