@@ -20,6 +20,9 @@ const resumeObjective = async (req, res, next) => {
 const setPrimary = async (req, res, next) => {
   try { res.json(apiResponse.success(await objectiveService.setPrimary(req.user.userId, req.params.id))); } catch (err) { next(err); }
 };
+const deleteObjective = async (req, res, next) => {
+  try { res.json(apiResponse.success(await objectiveService.deleteObjective(req.user.userId, req.params.id))); } catch (err) { next(err); }
+};
 
 // --- Objective Intelligence Engine ---
 
@@ -44,4 +47,4 @@ const activateObjective = async (req, res, next) => {
   try { res.json(apiResponse.success(await objectiveService.activateObjective(req.user.userId, req.params.id))); } catch (err) { next(err); }
 };
 
-module.exports = { getObjectives, createObjective, updateObjective, pauseObjective, resumeObjective, setPrimary, analyzeObjective, getObjectiveBrief, activateObjective };
+module.exports = { getObjectives, createObjective, updateObjective, pauseObjective, resumeObjective, setPrimary, deleteObjective, analyzeObjective, getObjectiveBrief, activateObjective };

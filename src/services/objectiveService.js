@@ -65,6 +65,23 @@ class ObjectiveService {
     return UserObjective.findById(objectiveId);
   }
 
+  async deleteObjective(userId, objectiveId) {
+    const obj = await UserObjective.findOne({ _id: objectiveId, userId });
+    if (!obj) throw new ApiError(404, 'Objective not found');
+    const wasPrimary = obj.isPrimary;
+    await UserObjective.deleteOne({ _id: objectiveId, userId });
+    // If we deleted the primary, promote another active objective to primary.
+    if (wasPrimary) {
+      const next = await UserObjective.findOne({ userId, status: 'active' }).sort({ updatedAt: -1 });
+      if (next) {
+        next.isPrimary = true;
+        await next.save();
+      }
+    }
+    await this.rebalanceWeights(userId);
+    return { deleted: true, objectiveId: String(objectiveId) };
+  }
+
   async activateObjective(userId, objectiveId) {
     const objective = await UserObjective.findOne({ _id: objectiveId, userId, status: 'active' });
     if (!objective) {
