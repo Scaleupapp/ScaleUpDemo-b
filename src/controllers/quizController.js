@@ -35,8 +35,8 @@ const getHistory = async (req, res, next) => {
 
 const requestOnDemand = async (req, res, next) => {
   try {
-    const { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective } = req.body;
-    const trigger = await quizTriggerService.triggerOnDemand(req.user.userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective });
+    const { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective, weekNumber, source } = req.body;
+    const trigger = await quizTriggerService.triggerOnDemand(req.user.userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective, weekNumber, source });
     res.json(apiResponse.success({
       triggerId: trigger._id,
       status: trigger.status,
@@ -80,6 +80,19 @@ const startAttempt = async (req, res, next) => {
       userId: req.user.userId, quizId: quiz._id, status: 'in_progress',
     });
     if (existing) return res.json(apiResponse.success(existing, 'Attempt already in progress'));
+
+    // Idempotency: if the user already completed this quiz, surface that
+    // attempt with an explicit `alreadyCompleted: true` flag so iOS can
+    // route to the results screen instead of asking the user to re-answer
+    // (which would 404 on completeQuiz again). This is the fallback path
+    // for the "stuck loop" bug.
+    const completed = await QuizAttempt.findOne({
+      userId: req.user.userId, quizId: quiz._id, status: 'completed',
+    }).sort({ completedAt: -1 });
+    if (completed) {
+      const payload = { ...completed.toObject(), alreadyCompleted: true };
+      return res.json(apiResponse.success(payload, 'Quiz already completed'));
+    }
 
     const attempt = await QuizAttempt.create({
       userId: req.user.userId, quizId: quiz._id,
@@ -131,7 +144,19 @@ const completeQuiz = async (req, res, next) => {
     const attempt = await QuizAttempt.findOne({
       quizId: req.params.id, userId: req.user.userId, status: 'in_progress',
     });
-    if (!attempt) throw new ApiError(404, 'No active attempt found');
+    // Idempotency: if there's no in-progress attempt but there IS a completed
+    // one, return that completed attempt in the same shape — clients retrying
+    // a successful complete (e.g. after a flaky network) should NOT 404 and
+    // get bounced back to the quiz UI ("stuck loop" symptom).
+    if (!attempt) {
+      const already = await QuizAttempt.findOne({
+        quizId: req.params.id, userId: req.user.userId, status: 'completed',
+      }).sort({ completedAt: -1 });
+      if (already) {
+        return res.json(apiResponse.success(already, 'Quiz already completed'));
+      }
+      throw new ApiError(404, 'No active attempt found');
+    }
 
     const scored = await quizScoringService.scoreQuiz(attempt._id);
 

@@ -64,56 +64,59 @@ async function resolveContentForTopic(key, objectiveId) {
   return content;
 }
 
-async function resolveTopic({ topicCanonicalName, objectiveType, objectiveId, userId }) {
+async function resolveTopic({ topicCanonicalName, objectiveType, objectiveId, userId, skipQuiz }) {
   const key = canonicalize(topicCanonicalName);
   if (!key) return { quizId: null, contentId: null };
 
-  // Quizzes are user-scoped — GET /quizzes/:id does Quiz.findOne({ _id, userId }).
-  // So the plan must only ever reference quizzes THIS user owns; otherwise the
-  // task opens to "Quiz not found". Previously this matched any user's quiz by
-  // {topic, objectiveId} (or globally by topic), which is exactly that bug.
-  let quiz = null;
-  if (userId) {
-    quiz = await Quiz.findOne({ topic: key, objectiveId, userId }).sort({ createdAt: -1 }).lean();
-    if (!quiz) {
-      quiz = await Quiz.findOne({ topic: key, userId }).sort({ createdAt: -1 }).lean();
-    }
-  }
-  // No user-owned quiz → fall through to lazy generation below.
-
-  // Phase 7: lazy quiz generation. If no quiz exists for this topic+objective,
-  // synchronously generate one via the existing quizGenerationService.
+  // Plan generation passes `skipQuiz: true` so we do NOT pre-bake a quizId
+  // at plan-generation time. Reason: a 26-week plan that revisits the same
+  // topic in weeks 4/11/17/22 used to stamp the SAME quizId into all four
+  // tasks (identical questions every time) AND every plan-seeded Quiz doc
+  // expired 7 days after generation — long before the user reached week 17.
   //
-  // Timeout was 15s, but quiz LLM gen averages 20-40s, so every call timed out
-  // and we wasted 15s × N topics producing nothing. Raised to 60s so successes
-  // actually persist + get cached for adjacent weeks. `suppressNotification`
-  // stops the per-quiz "Quiz Ready!" push from firing during bulk plan-gen
-  // (the plan-ready push covers the batch).
-  if (!quiz && objectiveId && userId) {
-    let timeoutHandle;
-    try {
-      const quizGenerationService = require('../quizGenerationService');
-      const generated = await Promise.race([
-        quizGenerationService.generateQuiz({
-          userId,
-          objectiveId,
-          topic: key,
-          contentIds: [],
-          type: 'plan_seed',
-          questionCount: 5,
-          suppressNotification: true,
-        }),
-        new Promise((_, reject) => {
-          timeoutHandle = setTimeout(() => reject(new Error('lazy_gen_timeout')), 60000);
-        }),
-      ]);
-      if (generated && generated._id) {
-        quiz = generated;
+  // Quiz tasks now ship without a quizId; iOS routes them through
+  // V2QuizRequestLoaderSheet which calls the on-demand generator, so each
+  // week gets a fresh quiz seeded with the current week number and the
+  // user's recent attempts.
+  let quiz = null;
+  if (!skipQuiz) {
+    // Quizzes are user-scoped — GET /quizzes/:id does Quiz.findOne({ _id, userId }).
+    // So the plan must only ever reference quizzes THIS user owns; otherwise the
+    // task opens to "Quiz not found".
+    if (userId) {
+      quiz = await Quiz.findOne({ topic: key, objectiveId, userId }).sort({ createdAt: -1 }).lean();
+      if (!quiz) {
+        quiz = await Quiz.findOne({ topic: key, userId }).sort({ createdAt: -1 }).lean();
       }
-    } catch (err) {
-      console.warn('[taskCatalogService] lazy quiz gen failed for topic', key, ':', err.message);
-    } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
+    // No user-owned quiz → fall through to lazy generation below.
+
+    if (!quiz && objectiveId && userId) {
+      let timeoutHandle;
+      try {
+        const quizGenerationService = require('../quizGenerationService');
+        const generated = await Promise.race([
+          quizGenerationService.generateQuiz({
+            userId,
+            objectiveId,
+            topic: key,
+            contentIds: [],
+            type: 'plan_seed',
+            questionCount: 5,
+            suppressNotification: true,
+          }),
+          new Promise((_, reject) => {
+            timeoutHandle = setTimeout(() => reject(new Error('lazy_gen_timeout')), 60000);
+          }),
+        ]);
+        if (generated && generated._id) {
+          quiz = generated;
+        }
+      } catch (err) {
+        console.warn('[taskCatalogService] lazy quiz gen failed for topic', key, ':', err.message);
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+      }
     }
   }
 
@@ -128,4 +131,37 @@ async function resolveTopic({ topicCanonicalName, objectiveType, objectiveId, us
   };
 }
 
-module.exports = { resolveTopic, _internal: { DEFAULT_QUIZ_MINUTES, DEFAULT_CONTENT_MINUTES } };
+/**
+ * On-demand plan-context quiz generation. Called by the request-quiz path
+ * (iOS V2QuizRequestLoaderSheet) for plan tasks that ship without a quizId.
+ *
+ * Passes `weekNumber` through to the quiz generator so the LLM produces
+ * different questions for week 4 vs week 17 even when the topic is identical,
+ * and pulls the user's recent attempts for this topic so the LLM can avoid
+ * repeating questions across weeks.
+ */
+async function resolvePlanQuizOnDemand({ topicCanonicalName, objectiveId, userId, weekNumber, questionCount }) {
+  const key = canonicalize(topicCanonicalName);
+  if (!key) throw new Error('resolvePlanQuizOnDemand: invalid topic');
+  if (!userId) throw new Error('resolvePlanQuizOnDemand: userId required');
+
+  const quizGenerationService = require('../quizGenerationService');
+  const generated = await quizGenerationService.generateQuiz({
+    userId,
+    objectiveId,
+    topic: key,
+    contentIds: [],
+    type: 'on_demand',
+    questionCount: questionCount || 10,
+    suppressNotification: true,
+    source: 'plan',
+    weekNumber: weekNumber || null,
+  });
+  return generated;
+}
+
+module.exports = {
+  resolveTopic,
+  resolvePlanQuizOnDemand,
+  _internal: { DEFAULT_QUIZ_MINUTES, DEFAULT_CONTENT_MINUTES },
+};

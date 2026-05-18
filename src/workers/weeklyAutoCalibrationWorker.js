@@ -67,11 +67,15 @@ async function softRealignPlan(plan, objectiveType /* , specificsCanonical */) {
     // Build refreshed quiz + in_app_content tasks for each allocation
     const refreshed = [];
     for (const alloc of (week.allocations || [])) {
+      // skipQuiz=true: quiz tasks are emitted without a quizId — iOS resolves
+      // them on demand at tap time so each week's quiz is fresh and we don't
+      // have a stale Quiz doc rotting against its 7-day expiresAt.
       const resolved = await taskCatalogService.resolveTopic({
         topicCanonicalName: alloc.topicCanonicalName,
         objectiveType,
         objectiveId: plan.objectiveId,
         userId: String(plan.userId),
+        skipQuiz: true,
       });
       const displayName = alloc.topicCanonicalName
         .replace(/-/g, ' ')
@@ -91,11 +95,15 @@ async function softRealignPlan(plan, objectiveType /* , specificsCanonical */) {
         t.progress?.status === 'complete'
       );
 
-      if (resolved.quizId && !hasCompletedQuiz) {
+      if (!hasCompletedQuiz) {
         refreshed.push({
           type: 'quiz',
           topic: topicShape,
-          payload: { quizId: resolved.quizId, estimatedMinutes: resolved.quizMinutes },
+          payload: {
+            topic: alloc.topicCanonicalName,
+            weekNumber: week.week,
+            estimatedMinutes: 8,
+          },
           completion: { mode: 'auto', requiresSelfRating: false },
           progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
         });

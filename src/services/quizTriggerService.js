@@ -60,7 +60,7 @@ class QuizTriggerService {
   /**
    * On-demand quiz request from the user.
    */
-  async triggerOnDemand(userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective }) {
+  async triggerOnDemand(userId, { topic, contentIds, questionCount, assessmentType, objectiveId, isSkillAssessment, noObjective, weekNumber, source }) {
     // Validate and cap question count (1-20, default decided by generation service)
     const validatedCount = questionCount ? Math.min(Math.max(Math.round(Number(questionCount)), 1), 20) : undefined;
 
@@ -98,6 +98,10 @@ class QuizTriggerService {
       objectiveId: objectiveId || undefined,
       isSkillAssessment: isSkillAssessment || false,
       noObjective: noObjective === true,
+      // Plan-context fields — propagated through so generateQuiz can seed
+      // per-week variants and use a plan-aware expiresAt instead of 7d.
+      weekNumber: (weekNumber != null) ? Number(weekNumber) : undefined,
+      source: source || undefined,
     }, {
       attempts: 2,
       backoff: { type: 'exponential', delay: 10000 },

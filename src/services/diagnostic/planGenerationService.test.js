@@ -177,7 +177,12 @@ test('generate: post-processes weeklySchedule to include tasks[] per topic', asy
     const contentTask = w0.tasks.find(t => t.type === 'in_app_content');
     assert.ok(quizTask, 'quiz task missing');
     assert.ok(contentTask, 'in_app_content task missing');
-    assert.strictEqual(quizTask.payload.quizId, '64aaaaaaaaaaaaaaaaaaaaaa');
+    // Plan-gen no longer pre-bakes quizId — every plan quiz is resolved on
+    // demand at tap time so each week of a multi-week plan can get fresh
+    // questions and we avoid the 7-day Quiz expiresAt time bomb.
+    assert.strictEqual(quizTask.payload.quizId, undefined);
+    assert.strictEqual(quizTask.payload.topic, 'product-strategy');
+    assert.strictEqual(quizTask.payload.weekNumber, 1);
     assert.strictEqual(quizTask.completion.mode, 'auto');
     assert.strictEqual(quizTask.progress.status, 'pending');
     assert.strictEqual(contentTask.payload.contentId, '64bbbbbbbbbbbbbbbbbbbbbb');
@@ -188,7 +193,7 @@ test('generate: post-processes weeklySchedule to include tasks[] per topic', asy
   }
 });
 
-test('generate: emits no quiz/content task for a topic with no quiz and no content (manual fallback fires)', async () => {
+test('generate: emits quiz task (on-demand) and skips in_app_content when no content resolved', async () => {
   const planService = require('./planGenerationService');
   const mongoose = require('mongoose');
 
@@ -198,6 +203,7 @@ test('generate: emits no quiz/content task for a topic with no quiz and no conte
 
   const taskCatalogService = require('../plan/taskCatalogService');
   const origResolve = taskCatalogService.resolveTopic;
+  // skipQuiz=true is the plan-gen contract; the stub returns no content either.
   taskCatalogService.resolveTopic = async () => ({ quizId: null, contentId: null });
 
   try {
@@ -217,11 +223,16 @@ test('generate: emits no quiz/content task for a topic with no quiz and no conte
     });
     out.weeklySchedule.forEach(w => {
       const tasks = w.tasks || [];
-      assert.ok(!tasks.some(t => t.type === 'quiz'), `week ${w.week} should have no quiz task`);
+      // Quiz task is ALWAYS emitted now (resolved on demand); content task is
+      // skipped only when no content was resolved. The legacy "manual" stub
+      // was removed — every topic has a quiz + competition task instead.
+      const quizTask = tasks.find(t => t.type === 'quiz');
+      assert.ok(quizTask, `week ${w.week} should emit on-demand quiz task`);
+      assert.strictEqual(quizTask.payload.quizId, undefined);
+      assert.strictEqual(quizTask.payload.topic, 'unmapped-topic');
+      assert.strictEqual(quizTask.payload.weekNumber, w.week);
       assert.ok(!tasks.some(t => t.type === 'in_app_content'), `week ${w.week} should have no in_app_content task`);
-      // Phase 6: ai_interview is now objective-level, so it does NOT cover the topic.
-      // Manual fallback fires for the unmapped topic.
-      assert.ok(tasks.some(t => t.type === 'manual'), `week ${w.week} should emit manual when nothing else resolved for the topic`);
+      assert.ok(!tasks.some(t => t.type === 'manual'), `week ${w.week} should NOT emit legacy manual fallback`);
     });
   } finally {
     openai.chat.completions.create = origCreate;
@@ -434,7 +445,7 @@ test('generate: emits competition task for every topic regardless of objective',
   }
 });
 
-test('generate: emits manual fallback when topic has no quiz/content/interview', async () => {
+test('generate: emits on-demand quiz task (no manual fallback) when topic has no quiz/content', async () => {
   const planService = require('./planGenerationService');
   const mongoose = require('mongoose');
   const openai = require('../../config/openai');
@@ -456,12 +467,16 @@ test('generate: emits manual fallback when topic has no quiz/content/interview',
       topicResults: [{ canonicalName: 'unmapped-topic', selfRating: 'familiar', measuredScore: 50, measuredBand: 'developing', calibrationDelta: 0, calibrationClass: 'well-calibrated', questionsAsked: 4, answerPattern: {}, isFutureProofing: false }],
     });
     const w0 = out.weeklySchedule[0];
-    const manualTask = w0.tasks.find(t => t.type === 'manual');
-    assert.ok(manualTask, 'should emit manual fallback when nothing else resolved');
-    assert.strictEqual(manualTask.completion.mode, 'manual');
-    assert.strictEqual(manualTask.completion.requiresSelfRating, true);
-    assert.ok(manualTask.payload.title, 'manual task needs a title');
-    assert.ok(manualTask.payload.estimatedMinutes > 0);
+    // Manual fallback was removed: every topic now ships a quiz task (resolved
+    // on demand) plus a competition task, which cover the "nothing else
+    // resolved" gap without a generic "practice this on your own" stub.
+    assert.strictEqual(w0.tasks.filter(t => t.type === 'manual').length, 0);
+    const quizTask = w0.tasks.find(t => t.type === 'quiz');
+    assert.ok(quizTask, 'every topic should get an on-demand quiz task');
+    assert.strictEqual(quizTask.payload.quizId, undefined);
+    assert.strictEqual(quizTask.payload.weekNumber, 1);
+    const competitionTask = w0.tasks.find(t => t.type === 'competition');
+    assert.ok(competitionTask, 'every topic should get a competition task');
   } finally {
     openai.chat.completions.create = origCreate;
     taskCatalogService.resolveTopic = origResolve;

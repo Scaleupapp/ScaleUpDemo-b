@@ -313,11 +313,17 @@ async function generate(input) {
     const chunk = uniqueTopics.slice(i, i + CONCURRENCY);
     const results = await Promise.all(chunk.map(async (topic) => {
       try {
+        // skipQuiz: true — quiz tasks are emitted WITHOUT a pre-baked quizId
+        // (see resolveTopic for the full rationale). iOS routes quiz tasks
+        // missing quizId through V2QuizRequestLoaderSheet which calls the
+        // on-demand generator at tap time. We still resolve content for
+        // in_app_content tasks.
         const r = await taskCatalogService.resolveTopic({
           topicCanonicalName: topic,
           objectiveType: input.objectiveType,
           objectiveId: input.objectiveId,
           userId: input.userId,
+          skipQuiz: true,
         });
         return [topic, r];
       } catch (err) {
@@ -331,28 +337,34 @@ async function generate(input) {
   }
 
   // Post-process: populate tasks[] per week from each allocation's topic.
-  // Best-effort — a topic with no matching quiz/content yields no tasks for
-  // that topic this week, but the rest of the plan is unaffected.
+  // Best-effort — a topic with no matching content yields no in_app_content
+  // task for that topic this week, but the rest of the plan is unaffected.
+  //
+  // Quiz tasks are ALWAYS emitted (no quizId pre-baked) — iOS resolves them
+  // on demand via V2QuizRequestLoaderSheet, which keeps each week's quiz
+  // fresh and avoids the 7-day Quiz `expiresAt` time bomb.
   for (const week of plan.weeklySchedule) {
     const tasks = [];
     for (const alloc of (week.allocations || [])) {
-      const resolved = resolvedByTopic.get(alloc.topicCanonicalName);
-      if (!resolved) continue;
+      const resolved = resolvedByTopic.get(alloc.topicCanonicalName) || {};
       const displayName = alloc.topicCanonicalName.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
       const topicShape = { canonicalName: alloc.topicCanonicalName, displayName };
-      if (resolved.quizId) {
-        tasks.push({
-          type: 'quiz',
-          topic: topicShape,
-          payload: {
-            quizId: resolved.quizId,
-            estimatedMinutes: resolved.quizMinutes,
-            impact: computeTaskImpact('quiz', alloc, displayName, input.topicResults),
-          },
-          completion: { mode: 'auto', requiresSelfRating: false },
-          progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
-        });
-      }
+
+      // Quiz task — always emit, no quizId. Payload carries weekNumber so the
+      // on-demand generator can seed variant questions per week.
+      tasks.push({
+        type: 'quiz',
+        topic: topicShape,
+        payload: {
+          topic: alloc.topicCanonicalName,
+          weekNumber: week.week,
+          estimatedMinutes: 8,
+          impact: computeTaskImpact('quiz', alloc, displayName, input.topicResults),
+        },
+        completion: { mode: 'auto', requiresSelfRating: false },
+        progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
+      });
+
       if (resolved.contentId) {
         tasks.push({
           type: 'in_app_content',
@@ -381,22 +393,10 @@ async function generate(input) {
         progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
       });
 
-      // manual fallback — only when nothing else resolved for this topic.
-      const emittedNonCompetition = !!resolved.quizId || !!resolved.contentId;
-      if (!emittedNonCompetition) {
-        tasks.push({
-          type: 'manual',
-          topic: topicShape,
-          payload: {
-            title: `Practice ${displayName} on your own`,
-            description: `Spend ~30 minutes deepening your understanding of ${displayName}. Reading, exercises, or applying it to a real problem all count.`,
-            estimatedMinutes: 30,
-            impact: computeTaskImpact('manual', alloc, displayName, input.topicResults),
-          },
-          completion: { mode: 'manual', requiresSelfRating: true },
-          progress: { status: 'pending', completedAt: null, selfRating: null, sourceEventId: null },
-        });
-      }
+      // Manual-practice fallback removed: every topic now ships a quiz task
+      // (resolved on demand). Topics with no in-app content still have the
+      // quiz + competition tasks to drive learning, so a generic "practice
+      // this on your own" stub is redundant.
 
       // external_link tasks via LLM-as-judge — gated behind feature flag
       // because of latency/cost. When enabled, evaluates if in-app coverage
@@ -404,7 +404,9 @@ async function generate(input) {
       // links if there are gaps.
       if (process.env.FEATURE_EXTERNAL_CONTENT_JUDGE === 'true') {
         const inAppContent = [];
-        if (resolved.quizId) inAppContent.push({ type: 'quiz', title: `Quiz on ${displayName}` });
+        // Every topic ships an on-demand quiz now, so always treat that as
+        // available in-app coverage when the judge weighs external content.
+        inAppContent.push({ type: 'quiz', title: `Quiz on ${displayName}` });
         if (resolved.contentId) inAppContent.push({ type: 'content', title: `Content on ${displayName}` });
         const measuredBand = (input.topicResults || [])
           .find(t => t.canonicalName === alloc.topicCanonicalName)?.measuredBand || 'developing';

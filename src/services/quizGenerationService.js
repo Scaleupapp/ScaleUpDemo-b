@@ -129,7 +129,7 @@ const TRIGGER_TO_QUIZ_TYPE = {
 
 class QuizGenerationService {
 
-  async generateQuiz({ triggerId, userId, topic, contentIds, type, questionCount: requestedCount, objectiveId, assessmentType, isSkillAssessment, suppressNotification, noObjective }) {
+  async generateQuiz({ triggerId, userId, topic, contentIds, type, questionCount: requestedCount, objectiveId, assessmentType, isSkillAssessment, suppressNotification, noObjective, source, weekNumber }) {
     const quizType = isSkillAssessment ? 'competency_assessment' : (TRIGGER_TO_QUIZ_TYPE[type] || 'topic_consolidation');
 
     // Resolve content — contentIds may be empty for on-demand topic quizzes
@@ -253,6 +253,66 @@ class QuizGenerationService {
       promptData.competencyContext = competencyContext;
     }
 
+    // Plan-context variant seed: when this quiz is being generated for a
+    // specific week of a multi-week plan, pass the week number as a variant
+    // seed so the LLM produces different questions for week 4 vs week 17
+    // even when the topic is identical. Without this, revisited topics in
+    // long plans (e.g. SDE 26-week plans hitting "dynamic-programming" four
+    // times) would feel like the same quiz every time.
+    const isPlanContext = source === 'plan' || (weekNumber != null);
+    if (isPlanContext) {
+      promptData.planContext = {
+        weekNumber: weekNumber || null,
+        variantInstruction: weekNumber
+          ? `This quiz is for WEEK ${weekNumber} of a multi-week learning plan on this topic. ` +
+            `If the learner has taken earlier weeks' quizzes on the same topic, this one should ` +
+            `feel like a continuation: same fundamentals, different scenarios and angles, slightly ` +
+            `harder edge cases. Do not repeat questions verbatim — vary the framing, numbers, ` +
+            `domain examples, and the specific sub-concept emphasized.`
+          : `This quiz is part of a multi-week plan. Vary framing, scenarios, and emphasized ` +
+            `sub-concepts from any earlier quizzes the learner has taken on this topic.`,
+      };
+    }
+
+    // Pull recent attempts' first 1-2 question texts so the LLM can avoid
+    // repeating them. Cheap query — last 30 attempts on this topic for this
+    // user, plus the questionText from the matching quizzes' first two
+    // questions. Best-effort; failures don't block generation.
+    let avoidQuestionsBlock = '';
+    try {
+      if (userId && topic) {
+        const QuizAttempt = require('../models/QuizAttempt');
+        const recentAttempts = await QuizAttempt.find({ userId })
+          .sort({ createdAt: -1 })
+          .limit(30)
+          .select('quizId')
+          .lean();
+        const recentQuizIds = recentAttempts.map(a => a.quizId).filter(Boolean);
+        if (recentQuizIds.length > 0) {
+          const recentQuizzes = await Quiz.find({
+            _id: { $in: recentQuizIds },
+            topic,
+          })
+            .select('questions')
+            .limit(30)
+            .lean();
+          const avoidQuestions = [];
+          for (const q of recentQuizzes) {
+            const firstTwo = (q.questions || []).slice(0, 2);
+            for (const qq of firstTwo) {
+              if (qq?.questionText) avoidQuestions.push(qq.questionText);
+            }
+          }
+          if (avoidQuestions.length > 0) {
+            const trimmed = avoidQuestions.slice(0, 20).map((s, i) => `${i + 1}. ${String(s).slice(0, 180)}`);
+            avoidQuestionsBlock = `\n\nAVOID — these are questions the learner has already seen on this topic. Do NOT repeat them or trivially rephrase them. Produce fresh scenarios and angles.\navoidQuestionsContaining:\n${trimmed.join('\n')}`;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[quizGeneration] avoid-questions lookup failed:', err.message);
+    }
+
     if (isSkillAssessment && conceptData.length === 0) {
       promptData.note = `This is a SKILL ASSESSMENT for the competency "${topic}". Generate market-standard assessment questions that measure real-world proficiency in this skill. Questions should NOT depend on any specific training content — use industry-standard knowledge and best practices.`;
     } else if (conceptData.length === 0) {
@@ -323,7 +383,7 @@ class QuizGenerationService {
 
       console.log(`[QuizGeneration] Calling OpenAI for topic="${topic}", questionCount=${questionCount}, assessmentType=${effectiveAssessmentType || 'mixed'}, contentCount=${conceptData.length}, competencyAware=${!!competencyContext}, maxTokens=${maxTokens}`);
 
-      const userPrompt = JSON.stringify(promptData) + userContextBlock + externalContext;
+      const userPrompt = JSON.stringify(promptData) + userContextBlock + externalContext + avoidQuestionsBlock;
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
@@ -448,6 +508,29 @@ class QuizGenerationService {
     };
     const timePerQuestion = TIME_PER_QUESTION[effectiveAssessmentType] || 60;
 
+    // Compute expiresAt. Plan-context quizzes (signalled by source==='plan'
+    // or by an explicit weekNumber) get a long-lived expiry tied to the
+    // objective's targetDate — previously every quiz expired in 7 days,
+    // which meant a quiz generated at plan time for week 17 was already
+    // expired when the user reached it. Standalone Compass quizzes keep
+    // the 7-day expiry.
+    let expiresAt;
+    if (isPlanContext) {
+      try {
+        if (resolvedObjectiveId) {
+          const planObjective = await UserObjective.findById(resolvedObjectiveId)
+            .select('targetDate')
+            .lean();
+          if (planObjective?.targetDate) {
+            expiresAt = new Date(new Date(planObjective.targetDate).getTime() + 30 * 24 * 60 * 60 * 1000);
+          }
+        }
+      } catch (e) { /* fall through to undefined → no TTL */ }
+      // If we couldn't resolve a target date, leave expiresAt unset (no TTL).
+    } else {
+      expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    }
+
     const quiz = await Quiz.create({
       userId, title: quizTitle, type: quizType, topic,
       sourceContentIds: contentIds || [],
@@ -462,7 +545,7 @@ class QuizGenerationService {
       // shows the quiz as plan-linked instead of falsely tagging it "For fun".
       objectiveId: noObjective ? undefined : (resolvedObjectiveId || undefined),
       status: 'ready',
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      expiresAt,
       generatedAt: new Date(),
     });
 

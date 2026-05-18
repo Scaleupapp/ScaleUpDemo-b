@@ -97,10 +97,15 @@ test('softRealignPlan: refreshes pending quiz/content, preserves completed and o
       'completed quiz preserved, no new quiz emitted for completed topic'
     );
     assert.strictEqual(aQuizzes[0].progress.status, 'complete');
-    // Pending quiz for 'b' was replaced with the new resolved quiz
+    // Pending quiz for 'b' was replaced with a fresh on-demand quiz task.
+    // Recalibration no longer pre-bakes quizIds (same fix as plan generation):
+    // iOS resolves the quiz at tap time so each week's quiz is fresh and we
+    // don't have a stale Quiz doc rotting against its 7-day expiresAt.
     const bQuizzes = week.tasks.filter(t => t.type === 'quiz' && t.topic?.canonicalName === 'b');
     assert.strictEqual(bQuizzes.length, 1);
-    assert.strictEqual(bQuizzes[0].payload.quizId, 'newQuiz');
+    assert.strictEqual(bQuizzes[0].payload.quizId, undefined);
+    assert.strictEqual(bQuizzes[0].payload.topic, 'b');
+    assert.strictEqual(bQuizzes[0].payload.weekNumber, 1);
     assert.strictEqual(bQuizzes[0].progress.status, 'pending');
     // New content tasks were emitted for both topics (no completed content existed)
     const contents = week.tasks.filter(t => t.type === 'in_app_content');
