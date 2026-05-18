@@ -177,12 +177,26 @@ class QuizGenerationService {
     let linkedCompetencies = [];
     // User's explicit choice always takes priority
     let effectiveAssessmentType = assessmentType || null;
+    // Resolved objective id we'll persist on the Quiz doc. When the caller
+    // explicitly passed `objectiveId` we honor it; otherwise (and when
+    // `noObjective` is not set) we resolve the user's primary active objective
+    // and persist THAT id. Without this fallback, Compass-generated quizzes
+    // with the "link to my objective" toggle ON would land in the DB with
+    // objectiveId=null — and the iOS history view tags every null-objective
+    // quiz as "For fun", which is the bug we're fixing.
+    let resolvedObjectiveId = noObjective ? null : (objectiveId || null);
     try {
       const objective = noObjective
         ? null
         : (objectiveId
             ? await UserObjective.findById(objectiveId)
             : await UserObjective.findOne({ userId, status: 'active', isPrimary: true }));
+
+      // Capture the resolved objective's id so we can stamp it on the Quiz
+      // doc below even when the caller didn't pass one.
+      if (objective && !resolvedObjectiveId) {
+        resolvedObjectiveId = objective._id;
+      }
 
       if (objective?.analysis?.competencies?.length > 0) {
         // Find competencies relevant to this topic
@@ -443,7 +457,10 @@ class QuizGenerationService {
       assessmentType: effectiveAssessmentType || undefined,
       linkedCompetencies: linkedCompetencies.length > 0 ? linkedCompetencies : undefined,
       // Honor noObjective — for-fun quizzes don't get linked to the user's goal.
-      objectiveId: noObjective ? undefined : (objectiveId || undefined),
+      // When the toggle is OFF and the caller didn't pass an explicit objectiveId,
+      // we stamp the resolved primary-active objective so the iOS history view
+      // shows the quiz as plan-linked instead of falsely tagging it "For fun".
+      objectiveId: noObjective ? undefined : (resolvedObjectiveId || undefined),
       status: 'ready',
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       generatedAt: new Date(),
