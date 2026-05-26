@@ -1,6 +1,7 @@
-const drill = require('./drillGrader.worker');
+const drill     = require('./drillGrader.worker');
 const generator = require('./contentGenerator.worker');
 const validator = require('./contentValidator.worker');
+const scheduled = require('./scheduledGenerator.worker');
 
 function startAll() {
   return [
@@ -11,8 +12,9 @@ function startAll() {
 }
 
 module.exports = {
-  drillGraderQueue: drill.drillGraderQueue,
-  contentGeneratorQueue: generator.contentGeneratorQueue,
-  contentValidatorQueue: validator.contentValidatorQueue,
+  drillGraderQueue:       drill.drillGraderQueue,
+  contentGeneratorQueue:  generator.contentGeneratorQueue,
+  contentValidatorQueue:  validator.contentValidatorQueue,
   startAll,
+  runScheduledGeneration: scheduled.runScheduledGeneration,
 };
