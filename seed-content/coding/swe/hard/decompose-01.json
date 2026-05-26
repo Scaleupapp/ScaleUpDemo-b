@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "swe",
+  "language": "typescript",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Razorpay / Juspay senior engineering system design round — multi-tenancy architecture breakdown: plan a tenant-isolation migration for an existing payments API before any schema changes land",
+
+  "brief": "Your VP of Engineering has filed the following ticket:\n\n---\n**Ticket ARCH-12 — Add multi-tenancy to the payments API**\n\nToday the API serves a single organisation. We are signing three enterprise customers who each need full data isolation — one tenant's transactions, users, and webhooks must NEVER be visible to another tenant.\n\nRequirements:\n- Add a `tenantId` column/field to every relevant table/collection: `users`, `transactions`, `webhooks`, `api_keys`\n- Enforce isolation at the query layer — no query may return rows belonging to a different tenant than the authenticated caller\n- Auth tokens (JWTs) must carry tenant context; the API must reject tokens that don't have a `tenantId` claim\n- Existing data (currently all belonging to the 'default' org) must be migrated to a `default_tenant` record without downtime\n- A new `tenants` table/collection must be created with at least `id`, `name`, `status`, `createdAt`\n- Superadmin role can query across tenants; regular API calls are scoped to the caller's tenant\n\n---\n\nYour task: **Break this ticket into 6–8 clearly scoped steps** that you could hand off to an AI coding assistant one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale for why this step exists and why it comes here in the sequence\n\nDo NOT write any code. Focus on the sequencing, data-safety of the migration, and completeness of the plan.",
+
+  "acceptance_criteria": [
+    "Plan has between 6 and 8 steps",
+    "Plan creates the `tenants` table/collection and the `default_tenant` record before modifying any other table",
+    "Plan adds `tenantId` columns as nullable first (not NOT NULL), migrates existing data, then adds the NOT NULL constraint — never runs a NOT NULL migration on a non-empty table in a single step",
+    "Plan includes a step for updating the auth layer to issue and validate `tenantId` in JWTs",
+    "Plan includes a step that adds tenant-scoped query guards (middleware or repository layer) and explains where in the stack this enforcement lives",
+    "Plan includes a rollback or feature-flag strategy for the migration steps"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: Add Multi-Tenancy to the Payments API\n\n## Step 1 — Create the `tenants` table and seed the default tenant\nCreate a new `tenants` table with columns `id` (UUID, PK), `name` (text), `status` (enum: active/suspended), `created_at`. Insert a single row: `{ id: 'default_tenant', name: 'Default Organisation', status: 'active' }`.\n**Rationale:** All subsequent foreign-key references from other tables point to this table. Seeding the default tenant now means Steps 3-4 (which set tenantId on existing rows) have a valid FK target ready. This step is purely additive and fully rollback-safe.\n\n## Step 2 — Add nullable `tenantId` columns to all affected tables\nAdd `tenant_id UUID NULLABLE REFERENCES tenants(id)` to `users`, `transactions`, `webhooks`, and `api_keys`. Deploy this migration first, separately from the NOT NULL constraint. Use a feature flag to keep the new column invisible to the application for now.\n**Rationale:** Adding a NOT NULL column to a non-empty table in Postgres requires a full table rewrite and an exclusive lock. Adding it as nullable first is a zero-downtime pattern — rows with NULL tenant_id are tolerated until backfill is complete.\n\n## Step 3 — Backfill `tenantId` for all existing rows\nRun a batched UPDATE that sets `tenant_id = 'default_tenant'` for all rows where `tenant_id IS NULL`, processing in batches of 1 000-5 000 rows to avoid long-running transactions and table locks. Verify row counts before and after.\n**Rationale:** Backfilling in batches keeps the DB responsive during migration. Verifying counts before and after provides a safety checkpoint — if counts diverge, halt and investigate before proceeding.\n\n## Step 4 — Add the NOT NULL constraint and index\nAlter each table to add `NOT NULL` to the `tenant_id` column (safe now that all rows are backfilled). Add a composite index on `(tenant_id, id)` for each table — queries will almost always filter by tenant first. Run `EXPLAIN ANALYZE` on critical query paths to confirm index usage.\n**Rationale:** Enforcing NOT NULL at the DB level prevents any future insert from omitting tenant_id regardless of application bugs. The composite index is critical for performance — without it, every tenanted query does a full table scan.\n\n## Step 5 — Update the auth layer to issue and validate `tenantId` in JWTs\nModify the token-issuance service to include `tenantId` in the JWT payload. Update the auth middleware to: (a) reject tokens missing a `tenantId` claim with 401, and (b) attach `req.tenantId` to every authenticated request. Issue new tokens for all existing API keys, assigning them to `default_tenant`.\n**Rationale:** Auth tokens are the trust boundary for tenant isolation. Until this step, the query guards (Step 6) have no tenant context to enforce. Reissuing tokens for existing API keys ensures backward compatibility — old tokens stop working only after a grace period.\n\n## Step 6 — Add tenant-scoped query guards at the repository layer\nCreate a `TenantContext` wrapper around each repository/service that automatically appends `WHERE tenant_id = :tenantId` to every query. The tenantId is read from `req.tenantId` (set in Step 5). Add an ESLint/custom rule that flags any direct DB call that does not go through TenantContext. Superadmin calls bypass TenantContext via an explicit opt-out flag.\n**Rationale:** Enforcing isolation at the repository layer (not the route handler) ensures isolation cannot be accidentally bypassed by a new route that forgets to add a WHERE clause. The lint rule provides a compile-time safety net.\n\n## Step 7 — Write integration tests for isolation boundaries\nWrite tests that: (a) create two tenants and verify that a token for Tenant A cannot retrieve Tenant B's data on any endpoint; (b) verify that a token with no tenantId claim receives 401; (c) verify that the superadmin role can retrieve data across tenants; (d) verify that migrated legacy data appears under `default_tenant` only.\n**Rationale:** Isolation bugs are silent — a missing WHERE clause returns wrong data without an error. Explicit cross-tenant tests are the only automated safety net that confirms the guard is working end-to-end.\n\n## Step 8 — Add a feature flag and rollback plan\nWrap the tenancy enforcement in a feature flag (`MULTI_TENANCY_ENABLED`). If the flag is off, the system behaves as before (single-tenant). Document the rollback procedure: disable the flag, drop the NOT NULL constraint (add it back as nullable), restore original auth middleware. Keep the flag on staging for one sprint before enabling on production.\n**Rationale:** A phased rollout with a kill switch limits blast radius. The rollback procedure is documented before the migration goes live, not after an incident — this is the production-safety step that allows the team to act in seconds rather than minutes under pressure."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan adds `tenantId NOT NULL` in a single migration step on a populated table — in Postgres this requires an exclusive table lock and a full table rewrite, causing minutes of downtime on large tables. The correct pattern is: add nullable → backfill → add constraint separately.",
+      "why_compass_might_suggest_it": "Schema migrations are taught in tutorials using empty tables where NOT NULL has no cost. Learners and LLMs reproduce the one-step pattern because it is simpler to express and they have never experienced it on a production table with millions of rows.",
+      "detection_signals": [
+        "A single step adds both the column AND the NOT NULL constraint at the same time",
+        "No separate 'backfill' step between the add-column step and the add-constraint step"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan adds tenant query guards at the route handler level (middleware or route-specific WHERE clauses) rather than at the repository/service layer — any new route added in the future that bypasses the middleware will silently expose cross-tenant data.",
+      "why_compass_might_suggest_it": "Middleware is the most visible place in an Express/Fastify app to add auth and context checks. LLMs suggest middleware because it appears in the same layer as the existing auth middleware. The implication that enforcement must be deeper (at the data access layer) requires architectural awareness that the model doesn't surface by default.",
+      "detection_signals": [
+        "Plan says 'add middleware to filter responses by tenantId' rather than 'add tenantId to every query in the repository layer'",
+        "No mention of a repository wrapper, TenantContext, or lint rule to enforce query-layer isolation"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan omits a rollback strategy — migration steps are irreversible as written, with no feature flag and no documented procedure to disable tenancy enforcement if a bug is discovered post-deploy.",
+      "why_compass_might_suggest_it": "Decompositions focus on the forward path (what to build). Rollback is considered a DevOps or ops concern and learners defer it to 'we'll handle it if something breaks'. The LLM assistant mirrors this optimistic framing.",
+      "detection_signals": [
+        "Plan has no step or mention of 'feature flag', 'rollback', 'kill switch', or 'revert'",
+        "Final step is 'deploy to production' without a safety gate"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Plan uses the nullable-first migration pattern: add nullable column → backfill existing rows → add NOT NULL constraint as three distinct steps",
+      "weight": 0.30
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Tenant query isolation is enforced at the repository/service layer (not just at middleware), with an explanation of why route-level enforcement is insufficient",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Testing step includes explicit cross-tenant isolation tests — not just happy-path tests — and names at least two specific scenarios (e.g., Tenant A token cannot read Tenant B data, missing tenantId claim → 401)",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Plan includes a feature flag or rollback strategy and articulates the risk it mitigates (silent data exposure, migration downtime)",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Create `tenants` table + seed default_tenant — purely additive, establishes FK target before any other table is touched, fully rollback-safe",
+      "Step 2: Add nullable `tenant_id` columns — zero-downtime pattern; NOT NULL comes later; feature flag keeps the column invisible to the app during migration",
+      "Step 3: Backfill existing rows to default_tenant — batched updates, verify row counts before/after as a checkpoint",
+      "Step 4: Add NOT NULL constraint + composite index — only after backfill is confirmed complete; index on (tenant_id, id) is critical for query performance",
+      "Step 5: Update auth to issue/validate tenantId in JWTs — auth tokens carry tenant context; reissue tokens for existing API keys with default_tenant assignment",
+      "Step 6: Add TenantContext at the repository layer — every DB call goes through a wrapper that appends WHERE tenant_id = :tenantId; lint rule flags direct calls; superadmin has explicit opt-out",
+      "Step 7: Write cross-tenant isolation integration tests — Tenant A token cannot read Tenant B data on any endpoint; missing tenantId → 401; superadmin can read across tenants",
+      "Step 8: Feature flag + rollback plan — MULTI_TENANCY_ENABLED flag; rollback procedure documented and tested on staging before production deploy"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 280,
+    "branching_complexity": 5,
+    "edge_cases": 8,
+    "known_hard_patterns": [
+      "zero-downtime schema migration (nullable-first pattern)",
+      "repository-layer vs middleware-layer isolation",
+      "tenant context propagation through auth tokens",
+      "backfill safety and row-count verification",
+      "superadmin cross-tenant access control"
+    ]
+  }
+}

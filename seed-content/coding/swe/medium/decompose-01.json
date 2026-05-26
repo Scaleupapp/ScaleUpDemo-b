@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "swe",
+  "language": "python",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "Postman API team take-home — system design breakdown: plan a file-upload endpoint end-to-end before writing a line of code",
+
+  "brief": "Your product manager has raised the following ticket:\n\n---\n**Ticket PLAT-88 — Add avatar upload for user profiles**\n\nUsers need to be able to upload a profile photo. Implement a `POST /api/users/:id/avatar` endpoint (Python / FastAPI) that:\n- Accepts a single image file in a `multipart/form-data` request\n- Validates that the file is an image (MIME type must be one of `image/jpeg`, `image/png`, `image/webp`)\n- Validates that the file size does not exceed 2 MB\n- Stores the file in an AWS S3 bucket (`media.scaleup.app`), under the key `avatars/<user_id>/<uuid>.ext`\n- Returns the public URL of the stored file: `https://media.scaleup.app/avatars/<user_id>/<uuid>.ext`\n- Returns `404` if the user does not exist\n- Returns `400` with a descriptive message for MIME or size violations\n\n---\n\nYour task: **Break this ticket down into 5–7 clearly scoped steps** that you could hand off to an AI coding assistant one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale for why this step exists and why it comes here in the sequence\n\nDo NOT write any code. Focus on the sequencing and completeness of the plan.",
+
+  "acceptance_criteria": [
+    "Plan has between 5 and 7 steps",
+    "Plan includes a step that validates MIME type before touching S3 or the database",
+    "Plan includes a step that validates file size before touching S3",
+    "Plan includes a step that verifies the user exists before storing the file",
+    "Plan includes a step for generating the S3 key (with UUID) and uploading to S3",
+    "Plan includes a step for updating the user's avatar URL in the database and returning it"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: POST /api/users/:id/avatar\n\n## Step 1 — Verify the user exists\nBefore processing the file at all, query the users table for `id`. If not found, return 404 immediately.\n**Rationale:** Failing fast on a non-existent user avoids wasting MIME-validation, size-validation, and S3 upload work for a request that will never succeed. It also prevents orphaned files in S3 for ghost user IDs.\n\n## Step 2 — Read the multipart/form-data upload and enforce the 2 MB size limit\nUse FastAPI's `UploadFile` to receive the file. Read it in a single chunk and check `len(content) <= 2 * 1024 * 1024`. If oversized, return 400 with a descriptive message before any further processing.\n**Rationale:** Size validation must happen before MIME detection and S3 upload. Reading the full file into memory once lets us reuse the bytes for both the size check and the MIME check, without streaming to S3 first.\n\n## Step 3 — Validate the MIME type\nCheck the file's `content_type` header against the allowed list (`image/jpeg`, `image/png`, `image/webp`). Additionally, inspect the first 12 bytes of the content (magic bytes) as a defence-in-depth check since clients can spoof `Content-Type`. Return 400 if invalid.\n**Rationale:** MIME validation after size validation ensures we do not burn S3 PUT costs on a rejected file. The magic-byte check prevents a malicious client from uploading a PHP script with `Content-Type: image/jpeg`.\n\n## Step 4 — Generate the S3 key and upload the file\nGenerate a UUID v4 for the filename. Derive the extension from the validated MIME type (not the client-supplied filename). Build the S3 key as `avatars/<user_id>/<uuid>.<ext>`. Upload using `boto3.client('s3').put_object(...)` with `ContentType` set explicitly.\n**Rationale:** Using a server-generated UUID prevents key collisions and path-traversal attacks. Deriving the extension from the MIME type (not the client filename) prevents a `.php` extension being stored.\n\n## Step 5 — Update the user's `avatar_url` in the database\nConstruct the public URL `https://media.scaleup.app/<s3_key>` and write it to the `users` table for the given `id`. Use an `UPDATE ... RETURNING avatar_url` to confirm the write.\n**Rationale:** Only update the DB after a successful S3 upload. If S3 fails, the user record remains unchanged and the caller gets a 500, not a 200 with a URL that points to nothing.\n\n## Step 6 — Return the public URL and write integration tests\nRespond with `{ \"avatar_url\": \"https://...\" }` and status 200. Write integration tests for: valid JPEG upload (happy path), PNG over 2 MB (400), invalid MIME `application/pdf` (400), user ID that does not exist (404), and S3 failure (500 with no DB write).\n**Rationale:** Explicit test coverage for each rejection path ensures the error codes and messages are correct and that the DB is not updated when S3 fails."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan uploads to S3 before validating MIME type or size — on a malformed or oversized file the plan first stores the file, then returns 400, leaving garbage in S3 and burning egress/storage costs unnecessarily.",
+      "why_compass_might_suggest_it": "Engineers who think in terms of the HTTP request lifecycle often write 'receive file → upload → validate → respond'. The upload feels like the 'main' step and validation feels like a filter on top of the result.",
+      "detection_signals": [
+        "Plan has an S3 upload step before a validation step",
+        "No step mentions 'before uploading' or 'reject before S3'"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan omits the user-existence check entirely — the endpoint will attempt to store a file and update a row that does not exist, silently doing nothing or throwing a DB constraint error that surfaces as a confusing 500.",
+      "why_compass_might_suggest_it": "Learners focus on the file-upload mechanics and treat the `:id` path parameter as a pass-through. The 404 case only appears in the acceptance criteria; the LLM assistant won't add it unless the decomposition step mentions it.",
+      "detection_signals": [
+        "Plan has no step mentioning '404', 'user exists', or 'look up user'",
+        "First step directly references 'validate file' or 'receive upload'"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan uses the client-supplied filename (with its extension) for the S3 key rather than generating a UUID — this allows path-traversal attacks (e.g., filename `../../etc/passwd`) and key collisions when two users upload `photo.jpg`.",
+      "why_compass_might_suggest_it": "Storing the original filename feels natural and preserves metadata. The AI assistant's default suggestion for 'upload a file to S3' almost always uses the original filename as the key unless the prompt explicitly says otherwise.",
+      "detection_signals": [
+        "Plan says 'use the filename' or 'preserve the original name' in the S3 step",
+        "No step mentions UUID, random key, or server-generated identifier"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Validation steps (size AND MIME) appear before the S3 upload step — no file data reaches S3 before it has been validated",
+      "weight": 0.30
+    },
+    {
+      "dimension": "decomposition",
+      "check": "User-existence check is the first step (before any file processing), with an explicit 404 outcome",
+      "weight": 0.25
+    },
+    {
+      "dimension": "decomposition",
+      "check": "S3 key generation uses a server-generated UUID (not the client filename) and derives the extension from the MIME type — learner articulates why in the rationale",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Testing step names at least three failure paths (size > 2MB, invalid MIME, user not found) not just the happy path",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Verify the user exists — query the DB first; 404 immediately if not found; avoids orphaned S3 objects",
+      "Step 2: Read the upload and enforce size limit — read the file bytes, check len <= 2 MB, return 400 if oversized before any S3 work",
+      "Step 3: Validate the MIME type — check Content-Type header AND magic bytes; return 400 for anything outside the allowed list; do this before S3 to avoid storing rejected files",
+      "Step 4: Generate the S3 key with a server UUID — build `avatars/<user_id>/<uuid>.<ext>` where ext comes from the validated MIME type, not the client filename; upload with explicit ContentType",
+      "Step 5: Update the user's avatar_url in the DB — only after a confirmed S3 upload; build the public URL and write it; use UPDATE ... RETURNING to confirm",
+      "Step 6: Return the public URL — respond 200 with { avatar_url }; write integration tests covering happy path, size violation, MIME violation, missing user, and S3 failure"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 140,
+    "branching_complexity": 3,
+    "edge_cases": 6,
+    "known_hard_patterns": []
+  }
+}

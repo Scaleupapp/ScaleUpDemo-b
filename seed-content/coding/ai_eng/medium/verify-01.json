@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "verify",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "Sarvam AI applied research engineer — code review: audit an AI-generated LangChain-style agent loop for production safety bugs before it handles real user queries",
+
+  "brief": "Your AI coding assistant generated the following LangChain-style agent loop for an internal tool-calling agent. Your task is to **review it critically**, identify every production safety bug, explain why each one is dangerous in a real deployment, and write the corrected version.\n\nThe agent is supposed to:\n- Receive a user query\n- Decide which tool to call (web search or calculator)\n- Call the tool, observe the result, and decide whether to answer or call another tool\n- Return a final answer to the user\n\nHere is the generated implementation (~35 lines):\n\n```python\n# agent_loop.py\nfrom langchain.chat_models import ChatOpenAI\nfrom langchain.schema import HumanMessage, AIMessage, SystemMessage, ToolMessage\nfrom tools import web_search, calculator  # assume these are defined\n\nTOOLS = {\n    'web_search': web_search,\n    'calculator': calculator,\n}\n\ndef run_agent(user_query: str) -> str:\n    llm = ChatOpenAI(model='gpt-4o', temperature=0)\n\n    messages = [\n        SystemMessage(content='You are a helpful assistant. Use tools when needed.'),\n        HumanMessage(content=user_query),\n    ]\n\n    # Bug 1 lives here\n    while True:\n        response = llm.invoke(messages, tools=[\n            {'type': 'function', 'function': {'name': 'web_search', 'description': 'Search the web', 'parameters': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}}},\n            {'type': 'function', 'function': {'name': 'calculator', 'description': 'Evaluate a math expression', 'parameters': {'type': 'object', 'properties': {'expression': {'type': 'string'}}, 'required': ['expression']}}},\n        ])\n\n        if response.tool_calls:\n            messages.append(response)  # append AI response with tool_calls\n            for tool_call in response.tool_calls:\n                tool_name = tool_call['name']\n                tool_args = tool_call['args']\n                result = TOOLS[tool_name](**tool_args)\n                # Bug 2 lives here\n                messages.append(HumanMessage(content=str(result)))\n        else:\n            return response.content\n```\n\nIdentify every bug, explain why each one is a production problem, and write the corrected `run_agent` function.",
+
+  "acceptance_criteria": [
+    "Identifies Bug 1: no `max_iterations` limit — the while-True loop never exits if the LLM keeps calling tools (infinite loop, unbounded API cost, no timeout in production)",
+    "Provides a concrete fix: a counter that increments each iteration and a hard break with a fallback answer after N iterations (e.g., 10)",
+    "Identifies Bug 2: tool result appended as `HumanMessage` instead of `ToolMessage` — the LLM cannot match the tool result to the tool call because the role and `tool_call_id` are missing, causing the model to treat the result as a new user message and re-call the same tool",
+    "Provides the correct fix: `ToolMessage(content=str(result), tool_call_id=tool_call['id'])` — role must be 'tool' and `tool_call_id` must link the result to the originating call",
+    "Corrected implementation handles both bugs without introducing new issues (e.g., no KeyError if tool name is unknown)"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "agent_loop_fixed.py",
+        "content": "from langchain.chat_models import ChatOpenAI\nfrom langchain.schema import HumanMessage, AIMessage, SystemMessage, ToolMessage\nfrom tools import web_search, calculator\n\nTOOLS = {\n    'web_search': web_search,\n    'calculator': calculator,\n}\n\nTOOL_SCHEMAS = [\n    {\n        'type': 'function',\n        'function': {\n            'name': 'web_search',\n            'description': 'Search the web for current information',\n            'parameters': {\n                'type': 'object',\n                'properties': {'query': {'type': 'string', 'description': 'Search query'}},\n                'required': ['query'],\n            },\n        },\n    },\n    {\n        'type': 'function',\n        'function': {\n            'name': 'calculator',\n            'description': 'Evaluate a mathematical expression safely',\n            'parameters': {\n                'type': 'object',\n                'properties': {'expression': {'type': 'string', 'description': 'Math expression to evaluate'}},\n                'required': ['expression'],\n            },\n        },\n    },\n]\n\nMAX_ITERATIONS = 10  # Hard limit: prevents infinite loops and runaway API spend\n\n\ndef run_agent(user_query: str) -> str:\n    \"\"\"Run the tool-calling agent loop with safety limits.\n\n    Bug fixes applied:\n    1. Added MAX_ITERATIONS guard — the loop now exits with a fallback answer\n       if the model has not produced a final response after 10 rounds.\n    2. Tool results are appended as ToolMessage (role='tool') with the correct\n       tool_call_id — without this, the model cannot match results to calls\n       and re-calls the same tool indefinitely.\n    \"\"\"\n    llm = ChatOpenAI(model='gpt-4o', temperature=0)\n\n    messages = [\n        SystemMessage(content='You are a helpful assistant. Use tools when needed.'),\n        HumanMessage(content=user_query),\n    ]\n\n    for iteration in range(MAX_ITERATIONS):\n        response = llm.invoke(messages, tools=TOOL_SCHEMAS)\n\n        if not response.tool_calls:\n            # Model produced a final text response — we're done.\n            return response.content\n\n        # Append the AI response (which includes tool_calls metadata)\n        messages.append(response)\n\n        for tool_call in response.tool_calls:\n            tool_name = tool_call['name']\n            tool_args = tool_call['args']\n\n            if tool_name not in TOOLS:\n                # Unknown tool — append an error result so the model can recover\n                error_result = f'Error: tool \"{tool_name}\" is not available.'\n                messages.append(\n                    ToolMessage(content=error_result, tool_call_id=tool_call['id'])\n                )\n                continue\n\n            try:\n                result = TOOLS[tool_name](**tool_args)\n            except Exception as e:\n                result = f'Tool execution error: {e}'\n\n            # CRITICAL: role must be 'tool' and tool_call_id must match\n            # the originating tool call. Using HumanMessage here breaks the\n            # conversation structure — the LLM cannot correlate the result\n            # to the call and will re-invoke the same tool in a loop.\n            messages.append(\n                ToolMessage(content=str(result), tool_call_id=tool_call['id'])\n            )\n\n    # Exceeded MAX_ITERATIONS — return a safe fallback rather than hanging\n    return 'I was unable to complete this task within the allowed number of steps. Please try rephrasing your question.'\n"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "agent_loop.py:line 19 — while True",
+      "bug_description": "No iteration limit on the agent loop. If the LLM model enters a reasoning loop where it keeps deciding to call tools (e.g., each web search result triggers another web search, or the model misinterprets a calculator result and retries), the loop runs indefinitely. In production this means: (1) unbounded OpenAI API cost — a single agent call can generate hundreds of tool calls; (2) the request never returns to the caller, eventually timing out at the HTTP/load balancer level rather than returning a graceful error; (3) rate limits get exhausted for the entire application, affecting other users.",
+      "why_compass_might_suggest_it": "Agent loops are commonly presented in tutorials as `while True: ... if done: break` patterns. The tutorial code has an implicit assumption that the model always produces a final answer within 2-3 iterations. LLMs generate this pattern because it is the most direct translation of 'keep calling tools until done' — the production failure mode (never done) is not visible in the training examples.",
+      "detection_signals": [
+        "The loop is `while True:` with no iteration counter, no timeout, and no MAX_ITERATIONS constant anywhere in the file",
+        "The only exit from the loop is the `else: return response.content` branch — there is no fallback exit",
+        "If you replace the LLM with a mock that always returns tool_calls, the function never returns"
+      ]
+    },
+    {
+      "location": "agent_loop.py:line 31 — HumanMessage(content=str(result))",
+      "bug_description": "Tool results are appended to the message history as `HumanMessage` objects. OpenAI's (and most LLM providers') tool-use protocol requires tool results to be in a `ToolMessage` (role='tool') with the `tool_call_id` matching the originating tool call. When tool results arrive as HumanMessages: (1) the model cannot match the result to the tool call — it does not know which tool produced this output; (2) the model re-calls the same tool because, from its perspective, the tool call was never answered; (3) this can cause the infinite loop above even with a non-adversarial model — a simple single-tool query re-calls web_search indefinitely because the model never 'sees' the result as satisfying its tool call.",
+      "why_compass_might_suggest_it": "HumanMessage is the familiar 'append to conversation' pattern; it is how you add user turns. LLMs often generate `messages.append(HumanMessage(...))` because that is the general-purpose 'add something to the context' idiom. The distinction between HumanMessage and ToolMessage requires understanding the structured tool-use message protocol, which is less prominent in tutorial examples than the basic message types.",
+      "detection_signals": [
+        "The line inside the tool_calls processing loop appends `HumanMessage(...)` rather than `ToolMessage(..., tool_call_id=...)`",
+        "No reference to `tool_call['id']` or `tool_call_id` anywhere in the function",
+        "A mock test where the model returns one tool call and the loop is run will re-call the tool on every iteration — the model never transitions to producing a final answer"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the infinite loop bug, explains the cost-bomb production consequence, and provides a concrete fix with a named constant (MAX_ITERATIONS) and a graceful fallback response",
+      "weight": 0.35
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the HumanMessage-vs-ToolMessage bug, explains that missing tool_call_id breaks the model's result-to-call correlation, and provides ToolMessage with the correct tool_call_id from the tool_call dict",
+      "weight": 0.35
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Learner explains WHY the LLM generated these bugs — tutorial pattern for infinite loops; HumanMessage as the general-purpose append idiom — demonstrating understanding of LLM training data patterns",
+      "weight": 0.20
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Corrected code handles the unknown-tool case (tool_name not in TOOLS) and wraps tool execution in try/except, preventing uncaught exceptions from crashing the agent on tool failures",
+      "weight": 0.10
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [
+      "Testing with a mock LLM that returns a final answer on the first iteration — this passes both tests because neither bug manifests until the model actually calls a tool",
+      "Catching only the HumanMessage bug and missing the infinite loop — the HumanMessage bug is more visually obvious (wrong class name) but the infinite loop has larger production impact",
+      "Accepting MAX_ITERATIONS=100 without questioning whether 100 API calls per user query is acceptable — the number should be justified by the task complexity, typically 5-15 for simple agents"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 175,
+    "branching_complexity": 4,
+    "edge_cases": 5,
+    "known_hard_patterns": []
+  },
+
+  "content_hash": "placeholder"
+}

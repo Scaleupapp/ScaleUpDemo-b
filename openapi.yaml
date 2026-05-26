@@ -55,6 +55,8 @@ tags:
     description: Knowledge profile + topic mastery
   - name: Dashboard
     description: Home dashboard aggregate
+  - name: Coding
+    description: Coding practice — drills + capstones
 
 components:
   securitySchemes:
@@ -5811,3 +5813,610 @@ paths:
                 $ref: '#/components/schemas/ApiSuccessEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  # =====================================================================
+  # Coding (no /api/v1 version prefix — separate namespace)
+  # =====================================================================
+  /api/coding/drills/today:
+    get:
+      operationId: getCodeDrillToday
+      tags: [Coding]
+      summary: Get the recommended drill for the authenticated user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Recommended drill
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bundle_id, brief, time_budget_minutes, drill_subtype, difficulty, role_track, language]
+                properties:
+                  bundle_id:
+                    type: string
+                  brief:
+                    type: string
+                  time_budget_minutes:
+                    type: integer
+                  drill_subtype:
+                    type: string
+                    enum: [prompt, verify, decompose, refactor]
+                  difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+                  role_track:
+                    type: string
+                    enum: [swe, ds, ai_eng]
+                  language:
+                    type: string
+                  acceptance_criteria:
+                    type: array
+                    items:
+                      type: string
+                  starter_repo:
+                    description: Present only for refactor drills; null otherwise
+                    oneOf:
+                      - type: object
+                      - type: 'null'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No drill available or user objective does not map to a coding track
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [no_coding_track_for_objective, no_drill_available]
+                  role_track:
+                    type: string
+                  difficulty:
+                    type: string
+                  drill_subtype:
+                    type: string
+  /api/coding/drills/{id}/start:
+    post:
+      operationId: startCodeDrill
+      tags: [Coding]
+      summary: Start a drill attempt
+      description: Creates a DrillAttempt (status=in_progress) and returns the safe bundle view. Enforces daily quota of 1 non-calibration drill per day.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ArtifactBundle _id
+      responses:
+        '200':
+          description: Drill started — safe bundle view returned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt_id, bundle_id, brief, time_budget_minutes, drill_subtype, difficulty, role_track, language]
+                properties:
+                  attempt_id:
+                    type: string
+                  bundle_id:
+                    type: string
+                  brief:
+                    type: string
+                  time_budget_minutes:
+                    type: integer
+                  drill_subtype:
+                    type: string
+                    enum: [prompt, verify, decompose, refactor]
+                  difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+                  role_track:
+                    type: string
+                    enum: [swe, ds, ai_eng]
+                  language:
+                    type: string
+                  acceptance_criteria:
+                    type: array
+                    items:
+                      type: string
+                  starter_repo:
+                    description: Present only for refactor drills
+                    oneOf:
+                      - type: object
+                      - type: 'null'
+                  visible_tests:
+                    description: Present only for refactor drills; expected_output_contains omitted
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        command:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Bundle not found or not active
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [bundle_not_found]
+        '429':
+          description: Daily drill quota exceeded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [daily_quota_exceeded]
+                  limit:
+                    type: integer
+                    example: 1
+  /api/coding/drills/{id}/submit:
+    post:
+      operationId: submitCodeDrill
+      tags: [Coding]
+      summary: Submit a drill attempt for grading
+      description: Validates submission, marks attempt submitted, enqueues the drill-grader job. Returns 202 with poll URL.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ArtifactBundle _id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [drill_subtype, submission]
+              properties:
+                drill_subtype:
+                  type: string
+                  enum: [prompt, verify, decompose, refactor]
+                submission:
+                  type: object
+      responses:
+        '202':
+          description: Submission accepted and enqueued for grading
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt_id, status, poll_url]
+                properties:
+                  attempt_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [submitted]
+                  poll_url:
+                    type: string
+        '400':
+          description: Invalid submission or subtype mismatch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [invalid_submission, subtype_mismatch]
+                  detail:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Bundle not found or no active attempt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [bundle_not_found, no_active_attempt]
+  /api/coding/drills/{id}/result:
+    get:
+      operationId: getCodeDrillResult
+      tags: [Coding]
+      summary: Poll for drill grading result
+      description: Returns grade if attempt status is graded, otherwise 202 with current status.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ArtifactBundle _id
+      responses:
+        '200':
+          description: Attempt has been graded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt_id, status, overall_score, rubric_breakdown, what_to_try_next, integrity_confidence, graded_at, drill_subtype, difficulty, role_track]
+                properties:
+                  attempt_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [graded]
+                  overall_score:
+                    type: integer
+                    minimum: 0
+                    maximum: 100
+                  rubric_breakdown:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        dimension:
+                          type: string
+                        score:
+                          type: integer
+                        feedback:
+                          type: string
+                  what_to_try_next:
+                    type: string
+                  integrity_confidence:
+                    type: string
+                    enum: [high, medium, low]
+                  graded_at:
+                    type: string
+                    format: date-time
+                  drill_subtype:
+                    type: string
+                    enum: [prompt, verify, decompose, refactor]
+                  difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+                  role_track:
+                    type: string
+                    enum: [swe, ds, ai_eng]
+        '202':
+          description: Attempt not yet graded — poll again
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, attempt_id]
+                properties:
+                  status:
+                    type: string
+                    enum: [in_progress, submitted]
+                  attempt_id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No attempt found for this bundle
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [no_attempt_found]
+
+  /api/coding/drills/calibration/start:
+    post:
+      operationId: startCalibrationDrill
+      tags: [Coding]
+      summary: Start a calibration drill sequence (4 subtypes, easy difficulty)
+      description: |
+        Returns 4 easy-difficulty drill bundles, one per subtype (prompt, verify, decompose, refactor),
+        bundled as an 8-minute calibration sequence. Each attempt is flagged `is_calibration: true`
+        and bypasses the daily quota.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Calibration sequence started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [calibration_id, role_track, estimated_minutes, drills]
+                properties:
+                  calibration_id:
+                    type: string
+                    format: uuid
+                  role_track:
+                    type: string
+                    enum: [swe, ds, ai_eng]
+                  estimated_minutes:
+                    type: integer
+                    example: 8
+                  drills:
+                    type: array
+                    minItems: 4
+                    maxItems: 4
+                    items:
+                      type: object
+                      required: [drill_subtype, attempt_id, bundle_id, brief, time_budget_minutes]
+                      properties:
+                        drill_subtype:
+                          type: string
+                          enum: [prompt, verify, decompose, refactor]
+                        attempt_id:
+                          type: string
+                        bundle_id:
+                          type: string
+                        brief:
+                          type: string
+                        time_budget_minutes:
+                          type: integer
+                          example: 2
+                        difficulty:
+                          type: string
+                          enum: [easy]
+                        role_track:
+                          type: string
+                        language:
+                          type: string
+                        acceptance_criteria:
+                          type: array
+                          items:
+                            type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: User has no coding objective
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [no_coding_track_for_objective]
+        '503':
+          description: Not all 4 easy bundles are available yet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [calibration_unavailable]
+                  missing_subtypes:
+                    type: array
+                    items:
+                      type: string
+
+  /api/coding/drills/calibration/{calibration_id}/submit:
+    post:
+      operationId: submitCalibrationDrill
+      tags: [Coding]
+      summary: Submit all 4 calibration drill answers in one payload
+      description: |
+        Accepts all 4 submissions in a single request. Validates each individually.
+        Enqueues 4 drill-grader jobs. Returns 202.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: calibration_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The calibration_id returned by the start endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [submissions]
+              properties:
+                submissions:
+                  type: array
+                  minItems: 4
+                  maxItems: 4
+                  items:
+                    type: object
+                    required: [drill_subtype, attempt_id, submission]
+                    properties:
+                      drill_subtype:
+                        type: string
+                        enum: [prompt, verify, decompose, refactor]
+                      attempt_id:
+                        type: string
+                      submission:
+                        type: object
+      responses:
+        '202':
+          description: All 4 submissions accepted, grading enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [calibration_id, status, poll_url]
+                properties:
+                  calibration_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [submitted]
+                  poll_url:
+                    type: string
+        '400':
+          description: Incomplete or invalid submissions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [invalid_submission_count, invalid_submission]
+                  detail:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Calibration not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [calibration_not_found]
+
+  /api/coding/drills/calibration/{calibration_id}/result:
+    get:
+      operationId: getCalibrationDrillResult
+      tags: [Coding]
+      summary: Poll for calibration aggregate result
+      description: |
+        Returns aggregate result across all 4 calibration drills.
+        When all 4 are graded, also writes baseline to MetaSkillMastery and
+        recommended_difficulty to DifficultyState (idempotent via calibration_committed flag).
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: calibration_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The calibration_id from the start endpoint
+      responses:
+        '200':
+          description: All 4 drills graded — full aggregate result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [calibration_id, status, drills, baseline_axes, recommended_difficulty]
+                properties:
+                  calibration_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [graded]
+                  drills:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        drill_subtype:
+                          type: string
+                          enum: [prompt, verify, decompose, refactor]
+                        status:
+                          type: string
+                          enum: [graded]
+                        overall_score:
+                          type: integer
+                          minimum: 0
+                          maximum: 100
+                        rubric_breakdown:
+                          type: array
+                          items:
+                            type: object
+                  baseline_axes:
+                    type: object
+                    required: [prompting, verification, decomposition, refactoring]
+                    properties:
+                      prompting:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
+                      verification:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
+                      decomposition:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
+                      refactoring:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
+                  recommended_difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+        '202':
+          description: Grading still in progress
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [calibration_id, status, drills]
+                properties:
+                  calibration_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pending, partial]
+                  drills:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        drill_subtype:
+                          type: string
+                        status:
+                          type: string
+                        overall_score:
+                          oneOf:
+                            - type: integer
+                            - type: 'null'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Calibration not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [calibration_not_found]
+
+  /api/coding/health:
+    get:
+      operationId: getCodingHealth
+      tags: [Coding]
+      summary: Coding module healthcheck
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  module: { type: string }
+                  status: { type: string }
+                required: [module, status]
+        '400':
+          description: Bad request

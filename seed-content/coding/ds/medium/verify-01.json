@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "verify",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "CRED user modeling team — Jupyter notebook round: audit an AI-generated credit-risk pipeline for data leakage before it goes to model review",
+
+  "brief": "Your AI coding assistant generated the following scikit-learn pipeline to build a credit-risk classifier. Your task is to **review it critically** and identify every data leakage bug before the model is presented to the risk committee.\n\nThe pipeline is supposed to:\n- Load a loan dataset and split it into train and test sets\n- Engineer features, scale them, and train a logistic regression classifier\n- Evaluate on the held-out test set\n\nHere is the generated code (~30 lines):\n\n```python\n# credit_risk_pipeline.py\nimport pandas as pd\nimport numpy as np\nfrom sklearn.linear_model import LogisticRegression\nfrom sklearn.preprocessing import StandardScaler\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.metrics import roc_auc_score\n\ndf = pd.read_csv('loans.csv')\n# columns: user_id, loan_amount, income, loan_date, repaid (0/1 target)\n# each row is one loan application; repaid=1 means fully repaid\n\n# --- Feature engineering ---\n# Bug 1 lives here\ndf['avg_loan_per_user'] = df.groupby('user_id')['loan_amount'].transform('mean')\n\nX = df[['loan_amount', 'income', 'avg_loan_per_user']]\ny = df['repaid']\n\n# --- Train / test split ---\nX_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\n\n# Bug 2 lives here\nscaler = StandardScaler()\nX_train_scaled = scaler.fit_transform(X_train)\nX_test_scaled = scaler.fit_transform(X_test)  # should be .transform, not .fit_transform\n\n# --- Model ---\nclf = LogisticRegression()\nclf.fit(X_train_scaled, y_train)\npreds = clf.predict_proba(X_test_scaled)[:, 1]\nprint(f'Test AUC: {roc_auc_score(y_test, preds):.4f}')\n```\n\nList every data leakage bug you find, explain why each one inflates the reported AUC, and write the corrected version of the pipeline.",
+
+  "acceptance_criteria": [
+    "Identifies Bug 1: `avg_loan_per_user` is computed over the ENTIRE dataset before the train/test split — test-set rows contribute to the feature value of train-set rows for the same user, leaking future loan information",
+    "Explains the business consequence: model sees 'on average, this user's loans are X' including data it wouldn't have at prediction time",
+    "Identifies Bug 2: `scaler.fit_transform(X_test)` refits the scaler on test data — the test set now has its own mean/std, breaking the cardinal rule that test-set preprocessing must use only statistics from the training set",
+    "Provides a corrected pipeline: feature engineering inside a fit/transform split, and `scaler.transform(X_test)` (not fit_transform)"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "credit_risk_pipeline_fixed.py",
+        "content": "import pandas as pd\nimport numpy as np\nfrom sklearn.linear_model import LogisticRegression\nfrom sklearn.preprocessing import StandardScaler\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.metrics import roc_auc_score\n\ndf = pd.read_csv('loans.csv')\n# columns: user_id, loan_amount, income, loan_date, repaid (0/1 target)\n\n# --- Train / test split FIRST, before any feature engineering ---\ntrain_df, test_df = train_test_split(df, test_size=0.2, random_state=42)\n\n# --- Feature engineering: compute avg_loan_per_user from TRAIN ONLY ---\n# The mean is computed from train rows. For test users, we map the train mean;\n# unseen users (not in train) get the global train mean as a fallback.\ntrain_user_avg = train_df.groupby('user_id')['loan_amount'].mean().rename('avg_loan_per_user')\nglobal_train_avg = train_df['loan_amount'].mean()\n\ntrain_df = train_df.merge(train_user_avg, on='user_id', how='left')\ntest_df = test_df.merge(train_user_avg, on='user_id', how='left')\ntest_df['avg_loan_per_user'] = test_df['avg_loan_per_user'].fillna(global_train_avg)\n\nFEATURES = ['loan_amount', 'income', 'avg_loan_per_user']\nX_train = train_df[FEATURES]\ny_train = train_df['repaid']\nX_test = test_df[FEATURES]\ny_test = test_df['repaid']\n\n# --- Scaling: fit on train, transform both ---\n# NEVER call fit_transform on the test set — that would give the test set\n# its own mean/std, making the scaled distributions incompatible with training.\nscaler = StandardScaler()\nX_train_scaled = scaler.fit_transform(X_train)\nX_test_scaled = scaler.transform(X_test)  # .transform only — no re-fitting\n\n# --- Model ---\nclf = LogisticRegression()\nclf.fit(X_train_scaled, y_train)\npreds = clf.predict_proba(X_test_scaled)[:, 1]\nprint(f'Test AUC: {roc_auc_score(y_test, preds):.4f}')\n"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "credit_risk_pipeline.py:lines 14-15",
+      "bug_description": "Target leak via whole-dataset feature engineering: `df.groupby('user_id')['loan_amount'].transform('mean')` computes each user's average loan amount across ALL rows — including future rows that would not be available at prediction time and test-set rows. A user who defaults tends to have higher loan amounts on average; the model can use this signal to 'cheat' by learning from future behaviour. This is a classic aggregation leak that inflates AUC by 3-8 points in real credit datasets.",
+      "why_compass_might_suggest_it": "groupby + transform is the idiomatic pandas pattern for adding group-level statistics as a column, and the LLM generates it before the train_test_split because that's where the data is available. The temporal/causal structure (features must be computed only from information available at prediction time) is not encoded in the API — it requires domain reasoning the LLM doesn't apply by default.",
+      "detection_signals": [
+        "The `avg_loan_per_user` feature is computed on `df` (the full DataFrame) before the train_test_split call",
+        "If you compare train AUC to test AUC, they are suspiciously close — normally train AUC is higher; with this leak test AUC can exceed train AUC",
+        "Removing the `avg_loan_per_user` feature causes test AUC to drop by a noticeable margin (>0.03)"
+      ]
+    },
+    {
+      "location": "credit_risk_pipeline.py:line 24",
+      "bug_description": "`scaler.fit_transform(X_test)` refits the StandardScaler on the test set. The test set now has zero mean and unit variance according to its OWN statistics — not the training set's statistics. This means the scaled test features are on a different scale than the scaled training features, causing the trained model's coefficients to be applied to differently-scaled inputs. Reported AUC can be artificially inflated or deflated depending on the direction of the scale mismatch.",
+      "why_compass_might_suggest_it": "LLMs see `fit_transform` used everywhere in tutorial code and apply it symmetrically to both train and test. The distinction between `fit_transform(train)` and `transform(test)` requires understanding that the scaler parameters must be fixed after fitting on train — a subtle stateful concept that the LLM doesn't always model correctly.",
+      "detection_signals": [
+        "The same scaler object has `.fit_transform()` called twice — once on train, once on test",
+        "If you print `scaler.mean_` after the second fit_transform, it reflects X_test's mean, not X_train's mean",
+        "Removing the refitting (using `.transform(X_test)`) changes the reported AUC, confirming the scale mismatch"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the whole-dataset feature engineering leak, explains the aggregation-leak mechanism (future rows inflate the mean), and provides the correct fix (compute avg from train only, map to test)",
+      "weight": 0.35
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the fit_transform-on-test leak, explains that it gives the test set its own scaling statistics, and provides the correct fix (scaler.transform only)",
+      "weight": 0.35
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Learner explains WHY the LLM made each mistake — transform pattern applied symmetrically, groupby before split as the intuitive data-frame manipulation order — and quantifies the likely AUC inflation direction",
+      "weight": 0.20
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Corrected pipeline: split first, engineer from train only, map to test with fallback for unseen users, use scaler.transform for test — no new leaks introduced",
+      "weight": 0.10
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [
+      "Catching only the scaler bug and missing the aggregation leak — the scaler bug is more visually obvious (same method called twice) but the aggregation leak has larger business impact",
+      "Accepting that the leak is 'minor' because the feature is loan_amount (already in X) — the aggregation over future rows creates an entirely different signal from the raw column, so the redundancy argument doesn't hold",
+      "Not testing that removing the leaky feature changes AUC — without this quantification, the severity of the leak is unknown and the risk committee can't assess model reliability"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 140,
+    "branching_complexity": 3,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  }
+}

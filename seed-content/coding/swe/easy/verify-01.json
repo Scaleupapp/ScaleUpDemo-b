@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "verify",
+  "role_track": "swe",
+  "language": "javascript",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Razorpay / Postman early-career SWE round — code review: catch subtle bugs an AI pair might introduce in a simple filter utility",
+
+  "brief": "Your AI coding assistant just generated the following JavaScript utility for an age-gate feature. Your task is to **review the code critically** and identify every bug before it reaches production.\n\nThe function is supposed to:\n- Accept an array of user objects (each has at least a `name` field; `age` may or may not be present)\n- Return a new array containing only users who are **strictly over 18** (i.e., age must be > 18, not >= 18)\n- Users with a missing or non-numeric `age` field must be **excluded** from the result\n\nHere is the generated code:\n\n```javascript\n// users.js\nfunction filterAdults(users) {\n  return users.filter(user => {\n    const age = user.age;\n    if (age >= 18) {\n      return true;\n    }\n    return false;\n  });\n}\n\nmodule.exports = { filterAdults };\n```\n\nList every bug you find, explain why each one is wrong, and write the corrected version of the function.",
+
+  "acceptance_criteria": [
+    "Function returns only users whose age is strictly greater than 18 (not >= 18)",
+    "Function excludes users where age is undefined, null, or not a finite number",
+    "Function does not mutate the input array",
+    "Function returns an empty array when the input is empty or all users are excluded"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "users.js",
+        "content": "// users.js\nfunction filterAdults(users) {\n  return users.filter(user => {\n    const age = user.age;\n    // Exclude missing, null, or non-numeric age values\n    if (age === undefined || age === null || typeof age !== 'number' || !isFinite(age)) {\n      return false;\n    }\n    // 'over 18' means strictly greater than, not 'at least 18'\n    return age > 18;\n  });\n}\n\nmodule.exports = { filterAdults };\n"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "users.js:4",
+      "bug_description": "Off-by-one in age comparison: uses `>= 18` instead of `> 18`. A user who is exactly 18 is NOT 'over 18' — they should be excluded, but this code includes them.",
+      "why_compass_might_suggest_it": "LLMs frequently confuse 'over 18' (strictly greater) with 'at least 18' (greater-or-equal). The phrase 'adult' or 'over 18' in natural language is ambiguous; the model defaults to the more common >= pattern used in age-gate forms that say '18 or older'.",
+      "detection_signals": [
+        "Unit test: filterAdults([{ name: 'Alex', age: 18 }]) should return [] — the buggy code returns [{ name: 'Alex', age: 18 }]",
+        "Code review: scanning for >= in a filter that was specified as 'over N'"
+      ]
+    },
+    {
+      "location": "users.js:3",
+      "bug_description": "Missing guard for absent `age` field: when `user.age` is `undefined`, the expression `undefined >= 18` evaluates to `false` in JavaScript, which accidentally produces the correct exclusion result — BUT if `user.age` is `NaN` (e.g., parsed from a malformed string upstream), `NaN >= 18` also returns `false`, masking the bug. More critically, the spec says missing-age users must be explicitly excluded; relying on implicit NaN coercion is fragile and not intent-revealing.",
+      "why_compass_might_suggest_it": "JavaScript's implicit type coercion means `undefined >= 18` returns false without a type error, so the LLM's test suite (if it has one) passes on undefined inputs. The LLM does not add a guard because the comparison 'already works' for undefined. This is a classic case of accidentally-correct code that breaks with a different upstream type.",
+      "detection_signals": [
+        "Unit test: filterAdults([{ name: 'Bob' }]) returns [] — this passes with the buggy code, masking the missing explicit guard",
+        "Unit test: filterAdults([{ name: 'Carol', age: NaN }]) should return [] — the buggy code also returns [] here, but for the wrong reason",
+        "Code review: no typeof or Number.isFinite guard present in the filter callback"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the >= vs > off-by-one and names the exact line where it appears",
+      "weight": 0.40
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the missing explicit guard for undefined/non-numeric age, even if the accidental coercion behaviour happens to return the right result for undefined",
+      "weight": 0.35
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Learner explains WHY the LLM made each mistake (ambiguous natural-language spec, implicit JS coercion) rather than just stating 'it is wrong'",
+      "weight": 0.15
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Corrected code is clean, intent-revealing, and passes all four acceptance criteria — no new bugs introduced in the fix",
+      "weight": 0.10
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [
+      "Accepts the code as correct because undefined >= 18 happens to return false in JavaScript — the missing guard is invisible if you only test the happy path and the undefined path",
+      "Misses the >= vs > distinction because they mentally read 'adults' as meaning >= 18, matching the LLM's interpretation rather than the spec",
+      "Writes a corrected version that handles undefined but still uses >= 18, fixing only one of the two bugs"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 90,
+    "branching_complexity": 2,
+    "edge_cases": 3,
+    "known_hard_patterns": []
+  }
+}

@@ -85,6 +85,7 @@ app.use('/api/v1/mindmaps', require('./routes/mindmaps'));
 app.use('/api/v1/audio-summaries', require('./routes/audioSummaries'));
 app.use('/api/v1/note-requests', require('./routes/noteRequests'));
 app.use('/api/v1/interviews', require('./routes/interviews'));
+app.use('/api/coding', require('./coding').routes);
 
 // --- v2 API namespace (parallel rollout) ---
 // v2 lives alongside v1. v1 routes above are never touched.

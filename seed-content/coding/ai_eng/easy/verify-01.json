@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "verify",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Postman AI Agent Builder team — take-home: audit an AI-generated RAG retrieval utility for correctness bugs before it powers the docs assistant",
+
+  "brief": "Your AI coding assistant generated the following Python RAG retrieval utility. Your task is to **review it critically**, identify every bug, explain why each one is wrong, and write a corrected version.\n\nThe utility is supposed to:\n- Embed a user query using a sentence-transformer model\n- Compare the query embedding against a list of document chunk embeddings using cosine similarity\n- Return the top-k most similar chunks\n- Skip chunks that exceed the embedding model's context limit\n\nHere is the generated code (~25 lines):\n\n```python\n# retriever.py\nimport numpy as np\nfrom sentence_transformers import SentenceTransformer\n\nMODEL_NAME = 'all-MiniLM-L6-v2'\nMAX_TOKENS = 256  # embedding model context limit\nTOP_K = 3\n\nmodel = SentenceTransformer(MODEL_NAME)\n\ndef retrieve(query: str, chunks: list[str]) -> list[str]:\n    \"\"\"Return the top-k chunks most similar to the query.\"\"\"\n    query_emb = model.encode(query)\n\n    results = []\n    for chunk in chunks:\n        # Bug 2 lives here\n        tokens = chunk.split()\n        if len(tokens) > MAX_TOKENS:\n            continue  # silently skip oversized chunks\n\n        chunk_emb = model.encode(chunk)\n\n        # Bug 1 lives here\n        sim = np.dot(query_emb, chunk_emb) / (np.linalg.norm(query_emb) + np.linalg.norm(chunk_emb))\n        results.append((sim, chunk))\n\n    results.sort(key=lambda x: x[0], reverse=True)\n    return [chunk for _, chunk in results[:TOP_K]]\n```\n\nIdentify every bug, explain why each one produces wrong output, and write the corrected `retrieve` function.",
+
+  "acceptance_criteria": [
+    "Identifies Bug 1: cosine similarity denominator is a sum of norms (`norm(a) + norm(b)`) — the correct formula divides by the PRODUCT of norms (`norm(a) * norm(b)`). The sum-norm produces values that look like similarities (roughly in (-1, 1) for unit-ish vectors) but rank chunks differently from true cosine similarity, silently breaking retrieval quality.",
+    "Provides the correct cosine similarity formula: `np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))`",
+    "Identifies Bug 2: whitespace-splitting (`chunk.split()`) counts whitespace-delimited tokens, not model subword tokens — many chunks with many short words will PASS the filter even though their subword token count exceeds MAX_TOKENS, and the embedding model will silently truncate or error",
+    "Explains the data-loss consequence: silently skipping chunks rather than splitting/truncating them means those chunks are permanently excluded from retrieval — the RAG system loses knowledge it should have",
+    "Provides a corrected retriever that fixes both the similarity formula and the token counting/chunking strategy"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "retriever_fixed.py",
+        "content": "import numpy as np\nfrom sentence_transformers import SentenceTransformer\nfrom transformers import AutoTokenizer\n\nMODEL_NAME = 'all-MiniLM-L6-v2'\nMAX_TOKENS = 256  # embedding model context limit in subword tokens\nTOP_K = 3\nOVERLAP = 32      # token overlap when splitting oversized chunks\n\nmodel = SentenceTransformer(MODEL_NAME)\n# Use the model's actual tokenizer to count subword tokens accurately\ntokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)\n\n\ndef split_into_sub_chunks(text: str, max_tokens: int = MAX_TOKENS, overlap: int = OVERLAP) -> list[str]:\n    \"\"\"Split a text into overlapping sub-chunks that fit within max_tokens.\n\n    Uses the model's own tokenizer for accurate token counting.\n    Overlapping windows ensure context continuity at chunk boundaries.\n    \"\"\"\n    token_ids = tokenizer.encode(text, add_special_tokens=False)\n    sub_chunks = []\n    start = 0\n    while start < len(token_ids):\n        end = min(start + max_tokens, len(token_ids))\n        sub_chunk_ids = token_ids[start:end]\n        sub_chunks.append(tokenizer.decode(sub_chunk_ids))\n        if end == len(token_ids):\n            break\n        start += max_tokens - overlap  # step forward with overlap\n    return sub_chunks\n\n\ndef cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:\n    \"\"\"True cosine similarity: dot product divided by the PRODUCT of L2 norms.\n\n    Note: dividing by (norm_a + norm_b) instead of (norm_a * norm_b) is a\n    common bug that produces values superficially similar to cosine but with\n    different ranking properties — it is NOT cosine similarity.\n    \"\"\"\n    norm_a = np.linalg.norm(a)\n    norm_b = np.linalg.norm(b)\n    if norm_a == 0 or norm_b == 0:\n        return 0.0\n    return float(np.dot(a, b) / (norm_a * norm_b))\n\n\ndef retrieve(query: str, chunks: list[str]) -> list[str]:\n    \"\"\"Return the top-k chunks most similar to the query.\n\n    Oversized chunks are split into sub-chunks (with overlap) rather than\n    dropped — dropping them silently removes knowledge from the retrieval index.\n    \"\"\"\n    query_emb = model.encode(query)\n\n    candidates: list[tuple[float, str]] = []\n    for chunk in chunks:\n        token_count = len(tokenizer.encode(chunk, add_special_tokens=False))\n        if token_count > MAX_TOKENS:\n            # Split into sub-chunks instead of silently dropping\n            sub_chunks = split_into_sub_chunks(chunk)\n        else:\n            sub_chunks = [chunk]\n\n        for sub in sub_chunks:\n            emb = model.encode(sub)\n            sim = cosine_similarity(query_emb, emb)\n            candidates.append((sim, sub))\n\n    candidates.sort(key=lambda x: x[0], reverse=True)\n    return [c for _, c in candidates[:TOP_K]]\n"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "retriever.py:line 24",
+      "bug_description": "Wrong cosine similarity denominator: `np.dot(a, b) / (np.linalg.norm(a) + np.linalg.norm(b))` divides by the SUM of norms rather than the PRODUCT. For two vectors with norms 1.0 and 1.2, the sum is 2.2 while the product is 1.2 — both denominators look plausible but produce different similarity scores. Chunks with higher-norm embeddings are systematically under-ranked because the sum grows faster than the product as norms increase. The bug does NOT cause crashes or obvious errors — it silently degrades retrieval quality.",
+      "why_compass_might_suggest_it": "LLMs encounter 'normalize by combining the norms of both vectors' in many contexts and sometimes generate + instead of * when transcribing the formula. The formula looks mathematically reasonable at a glance — both plus and times are arithmetic operations on norms — so the bug passes casual inspection.",
+      "detection_signals": [
+        "The similarity line contains `np.linalg.norm(a) + np.linalg.norm(b)` rather than `np.linalg.norm(a) * np.linalg.norm(b)`",
+        "For two identical non-zero vectors, true cosine similarity = 1.0; the buggy formula returns 0.5 (for unit vectors) — a quick sanity check exposes this",
+        "Ranking unit tests with known similarity ordering will fail: two closely-similar chunks swap positions compared to correct cosine similarity"
+      ]
+    },
+    {
+      "location": "retriever.py:lines 15-17",
+      "bug_description": "Whitespace-token counting (`chunk.split()`) is not equivalent to subword token counting used by the embedding model. 'all-MiniLM-L6-v2' uses WordPiece tokenization: a single English word like 'characterization' may tokenize to 4 subword tokens; a sentence with 200 words can produce 300+ subword tokens. Chunks that SHOULD be split (because the model will truncate them at token 256) PASS the whitespace filter and silently get truncated by the model's tokenizer — the end of each long chunk is simply discarded during encoding. Furthermore, silently skipping entire chunks (even with correct counting) causes data loss: a long document chunk containing the exact answer to the query is permanently excluded from the index.",
+      "why_compass_might_suggest_it": "Word counting with `.split()` is the intuitive 'count tokens' approximation used in NLP tutorials predating the widespread adoption of subword tokenizers. LLMs reproduce this pattern when asked to 'check if text exceeds the token limit' without being prompted to use the model's actual tokenizer.",
+      "detection_signals": [
+        "Token counting uses `len(chunk.split())` rather than `len(tokenizer.encode(chunk))`",
+        "The code does `continue` (skip) when the token count is too high rather than splitting and embedding sub-chunks",
+        "A chunk containing the keyword from the query is silently absent from results when that chunk has > MAX_TOKENS whitespace-words"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the cosine similarity denominator bug, demonstrates the correct formula (product of norms), and shows a sanity-check that two identical vectors should score 1.0",
+      "weight": 0.35
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the whitespace-tokenization bug, explains that subword token counts are higher than word counts, and recognises that the skip-and-discard strategy causes data loss",
+      "weight": 0.35
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Learner explains WHY each bug is silent: the similarity formula produces values in a plausible range; the token filter produces no error even while discarding data — both pass smoke tests",
+      "weight": 0.20
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Corrected code splits oversized chunks into sub-chunks with overlap rather than dropping them, uses the model's tokenizer for counting, and applies the correct cosine similarity formula",
+      "weight": 0.10
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [
+      "Testing with short chunks where whitespace-token count and subword-token count are close — the bug only manifests on longer text where the divergence matters",
+      "Checking that results are non-empty and look reasonable — the cosine bug produces plausible-looking scores and rankings that are subtly wrong, not obviously broken",
+      "Not sanity-checking the similarity formula with identical vectors: if cosine(v, v) != 1.0, the formula is wrong — this is the fastest way to catch the denominator bug"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 130,
+    "branching_complexity": 2,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  },
+
+  "content_hash": "placeholder"
+}

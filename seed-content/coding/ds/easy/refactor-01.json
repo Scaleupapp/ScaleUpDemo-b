@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Atlan data platform internship code review — vectorize a slow feature-computation loop before it blocks the nightly pipeline",
+
+  "brief": "Your team has a Python module `features.py` that computes a derived column for a transactions DataFrame. It was written quickly and uses `df.iterrows()` — which is 100-1000x slower than vectorized pandas operations.\n\nHere is the current code:\n\n```python\nimport pandas as pd\n\ndef add_value_tier(df):\n    \"\"\"Add a 'value_tier' column: 'high' if amount > 1000, 'mid' if 200-1000, 'low' otherwise.\"\"\"\n    result = []\n    for idx, row in df.iterrows():\n        if row['amount'] > 1000:\n            result.append('high')\n        elif row['amount'] >= 200:\n            result.append('mid')\n        else:\n            result.append('low')\n    df['value_tier'] = result\n    return df\n```\n\n**Your tasks:**\n1. Refactor `add_value_tier` to use `pd.cut` or `numpy.select` (no `iterrows`, no `apply`, no list comprehension over rows).\n2. The function must NOT mutate the input DataFrame — return a new DataFrame with the added column.\n3. Keep the function signature identical: `add_value_tier(df) -> pd.DataFrame`.\n4. Both visible tests must pass after the refactor.",
+
+  "acceptance_criteria": [
+    "Function `add_value_tier` exists and is callable from `features` module",
+    "Output column values match the original iterrows logic for all three tiers",
+    "Input DataFrame is not mutated (original df has no `value_tier` column after the call)",
+    "Implementation uses vectorized operations only — no `iterrows`, `itertuples`, `apply`, or Python-level row loops"
+  ],
+
+  "starter_repo": {
+    "files": [
+      {
+        "path": "features.py",
+        "content": "import pandas as pd\n\n\ndef add_value_tier(df):\n    \"\"\"Add a 'value_tier' column: 'high' if amount > 1000, 'mid' if 200-1000, 'low' otherwise.\"\"\"\n    result = []\n    for idx, row in df.iterrows():\n        if row['amount'] > 1000:\n            result.append('high')\n        elif row['amount'] >= 200:\n            result.append('mid')\n        else:\n            result.append('low')\n    df['value_tier'] = result\n    return df\n"
+      }
+    ]
+  },
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "features.py",
+        "content": "import numpy as np\nimport pandas as pd\n\n\ndef add_value_tier(df: pd.DataFrame) -> pd.DataFrame:\n    \"\"\"Return a copy of df with a 'value_tier' column added.\n\n    Tiers:\n      high  — amount > 1000\n      mid   — 200 <= amount <= 1000\n      low   — amount < 200\n\n    Uses numpy.select for vectorized, branch-free computation.\n    Does NOT mutate the input DataFrame.\n    \"\"\"\n    out = df.copy()\n    conditions = [\n        out['amount'] > 1000,\n        out['amount'] >= 200,\n    ]\n    choices = ['high', 'mid']\n    out['value_tier'] = np.select(conditions, choices, default='low')\n    return out\n"
+      }
+    ]
+  },
+
+  "visible_tests": [
+    {
+      "name": "add_value_tier_exists_and_callable",
+      "command": "python -c \"import features; assert callable(getattr(features, 'add_value_tier', None)), 'add_value_tier not found'\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": []
+    },
+    {
+      "name": "output_values_correct_and_no_mutation",
+      "command": "python -c \"\nimport pandas as pd\nimport features\ndf = pd.DataFrame({'amount': [50, 200, 500, 1001, 1000]})\nresult = features.add_value_tier(df)\nexpected = ['low', 'mid', 'mid', 'high', 'mid']\nassert list(result['value_tier']) == expected, f'got {list(result[\\\"value_tier\\\"])}, expected {expected}'\nassert 'value_tier' not in df.columns, 'input df was mutated'\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": []
+    }
+  ],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Replaces `iterrows` with `df.apply(lambda row: ..., axis=1)` — removes the loop syntax but is still row-wise Python execution under the hood, giving no meaningful speedup on large DataFrames",
+      "why_compass_might_suggest_it": "`df.apply()` is the most commonly suggested 'improvement' over iterrows in LLM training data because it looks cleaner. Many tutorials present apply as vectorized when it is not — it is a Python-level loop wrapped in a pandas API.",
+      "detection_signals": [
+        "Refactored code contains `.apply(` with `axis=1`",
+        "No use of `np.select`, `pd.cut`, or boolean indexing in the implementation"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Refactored function mutates the input DataFrame by assigning `df['value_tier'] = ...` directly instead of working on a copy — callers who reuse the original df see unexpected columns, a classic pandas side-effect bug",
+      "why_compass_might_suggest_it": "The original iterrows version also mutated df — learners often preserve this behaviour without noticing, especially if they only test the return value and not the original df post-call.",
+      "detection_signals": [
+        "no_mutation visible test fails: `assert 'value_tier' not in df.columns` raises AssertionError",
+        "Refactored code assigns directly to `df['value_tier']` without a `.copy()` first"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Uses `pd.cut` with bins that don't match the original boundary conditions — `pd.cut` uses half-open intervals and the boundary semantics differ subtly from the iterrows `> 1000` / `>= 200` conditions, causing the 1000.0 boundary case to land in the wrong tier",
+      "why_compass_might_suggest_it": "pd.cut is a common suggestion for binning but its right=True default means the right endpoint of each bin is included, so a bin of (200, 1000] includes 1000 as 'mid' — which is correct. However, the > 1000 boundary means exactly 1000 is mid, not high. LLMs that use pd.cut often set the wrong bin edges and miscategorise the boundary.",
+      "detection_signals": [
+        "output_values_correct test fails for amount=1000 — should be 'mid' but pd.cut with wrong bins returns 'high'",
+        "Code uses pd.cut with bins=[0, 200, 1000, inf] without carefully matching the open/closed boundary to the original condition"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "code_quality",
+      "check": "Implementation uses `np.select`, `pd.cut`, or chained boolean indexing — no `iterrows`, `itertuples`, `apply(axis=1)`, or Python for-loop over rows",
+      "weight": 0.30
+    },
+    {
+      "dimension": "correctness",
+      "check": "Both visible tests pass — output values match the original for all three tiers including the exact 200 and 1000 boundary values",
+      "weight": 0.30
+    },
+    {
+      "dimension": "correctness",
+      "check": "Input DataFrame is not mutated — function works on a copy, preserving caller's original df",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt to the AI specified 'vectorized only, no apply or iterrows' and explicitly mentioned no-mutation — not just 'make it faster'",
+      "weight": 0.15
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Specifies 'vectorized only' and explicitly bans `apply(axis=1)` so the LLM doesn't substitute one slow pattern for another",
+      "Asks for a copy (`df.copy()`) to avoid mutating the input — states 'do not mutate the input DataFrame'",
+      "Requests the exact function signature be preserved so callers don't break"
+    ],
+    "common_verification_traps": [
+      "Testing only on a DataFrame where no amount equals exactly 200 or 1000 — boundary values are the most likely place for pd.cut bin-edge bugs",
+      "Verifying the output is correct without checking that the input df was not mutated — mutation bugs are invisible unless you inspect the original df after the call"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 70,
+    "branching_complexity": 2,
+    "edge_cases": 3,
+    "known_hard_patterns": []
+  }
+}

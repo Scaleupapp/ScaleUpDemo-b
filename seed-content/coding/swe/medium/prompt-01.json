@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "swe",
+  "language": "javascript",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "Razorpay backend lateral round — practical design task: write a precise AI prompt to generate a production-grade POST /api/orders handler with idempotency and validation",
+
+  "brief": "Your team is building an orders microservice in Node.js + Express. You need to write a prompt that gets an LLM to produce a complete route handler for `POST /api/orders`.\n\nThe handler must satisfy all of the following requirements:\n\n**Idempotency:**\n- Accept an `Idempotency-Key` header (UUID v4). If a request with that key was already processed successfully, return the same response body and a `200` status (not `201`) — do not create a duplicate order.\n- Store processed keys in a Redis hash `idempotency:orders` with a TTL of 24 hours.\n\n**Request validation (Joi):**\n- `body.customerId` — required, string, UUID format\n- `body.items` — required, non-empty array; each item has `productId` (required, string), `quantity` (required, integer, min 1), `unitPrice` (required, number, positive)\n- `body.currency` — optional, string, one of `['INR', 'USD', 'EUR']`, default `'INR'`\n\n**Response shape (success `201`):**\n```json\n{ \"success\": true, \"data\": { \"orderId\": \"...\", \"total\": 0.00, \"currency\": \"INR\" } }\n```\n\n**Error envelope (all failures):**\n```json\n{ \"success\": false, \"error\": { \"code\": \"VALIDATION_ERROR\", \"message\": \"...\" } }\n```\nUse HTTP `400` for validation errors, `500` for unexpected errors.\n\n**Your task:** Write the prompt you would send to an LLM coding assistant to generate this handler. You are NOT writing the handler — you are writing the instruction. The prompt must be precise enough that a competent engineer would be satisfied to use the generated code without significant rework.",
+
+  "acceptance_criteria": [
+    "Prompt names the exact route method and path (`router.post('/api/orders', ...)`)",
+    "Prompt specifies the idempotency-key header name, storage mechanism (Redis hash + key name), TTL (24 h), and the 200-vs-201 distinction for cached vs new",
+    "Prompt gives the complete Joi schema for all three fields including data types, UUID format, min constraints, and the default currency",
+    "Prompt defines both success and error response envelopes with exact JSON shapes and correct HTTP status codes",
+    "Prompt specifies that the total is computed server-side as sum(quantity * unitPrice) — not trusted from the client"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "gold_prompt.txt",
+        "content": "Using Node.js, Express, Joi for validation, and ioredis for Redis, generate a single Express route handler for:\n\n    POST /api/orders\n\n=== IDEMPOTENCY ===\n1. Read the `Idempotency-Key` header. If it is missing or not a valid UUID v4, respond with 400 and the error envelope described below.\n2. Check Redis hash key `idempotency:orders` for the field matching this idempotency key.\n   - If the field exists: return HTTP 200 with the stored JSON as the response body. Do NOT create a new order.\n   - If the field does not exist: proceed to validation and creation.\n3. After successfully creating an order, store the response JSON in `idempotency:orders` under the idempotency key. Set the hash field TTL to 24 hours (86400 seconds) using `EXPIRE` on the hash or a per-field expiry approach that your Redis client supports.\n\n=== REQUEST VALIDATION (Joi) ===\nValidate `req.body` with the following schema. On failure respond with HTTP 400 + error envelope.\n\n    const schema = Joi.object({\n      customerId: Joi.string().uuid({ version: 'uuidv4' }).required(),\n      items: Joi.array().items(\n        Joi.object({\n          productId: Joi.string().required(),\n          quantity:  Joi.number().integer().min(1).required(),\n          unitPrice: Joi.number().positive().required(),\n        })\n      ).min(1).required(),\n      currency: Joi.string().valid('INR', 'USD', 'EUR').default('INR'),\n    });\n\n=== ORDER CREATION ===\n- Generate a new UUID v4 for `orderId`.\n- Compute `total` server-side: sum of (item.quantity * item.unitPrice) for all items. Do NOT trust any total from the client.\n- Persist the order however you like (stub with an in-memory Map is fine — I will wire the real DB later).\n\n=== SUCCESS RESPONSE (HTTP 201) ===\n    { \"success\": true, \"data\": { \"orderId\": \"<uuid>\", \"total\": <number>, \"currency\": \"<string>\" } }\n\n=== ERROR ENVELOPE (HTTP 400 for validation, HTTP 500 for unexpected) ===\n    { \"success\": false, \"error\": { \"code\": \"VALIDATION_ERROR\", \"message\": \"<joi details string>\" } }\n    { \"success\": false, \"error\": { \"code\": \"INTERNAL_ERROR\", \"message\": \"Something went wrong\" } }\n\nWrap the entire handler body in a try/catch so any unhandled exception returns the 500 envelope instead of crashing Express.\n\nReturn only the handler code (and any necessary imports at the top). Do not include a server bootstrap or app.listen."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt omits the idempotency-key TTL or the 200-vs-201 distinction — the LLM either never sets an expiry (cache grows forever) or always returns 201 on cache hit, breaking idempotent clients that check the status code.",
+      "why_compass_might_suggest_it": "Idempotency key logic feels like an implementation detail; learners mentally shorthand it as 'just store the key in Redis' without specifying the expiry time or the status code for a replay response.",
+      "detection_signals": [
+        "Prompt does not contain '200' and '201' in the context of idempotency",
+        "Prompt does not mention TTL, expiry, or '86400'"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt says 'validate the request body' without providing the Joi schema — the LLM invents its own schema, typically missing the UUID constraint on customerId and the min(1) on quantity, leading to silent acceptance of invalid orders.",
+      "why_compass_might_suggest_it": "Learners assume the LLM can infer the right schema from the field names. The model is good at guessing reasonable defaults but will not use `Joi.string().uuid()` unless explicitly instructed.",
+      "detection_signals": [
+        "Prompt does not contain 'uuid' in the context of customerId validation",
+        "Generated handler accepts customerId: 'not-a-uuid' without error"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt does not specify that `total` must be computed server-side — the LLM includes a `total` field in the request body schema and trusts the client value, which allows price manipulation.",
+      "why_compass_might_suggest_it": "The natural shape of an order payload includes a total; the LLM mirrors REST API examples it was trained on, many of which accept total from the client.",
+      "detection_signals": [
+        "Generated handler reads `req.body.total` instead of computing sum(quantity * unitPrice)",
+        "Prompt does not contain the phrase 'server-side' or 'compute' near 'total'"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt specifies both the idempotency check logic AND the storage details (Redis hash key name, TTL value, 200 on replay vs 201 on creation) — not just 'use an idempotency key'",
+      "weight": 0.30
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt provides the complete Joi schema inline (or equivalent precision) including uuid format, min(1) on quantity, positive on unitPrice, and valid() on currency with default",
+      "weight": 0.25
+    },
+    {
+      "dimension": "correctness",
+      "check": "Prompt explicitly instructs the LLM to compute total server-side as sum(quantity * unitPrice) and not accept it from the client body",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt defines both success and error envelope shapes with the exact JSON structure, HTTP status codes, and error code strings so the LLM cannot invent its own response format",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Includes the exact Joi schema as a code block — does not say 'validate appropriately' or 'use standard validation'",
+      "Specifies the Redis key name (`idempotency:orders`) so the LLM does not invent its own key schema",
+      "States the 200/201 status code distinction for replay vs new order explicitly",
+      "Provides both success and error envelope JSON shapes as concrete examples with placeholder values",
+      "Instructs the LLM that total is server-computed and names the formula (sum of quantity * unitPrice)",
+      "Ends the prompt with a clear scope boundary: 'return only the handler, no app.listen or server bootstrap'"
+    ],
+    "common_verification_traps": [
+      "Accepts a handler that always returns 201 on idempotency replay — easy to miss unless you replay the same Idempotency-Key twice and check the status code",
+      "Does not test that quantity=0 is rejected — the LLM may use min(0) instead of min(1) unless min(1) is explicit in the prompt",
+      "Overlooks the server-side total computation — manually sending a wrong total in the body and checking the response total exposes whether the LLM trusted the client"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 150,
+    "branching_complexity": 3,
+    "edge_cases": 5,
+    "known_hard_patterns": []
+  }
+}

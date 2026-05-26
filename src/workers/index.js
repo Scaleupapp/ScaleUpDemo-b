@@ -34,6 +34,9 @@ function startWorkers() {
   new Worker('interviewEvaluation', evaluateInterview, { connection, concurrency: 2 });
   new Worker('planGeneration', planGenerationWorker.processJob, { connection, concurrency: 4 });
 
+  const coding = require('../coding/workers');
+  coding.startAll();
+
   startCronJobs();
 
   console.log('All workers started');

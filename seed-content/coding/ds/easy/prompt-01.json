@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Swiggy data science loop — take-home task: write a clear analytical specification before delegating aggregation code to an AI pair",
+
+  "brief": "You are a data analyst at a food-delivery company. Your manager has asked for a table that shows **average order value per user, segmented by calendar month, plus a 7-day rolling average of daily GMV**.\n\nYou have a DataFrame `orders` with columns: `user_id` (str), `order_date` (datetime64), `order_value` (float, nullable).\n\nYour task: **Write the prompt you would send to an LLM coding assistant** to produce the following two outputs:\n\n1. `monthly_avg` — a DataFrame with `(user_id, month)` as the index and `avg_order_value` as the value column. `month` should be a period label (e.g., `2024-01`). Rows where `order_value` is NaN must be excluded from the average. Users with zero valid orders in a month must appear with NaN (not 0) in the result.\n\n2. `rolling_gmv` — a Series indexed by date, containing the 7-day **trailing** rolling average of daily total GMV. Days with no orders should be filled as 0 before computing the rolling average.\n\nYou are NOT writing the code yourself — you are writing the instruction that produces it. The prompt should be precise enough that an LLM assistant produces correct, idiomatic pandas code on the first attempt.",
+
+  "acceptance_criteria": [
+    "Prompt names both output variables (`monthly_avg` and `rolling_gmv`) and describes their exact shapes and index types",
+    "Prompt specifies that NaN order values must be excluded — not filled — before computing the monthly average",
+    "Prompt specifies that users with zero valid orders in a month appear as NaN (not 0) in `monthly_avg`",
+    "Prompt specifies that `rolling_gmv` uses a 7-day trailing window (not centred) and that missing days are zero-filled before rolling"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "gold_prompt.txt",
+        "content": "I have a pandas DataFrame called `orders` with three columns:\n- `user_id` (str): customer identifier\n- `order_date` (datetime64[ns]): when the order was placed\n- `order_value` (float, nullable): value of the order in rupees — some rows have NaN\n\nPlease write Python pandas code that produces two outputs:\n\n### Output 1: monthly_avg\nA DataFrame named `monthly_avg` where:\n- The index is a MultiIndex of (`user_id`, `month`), where `month` is a pandas Period label formatted as 'YYYY-MM' (i.e., use `order_date.dt.to_period('M')`)\n- The single value column is `avg_order_value`, which is the mean of `order_value` for that user-month pair\n- NaN rows in `order_value` must be EXCLUDED (not filled or replaced) before computing the mean\n- If a user has no valid (non-NaN) orders in a given month, they should NOT appear in that month's rows (do not artificially insert NaN rows — just let groupby skip empty groups)\n\n### Output 2: rolling_gmv\nA pandas Series named `rolling_gmv` where:\n- The index is a DatetimeIndex of all calendar days in the date range of `orders` (use `pd.date_range(orders.order_date.min(), orders.order_date.max(), freq='D')`)\n- The values are the 7-day TRAILING rolling mean of daily total GMV (sum of `order_value` per day)\n- Days with no orders must be treated as 0 GMV (fill missing dates with 0 before rolling)\n- Use `min_periods=1` in the rolling call so that the first 6 days produce a partial-window average rather than NaN\n- NaN order values should be excluded when summing daily GMV (use `sum(skipna=True)` which is the pandas default)\n\nDo not import any libraries other than pandas. Do not print anything — just assign to `monthly_avg` and `rolling_gmv`."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt says 'compute average order value by user and month' without specifying NaN handling — LLM uses the default mean which excludes NaN anyway, but doesn't document it, and more critically the prompt doesn't address what happens to users with no valid orders, so the LLM may fill them with 0",
+      "why_compass_might_suggest_it": "Learners assume pandas default behaviour (skipna=True in mean) is well-known and skip specifying it. The subtlety is what the output shape should look like for users with zero valid rows — NaN vs 0 vs absent row all look similar until you join downstream.",
+      "detection_signals": [
+        "Gold prompt contains 'NaN' or 'skipna' or 'exclude'",
+        "Prompt does not mention what to do with all-NaN user-months",
+        "LLM-generated code uses `.fillna(0)` before `.mean()` — silently wrong"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt asks for a '7-day rolling average' without specifying trailing vs centred — LLM may use `center=True` by default in older pandas, or leave it ambiguous, causing each day's rolling average to look 3 days into the future",
+      "why_compass_might_suggest_it": "Rolling window directionality is an easy oversight. The LLM training data contains many examples with `center=False` (default) but also examples that set `center=True` for smoothing; without explicit instruction the model picks whatever appeared more often in context.",
+      "detection_signals": [
+        "Gold prompt contains 'trailing' or 'center=False'",
+        "LLM-generated code contains `center=True` or omits the center parameter entirely without the prompt specifying"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt specifies the monthly segmentation but doesn't mention the Period type for `month` — LLM uses `dt.month` (integer 1-12) instead of `dt.to_period('M')`, producing an ambiguous integer index that collapses data across years (Jan 2023 and Jan 2024 both become 1)",
+      "why_compass_might_suggest_it": "Using `dt.month` is the most common pattern in LLM training data for grouping by month. Period-based grouping is less common and only appears when the prompt explicitly asks for a 'YYYY-MM' label.",
+      "detection_signals": [
+        "Gold prompt mentions 'to_period' or 'YYYY-MM'",
+        "LLM-generated code uses `.dt.month` producing integer month column"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt names both output variables (`monthly_avg`, `rolling_gmv`) with their exact index structure — MultiIndex for monthly, DatetimeIndex for rolling",
+      "weight": 0.30
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt specifies NaN exclusion semantics AND what to do with users who have no valid orders (NaN or absent row, not 0)",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt explicitly says 'trailing' window (or `center=False`) and specifies `min_periods=1` so early dates don't return NaN",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt specifies the Period type for month (`to_period('M')`) to avoid the cross-year month-integer collision",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Names both output variables explicitly with their index types (MultiIndex vs DatetimeIndex)",
+      "States NaN exclusion rule and the desired output shape for all-NaN user-months",
+      "Specifies trailing (not centred) window direction for the 7-day rolling average",
+      "Requests `min_periods=1` so partial windows at the start of the series don't produce NaN",
+      "Asks for `to_period('M')` month label so the year is preserved in the groupby key",
+      "Specifies zero-fill for missing dates before rolling so gaps in order data don't produce misleading NaN"
+    ],
+    "common_verification_traps": [
+      "Accepting a result where Jan 2023 and Jan 2024 are both labelled '1' — the cross-year collision is invisible if your test data spans only a single year",
+      "Not testing a date with no orders — if the date_range step is missing, the rolling series will skip those days silently and produce a shorter series than expected",
+      "Accepting `center=True` output without checking — the first 3 days will have NaN (or use future data) but this is invisible unless you inspect the rolling values against raw daily totals"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 85,
+    "branching_complexity": 2,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  }
+}

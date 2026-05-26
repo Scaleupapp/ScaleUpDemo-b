@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "ai_eng",
+  "language": "typescript",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "Postman AI Agent Builder team — system design + take-home: break down a multi-tool agent feature into implementable steps before the sprint starts",
+
+  "brief": "Your product manager has filed the following ticket:\n\n---\n**Ticket AI-204 — Build a business analytics agent**\n\nWe want an agent that can answer natural-language questions like:\n- 'What was our total revenue last month, and how does that compare to forecast?'\n- 'Which product had the most returns in Q3, and why might that be?'\n\nThe agent needs to:\n1. Query our PostgreSQL revenue database (via a `query_revenue_db` tool)\n2. Query our forecasting service REST API (via a `get_forecast` tool)\n3. Synthesise data from both tools into a coherent answer\n4. Handle errors gracefully if one service is unavailable\n5. Be observable — we need to see what tools it called and with what arguments\n\nStack: TypeScript, Vercel AI SDK (`ai` package), OpenAI GPT-4o.\n\n---\n\nYour task: **Break this ticket down into 6–8 clearly scoped steps** that you could hand off to an AI coding assistant one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale for why this step exists and why it comes here in the sequence\n\nDo NOT write any code. Focus on the sequencing and completeness of the plan.",
+
+  "acceptance_criteria": [
+    "Plan has between 6 and 8 steps",
+    "Plan includes tool schema definition as a distinct early step (Zod or equivalent typed schemas for tool inputs/outputs)",
+    "Plan includes a system prompt design step that describes the agent's role, available tools, and error-handling instructions",
+    "Plan includes error handling per tool as an explicit step — not assumed to be handled inside the tool implementation",
+    "Plan includes a loop control step: max iterations + graceful fallback answer if the agent exceeds the limit",
+    "Plan includes an observability step: logging tool calls, arguments, and results (not just 'add console.log')",
+    "Plan includes an evaluation step with golden test questions"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: Multi-Tool Business Analytics Agent (TypeScript / Vercel AI SDK)\n\n## Step 1 — Define tool schemas with Zod\nWrite TypeScript Zod schemas for `query_revenue_db` (input: date range + metric name; output: { rows, total }) and `get_forecast` (input: period + metric; output: { forecast_value, confidence_interval }). Export the schemas and inferred TypeScript types.\n**Rationale:** The Vercel AI SDK's `tool()` function requires Zod schemas for type-safe parameter validation. Defining schemas first means every subsequent step — system prompt, tool implementation, tests — works from a shared, authoritative contract. Schema-first also prevents the common bug of tool implementations accepting different fields than the agent is told to use.\n\n## Step 2 — Write the tool implementations\nImplement `queryRevenueDb(input)` (execute a parameterised SQL query via pg client) and `getForecast(input)` (HTTP GET to the forecasting service REST API). Each returns a typed result matching the Zod output schema.\n**Rationale:** Tool implementations are pure functions: input → output (or throw). Building them before the agent loop means they can be unit-tested in isolation — this is the only step where real DB/API integration matters, and it should be verified before being wired into the agent.\n\n## Step 3 — Add per-tool error handling and fallbacks\nWrap each tool implementation so that network timeouts, DB connection errors, and malformed API responses are caught and returned as a structured error object (e.g., `{ error: 'forecast_service_unavailable', message: '...' }`) rather than thrown exceptions.\n**Rationale:** The agent loop passes tool results back to the model. If a tool throws, it crashes the loop. Returning a structured error allows the model to acknowledge the failure and either retry with different parameters or answer with partial data — which is the desired production behaviour.\n\n## Step 4 — Design the system prompt\nWrite the system prompt that tells the agent: its role (business analytics assistant), the available tools and when to use each, how to handle partial data (one tool failed), how to cite the data source in the answer, and the maximum number of tool calls it should make before admitting it cannot answer.\n**Rationale:** System prompt design is the most impactful lever for agent behaviour — it governs tool selection, error handling, and answer format. It must be designed after the tool schemas are known (Step 1) so the prompt can reference actual tool names and parameter descriptions.\n\n## Step 5 — Implement the agent loop with MAX_ITERATIONS guard\nUse the Vercel AI SDK `generateText` with `tools` and `maxSteps` parameter set to a concrete limit (e.g., 8). Wire the Zod-typed tools from Steps 1–3 into the `tools` object. Return the model's final text response.\n**Rationale:** The `maxSteps` parameter is the Vercel AI SDK's built-in loop control; setting it explicitly prevents unbounded tool-calling if the model enters a reasoning loop. This step is where all prior components are assembled — it should be the last implementation step, not the first.\n\n## Step 6 — Add observability: structured tool-call logging\nAdd a `onStepFinish` callback (Vercel AI SDK lifecycle hook) that logs each step's tool calls, arguments, tool results, and token usage to a structured JSON logger (e.g., pino). Include a correlation ID per agent invocation.\n**Rationale:** Without structured logging, debugging a wrong agent answer requires re-running the query and hoping the model makes the same tool calls. Per-step logs let you reconstruct exactly what the agent queried, what data it received, and how it synthesised the answer — essential for both debugging and compliance.\n\n## Step 7 — Evaluate with golden test questions\nCreate 8–10 hand-written (question, expected_tool_calls, expected_answer_contains) test cases covering: revenue-only question, forecast-only question, combined question, question when forecast service is unavailable, question with no data in the DB. Run the agent against each and check tool call correctness and answer quality.\n**Rationale:** Golden test cases are the quality gate before shipping to users. They should cover both the happy path and failure modes. Without them, the team has no way to know if a prompt change improved or regressed agent behaviour."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan starts with 'implement the agent loop' before defining tool schemas — the tool implementations and the agent call are written in one step with inline schema definitions. The result: schema and implementation are coupled, making it hard to iterate on either independently.",
+      "why_compass_might_suggest_it": "LLM-generated agent boilerplate puts schema definition inline with the `generateText` call. Learners copy this structure and treat schema-first as a best practice for 'later refactoring' rather than a prerequisite for correctness.",
+      "detection_signals": [
+        "Plan has no step that mentions 'Zod', 'schema', 'tool definition', or 'input/output types'",
+        "First or second step involves running the agent or calling the LLM"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "No observability step — plan ends at 'the agent answers questions' without any logging, tracing, or step-level visibility. In production, a wrong answer with no tool call logs is undebuggable.",
+      "why_compass_might_suggest_it": "Observability feels like an infrastructure concern ('we'll add logging later'). AI engineers building agents for the first time focus on correctness and defer logging. The AI assistant will not add this step unless explicitly prompted.",
+      "detection_signals": [
+        "Plan contains no step mentioning 'log', 'trace', 'observability', 'onStepFinish', or 'structured logging'",
+        "Plan ends with 'add tests' with no logging step anywhere"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "No per-tool error handling step — plan assumes tool implementations either succeed or throw, and the agent loop handles the exception. This causes the agent to crash on service unavailability rather than returning a graceful partial answer.",
+      "why_compass_might_suggest_it": "Error handling is typically the last thing learners add. In a happy-path demo the forecast service is always available, so the absence of error handling is invisible. The ticket explicitly requires graceful degradation, but learners absorb the happy-path requirement and skip the failure-mode one.",
+      "detection_signals": [
+        "Tool implementation step has no mention of try/catch, fallback, structured error response, or 'service unavailable' case",
+        "No step in the plan addresses 'what happens if the forecast service is down'"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Plan leads with a tool schema definition step (Zod or equivalent) before any implementation step — schemas are the contract that all subsequent steps depend on",
+      "weight": 0.25
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Per-tool error handling is a distinct step that returns structured error objects rather than throwing — enabling the agent to degrade gracefully when one service is unavailable",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Observability step references a specific mechanism (e.g., onStepFinish callback, structured JSON logger, correlation ID) — not just 'add console.log'",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Evaluation step names at least 3 distinct test-case categories: happy path, one-tool-unavailable, no-data case — covering both success and failure modes",
+      "weight": 0.25
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Define tool schemas with Zod — input/output types for query_revenue_db and get_forecast; this is the contract all other steps build on",
+      "Step 2: Implement tool functions — typed implementations that return results matching the Zod output schemas; unit-testable in isolation before wiring into the agent",
+      "Step 3: Add per-tool error handling — catch DB timeouts and API failures, return structured error objects so the agent can degrade gracefully instead of crashing",
+      "Step 4: Design the system prompt — role, tool descriptions, error-handling instructions, citation format, loop-limit guidance",
+      "Step 5: Implement agent loop with maxSteps guard — Vercel AI SDK generateText with Zod-typed tools and explicit maxSteps to prevent infinite tool-calling",
+      "Step 6: Add structured tool-call logging — onStepFinish callback logging tool name, args, result, and tokens; correlation ID per invocation",
+      "Step 7: Evaluate with golden test questions — happy path, one-service-down, no-data case, combined query; check tool call correctness and answer quality"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 155,
+    "branching_complexity": 3,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  },
+
+  "content_hash": "placeholder"
+}

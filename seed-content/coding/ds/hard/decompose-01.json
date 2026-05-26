@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Meesho / Flipkart senior ML engineer interview — system design case study: decompose a full recommendation system end-to-end into an AI-delegatable execution plan",
+
+  "brief": "Your product team has filed the following ticket:\n\n---\n**Ticket DS-501 — Build 'Similar Products' recommendation for the e-commerce homepage**\n\nWe want to show each user a 'Similar Products' section on the homepage. This is currently empty. Requirements:\n- Personalised recommendations based on browsing and purchase history\n- Must serve < 100ms latency at p99\n- Must be A/B testable before full rollout\n- Must be maintainable: model refresh cadence, monitoring for drift\n\nDeliverables: data pipeline, model, serving layer, A/B test design, eval framework, MLOps handoff.\n\n---\n\nYour task: **Break this project down into 7–9 clearly scoped steps** that you could hand off to an AI coding assistant or a junior DS one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale — why this step exists AND why it must come here in the sequence\n\nKey constraints your plan must address:\n- Explicitly choose between collaborative filtering, content-based, and/or hybrid — and justify\n- Distinguish offline eval (before A/B) from online eval (A/B test)\n- Serving strategy: precomputed cache vs real-time model inference — justify given the <100ms requirement\n- MLOps: model refresh cadence and drift monitoring strategy\n\nDo NOT write code. Focus on completeness, sequencing rationale, and explicit trade-off decisions.",
+
+  "acceptance_criteria": [
+    "Plan has between 7 and 9 steps",
+    "Plan explicitly chooses a candidate generation strategy (CF, content-based, or hybrid) with a stated trade-off rationale",
+    "Plan distinguishes offline evaluation (before A/B) from online A/B test design as separate steps",
+    "Plan explicitly addresses the <100ms serving constraint with a precomputed cache or approximate nearest neighbor approach",
+    "Plan includes a drift/staleness monitoring step with a concrete check (e.g., coverage ratio, prediction distribution shift, CTR decay)"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: Similar Products Recommendation System\n\n## Step 1 — Define the interaction data schema and collect signals\nAudit which user-item interactions exist (views, add-to-carts, purchases, dwell time) and build a unified interaction log table: `(user_id, item_id, event_type, event_ts)`. Decide the weighting scheme (purchase = 5, add-to-cart = 3, view = 1) and minimum recency window (last 90 days).\n**Rationale:** Every modelling decision downstream depends on what signals exist and how strong they are. Interaction data quality assessment must precede candidate generation choice — a sparse interaction matrix (<1 interaction per user) forces a content-based fallback; a dense matrix enables collaborative filtering.\n\n## Step 2 — Analyse interaction matrix density and choose candidate generation approach\nCompute the user-item matrix sparsity. If density > 1% and >=50k users with >=5 interactions, proceed with matrix factorization (implicit ALS via `implicit` library) as the primary signal. Add content-based similarity (product title/category embeddings via sentence-transformers) as a fallback for cold-start users. This hybrid approach is chosen over pure CF because new users/items (cold-start) are common in a growing catalogue.\n**Rationale:** This is the core architectural decision: CF vs content-based vs hybrid. Making it explicit here, with the density threshold as the criterion, prevents the model choice from being made implicitly inside a notebook. The hybrid choice trades training complexity for cold-start robustness.\n\n## Step 3 — Build the offline data pipeline\nWrite an Airflow DAG (or cron job) that: (a) reads the last 90 days of interactions from the event store, (b) applies the weighting scheme, (c) trains the ALS model and computes content embeddings, (d) generates the top-K (K=50) candidates per user and writes them to a Redis hash: `recs:{user_id}` → JSON array of item_ids. Schedule daily retraining.\n**Rationale:** The offline pipeline must be automated before anything reaches production. Precomputing candidates is the only way to meet the <100ms serving SLA — real-time ALS inference at query time would take 300-600ms for a large catalogue.\n\n## Step 4 — Build the serving API\nBuild a lightweight FastAPI endpoint `GET /recs/{user_id}?n=10` that: (a) reads the precomputed Redis cache for this user, (b) fetches item metadata (title, image URL, price) from the item catalogue service for the top-n candidates, (c) returns a JSON array in <20ms (Redis read + metadata join). Handle cache-miss with a fallback to globally popular items.\n**Rationale:** The API must be built and load-tested against the <100ms p99 SLA before the A/B test is designed. Separating the serving layer from the model pipeline means model updates don't require API redeployment.\n\n## Step 5 — Offline evaluation: precision, recall, coverage, and diversity\nEvaluate the model on a temporal hold-out: for users with interactions in months 1-3, predict what they'll interact with in month 4. Compute: Precision@10, Recall@10, NDCG@10, catalogue coverage (what % of items are recommended to at least one user), and intra-list diversity (avg pairwise dissimilarity of the 10 recommendations). Establish minimum passing thresholds before A/B.\n**Rationale:** Offline eval with temporal hold-out is the correct way to simulate production — a random hold-out would inflate precision by leaking temporal context. Coverage and diversity metrics catch degenerate models that only recommend popular items.\n\n## Step 6 — A/B test design\nDesign the A/B experiment: treatment = personalised recs, control = globally popular items (current state). Primary metric: 7-day CTR on the 'Similar Products' section. Secondary metrics: add-to-cart rate, 14-day GMV per session. Use user-level randomisation (not session) to avoid network effects. Calculate required sample size for 10% MDE at 80% power. Define guardrail metrics (overall homepage CTR must not drop). Target 14-day experiment duration.\n**Rationale:** A/B test design must be done before launch, not after seeing initial results. Pre-specifying the primary metric, MDE, and sample size prevents p-hacking. User-level randomisation is required because recommendations on successive sessions should be consistent for the same user.\n\n## Step 7 — Implement A/B test, launch, and monitor\nImplement the A/B split in the feature flag system (Unleash / LaunchDarkly). Instrument the frontend with Mixpanel events: `rec_shown`, `rec_clicked`, `rec_added_to_cart`. Build a real-time dashboard showing treatment vs control CTR by day. Set up an alert that triggers if homepage CTR drops > 5% versus pre-experiment baseline.\n**Rationale:** The monitoring infrastructure must be in place before the experiment goes live — post-hoc instrumentation misses early data. Real-time CTR monitoring allows early stopping if the guardrail is breached.\n\n## Step 8 — Post-A/B analysis and rollout decision\nAfter the 14-day experiment: run a z-test on CTR difference; check for novelty bias (day-1 CTR spike that decays); segment results by user cohort (new vs returning) and device (mobile vs desktop); make a rollout/rollback/iterate decision. Document the analysis for the product review.\n**Rationale:** Analysis must go beyond the headline p-value — novelty effects and cohort heterogeneity are common failure modes in recommendation A/B tests. The segmented analysis determines whether a global rollout is safe or only safe for a subset.\n\n## Step 9 — MLOps: refresh cadence and drift monitoring\nSet up: (a) daily model retraining triggered by the Airflow DAG; (b) a staleness monitor that alerts if the Redis cache has > 5% users with recommendations older than 25 hours; (c) a distribution drift check that flags if the top-10 recommendation distribution shifts significantly (PSI > 0.2) compared to the previous week's distribution; (d) a business-metric monitor that alerts if 7-day CTR drops > 15% week-over-week (potential model degradation). Include a manual override endpoint to serve fallback popular items while the model is being retrained.\n**Rationale:** Recommendation quality degrades as user preferences evolve and new items are added. Without automated refresh and drift alerting, the model silently worsens and the team finds out only when CTR drops become large enough to notice in weekly reports."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Skips the serving architecture decision — plan describes model training and evaluation but doesn't address how precomputed recommendations will be stored or served. The team then discovers the <100ms requirement at deployment time and has to redesign the architecture.",
+      "why_compass_might_suggest_it": "ML engineers often separate 'modelling' and 'engineering' in their mental models and leave serving to the platform team. The LLM mirrors this by focusing on the ML steps without the systems design steps unless explicitly prompted.",
+      "detection_signals": [
+        "Plan has no step mentioning 'Redis', 'cache', 'precompute', 'serving API', or 'latency'",
+        "Plan ends with evaluation and doesn't have a serving or deployment step"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Uses random hold-out for offline evaluation instead of temporal hold-out — plan says 'split data into train/test 80/20' without specifying chronological split, allowing future interactions to leak into training and inflating offline metrics",
+      "why_compass_might_suggest_it": "Random split is the default pattern. In recommendation systems, temporal splitting requires awareness that interactions have a causal direction — a user's future purchases cannot inform their past embedding.",
+      "detection_signals": [
+        "Evaluation step mentions 'random split' or 'random_state' without specifying temporal ordering",
+        "No mention of 'temporal hold-out', 'month-over-month', or 'time-based evaluation'"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "No explicit MLOps / drift monitoring step — plan ends at A/B test rollout without a mechanism to detect when the model becomes stale or when recommendation quality degrades in production",
+      "why_compass_might_suggest_it": "MLOps is often treated as a post-launch concern. Early-career DS plans frequently end at 'deploy the model' without thinking about long-term maintenance. The AI assistant won't add monitoring unless it is explicitly required in the brief.",
+      "detection_signals": [
+        "Plan has no step containing 'drift', 'monitor', 'refresh', 'staleness', or 'retrain cadence'",
+        "Plan ends at rollout decision without a maintenance or monitoring step"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Plan leads with interaction data schema and matrix density analysis BEFORE choosing the modelling approach — the approach is justified by a concrete data criterion (sparsity threshold), not chosen by default",
+      "weight": 0.20
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Plan explicitly addresses the <100ms serving requirement with a precomputed cache strategy (Redis or equivalent) in a distinct serving/API step with latency reasoning",
+      "weight": 0.20
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Plan has separate offline evaluation (temporal hold-out, Precision@K, NDCG, coverage, diversity) and online A/B test steps, each with distinct metrics and the offline step preceding the A/B design",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "A/B test step specifies primary metric, randomisation unit (user-level), sample size calculation, and guardrail metrics — not just 'run an A/B test'",
+      "weight": 0.20
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "MLOps step includes at least two concrete monitoring signals: cache staleness check AND recommendation distribution drift (PSI or KL divergence), not just 'monitor the model'",
+      "weight": 0.15
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Define interaction signals and data schema — audit available signals (views, purchases, dwell time); weighting scheme; 90-day recency window; must precede density analysis",
+      "Step 2: Analyse matrix density and choose approach — sparsity > 1% → ALS (implicit CF); cold-start fallback via content embeddings; explicit trade-off between CF and content-based documented here",
+      "Step 3: Build offline data pipeline — Airflow DAG; daily ALS retraining; precompute top-50 candidates per user into Redis; daily cadence; precomputation is the only path to <100ms",
+      "Step 4: Build serving API — FastAPI GET /recs/{user_id}; Redis read + metadata join; cache-miss fallback to popular items; load-test to confirm <100ms p99 before A/B",
+      "Step 5: Offline evaluation with temporal hold-out — Precision@10, Recall@10, NDCG@10, coverage, diversity; temporal split not random; establishes baseline before A/B",
+      "Step 6: A/B test design — primary metric CTR, secondary GMV; user-level randomisation; sample size and power calculation; guardrail metrics pre-specified",
+      "Step 7: Implement A/B, launch, and monitor — feature flags; Mixpanel instrumentation; real-time CTR dashboard; guardrail alert before experiment goes live",
+      "Step 8: Post-A/B analysis and rollout decision — z-test on CTR; novelty bias check; cohort segmentation; explicit rollout/rollback/iterate decision",
+      "Step 9: MLOps — daily retraining DAG; cache staleness alert (>25h); distribution drift monitor (PSI); CTR week-over-week drop alert; fallback endpoint during retraining"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 280,
+    "branching_complexity": 5,
+    "edge_cases": 8,
+    "known_hard_patterns": [
+      "recommendation system architecture",
+      "cold-start problem",
+      "temporal vs random evaluation split",
+      "precomputed cache vs real-time serving",
+      "A/B test design for recommendation",
+      "MLOps drift monitoring",
+      "novelty bias in A/B analysis"
+    ]
+  }
+}

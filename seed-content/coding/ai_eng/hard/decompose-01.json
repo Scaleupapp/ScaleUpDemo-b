@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Krutrim LLM serving — system design + take-home: decompose a prototype-to-production RAG migration with eval harness, A/B testing, and PII compliance",
+
+  "brief": "Your CTO has filed the following ticket after a successful prototype demo:\n\n---\n**Ticket AI-301 — Production RAG: eval harness, retriever upgrade, monitoring, A/B framework, PII compliance**\n\nOur prototype RAG uses naive top-k cosine similarity over dense embeddings with a hardcoded system prompt. It answers correctly ~65% of the time on informal testing. Before we can ship to 50,000 users we need:\n\n1. A rigorous eval harness (we need to know when we make it worse)\n2. Better retrieval (the dense-only approach misses exact-match keyword queries)\n3. Ability to A/B test prompt variants without a redeploy\n4. Online monitoring of latency, cost, and answer quality\n5. PII redaction in logs (user queries sometimes contain Aadhaar numbers, phone numbers, email addresses)\n6. A rollback plan if the new retriever degrades live quality\n\nPrototype stack: Python, Chroma vector DB, OpenAI `text-embedding-3-small`, GPT-4o.\n\n---\n\nYour task: **Break this ticket down into 8–10 clearly scoped steps** that you could hand off to an AI coding assistant one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale for why this step exists and why it comes here in the sequence\n\nDo NOT write any code. Focus on the sequencing, dependencies, and completeness of the plan.",
+
+  "acceptance_criteria": [
+    "Plan has between 8 and 10 steps",
+    "Plan begins with golden eval set creation BEFORE any retriever changes — establishing a quality baseline is the prerequisite for knowing whether changes improve or degrade performance",
+    "Plan includes hybrid BM25+dense retrieval as a named retriever upgrade (not just 'improve retrieval')",
+    "Plan includes a named eval metric for each of: retrieval quality (context precision/recall), answer faithfulness, and answer relevance",
+    "Plan includes prompt versioning as a distinct step, naming a concrete mechanism (e.g., YAML config file, feature flag, or DB-backed prompt store)",
+    "Plan includes PII redaction in logs as a distinct step, naming at least two PII types to detect (Aadhaar, phone, email)",
+    "Plan includes an A/B framework step that specifies user-level routing (not just two separate deployments)",
+    "Plan includes a rollback plan as an explicit step with a concrete trigger condition (e.g., answer quality metric drops > X%)"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: Production RAG Migration with Eval, A/B, PII Compliance\n\n## Step 1 — Build the golden evaluation set\nCreate 80–100 (question, reference_answer, expected_source_document) triples by: (a) mining real user queries from the prototype logs, (b) having 2–3 domain experts write reference answers, (c) ensuring coverage of keyword-match queries (where dense retrieval fails), edge-case queries (where no document is relevant), and multi-document queries.\n**Rationale:** Every subsequent step will change retrieval or generation behaviour. Without a stable eval set created BEFORE making changes, you cannot tell whether Step 2 improved or regressed quality — you are flying blind. The eval set is the source of truth for all A/B decisions.\n\n## Step 2 — Define and implement eval metrics\nImplement three metrics over the golden set: (a) Context Precision@5: fraction of top-5 retrieved chunks that appear in the reference answer sources; (b) Faithfulness: LLM-as-judge check that the generated answer contains no claims not supported by the retrieved chunks; (c) Answer Relevance: embedding-similarity between the question and the generated answer. Use RAGAS or implement each metric as a standalone Python function.\n**Rationale:** Named metrics make quality changes measurable and comparable across retriever versions, prompt variants, and model upgrades. Without them, 'better' is a subjective claim — with them, it is a number.\n\n## Step 3 — Run baseline eval on the prototype\nRun all three metrics against the current prototype (dense-only top-k cosine) on the full golden set. Record the baseline scores. Commit the baseline results to the repo as `eval_results/baseline.json`.\n**Rationale:** The baseline is the floor — any retriever or prompt change must be evaluated against it, not against informal testing. Committing the results to the repo creates an auditable record that prevents cherry-picking.\n\n## Step 4 — Implement hybrid BM25 + dense retrieval\nAdd BM25 (using `rank_bm25` library) over the same document corpus. Implement a hybrid retriever that merges BM25 and dense cosine scores using Reciprocal Rank Fusion (RRF) or a weighted linear combination. Run the eval metrics from Step 2 against the hybrid retriever and compare to baseline.\n**Rationale:** Dense-only retrieval has poor recall for exact-match queries ('what is the definition of X?') where keyword overlap matters more than semantic similarity. Hybrid retrieval consistently outperforms dense-only on mixed query sets in production RAG benchmarks. Eval gates this change before it touches users.\n\n## Step 5 — Implement re-ranking (optional if hybrid gains are insufficient)\nAdd a cross-encoder re-ranker (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2`) that re-scores the top-20 candidates from Step 4 and returns the top-5. Measure latency increase vs. precision gain on the eval set.\n**Rationale:** Re-ranking adds latency (50–200ms) but significantly improves precision on ambiguous queries. This step is gated by whether the hybrid gain from Step 4 meets the target — it is the second retrieval lever, not the first.\n\n## Step 6 — Implement prompt versioning\nMove the system prompt from a hardcoded string to a YAML config file (`prompts/v1.yaml`) that is loaded at startup. Add a `prompt_version` field to each log entry. Implement a `load_prompt(version: str)` function that reads the correct YAML file.\n**Rationale:** Prompt changes are the highest-frequency change in a production RAG system. Without versioning, a prompt change cannot be rolled back, A/B tested, or audited. YAML files in the repo give version history via git; a DB-backed store allows runtime switching without redeployment.\n\n## Step 7 — Implement PII redaction in logs\nBefore logging any user query or LLM response, apply a PII redactor that detects and masks: (a) Aadhaar numbers (12-digit patterns), (b) Indian mobile numbers (10-digit, optional +91 prefix), (c) email addresses, (d) PAN card numbers (AAAAA9999A format). Use regex patterns for structural PII and consider a lightweight NER model for name redaction. Log `[REDACTED_AADHAAR]` etc. in place of the matched value.\n**Rationale:** User queries in a fintech/government-data RAG system frequently contain sensitive identifiers. Logging them in plaintext creates a compliance liability under India's DPDP Act. Redaction must happen before the logging call, not as a post-processing step — otherwise the PII exists in the raw log stream.\n\n## Step 8 — Implement the A/B routing framework\nAdd a user-level routing function `get_user_variant(user_id: str, experiment_id: str) -> str` that deterministically assigns users to variant A or B using a hash of `(user_id + experiment_id) % 100`. Store experiment configurations (traffic split percentage, prompt version per variant, retriever per variant) in a JSON/YAML config. Log the variant with every request.\n**Rationale:** User-level deterministic assignment means a user always sees the same variant — avoiding the UX confusion of getting different answer styles per query. Routing config in a file (not hardcoded) allows traffic splits to be adjusted without redeployment.\n\n## Step 9 — Add online monitoring: latency, cost, and quality proxy\nAdd instrumentation to log per-request: retrieval latency (ms), LLM time-to-first-token (ms), total tokens used (input + output), estimated cost (tokens × rate), and a quality proxy (user thumbs-up/down if available, or answer length as a weak proxy). Expose a `/metrics` endpoint or push to a time-series store (e.g., CloudWatch, Prometheus).\n**Rationale:** Offline eval on golden questions tells you about static quality; online metrics tell you about real-user behaviour and cost trends. Latency and cost spikes from a retriever change are visible in online metrics before they show up in user complaints.\n\n## Step 10 — Define the rollback plan and release gate\nDocument the rollback criteria: if the primary eval metric (Faithfulness) drops more than 5% versus baseline on a rolling 1-hour window of online quality-proxy signals, or if p95 latency exceeds 3s, the deployment pipeline automatically routes 100% of traffic back to the previous version. Test the rollback by intentionally degrading the retriever in staging and verifying the metric trigger fires.\n**Rationale:** A rollback plan that is not tested is not a plan. The trigger conditions must be numeric and automated — 'if quality gets worse' is not actionable. This step closes the production safety loop that all prior steps enable."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan starts with 'upgrade the retriever to hybrid BM25+dense' before creating a golden eval set — any improvement is measured against informal testing ('it feels better') rather than a quantitative baseline. When the new retriever accidentally regresses on a subset of queries, there is no data to detect it.",
+      "why_compass_might_suggest_it": "Engineers under pressure to show technical progress reach for the most visible change (retriever upgrade) first. The eval set feels like 'tooling work' that can be added 'once the system is better'. The LLM assistant will generate the retriever code eagerly when asked without asking 'what metric are we optimising?'",
+      "detection_signals": [
+        "Plan has no step that appears BEFORE the retriever upgrade and involves creating (question, answer) pairs, golden queries, or a test set",
+        "First or second step involves BM25, hybrid retrieval, or re-ranking"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "PII redaction is treated as a post-hoc cleanup ('we'll scrub the logs later') rather than a pre-logging gate — meaning PII enters the raw log stream and must be scrubbed retroactively, which is both more expensive and less reliable than pre-redaction.",
+      "why_compass_might_suggest_it": "Compliance requirements feel like operational concerns that 'come after' the engineering work. Learners sequence PII handling as the last step because it doesn't affect functionality. The subtlety — that the compliance window is at write time, not read time — requires understanding of DPDP/GDPR retention obligations.",
+      "detection_signals": [
+        "PII redaction step is last in the plan or after monitoring/A/B steps",
+        "Plan says 'audit logs for PII' or 'redact PII from stored logs' (post-hoc) rather than 'redact before logging' (pre-logging gate)"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "A/B testing is described as 'run two separate deployments on different servers' rather than user-level deterministic routing within a single deployment — the two-deployment approach prevents controlled experimentation (different users get different server load, not just different model behaviour) and doubles operational overhead.",
+      "why_compass_might_suggest_it": "The most intuitive mental model for A/B testing is 'have two versions running'. Proper A/B routing (deterministic user assignment, single deployment, log variant per request) is a statistically rigorous design that requires understanding of experimentation methodology, which is less commonly taught in ML curricula.",
+      "detection_signals": [
+        "A/B step mentions 'two deployments', 'separate environments', or 'blue-green' without mentioning user-level routing or variant assignment",
+        "No mention of `user_id`, hash-based assignment, or a routing function that takes a user identifier"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Plan leads with golden eval set creation and metric definition BEFORE any retriever or prompt change — establishing the baseline is the prerequisite, not an afterthought",
+      "weight": 0.25
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Plan includes all three required components: hybrid BM25+dense retriever (named), prompt versioning with a concrete mechanism (YAML/DB), and A/B routing with user-level deterministic assignment",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Plan specifies eval metrics by name (Context Precision, Faithfulness, Answer Relevance or equivalents) and names at least one tool/library (RAGAS, BM25, cross-encoder) — not just 'measure quality'",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "PII redaction step appears as a pre-logging gate (not post-hoc), names specific Indian PII types (Aadhaar, PAN, mobile), and references a compliance context (DPDP Act or equivalent)",
+      "weight": 0.15
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Rollback plan is a distinct step with a quantitative trigger condition (e.g., metric drops > X% or latency exceeds Y ms) and a statement that it must be tested in staging — not just 'have a rollback button'",
+      "weight": 0.10
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Build golden eval set — 80–100 (question, reference_answer, source) triples from real logs + domain expert annotation; must cover keyword-match, edge-case, and multi-doc queries; created BEFORE any change",
+      "Step 2: Define eval metrics — Context Precision@5, Faithfulness (LLM-as-judge), Answer Relevance (embedding similarity); implement as Python functions or via RAGAS",
+      "Step 3: Run baseline eval on prototype — record scores for all three metrics; commit to eval_results/baseline.json; this is the floor all future changes are measured against",
+      "Step 4: Implement hybrid BM25+dense retrieval — rank_bm25 + Reciprocal Rank Fusion or weighted linear combination; gate on eval improvement over baseline before exposing to users",
+      "Step 5: Implement re-ranking (cross-encoder) — optional if hybrid gains are insufficient; measure latency cost vs. precision gain",
+      "Step 6: Implement prompt versioning — YAML config files in repo loaded at startup, prompt_version in every log entry, load_prompt(version) function",
+      "Step 7: Implement PII redaction as pre-logging gate — regex patterns for Aadhaar (12-digit), PAN (AAAAA9999A), mobile (+91/10-digit), email; redact before the logging call",
+      "Step 8: Implement A/B routing — user_id-based deterministic hash assignment, experiment config in YAML/JSON, log variant per request",
+      "Step 9: Add online monitoring — retrieval latency, LLM TTFT, tokens, estimated cost, quality proxy; /metrics endpoint or time-series push",
+      "Step 10: Define and test rollback plan — numeric trigger (Faithfulness drops >5% or p95 latency >3s), automated 100% traffic rollback, verified by intentional degradation in staging"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 290,
+    "branching_complexity": 6,
+    "edge_cases": 9,
+    "known_hard_patterns": [
+      "eval-before-change discipline",
+      "PII compliance as pre-logging gate",
+      "user-level A/B routing via deterministic hash",
+      "retriever upgrade with quantitative gating",
+      "rollback plan with numeric trigger conditions",
+      "prompt versioning for runtime A/B without redeploy"
+    ]
+  },
+
+  "content_hash": "placeholder"
+}

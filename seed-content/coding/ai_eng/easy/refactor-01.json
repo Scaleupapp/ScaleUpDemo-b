@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "ai_eng",
+  "language": "typescript",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Razorpay AI platform team — lateral round: modernise an Anthropic API call from blocking to streaming before the feature ships to production",
+
+  "brief": "Your team has a TypeScript utility that calls the Anthropic Claude API and waits for the full response before returning. In production this causes the UI to hang for several seconds on long responses. You need to refactor it to stream tokens.\n\nHere is the current implementation:\n\n```typescript\n// llmClient.ts\nimport Anthropic from '@anthropic-ai/sdk';\n\nconst client = new Anthropic();\n\nexport async function generateResponse(systemPrompt: string, userMessage: string): Promise<string> {\n  const response = await client.messages.create({\n    model: 'claude-3-5-haiku-20241022',\n    max_tokens: 1024,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }],\n  });\n  const block = response.content[0];\n  if (block.type !== 'text') throw new Error('Expected text block');\n  return block.text;\n}\n```\n\n**Your tasks:**\n1. Refactor `generateResponse` to return an `AsyncGenerator<string>` that yields each text delta as it arrives from the Anthropic streaming API.\n2. Use `client.messages.stream()` (the Anthropic SDK's streaming helper) instead of `client.messages.create()`.\n3. The function signature must become: `async function* generateResponse(systemPrompt: string, userMessage: string): AsyncGenerator<string>`\n4. Both visible tests must pass against the refactored code.",
+
+  "acceptance_criteria": [
+    "`generateResponse` is declared as `async function*` and returns an `AsyncGenerator<string>`",
+    "Implementation uses `client.messages.stream()` not `client.messages.create()`",
+    "Each text delta is yielded individually as it arrives, not buffered until the stream ends",
+    "Both visible tests pass against the refactored code"
+  ],
+
+  "starter_repo": {
+    "files": [
+      {
+        "path": "llmClient.ts",
+        "content": "import Anthropic from '@anthropic-ai/sdk';\n\nconst client = new Anthropic();\n\nexport async function generateResponse(systemPrompt: string, userMessage: string): Promise<string> {\n  const response = await client.messages.create({\n    model: 'claude-3-5-haiku-20241022',\n    max_tokens: 1024,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }],\n  });\n  const block = response.content[0];\n  if (block.type !== 'text') throw new Error('Expected text block');\n  return block.text;\n}\n"
+      },
+      {
+        "path": "llmClient.test.ts",
+        "content": "// Lightweight shape tests — no real API calls needed\nimport { generateResponse } from './llmClient';\n\ntest('generateResponse is an async generator function', () => {\n  // An async generator function has a constructor name of 'AsyncGeneratorFunction'\n  const fn = generateResponse as unknown as Function;\n  expect(fn.constructor.name).toBe('AsyncGeneratorFunction');\n});\n\ntest('generateResponse returns an object with Symbol.asyncIterator', () => {\n  // Calling an async generator returns an AsyncGenerator object\n  // We check the shape without actually calling the Anthropic API\n  const iter = generateResponse('system', 'hello');\n  expect(typeof (iter as any)[Symbol.asyncIterator]).toBe('function');\n  // Clean up: we won't iterate it (no real API key in tests)\n  if (typeof (iter as any).return === 'function') {\n    (iter as any).return();\n  }\n});\n"
+      }
+    ]
+  },
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "llmClient.ts",
+        "content": "import Anthropic from '@anthropic-ai/sdk';\n\nconst client = new Anthropic();\n\n/**\n * Stream a response from Claude, yielding each text delta as it arrives.\n *\n * Usage:\n *   for await (const chunk of generateResponse(system, user)) {\n *     process.stdout.write(chunk);\n *   }\n *\n * @param systemPrompt  Standing instructions for the model\n * @param userMessage   The user's input\n * @yields             Text delta strings from the model stream\n */\nexport async function* generateResponse(\n  systemPrompt: string,\n  userMessage: string,\n): AsyncGenerator<string> {\n  const stream = client.messages.stream({\n    model: 'claude-3-5-haiku-20241022',\n    max_tokens: 1024,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }],\n  });\n\n  // The SDK's stream emits 'text' events for each delta.\n  // Iterating with for-await gives us each MessageStreamEvent;\n  // we filter for content_block_delta events carrying text deltas.\n  for await (const event of stream) {\n    if (\n      event.type === 'content_block_delta' &&\n      event.delta.type === 'text_delta'\n    ) {\n      yield event.delta.text;\n    }\n  }\n}\n"
+      }
+    ]
+  },
+
+  "visible_tests": [
+    {
+      "name": "generateResponse_is_async_generator",
+      "command": "npx ts-node -e \"import { generateResponse } from './llmClient'; const fn = generateResponse as unknown as Function; const ok = fn.constructor.name === 'AsyncGeneratorFunction'; console.assert(ok, 'generateResponse must be AsyncGeneratorFunction, got: ' + fn.constructor.name); if (ok) console.log('PASS');\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": ["PASS"]
+    },
+    {
+      "name": "generateResponse_returns_async_iterable",
+      "command": "npx ts-node -e \"import { generateResponse } from './llmClient'; const iter = generateResponse('sys', 'hi'); const hasAsyncIter = typeof (iter as any)[Symbol.asyncIterator] === 'function'; console.assert(hasAsyncIter, 'result must implement Symbol.asyncIterator'); if ((iter as any).return) (iter as any).return(); if (hasAsyncIter) console.log('PASS');\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": ["PASS"]
+    }
+  ],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Collects the entire stream into a string and returns it as a Promise<string> rather than yielding deltas — e.g., uses `stream.finalText()` or accumulates all deltas into a buffer. The signature changes to an async generator on paper but the consumer receives one large chunk at the end instead of incremental tokens.",
+      "why_compass_might_suggest_it": "The Anthropic SDK's `stream.finalText()` helper is prominently documented and is the easiest way to 'use streaming'. LLMs generate this pattern when asked to 'refactor to use streaming' without understanding that streaming's value is in incremental token delivery, not just using the streaming API endpoint.",
+      "detection_signals": [
+        "Code calls `stream.finalText()` or accumulates into a `let fullText = ''` variable before yielding",
+        "The function has a single `yield` statement at the end rather than `yield` inside a loop over stream events",
+        "The async generator test passes but the streaming UX test would fail (consumer receives one chunk)"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Uses the SSE raw stream (`client.messages.create({ stream: true })`) rather than `client.messages.stream()`, and attempts to parse raw SSE lines manually — this is error-prone and bypasses the SDK's event typing",
+      "why_compass_might_suggest_it": "LLMs trained on OpenAI streaming examples reach for `{ stream: true }` parameter pattern. The Anthropic SDK has `client.messages.stream()` as a dedicated helper, but the LLM may generate the lower-level approach.",
+      "detection_signals": [
+        "Code contains `client.messages.create({ stream: true })` rather than `client.messages.stream(...)`",
+        "Code attempts to parse SSE data with string splitting on 'data: ' prefix"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Function is refactored to `async function*` but the event filter is incorrect — yields on `message_delta` or `message_stop` events instead of `content_block_delta` events with `text_delta` type, producing either empty strings or no output",
+      "why_compass_might_suggest_it": "The Anthropic streaming event hierarchy has multiple event types (message_start, content_block_start, content_block_delta, message_stop). LLMs sometimes pick the wrong event type, especially conflating message-level events with block-level events.",
+      "detection_signals": [
+        "Code filters for `event.type === 'message_delta'` instead of `event.type === 'content_block_delta'`",
+        "Integration test with a mock stream that emits real event shapes yields empty strings"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "code_quality",
+      "check": "`generateResponse` is declared as `async function*` and yields individual text delta strings inside the streaming loop — not a single yield at the end",
+      "weight": 0.30
+    },
+    {
+      "dimension": "correctness",
+      "check": "Both visible tests pass: function is detected as AsyncGeneratorFunction AND the return value implements Symbol.asyncIterator",
+      "weight": 0.30
+    },
+    {
+      "dimension": "code_quality",
+      "check": "Code uses `client.messages.stream()` (the SDK helper) and filters events by `content_block_delta` + `text_delta` type — not raw SSE parsing or incorrect event types",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt to the AI explicitly requested `async function*` signature and `Symbol.asyncIterator` compliance — not just 'use streaming API'",
+      "weight": 0.15
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Specifies the exact new function signature: `async function* generateResponse(...): AsyncGenerator<string>` — not just 'make it stream'",
+      "Names the SDK method to use: `client.messages.stream()` — prevents the LLM from reaching for `{ stream: true }` in messages.create()",
+      "States 'yield each text delta individually inside a loop' — prevents the collect-then-yield anti-pattern",
+      "References the correct event type: `content_block_delta` with `delta.type === 'text_delta'` — prevents the LLM from filtering on the wrong event"
+    ],
+    "common_verification_traps": [
+      "Checking that the function is an AsyncGeneratorFunction without verifying that it actually yields mid-stream — the collect-then-yield pattern passes the shape test",
+      "Not testing with a mock stream: if you only test the type signature, you can miss that the event filter is wrong and the generator yields nothing in practice"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 95,
+    "branching_complexity": 2,
+    "edge_cases": 3,
+    "known_hard_patterns": []
+  },
+
+  "content_hash": "placeholder"
+}

@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "verify",
+  "role_track": "swe",
+  "language": "javascript",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "CRED backend platform interview — security code-review round: catch auth middleware bugs before they hit the payments API",
+
+  "brief": "Your AI coding assistant generated the following Express JWT authentication middleware. Your task is to **review it critically** and identify every security bug before this reaches the payments API.\n\nThe middleware is supposed to:\n- Read the JWT from the `Authorization: Bearer <token>` header\n- Verify the token using `jsonwebtoken.verify()` with the app's `JWT_SECRET`\n- Reject expired tokens (tokens past their `exp` claim)\n- Attach the decoded payload to `req.user` and call `next()` on success\n- Return `401` with `{ error: 'Unauthorized' }` for any failure\n\nHere is the generated middleware:\n\n```javascript\n// auth.js\nconst jwt = require('jsonwebtoken');\n\nfunction authenticate(req, res, next) {\n  const authHeader = req.headers['authorization'];\n  if (!authHeader) {\n    return res.status(401).json({ error: 'Unauthorized' });\n  }\n\n  const token = authHeader.split(' ')[1];\n  if (!token) {\n    return res.status(401).json({ error: 'Unauthorized' });\n  }\n\n  try {\n    const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: true });\n    req.user = decoded;\n    next();\n  } catch (err) {\n    return res.status(401).json({ error: 'Unauthorized' });\n  }\n}\n\nmodule.exports = { authenticate };\n```\n\nList every bug you find, explain why each one is a security risk, and write the corrected version of the middleware.",
+
+  "acceptance_criteria": [
+    "Identifies the `ignoreExpiration: true` option as a critical security flaw that allows expired tokens to pass through",
+    "Identifies that `authHeader.split(' ')[1]` returns an empty string `''` when the header is `Authorization: Bearer ` (trailing space, no token), and that the truthiness check `if (!token)` passes for empty string in some contexts — or that the split produces `''` which is falsy but only by coincidence",
+    "Provides a corrected version that removes `ignoreExpiration: true` entirely",
+    "Provides a corrected version that explicitly checks `token.length > 0` or trims the token before using it"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "auth.js",
+        "content": "// auth.js\nconst jwt = require('jsonwebtoken');\n\nfunction authenticate(req, res, next) {\n  const authHeader = req.headers['authorization'];\n  if (!authHeader) {\n    return res.status(401).json({ error: 'Unauthorized' });\n  }\n\n  // Split on a single space and take the second segment.\n  // Trim to guard against 'Bearer <token> ' trailing whitespace.\n  const parts = authHeader.split(' ');\n  const token = parts[1] && parts[1].trim();\n\n  // Explicit length check: an empty string after trim must be rejected.\n  if (!token || token.length === 0) {\n    return res.status(401).json({ error: 'Unauthorized' });\n  }\n\n  try {\n    // Do NOT pass ignoreExpiration — jwt.verify() checks exp by default.\n    // An expired token throws TokenExpiredError which is caught below.\n    const decoded = jwt.verify(token, process.env.JWT_SECRET);\n    req.user = decoded;\n    next();\n  } catch (err) {\n    return res.status(401).json({ error: 'Unauthorized' });\n  }\n}\n\nmodule.exports = { authenticate };\n"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "auth.js:14",
+      "bug_description": "Critical: `{ ignoreExpiration: true }` is passed to `jwt.verify()`. This tells the `jsonwebtoken` library to skip the `exp` claim check entirely — expired tokens are accepted as valid. An attacker who obtained a token 6 months ago can still authenticate indefinitely.",
+      "why_compass_might_suggest_it": "LLMs sometimes add `ignoreExpiration: true` when generating middleware for development environments (to avoid constant token refresh annoyance during testing). The comment 'for dev convenience' in training data bleeds into production code. The dev who reads the output quickly sees `jwt.verify()` and assumes it checks expiry — the option is easy to miss.",
+      "detection_signals": [
+        "Search the file for 'ignoreExpiration' — its presence is the bug",
+        "Test: call the middleware with a JWT whose exp is in the past; it should return 401 but the buggy version returns 200"
+      ]
+    },
+    {
+      "location": "auth.js:10",
+      "bug_description": "Empty-token bypass: when the `Authorization` header is exactly `Bearer ` (the word Bearer, a space, and nothing else), `authHeader.split(' ')[1]` evaluates to `''` (empty string). In JavaScript, `!''` is `true`, so the guard `if (!token)` should catch it — BUT: the guard is checking a string that `split` may return as `undefined` when there is no second segment, while an empty string `''` is technically defined. The real risk is that a caller sends `Bearer ` with a deliberate trailing space and `split` returns `['Bearer', '']` — empty string is falsy so the existing guard accidentally catches it. However this is fragile: if whitespace is trimmed upstream (e.g., by a reverse proxy), the `''` becomes `undefined` and the behaviour changes silently. The fix is an explicit `token.length > 0` check after trimming.",
+      "why_compass_might_suggest_it": "The LLM tests its own code against `Authorization: Bearer <valid-token>` (the happy path). It does not simulate `Bearer ` with no token. The truthiness check `if (!token)` looks correct for `undefined` and `null` inputs and the LLM sees no reason to add a length guard.",
+      "detection_signals": [
+        "Test: send `Authorization: Bearer ` (trailing space only) — the buggy code's guard may pass or fail depending on Node.js split behaviour, which makes this a reliability issue even if the current version accidentally rejects it",
+        "Code review: no `.trim()` call on the extracted token, and no explicit `.length > 0` guard"
+      ]
+    },
+    {
+      "location": "auth.js:overall",
+      "bug_description": "No differentiation between `TokenExpiredError` and `JsonWebTokenError` in the catch block — both return a generic 401. While not a security flaw per se, this makes debugging harder and can mask configuration issues (wrong secret) vs legitimate expiry.",
+      "why_compass_might_suggest_it": "Learners (and LLMs) default to a single catch-all for auth errors to avoid leaking information. This is correct security practice for responses to clients, but the middleware should still log the specific error type internally.",
+      "detection_signals": [
+        "catch block does not inspect `err.name` or `err instanceof jwt.TokenExpiredError`",
+        "No logger call inside the catch block"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies `ignoreExpiration: true` by name, explains that it disables the `exp` claim check, and provides a concrete attack scenario (replay of an old token)",
+      "weight": 0.40
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the empty-token edge case from `split(' ')[1]` returning `''` and explains why a truthy check alone is fragile — trim + length guard is the fix",
+      "weight": 0.30
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Learner explains WHY the LLM made each mistake — development-convenience option leaked to production, and no edge-case test coverage for the empty-Bearer header",
+      "weight": 0.20
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Corrected code removes `ignoreExpiration`, adds `.trim()` and `.length` guard, and introduces no new vulnerabilities or logic errors",
+      "weight": 0.10
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [
+      "Reading `jwt.verify(token, secret, { ignoreExpiration: true })` and assuming all jwt.verify options are benign — most developers only know the `algorithms` option; ignoreExpiration is obscure enough to be overlooked in a quick scan",
+      "Testing the middleware with a valid, non-expired token only — expiry bypass is invisible unless you construct an expired test JWT or inspect the options object",
+      "Accepting the empty-string token fix as complete after adding `if (!token)` — this looks correct for undefined but fails to explicitly guard against the split-returning-empty-string case when the header is `Bearer ` with a trailing space"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 130,
+    "branching_complexity": 3,
+    "edge_cases": 5,
+    "known_hard_patterns": []
+  }
+}
