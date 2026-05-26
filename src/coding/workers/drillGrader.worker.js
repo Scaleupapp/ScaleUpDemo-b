@@ -3,14 +3,30 @@ const Redis = require('ioredis');
 
 const connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
 
-const drillGraderQueue = new Queue('coding-drill-grader', { connection });
+const drillGraderQueue = new Queue('coding-drill-grader', {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+  },
+});
 
-function startDrillGraderWorker() {
-  return new Worker('coding-drill-grader', async (job) => {
-    const { drillAttemptId, drill_subtype } = job.data;
-    const handler = require(`../services/drillGrader/${drill_subtype}Grader`);
-    return handler.grade({ drillAttemptId });
-  }, { connection, concurrency: 5 });
+async function dispatchDrillGrade(jobData) {
+  const { drillAttemptId, drill_subtype } = jobData;
+  const validSubtypes = ['prompt', 'verify', 'decompose', 'refactor'];
+  if (!validSubtypes.includes(drill_subtype)) {
+    throw new Error(`Unknown drill_subtype: ${drill_subtype}`);
+  }
+  const handler = require(`../services/drillGrader/${drill_subtype}Grader`);
+  return handler.grade({ drillAttemptId });
 }
 
-module.exports = { drillGraderQueue, startDrillGraderWorker };
+function startDrillGraderWorker() {
+  return new Worker(
+    'coding-drill-grader',
+    async (job) => dispatchDrillGrade(job.data),
+    { connection, concurrency: 5 }
+  );
+}
+
+module.exports = { drillGraderQueue, startDrillGraderWorker, dispatchDrillGrade };
