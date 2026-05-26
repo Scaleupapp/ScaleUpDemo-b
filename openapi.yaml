@@ -5816,6 +5816,66 @@ paths:
   # =====================================================================
   # Coding (no /api/v1 version prefix — separate namespace)
   # =====================================================================
+  /api/coding/drills/today:
+    get:
+      operationId: getCodeDrillToday
+      tags: [Coding]
+      summary: Get the recommended drill for the authenticated user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Recommended drill
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bundle_id, brief, time_budget_minutes, drill_subtype, difficulty, role_track, language]
+                properties:
+                  bundle_id:
+                    type: string
+                  brief:
+                    type: string
+                  time_budget_minutes:
+                    type: integer
+                  drill_subtype:
+                    type: string
+                    enum: [prompt, verify, decompose, refactor]
+                  difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+                  role_track:
+                    type: string
+                    enum: [swe, ds, ai_eng]
+                  language:
+                    type: string
+                  acceptance_criteria:
+                    type: array
+                    items:
+                      type: string
+                  starter_repo:
+                    description: Present only for refactor drills; null otherwise
+                    oneOf:
+                      - type: object
+                      - type: 'null'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No drill available or user objective does not map to a coding track
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [no_coding_track_for_objective, no_drill_available]
+                  role_track:
+                    type: string
+                  difficulty:
+                    type: string
+                  drill_subtype:
+                    type: string
   /api/coding/health:
     get:
       operationId: getCodingHealth
