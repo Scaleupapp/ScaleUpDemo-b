@@ -1,7 +1,7 @@
 'use strict';
 
 const { ArtifactBundle, MetaSkillMastery, DifficultyState } = require('../models');
-const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype, subtypeToAxis } = require('../services/roleTrackMapper');
+const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype, subtypeToAxis, PHASE_A_DRILL_SUBTYPES } = require('../services/roleTrackMapper');
 const { validateDrillSubmission } = require('../validators/drill.validator');
 const { randomUUID } = require('crypto');
 
@@ -80,12 +80,21 @@ async function getToday(req, res) {
       });
     }
 
-    // Mastery — null is fine; the picker handles the default
+    // Mastery — if absent, user needs to take calibration first.
+    // The mobile Home card uses calibration_required to show the calibration prompt.
     const mastery = await MetaSkillMastery.findOne({ user_id: userId, role_track }).lean();
+
+    // If user has a coding mapping but no MetaSkillMastery doc yet, they need to
+    // take calibration first. The mobile Home card uses this signal to show the
+    // calibration prompt instead of "no drill available".
+    if (!mastery) {
+      return res.status(404).json({ error: 'calibration_required', role_track });
+    }
+
     const weakestAxis = pickWeakestAxis(mastery);
     const drill_subtype = axisToSubtype(weakestAxis);
 
-    // Find the most recent active bundle matching the criteria
+    // Find the most recent active bundle matching the preferred subtype and difficulty.
     const bundle = await ArtifactBundle.findOne({
       type: 'drill',
       role_track,
@@ -94,7 +103,19 @@ async function getToday(req, res) {
       status: 'active',
     }).sort({ createdAt: -1 }).lean();
 
-    if (!bundle) {
+    // Fallback: if no exact-subtype bundle, try any Phase A subtype at this difficulty.
+    let actualBundle = bundle;
+    if (!actualBundle) {
+      actualBundle = await ArtifactBundle.findOne({
+        type: 'drill',
+        role_track,
+        difficulty: diffState.current_difficulty,
+        drill_subtype: { $in: PHASE_A_DRILL_SUBTYPES },
+        status: 'active',
+      }).sort({ createdAt: -1 }).lean();
+    }
+
+    if (!actualBundle) {
       return res.status(404).json({
         error: 'no_drill_available',
         role_track,
@@ -104,15 +125,15 @@ async function getToday(req, res) {
     }
 
     return res.json({
-      bundle_id: bundle._id,
-      brief: bundle.brief,
-      time_budget_minutes: bundle.time_budget_minutes,
+      bundle_id: actualBundle._id,
+      brief: actualBundle.brief,
+      time_budget_minutes: actualBundle.time_budget_minutes,
       drill_subtype,
-      difficulty: bundle.difficulty,
+      difficulty: actualBundle.difficulty,
       role_track,
-      language: bundle.language,
-      acceptance_criteria: bundle.acceptance_criteria,
-      starter_repo: bundle.starter_repo || null,
+      language: actualBundle.language,
+      acceptance_criteria: actualBundle.acceptance_criteria,
+      starter_repo: actualBundle.starter_repo || null,
     });
   } catch (err) {
     console.error('[coding/drills/today]', err);

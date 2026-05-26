@@ -1,5 +1,12 @@
 'use strict';
 
+// Phase A ships drills without the Phase B web IDE. Refactor drills require
+// a laptop and the web IDE; until then, mobile selects only from these three
+// subtypes. Remove this constant when the Phase B web IDE lands and refactor
+// drills become servable.
+const PHASE_A_DRILL_SUBTYPES = ['prompt', 'verify', 'decompose'];
+const PHASE_A_AXES = ['prompting', 'verification', 'decomposition'];
+
 /**
  * Maps a user's objective → role_track for coding practice.
  *
@@ -67,15 +74,21 @@ const SUBTYPE_TO_AXIS = {
 
 /**
  * Given a MetaSkillMastery document (or null), return the name of the weakest
- * axis (e.g. 'verification'). Defaults to 'prompting' when no mastery exists.
+ * axis among Phase A axes (prompting, verification, decomposition).
+ * Refactoring is excluded — it requires the Phase B web IDE.
+ * Defaults to 'prompting' when no mastery exists.
  */
 function pickWeakestAxis(mastery) {
   if (!mastery || !mastery.axes) return 'prompting';
   const axes = mastery.axes;
   let minName = 'prompting';
-  let minVal = axes.prompting !== undefined ? axes.prompting : Infinity;
-  for (const [k, v] of Object.entries(axes)) {
-    if (v < minVal) { minVal = v; minName = k; }
+  let minVal = axes.prompting;
+  for (const k of PHASE_A_AXES) {
+    const v = axes[k];
+    if (typeof v === 'number' && v < minVal) {
+      minVal = v;
+      minName = k;
+    }
   }
   return minName;
 }
@@ -96,4 +109,6 @@ module.exports = {
   axisToSubtype,
   subtypeToAxis,
   OBJECTIVE_TO_TRACK,
+  PHASE_A_DRILL_SUBTYPES,
+  PHASE_A_AXES,
 };
