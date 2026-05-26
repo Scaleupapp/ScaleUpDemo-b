@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "Sprinklr / Postman product analytics team — code review: break a 60-line monolithic notebook cell into reusable functions before it blocks the ML platform handoff",
+
+  "brief": "Your data science team has a single 60-line Jupyter cell that reads a CSV, cleans it, engineers features, trains a model, and prints metrics. It works — but it can't be unit-tested, reused, or version-controlled cleanly.\n\nHere is the monolithic code in `main.py`:\n\n```python\n# main.py — all-in-one cell, needs refactoring\nimport pandas as pd\nimport numpy as np\nfrom sklearn.linear_model import LogisticRegression\nfrom sklearn.preprocessing import StandardScaler\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.metrics import roc_auc_score, average_precision_score\n\n# ---- Load and clean ----\ndf = pd.read_csv('transactions.csv')\ndf = df.dropna(subset=['user_id', 'amount', 'date'])\ndf['date'] = pd.to_datetime(df['date'])\ndf = df[df['amount'] > 0]\ndf = df.drop_duplicates(subset=['txn_id'])\n\n# ---- Feature engineering ----\nSNAPSHOT = pd.Timestamp('2024-03-31')\nrfm = df.groupby('user_id').agg(\n    recency=('date', lambda x: (SNAPSHOT - x.max()).days),\n    frequency=('txn_id', 'count'),\n    monetary=('amount', 'mean')\n).reset_index()\ndiversity = df.groupby('user_id')['category'].nunique().rename('category_diversity').reset_index()\nfeatures = rfm.merge(diversity, on='user_id')\n\n# ---- Labels (stub: random for demo) ----\nnp.random.seed(0)\nfeatures['churned'] = np.random.randint(0, 2, len(features))\n\n# ---- Model training ----\nX = features[['recency', 'frequency', 'monetary', 'category_diversity']]\ny = features['churned']\nX_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\nscaler = StandardScaler()\nX_train_s = scaler.fit_transform(X_train)\nX_test_s = scaler.transform(X_test)\nclf = LogisticRegression(max_iter=200)\nclf.fit(X_train_s, y_train)\n\n# ---- Evaluation ----\npreds = clf.predict_proba(X_test_s)[:, 1]\nauc = roc_auc_score(y_test, preds)\nap = average_precision_score(y_test, preds)\nprint(f'AUC-ROC: {auc:.4f}')\nprint(f'AUC-PR:  {ap:.4f}')\n```\n\n**Your tasks:**\n1. Refactor `main.py` into exactly 4 named functions: `load_and_clean(filepath)`, `compute_features(df, snapshot)`, `train_model(features_df, feature_cols, label_col)`, and `evaluate(clf, scaler, X_test, y_test)`.\n2. Each function must have a docstring that states its inputs, outputs, and one key assumption.\n3. A `main()` function must call them in sequence — running `python main.py` must produce the same two printed metric lines.\n4. Both visible tests must pass.",
+
+  "acceptance_criteria": [
+    "All 4 functions (`load_and_clean`, `compute_features`, `train_model`, `evaluate`) exist at module level and are callable",
+    "Each function has a docstring",
+    "Running `python main.py` prints two lines starting with 'AUC-ROC:' and 'AUC-PR:'",
+    "Functions are individually testable — `load_and_clean` takes only a filepath argument, `compute_features` takes only a df and a snapshot timestamp"
+  ],
+
+  "starter_repo": {
+    "files": [
+      {
+        "path": "main.py",
+        "content": "# main.py — all-in-one cell, needs refactoring\nimport pandas as pd\nimport numpy as np\nfrom sklearn.linear_model import LogisticRegression\nfrom sklearn.preprocessing import StandardScaler\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.metrics import roc_auc_score, average_precision_score\n\n# ---- Load and clean ----\ndf = pd.read_csv('transactions.csv')\ndf = df.dropna(subset=['user_id', 'amount', 'date'])\ndf['date'] = pd.to_datetime(df['date'])\ndf = df[df['amount'] > 0]\ndf = df.drop_duplicates(subset=['txn_id'])\n\n# ---- Feature engineering ----\nSNAPSHOT = pd.Timestamp('2024-03-31')\nrfm = df.groupby('user_id').agg(\n    recency=('date', lambda x: (SNAPSHOT - x.max()).days),\n    frequency=('txn_id', 'count'),\n    monetary=('amount', 'mean')\n).reset_index()\ndiversity = df.groupby('user_id')['category'].nunique().rename('category_diversity').reset_index()\nfeatures = rfm.merge(diversity, on='user_id')\n\n# ---- Labels (stub: random for demo) ----\nnp.random.seed(0)\nfeatures['churned'] = np.random.randint(0, 2, len(features))\n\n# ---- Model training ----\nX = features[['recency', 'frequency', 'monetary', 'category_diversity']]\ny = features['churned']\nX_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\nscaler = StandardScaler()\nX_train_s = scaler.fit_transform(X_train)\nX_test_s = scaler.transform(X_test)\nclf = LogisticRegression(max_iter=200)\nclf.fit(X_train_s, y_train)\n\n# ---- Evaluation ----\npreds = clf.predict_proba(X_test_s)[:, 1]\nauc = roc_auc_score(y_test, preds)\nap = average_precision_score(y_test, preds)\nprint(f'AUC-ROC: {auc:.4f}')\nprint(f'AUC-PR:  {ap:.4f}')\n"
+      }
+    ]
+  },
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "main.py",
+        "content": "import pandas as pd\nimport numpy as np\nfrom sklearn.linear_model import LogisticRegression\nfrom sklearn.preprocessing import StandardScaler\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.metrics import roc_auc_score, average_precision_score\n\n\ndef load_and_clean(filepath: str) -> pd.DataFrame:\n    \"\"\"Load transactions CSV and apply quality filters.\n\n    Args:\n        filepath: path to the CSV file.\n    Returns:\n        Cleaned DataFrame with columns: user_id, txn_id, amount, date (datetime), category.\n    Assumes:\n        CSV has a header row with at least these columns; 'date' column is parseable by pandas.\n    \"\"\"\n    df = pd.read_csv(filepath)\n    df = df.dropna(subset=['user_id', 'amount', 'date'])\n    df['date'] = pd.to_datetime(df['date'])\n    df = df[df['amount'] > 0]\n    df = df.drop_duplicates(subset=['txn_id'])\n    return df\n\n\ndef compute_features(df: pd.DataFrame, snapshot: pd.Timestamp) -> pd.DataFrame:\n    \"\"\"Compute RFM + category diversity features per user.\n\n    Args:\n        df: cleaned transactions DataFrame from load_and_clean.\n        snapshot: reference date for recency calculation.\n    Returns:\n        User-level feature DataFrame with columns:\n        user_id, recency, frequency, monetary, category_diversity.\n    Assumes:\n        df contains columns user_id, txn_id, amount, date, category.\n    \"\"\"\n    rfm = df.groupby('user_id').agg(\n        recency=('date', lambda x: (snapshot - x.max()).days),\n        frequency=('txn_id', 'count'),\n        monetary=('amount', 'mean'),\n    ).reset_index()\n    diversity = (\n        df.groupby('user_id')['category']\n        .nunique()\n        .rename('category_diversity')\n        .reset_index()\n    )\n    return rfm.merge(diversity, on='user_id')\n\n\ndef train_model(features_df: pd.DataFrame, feature_cols: list, label_col: str):\n    \"\"\"Split features, scale, and fit a logistic regression classifier.\n\n    Args:\n        features_df: user-level DataFrame with feature and label columns.\n        feature_cols: list of column names to use as model input features.\n        label_col: name of the binary target column.\n    Returns:\n        Tuple of (fitted LogisticRegression, fitted StandardScaler, X_test, y_test).\n    Assumes:\n        label_col is a binary integer column (0/1).\n    \"\"\"\n    X = features_df[feature_cols]\n    y = features_df[label_col]\n    X_train, X_test, y_train, y_test = train_test_split(\n        X, y, test_size=0.2, random_state=42\n    )\n    scaler = StandardScaler()\n    X_train_s = scaler.fit_transform(X_train)\n    X_test_s = scaler.transform(X_test)\n    clf = LogisticRegression(max_iter=200)\n    clf.fit(X_train_s, y_train)\n    return clf, scaler, X_test, y_test\n\n\ndef evaluate(clf, scaler, X_test: pd.DataFrame, y_test: pd.Series) -> dict:\n    \"\"\"Score the model on the test set and print AUC metrics.\n\n    Args:\n        clf: fitted classifier with predict_proba.\n        scaler: fitted StandardScaler used during training.\n        X_test: raw (unscaled) test features.\n        y_test: true binary labels for the test set.\n    Returns:\n        Dict with keys 'auc_roc' and 'auc_pr'.\n    Assumes:\n        clf and scaler were trained on the same feature columns as X_test.\n    \"\"\"\n    X_test_s = scaler.transform(X_test)\n    preds = clf.predict_proba(X_test_s)[:, 1]\n    auc = roc_auc_score(y_test, preds)\n    ap = average_precision_score(y_test, preds)\n    print(f'AUC-ROC: {auc:.4f}')\n    print(f'AUC-PR:  {ap:.4f}')\n    return {'auc_roc': auc, 'auc_pr': ap}\n\n\ndef main():\n    \"\"\"End-to-end pipeline: load, feature engineer, train, evaluate.\"\"\"\n    SNAPSHOT = pd.Timestamp('2024-03-31')\n    FEATURE_COLS = ['recency', 'frequency', 'monetary', 'category_diversity']\n\n    df = load_and_clean('transactions.csv')\n    features = compute_features(df, SNAPSHOT)\n\n    # Stub labels for demo\n    np.random.seed(0)\n    features['churned'] = np.random.randint(0, 2, len(features))\n\n    clf, scaler, X_test, y_test = train_model(features, FEATURE_COLS, 'churned')\n    evaluate(clf, scaler, X_test, y_test)\n\n\nif __name__ == '__main__':\n    main()\n"
+      }
+    ]
+  },
+
+  "visible_tests": [
+    {
+      "name": "all_four_functions_exist_and_callable",
+      "command": "python -c \"\nimport main\nfor fn in ['load_and_clean', 'compute_features', 'train_model', 'evaluate']:\n    assert callable(getattr(main, fn, None)), f'{fn} not found or not callable'\nprint('ok')\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": ["ok"]
+    },
+    {
+      "name": "compute_features_returns_expected_columns",
+      "command": "python -c \"\nimport pandas as pd\nimport main\ndf = pd.DataFrame({\n    'user_id': ['u1','u1','u2'],\n    'txn_id': ['t1','t2','t3'],\n    'amount': [100.0, 200.0, 150.0],\n    'date': pd.to_datetime(['2024-01-01','2024-02-01','2024-03-01']),\n    'category': ['food','travel','food']\n})\nsnap = pd.Timestamp('2024-03-31')\nresult = main.compute_features(df, snap)\nexpected_cols = {'user_id', 'recency', 'frequency', 'monetary', 'category_diversity'}\nassert expected_cols.issubset(set(result.columns)), f'Missing columns: {expected_cols - set(result.columns)}'\nassert len(result) == 2, f'Expected 2 user rows, got {len(result)}'\nprint('ok')\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": ["ok"]
+    }
+  ],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Splits code into 4 functions but keeps the scaler fitting inside `compute_features` or places it at module level, breaking the clean API contract where `train_model` owns all of data splitting, scaling, and model fitting",
+      "why_compass_might_suggest_it": "When LLMs see 'feature engineering then scaling', they sometimes keep scaling in the feature step because it feels like 'preparing the features'. The cleaner boundary — splitting is part of modelling, not feature engineering — requires explicit specification.",
+      "detection_signals": [
+        "compute_features_returns_expected_columns test fails because the returned DataFrame has already been scaled (float columns lost their original units)",
+        "train_model function signature doesn't include a StandardScaler return value"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Functions don't have docstrings, or docstrings are one-line placeholders without Args/Returns/Assumes — the acceptance criterion requires all three fields for each function",
+      "why_compass_might_suggest_it": "LLMs often add docstrings only to the most 'important' function (train_model) and skip shorter utility functions. The model considers minimal docstrings acceptable unless the prompt explicitly requires structured docstring fields.",
+      "detection_signals": [
+        "load_and_clean or compute_features has no docstring or has only a one-line summary without Args/Returns/Assumes",
+        "Code review scan: grep for '\"\"\"' shows fewer than 4 function docstrings"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Missing `if __name__ == '__main__': main()` guard — the refactored module runs the pipeline on import, causing the compute_features test to fail because it tries to read 'transactions.csv' which doesn't exist in the test environment",
+      "why_compass_might_suggest_it": "The original code is a notebook cell with no `if __name__` guard. When the LLM refactors it, it may preserve the top-level execution pattern, not realising that test imports will trigger the pipeline.",
+      "detection_signals": [
+        "all_four_functions_exist_and_callable test fails with FileNotFoundError for 'transactions.csv'",
+        "Module has `main()` call at the top level without the __name__ == '__main__' guard"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "code_quality",
+      "check": "All 4 named functions exist at module level with signatures matching the spec: `load_and_clean(filepath)`, `compute_features(df, snapshot)`, `train_model(features_df, feature_cols, label_col)`, `evaluate(clf, scaler, X_test, y_test)`",
+      "weight": 0.30
+    },
+    {
+      "dimension": "code_quality",
+      "check": "Each function has a docstring with at least Args, Returns, and one Assumes field; the pipeline-level `main()` function exists and has a `__name__ == '__main__'` guard",
+      "weight": 0.25
+    },
+    {
+      "dimension": "correctness",
+      "check": "Both visible tests pass — all 4 functions callable, `compute_features` returns a DataFrame with the correct 5 columns and correct row count",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt to the AI named the exact 4 function signatures and required structured docstrings — not just 'refactor into functions'",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Names all 4 functions explicitly with their exact signatures — not 'split into helper functions'",
+      "Specifies that scaler fit/transform lives inside `train_model`, not in `compute_features`",
+      "Requests `if __name__ == '__main__': main()` guard so tests can import the module without running the pipeline"
+    ],
+    "common_verification_traps": [
+      "Testing only that functions exist and are callable without checking that `compute_features` can be called with a small in-memory DataFrame independent of the CSV file",
+      "Accepting a refactor where the pipeline still runs at module import level — invisible until the first test import triggers a FileNotFoundError"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 150,
+    "branching_complexity": 2,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  }
+}

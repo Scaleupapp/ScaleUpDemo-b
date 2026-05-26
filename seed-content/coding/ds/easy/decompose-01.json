@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "CRED user modeling team — case study: break down a feature engineering ticket into AI-delegatable steps before writing a single line of pandas",
+
+  "brief": "Your team has filed the following ticket:\n\n---\n**Ticket DS-112 — Build RFM + behavioural feature set for churn model**\n\nWe have a `transactions` table with columns: `date` (datetime), `user_id` (str), `amount` (float), `category` (str, one of ~8 values). From this table, build a feature set for a churn prediction model.\n\nRequired features per user:\n- **Recency**: days since the user's most recent transaction (as of snapshot date `2024-03-31`)\n- **Frequency**: total number of transactions\n- **Monetary**: average transaction amount (skip NaN amounts)\n- **Category diversity**: number of distinct categories the user has transacted in\n- **30-day spend trend**: slope of daily spend over the last 30 days (positive = increasing spend)\n\n---\n\nYour task: **Break this ticket down into 4–6 clearly scoped steps** that you could hand off to an AI coding assistant one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale for why this step exists and why it comes here in the sequence\n\nDo NOT write any code. Focus on sequencing and completeness.",
+
+  "acceptance_criteria": [
+    "Plan has between 4 and 6 steps",
+    "Plan includes a data-validation or profiling step before feature computation",
+    "Each RFM component and the two behavioural features are accounted for in the plan (not collapsed into one step)",
+    "Plan includes a step to join all computed features into a single user-level feature DataFrame",
+    "Plan includes or implies a sanity-check step verifying the output shape and null counts"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: RFM + Behavioural Feature Engineering\n\n## Step 1 — Profile and validate the raw data\nRun `.info()`, `.describe()`, and a null-count check on the `transactions` DataFrame; confirm `date` is datetime, `amount` has no negative values, and `category` has exactly the expected 8 values.\n**Rationale:** Downstream features silently absorb data quality issues. A 5-minute profiling step catches null amounts, miscoded categories, and future-dated rows that would corrupt recency calculations — before you ask an AI assistant to build any feature.\n\n## Step 2 — Compute RFM features (recency, frequency, monetary)\nGroup by `user_id`: recency = `(snapshot_date - max(date)).days`; frequency = `count()`; monetary = `mean(amount, skipna=True)`.\n**Rationale:** RFM is a single groupby so it can be delegated as one unit. Doing it before the behavioural features keeps the AI task small and verifiable — check that each user has exactly one row and monetary is never negative.\n\n## Step 3 — Compute category diversity\nGroup by `user_id` and count distinct values in the `category` column.\n**Rationale:** Separating this step from RFM makes the groupby logic for each feature independently testable. Category diversity is also semantically different (it counts cardinality, not aggregates of a continuous variable).\n\n## Step 4 — Compute 30-day spend trend (slope)\nFilter transactions to the 30-day window ending on `2024-03-31`, compute daily totals, then fit a linear regression (numpy polyfit or scipy linregress) per user to get the slope. Users with fewer than 2 days of data in the window get NaN slope.\n**Rationale:** This is the most complex feature and needs its own step — windowing, aggregation, and regression in sequence. Isolating it allows independent verification (confirm slope is positive for a user whose daily spend clearly rises).\n\n## Step 5 — Join all feature tables and validate output\nMerge the RFM DataFrame, category diversity Series, and slope Series on `user_id` using left joins from the full user list; verify the final DataFrame has one row per user, column null counts are within expected ranges, and no user_id is duplicated.\n**Rationale:** Each sub-feature was built independently and could have different user coverage (e.g., some users have no transactions in the 30-day window). Explicit join + shape assertion catches mismatches before the feature table is handed to the model training step."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Skips data profiling and jumps directly to feature computation — NaN amounts silently propagate into the monetary feature, future-dated rows inflate frequency, and miscoded categories inflate category diversity",
+      "why_compass_might_suggest_it": "Learners eager to reach the modelling step treat data as clean by assumption. The AI assistant will happily compute features on dirty data without warning.",
+      "detection_signals": [
+        "Plan's first step mentions groupby or feature calculation, not profiling",
+        "No step contains the words 'validate', 'profile', 'describe', or 'null'"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Collapses all 5 features into a single 'compute features' step — the AI generates a 50-line cell with all features interleaved, making it hard to verify any single feature independently or isolate which feature introduced a null",
+      "why_compass_might_suggest_it": "Asking an LLM to 'build the feature set' in one prompt is the path of least resistance. The LLM produces working code; the learner doesn't notice that the 5 features are now entangled.",
+      "detection_signals": [
+        "Plan has fewer than 4 steps total",
+        "A single step mentions more than 2 of: recency, frequency, monetary, category diversity, spend trend"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "No join/consolidation step — each feature is computed but the plan ends without explaining how they become a single user-level feature DataFrame suitable for model training",
+      "why_compass_might_suggest_it": "Learners who think step-by-step about computation sometimes forget the assembly step. The AI will produce individual Series or DataFrames per feature but won't merge them unless explicitly asked.",
+      "detection_signals": [
+        "Plan has no step mentioning 'merge', 'join', 'concat', or 'feature table'",
+        "Plan ends with the last feature computation step"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Plan leads with a profiling/validation step before any feature is computed — confirms data types, null counts, and value ranges",
+      "weight": 0.30
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Each feature group (RFM together, category diversity separately, spend trend separately) is a distinct step — not all five features collapsed into one",
+      "weight": 0.30
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Plan includes an explicit join + shape assertion step as the final step, not just feature computation",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Plan's rationale for each step explains the verification method — how the learner would confirm the step produced correct output before proceeding",
+      "weight": 0.15
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Profile and validate raw data — run .info(), .describe(), null counts; confirm date dtype, no negative amounts, 8 expected categories; catches upstream ETL issues before they corrupt features",
+      "Step 2: Compute RFM features — single groupby for recency (days since max date), frequency (count), monetary (mean skipna); verify one row per user and monetary >= 0",
+      "Step 3: Compute category diversity — separate groupby counting distinct category values per user; keep separate so it can be tested independently",
+      "Step 4: Compute 30-day spend trend — filter to 30-day window, compute daily totals, fit linear slope per user; users with < 2 days get NaN; most complex feature, must be isolated",
+      "Step 5: Join all feature tables and validate — left join all computed features on user_id from full user list; assert one row per user, check null rates, no duplicate user_ids"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 75,
+    "branching_complexity": 1,
+    "edge_cases": 2,
+    "known_hard_patterns": []
+  }
+}

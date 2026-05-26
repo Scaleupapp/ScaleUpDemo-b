@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "ds",
+  "language": "sql",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "Swiggy data science loop — Jupyter notebook round: write a precise SQL specification for cohort retention before delegating query generation to an AI assistant",
+
+  "brief": "You are a product analyst at a subscription service. Your manager wants a **monthly cohort retention matrix** to understand how many users from each signup cohort are still active in subsequent months.\n\nYou have two Postgres tables:\n- `users(id BIGINT, signup_date DATE)` — one row per user\n- `events(user_id BIGINT, event_date DATE, event_type VARCHAR)` — activity events; a user is \"active\" in a month if they have at least one event in that month\n\n**Your task:** Write the prompt you would send to an LLM coding assistant to produce the final SQL query.\n\nThe query should produce:\n- One row per `(cohort_month, months_since_signup)` pair\n- Columns: `cohort_month` (YYYY-MM format), `months_since_signup` (0, 1, 2, ...), `cohort_size` (users in that signup cohort), `active_users` (users from that cohort who were active in that month offset), `retention_pct` (active_users / cohort_size * 100, rounded to 1 decimal)\n- Row at `months_since_signup = 0` is the signup month itself (should be 100.0% if every user has at least one event in their signup month, or the actual % otherwise)\n- **Partial cohort edge case**: the query must exclude cohort-month combinations where `months_since_signup` puts the activity month in the future (i.e., beyond the current data boundary) — those rows should not appear in the output at all\n\nYou are NOT writing the SQL yourself — you are writing the instruction that produces it. Aim for a prompt that produces a correct Postgres query on the first attempt.",
+
+  "acceptance_criteria": [
+    "Prompt names both tables and their relevant columns with correct data types",
+    "Prompt defines 'active' precisely: at least one event in the calendar month (not just any day)",
+    "Prompt specifies the output schema: all 5 columns with names, types, and the retention_pct formula",
+    "Prompt explains the partial-cohort edge case: months_since_signup must not extend beyond the latest event_date in the dataset",
+    "Prompt specifies the Postgres dialect and that cohort_month should be formatted as YYYY-MM string"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "gold_prompt.txt",
+        "content": "Write a Postgres SQL query that computes a monthly cohort retention matrix from two tables:\n\n  users(id BIGINT, signup_date DATE)\n  events(user_id BIGINT, event_date DATE, event_type VARCHAR)\n\nDefinitions:\n- A user's cohort is determined by the year-month of their signup_date. Format cohort as a string 'YYYY-MM' using TO_CHAR(signup_date, 'YYYY-MM').\n- A user is 'active' in a given month if they have at least one row in the events table where TO_CHAR(event_date, 'YYYY-MM') equals that month (any event_type counts).\n- months_since_signup is the integer number of calendar months between the cohort month and the activity month, computed as: (EXTRACT(YEAR FROM activity_month) - EXTRACT(YEAR FROM cohort_month)) * 12 + (EXTRACT(MONTH FROM activity_month) - EXTRACT(MONTH FROM cohort_month)). Use DATE_TRUNC('month', ...) to get month boundaries.\n\nOutput exactly these 5 columns:\n  cohort_month      TEXT       -- formatted as 'YYYY-MM'\n  months_since_signup INT      -- 0 = signup month, 1 = one month later, etc.\n  cohort_size       BIGINT     -- number of users in this signup cohort\n  active_users      BIGINT     -- users from this cohort who were active in this month offset\n  retention_pct     NUMERIC    -- ROUND(active_users::numeric / cohort_size * 100, 1)\n\nCritical: only include rows where the activity month (cohort_month + months_since_signup months) is <= the latest month present in the events table (i.e., DATE_TRUNC('month', MAX(event_date)) computed from the events table). Do NOT include future months where we have no data yet — this prevents partial cohorts from showing artificially low retention at the right edge of the matrix.\n\nSort the output by cohort_month ASC, months_since_signup ASC.\n\nUse only standard Postgres syntax. Do not use any CTEs beyond what is needed for clarity. Do not filter by event_type — all events count as activity."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt doesn't address the partial-cohort edge case — LLM generates a query that includes months_since_signup values for activity months that are in the future (beyond max event_date), making retention for recent cohorts appear artificially low because the denominator includes all users but the numerator only includes users with events in a month that hasn't fully passed",
+      "why_compass_might_suggest_it": "The edge case is easy to overlook conceptually — it only manifests at the right edge of the retention matrix and looks like 'recent cohorts have lower retention', which might be misread as a real business signal rather than a data truncation artefact.",
+      "detection_signals": [
+        "Gold prompt contains 'latest month', 'max(event_date)', or 'partial cohort'",
+        "LLM query produces rows where activity_month > date_trunc('month', current_date) or > max(event_date)"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt defines 'active' as 'any event on any day' rather than 'at least one event in the calendar month' — LLM generates a query that uses event_date = some specific date instead of grouping by calendar month, producing wrong retention counts",
+      "why_compass_might_suggest_it": "The phrase 'active in a month' is ambiguous in natural language. LLMs sometimes interpret it as 'active on the same day as signup + N months' rather than 'active anywhere within month N'.",
+      "detection_signals": [
+        "Gold prompt contains 'at least one event' and 'calendar month'",
+        "LLM-generated WHERE clause uses a date equality or single-day comparison instead of month truncation"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt omits the output column names and types — LLM produces a query with unlabelled or differently-named columns (`cnt`, `ret_pct`, etc.) that won't match the downstream chart or BI tool expecting specific column names",
+      "why_compass_might_suggest_it": "Analysts naturally describe what they want conceptually ('I want cohort month, offset, and retention percent') without specifying exact output column names, assuming the LLM will pick reasonable names. The LLM does pick names — just not the ones the analyst needs.",
+      "detection_signals": [
+        "Gold prompt lists all 5 column names explicitly",
+        "LLM output has columns named 'month', 'offset', 'pct' or other variants that don't match the spec"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt says 'monthly cohort retention' without specifying that cohort granularity is calendar month (not week or quarter) — LLM may pick week-based cohorts if it assumes finer granularity, especially if the events table has daily timestamps",
+      "why_compass_might_suggest_it": "The word 'monthly' modifies 'retention' (how often to measure retention) but can also be read as 'monthly cohorts' (signup granularity). Without explicit instruction the LLM must guess.",
+      "detection_signals": [
+        "Gold prompt contains 'signup month' and 'TO_CHAR' or 'DATE_TRUNC month' to unambiguously set cohort granularity",
+        "LLM-generated cohort definition uses DATE_TRUNC('week', ...) or extracts the exact date"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt names both tables with column names and types, defines 'active' as at least one event per calendar month, and names all 5 output columns explicitly",
+      "weight": 0.30
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt addresses the partial-cohort edge case: activity months beyond max(event_date) must be excluded from the output",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt specifies cohort granularity (calendar month via DATE_TRUNC or TO_CHAR 'YYYY-MM'), not just 'monthly'",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Prompt specifies the retention_pct formula explicitly: active_users / cohort_size * 100, rounded to 1 decimal — not just 'percentage'",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Provides exact table and column definitions — names, types, semantics — not just 'I have a users and events table'",
+      "Defines 'active in a month' with a concrete SQL idiom (DATE_TRUNC('month', event_date) = cohort_month)",
+      "Specifies months_since_signup computation formula so the LLM doesn't invent a non-standard month-diff function",
+      "States the partial-cohort filter condition explicitly: activity_month <= DATE_TRUNC('month', MAX(event_date))",
+      "Lists all 5 output columns with names and types — no ambiguity about what the query should SELECT",
+      "Specifies the Postgres dialect to avoid cross-DB portability hedging in the LLM response"
+    ],
+    "common_verification_traps": [
+      "Running the query on a toy dataset where all cohorts are fully observed — the partial-cohort bug is invisible unless the latest cohort's activity month is the current month",
+      "Checking only month 0 retention (should be near 100%) and missing that month N retention for recent cohorts is artificially deflated by the partial-cohort issue",
+      "Not verifying that the cohort_size is constant for all months_since_signup of the same cohort — if the query accidentally filters the user base differently per offset, cohort_size will change and retention_pct will be meaningless"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 130,
+    "branching_complexity": 3,
+    "edge_cases": 5,
+    "known_hard_patterns": []
+  }
+}

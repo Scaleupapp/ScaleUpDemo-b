@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "Razorpay Risk Analytics — take-home case study: decompose a churn prediction project into an AI-delegatable execution plan before building anything",
+
+  "brief": "Your product team has filed the following ticket:\n\n---\n**Ticket DS-301 — Build a monthly churn prediction model for the subscription product**\n\nWe have a subscription product (~200k active users). We want to predict which users will churn next month so the growth team can intervene. \"Churn\" is not yet formally defined.\n\nDeliverables:\n- A trained model that scores each active user with a churn probability\n- A CSV of predicted probabilities for next month (for the growth team's CRM)\n- An evaluation report with the metrics the risk committee cares about\n\n---\n\nYour task: **Break this project down into 6–8 clearly scoped steps** that you could hand off to an AI coding assistant one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale — why this step exists AND why it must come here in the sequence\n\nKey constraints:\n- Train/validation split **must** be time-based (temporal hold-out), not random\n- Churn definition must be agreed before any modelling begins\n- Evaluation must include calibration (predicted probabilities must be reliable), not just AUC\n\nDo NOT write any code. Focus on sequencing, completeness, and the rationale for each step.",
+
+  "acceptance_criteria": [
+    "Plan has between 6 and 8 steps",
+    "Plan defines churn explicitly (e.g., 'no activity for 30 days after subscription renewal') as a distinct first step before any feature engineering",
+    "Plan specifies time-based train/val/test split — not random — with a clear rationale",
+    "Plan includes model calibration as an explicit step or acceptance criterion (not just AUC/F1)",
+    "Plan includes a handoff step: scoring current active users and generating the prediction CSV"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: Churn Prediction Pipeline\n\n## Step 1 — Define churn and the label window\nWith the product team, agree on a precise churn definition: a user is \"churned\" if they have not performed any qualifying action (e.g., any login, purchase, or API call) for 30 calendar days after their subscription renewal date. Apply this label to historical data, creating a binary `churned` column.\n**Rationale:** Every downstream decision — which rows are positive examples, what the prediction horizon is, how to compute recency features — depends on this definition. Starting without it guarantees rework when the model is reviewed.\n\n## Step 2 — Exploratory data analysis (EDA) and class imbalance check\nProfile the labelled dataset: churn rate by month, user cohort, and plan tier; null and outlier counts in candidate feature columns; confirm the label window produces a realistic positive rate (typically 5-20% for subscription products).\n**Rationale:** Churn rate strongly affects the evaluation metric choice and whether class-balancing (SMOTE, class_weight='balanced') is needed. EDA here prevents building a model that predicts 'never churn' and scores 95% accuracy.\n\n## Step 3 — Time-based train / validation / test split\nSplit the labelled data chronologically: earliest N months for training, next M months for validation (hyper-parameter tuning), last K months as a held-out test set (never touched until final evaluation). Typical split: 70% train, 15% val, 15% test by time.\n**Rationale:** Random splits create data leakage for time-series user behaviour — a user's December features would appear in both train and test. A temporal split ensures the model is evaluated on its ability to generalize to future, unseen time periods.\n\n## Step 4 — Feature engineering (from training data only)\nBuild user-level features: recency (days since last activity), frequency (events in last 30/60/90 days), monetary (total spend in last 90 days), engagement score (login streak), plan tier, days since signup. All aggregations computed from train-period data only; map to val/test using train-period statistics.\n**Rationale:** Feature engineering must happen after the split so that aggregation statistics (means, medians used in feature construction) are derived only from training examples, not from validation or test rows that represent 'the future'.\n\n## Step 5 — Train candidate models and tune on validation set\nTrain logistic regression (baseline), XGBoost, and LightGBM; use Optuna or manual grid search on the validation set for key hyperparameters (learning rate, max_depth, scale_pos_weight for imbalance). Optimise for AUC-PR (area under the precision-recall curve) rather than AUC-ROC given class imbalance.\n**Rationale:** Multiple candidates on the validation set allow comparison without touching the test set. AUC-PR is more informative than AUC-ROC when churn rate is low because it gives higher weight to the positive (rare) class.\n\n## Step 6 — Calibrate the winning model\nApply Platt scaling or isotonic regression on the validation set predictions to ensure the output probabilities are well-calibrated (a predicted 30% churn probability should correspond to ~30% of users actually churning). Plot the calibration curve.\n**Rationale:** The growth team will use raw probabilities to prioritise outreach — an uncalibrated model where 30% probability really means 5% probability causes over-investment in low-risk users. Calibration must precede the handoff.\n\n## Step 7 — Final evaluation on held-out test set\nEvaluate the calibrated model on the test set: AUC-ROC, AUC-PR, precision and recall at the operating threshold (e.g., top 10% by score), calibration plot, and a confusion matrix at 0.5 threshold. Document results for the risk committee.\n**Rationale:** The test set is touched only once — after all modelling decisions are final — so the reported metrics are unbiased estimates of production performance.\n\n## Step 8 — Score current active users and generate prediction CSV\nApply the calibrated model to the current month's active users (no churn label — these are future predictions). Output a CSV with columns: user_id, churn_probability, risk_tier (top 10% = 'high', next 20% = 'medium', rest = 'low'). Share with the growth CRM team.\n**Rationale:** This is the actual deliverable. Keeping it as a distinct final step ensures all preceding validation steps are complete before predictions reach the business, preventing premature use of an uncalibrated or unvalidated model."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Skips the churn definition step and jumps to 'collect data' or 'build features' — without a precise label definition the training data is mislabelled, making every downstream metric meaningless",
+      "why_compass_might_suggest_it": "Learners with an engineering mindset see churn as an obvious concept and assume everyone knows what it means. The AI assistant will happily build features without asking 'what is churn?' — the definition lives in the business context, not the data.",
+      "detection_signals": [
+        "Plan's first step is data collection, EDA, or feature engineering",
+        "No step mentions 'definition', 'label window', or 'ground truth'"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Uses random train/test split instead of time-based split — plan mentions 'split data' but doesn't specify temporal ordering, allowing the AI to generate `train_test_split(..., random_state=42)` which leaks future behaviour into training",
+      "why_compass_might_suggest_it": "Random split is the scikit-learn default and the pattern in 90% of tutorial notebooks. Temporal splitting requires awareness of the time-series nature of user behaviour that the LLM won't apply unless explicitly required.",
+      "detection_signals": [
+        "Split step mentions 'random', 'random_state', or doesn't mention 'chronological' / 'temporal' / 'time-based'",
+        "Plan has no step that discusses train/val/test chronological ordering"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "No calibration step — plan ends at model training and evaluation (AUC), skipping calibration; growth team receives uncalibrated probabilities that may be systematically overconfident or underconfident",
+      "why_compass_might_suggest_it": "Calibration is an advanced concept not covered in most introductory ML courses. Learners and LLMs optimise for AUC (the standard interview metric) and omit calibration unless it is explicitly required.",
+      "detection_signals": [
+        "Plan has no step containing 'calibrat', 'Platt', 'isotonic', or 'reliability diagram'",
+        "Evaluation step only mentions AUC, F1, or accuracy"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Plan leads with a churn definition step that produces a precise, measurable label (e.g., 'no qualifying event for N days after renewal') before any feature or model step",
+      "weight": 0.25
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Train/val/test split step explicitly specifies time-based (chronological) ordering with a rationale about preventing temporal data leakage",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Plan includes a dedicated calibration step (or calibration as an explicit acceptance criterion of the evaluation step) with a rationale about why probabilities must be reliable for the growth team",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Plan ends with an explicit handoff/scoring step that produces the prediction CSV, not just 'evaluate the model' — distinguishes between model validation and production scoring",
+      "weight": 0.25
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Define churn and label window — agree precise definition with product team before touching data; every downstream metric depends on this",
+      "Step 2: EDA and class imbalance check — profile churn rate by segment and month; determines metric choice (AUC-PR vs AUC-ROC) and whether class balancing is needed",
+      "Step 3: Time-based train/val/test split — chronological split (earliest=train, next=val, latest=test); prevents temporal leakage from random split",
+      "Step 4: Feature engineering from training data only — RFM + engagement features; all aggregations computed from train period then mapped to val/test",
+      "Step 5: Train candidates and tune on validation set — logistic regression baseline + XGBoost/LightGBM; optimise AUC-PR on val; never touch test set here",
+      "Step 6: Calibrate winning model — Platt scaling or isotonic regression on val set; calibration curve must show reliable probabilities before handoff",
+      "Step 7: Final evaluation on held-out test set — AUC-ROC, AUC-PR, calibration, confusion matrix at operating threshold; document for risk committee",
+      "Step 8: Score current active users and generate prediction CSV — apply calibrated model; output user_id + churn_probability + risk_tier for growth CRM"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 145,
+    "branching_complexity": 3,
+    "edge_cases": 5,
+    "known_hard_patterns": []
+  }
+}

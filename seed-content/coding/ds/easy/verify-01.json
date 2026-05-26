@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "verify",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Razorpay Risk Analytics — take-home code review: catch silent data quality bugs in an AI-generated merge before they corrupt the risk dashboard",
+
+  "brief": "Your AI coding assistant generated the following notebook cell to join orders and customer data before building a risk dashboard. Your task is to **review it critically** and identify every bug before the cell is promoted to production.\n\nThe cell is supposed to:\n- Merge all orders with their corresponding customer profile, keeping every order (even orders for customers who don't yet have a profile record)\n- Produce a merged DataFrame with exactly one row per order\n- Report how many orders were unmatched (no customer record)\n\nHere is the generated code:\n\n```python\n# Cell 3 — merge orders with customer profiles\nimport pandas as pd\n\n# orders: ~50,000 rows — columns: order_id, user_id, amount, ts\n# customers: ~43,000 rows — columns: user_id, segment, city\n# Note: ~7,000 orders have user_id values NOT present in the customers table\n\nmerged = orders.merge(customers, on='user_id')   # Bug 1\n\nunmatched = orders[~orders['user_id'].isin(customers['user_id'])]\nprint(f'Unmatched orders: {len(unmatched)}')\n\n# Bug 2: customers table has duplicate user_id rows (a data quality issue)\n# from an ETL bug last quarter — not checked here\nprint(f'Merged shape: {merged.shape}')\nprint(f'Orders shape: {orders.shape}')\n```\n\nList every bug you find, explain why each one is dangerous in a production risk pipeline, and write the corrected version of the merge cell.",
+
+  "acceptance_criteria": [
+    "Identifies Bug 1: `.merge(..., on='user_id')` defaults to `how='inner'`, silently dropping ~7,000 orders for users with no customer profile — must use `how='left'`",
+    "Explains why silent row loss is dangerous in a risk context (credit decisions made on incomplete data)",
+    "Identifies Bug 2: no duplicate-key check on the right table — if `customers` has duplicate `user_id` rows, the merge produces MORE rows than `orders` (row explosion), breaking the one-row-per-order invariant",
+    "Provides a corrected cell that uses `how='left'` AND checks for duplicate keys with an assertion or explicit dedup before merging"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "merge_cell_fixed.py",
+        "content": "import pandas as pd\n\n# orders: ~50,000 rows — columns: order_id, user_id, amount, ts\n# customers: ~43,000 rows — columns: user_id, segment, city\n\n# Guard: assert customers has no duplicate user_id rows before merging.\n# A duplicate in the right table causes a row explosion in the merged output.\nassert customers['user_id'].is_unique, (\n    f'customers table has duplicate user_ids: '\n    f'{customers[customers[\"user_id\"].duplicated()][\"user_id\"].tolist()[:5]}'\n)\n\n# Fix Bug 1: use how='left' to keep ALL orders, even those with no matching\n# customer profile. Unmatched rows get NaN in the customers columns.\nmerged = orders.merge(customers, on='user_id', how='left')\n\n# Verify the one-row-per-order invariant held after the merge.\nassert len(merged) == len(orders), (\n    f'Row count changed after merge: {len(orders)} orders -> {len(merged)} rows. '\n    'This usually means duplicate user_id values in the customers table.'\n)\n\nunmatched_count = merged['segment'].isna().sum()  # NaN in customers columns => unmatched\nprint(f'Unmatched orders (no customer profile): {unmatched_count}')\nprint(f'Merged shape: {merged.shape}')  # should equal orders.shape[0] rows\nprint(f'Orders shape: {orders.shape}')\n"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "merge_cell.py:line 10",
+      "bug_description": "Silent inner join: `.merge(customers, on='user_id')` uses `how='inner'` by default. The ~7,000 orders whose `user_id` is absent from the customers table are silently dropped. The `merged` DataFrame has ~43,000 rows instead of ~50,000 — but because the code prints `merged.shape` alongside `orders.shape` without comparing them, the analyst may never notice the discrepancy on a quick read.",
+      "why_compass_might_suggest_it": "LLMs are trained on code where inner join is the most common merge pattern — it's the SQL default, the pandas default, and the majority of tutorial code. The model does not reason about business intent ('keep all orders') unless that intent is made explicit in the prompt.",
+      "detection_signals": [
+        "merged.shape[0] < orders.shape[0] when run on realistic data — the count drops by ~14%",
+        "Code review: `.merge(` call has no `how=` keyword argument",
+        "The unmatched_count printed after the merge is 0 even though 7,000 orders lack profiles — the inner join already removed them"
+      ]
+    },
+    {
+      "location": "merge_cell.py:no duplicate check",
+      "bug_description": "No uniqueness guard on the right-table join key: if `customers` has duplicate `user_id` rows (documented as a known ETL issue), every order row for that `user_id` is duplicated in `merged`, inflating the row count silently. A risk model trained on this inflated DataFrame would over-weight affected users. The bug is invisible because `.merge()` does not warn about key explosions.",
+      "why_compass_might_suggest_it": "LLM-generated merge code rarely includes pre-merge key validation because in the training examples the tables are assumed clean. The uniqueness assumption is implicit and the model has no reason to add an assertion unless explicitly asked.",
+      "detection_signals": [
+        "len(merged) > len(orders) when customers has any duplicated user_id",
+        "No `assert ... is_unique` or `customers.drop_duplicates('user_id')` call before the merge",
+        "merged.shape printed but never compared to orders.shape with an assertion"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the inner-join default and correctly names `how='left'` as the fix, explains the business consequence (7k orders silently lost from risk calculations)",
+      "weight": 0.40
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the missing uniqueness check on the right table, explains the row-explosion mechanism, and proposes either a pre-merge assertion or deduplication",
+      "weight": 0.35
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Learner explains WHY the LLM chose inner join (SQL/pandas default) and why the row-count print without comparison masked both bugs",
+      "weight": 0.15
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Corrected cell uses `how='left'`, asserts key uniqueness, and verifies `len(merged) == len(orders)` after the merge — no new bugs introduced",
+      "weight": 0.10
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [
+      "Running the cell on a sample where all user_ids exist in both tables — the inner join happens to return all rows, hiding the data loss bug entirely",
+      "Spotting the inner-join bug but missing the duplicate-key bug because the ETL note is in a comment, not in the executed code path",
+      "Accepting a fix that adds `how='left'` but doesn't add a post-merge shape assertion — the row-explosion bug from duplicates is still invisible"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 95,
+    "branching_complexity": 2,
+    "edge_cases": 3,
+    "known_hard_patterns": []
+  }
+}
