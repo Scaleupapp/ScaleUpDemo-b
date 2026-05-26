@@ -1,0 +1,125 @@
+'use strict';
+
+/**
+ * Refactor Drill grader — sandbox-aware.
+ *
+ * Runs the bundle's visible_tests against the learner's refactored_code.files
+ * inside the local sandbox to determine correctness deterministically, then
+ * asks the LLM to score readability_gain and ai_usage_judgment.
+ *
+ * Score blend:
+ *   overall_score = round((correctness * 0.5 + readability_gain * 0.25 + ai_usage_judgment * 0.25) * 10)
+ *
+ * All dimensions are on a 0-10 scale; overall_score is 0-100.
+ *
+ * Note: Phase B will replace localSandbox with a managed cloud sandbox.
+ */
+
+const { ArtifactBundle, DrillAttempt } = require('../../models');
+const { llmCall }       = require('../llmRouter');
+const { flattenRubric } = require('./rubric');
+const sandbox           = require('../sandbox/localSandbox');
+
+// ── System prompt ─────────────────────────────────────────────────────────────
+
+const SYSTEM = `You grade Refactor-with-AI Drills. The learner refactored code using Compass. You see the original, the refactored result, and the test pass/fail count.
+
+Score 0-10:
+- readability_gain: is the refactor genuinely clearer / better factored than the original
+- ai_usage_judgment: did they use Compass well (good prompts, accept/reject judgment)
+
+correctness is already computed deterministically and provided to you. Do not score correctness.
+
+Return strict JSON: { rubric: { readability_gain, ai_usage_judgment }, what_to_try_next: string (<=200 chars) }`;
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Grade a submitted Refactor Drill attempt.
+ *
+ * Runs visible_tests inside the local sandbox to compute a deterministic
+ * correctness score, then calls the LLM for readability_gain and
+ * ai_usage_judgment.
+ *
+ * @param {{ drillAttemptId: import('mongoose').Types.ObjectId | string }} opts
+ * @returns {Promise<{ overall_score: number, rubric: object, what_to_try_next: string }>}
+ */
+async function grade({ drillAttemptId }) {
+  const attempt = await DrillAttempt.findById(drillAttemptId).lean();
+  if (!attempt) throw new Error(`DrillAttempt ${drillAttemptId} not found`);
+
+  const bundle = await ArtifactBundle.findById(attempt.bundle_id).lean();
+  if (!bundle) throw new Error(`ArtifactBundle ${attempt.bundle_id} not found`);
+
+  const files = (
+    attempt.submission &&
+    attempt.submission.refactored_code &&
+    attempt.submission.refactored_code.files
+  ) || [];
+
+  const tests = bundle.visible_tests || [];
+
+  // ── Deterministic dimension: correctness ──────────────────────────────────
+
+  let passed = 0;
+  if (tests.length > 0) {
+    const testResults = await Promise.all(
+      tests.map(t => sandbox.runInTempDir({ files, command: t.command, timeout_ms: 15000 }))
+    );
+
+    passed = testResults.filter((r, i) => {
+      const expectedExit = (tests[i] && tests[i].expected_exit_code !== undefined)
+        ? tests[i].expected_exit_code
+        : 0;
+      return r.exit_code === expectedExit;
+    }).length;
+  }
+
+  // When there are no tests the bundle cannot penalise — full credit.
+  const totalTests  = tests.length > 0 ? tests.length : 1;
+  const passedCount = tests.length > 0 ? passed : 1;
+  const correctness = (passedCount / totalTests) * 10;
+
+  // ── LLM dimensions: readability_gain + ai_usage_judgment ─────────────────
+
+  const originalFiles = (bundle.starter_repo && bundle.starter_repo.files) || [];
+  const userMsg = [
+    `ORIGINAL CODE:\n${JSON.stringify(originalFiles)}`,
+    `REFACTORED:\n${JSON.stringify(files)}`,
+    `TEST RESULTS: ${passed}/${tests.length} passed`,
+    `Score readability_gain and ai_usage_judgment.`,
+  ].join('\n\n');
+
+  const res = await llmCall({
+    taskId:   'drill_grade_refactor',
+    system:   SYSTEM,
+    messages: [{ role: 'user', content: userMsg }],
+  });
+
+  const parsed             = JSON.parse(res.content[0].text);
+  const { readability_gain, ai_usage_judgment } = parsed.rubric;
+
+  // ── Blend ─────────────────────────────────────────────────────────────────
+
+  const overall = Math.round(
+    (correctness * 0.5 + readability_gain * 0.25 + ai_usage_judgment * 0.25) * 10
+  );
+
+  const fullRubric = { correctness, readability_gain, ai_usage_judgment };
+
+  await DrillAttempt.findByIdAndUpdate(drillAttemptId, {
+    status: 'graded',
+    grade: {
+      overall_score:        overall,
+      rubric_breakdown:     flattenRubric(fullRubric),
+      what_to_try_next:     parsed.what_to_try_next,
+      integrity_confidence: 'high',
+      graded_at:            new Date(),
+      grader_model:         res._meta.model,
+    },
+  });
+
+  return { overall_score: overall, rubric: fullRubric, what_to_try_next: parsed.what_to_try_next };
+}
+
+module.exports = { grade };
