@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "swe",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Razorpay / Postman early-career SWE round — task breakdown: decompose a feature request into AI-delegatable steps before touching the keyboard",
+
+  "brief": "Your tech lead has filed the following ticket:\n\n---\n**Ticket SWE-204 — Add pagination to GET /api/users**\n\nCurrently, `GET /api/users` fetches all rows from the `users` table and returns them in a single JSON array. On staging the table has 40 000 rows; this is making the endpoint slow and memory-hungry.\n\nAdd pagination support: the endpoint should accept `?page=N&size=M` query parameters. Use sensible defaults and enforce a maximum page size so callers cannot accidentally dump the whole table.\n\n---\n\nYour task: **Break this ticket down into 4–7 clearly scoped steps** that you could hand off to an AI coding assistant one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale for why this step exists and why it comes here in the sequence\n\nDo NOT write any code. Focus on the sequencing and completeness of the plan.",
+
+  "acceptance_criteria": [
+    "Plan has between 4 and 7 steps",
+    "Plan defines the API contract (defaults and limits) before writing any implementation code",
+    "Plan includes query-param parsing and validation as a distinct step",
+    "Plan includes a step that updates or verifies the OpenAPI / API documentation",
+    "Each step is scoped to a single concern — no step combines schema change + DB query + API response shape"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: Add Pagination to GET /api/users\n\n## Step 1 — Define the API contract\nDecide and document: default page=1, default size=20, maximum size=100, minimum size=1; response shape includes `data` array plus `pagination` object with `page`, `size`, `total_count`, `total_pages`, `has_next`.\n**Rationale:** Every downstream step depends on these numbers. Agreeing on the contract first prevents the DB step and the response-shaping step from being designed independently and then conflicting.\n\n## Step 2 — Add query-param parsing and validation\nIn the route handler, read `page` and `size` from `request.query`, coerce to integers, apply defaults if absent, and reject requests where either value is out of range (size > 100 or page < 1) with a 400 response.\n**Rationale:** Validation must happen before the DB query to avoid passing raw user input to LIMIT/OFFSET. Isolating this step also makes it easy to unit-test the validation logic without a real DB.\n\n## Step 3 — Apply LIMIT / OFFSET to the database query\nRewrite the query from `SELECT * FROM users` to `SELECT * FROM users ORDER BY id LIMIT $size OFFSET ($page - 1) * $size`. Retrieve `total_count` with a `SELECT COUNT(*)` (can be a separate query or a window function).\n**Rationale:** This is the core data-access change. Doing it after Step 2 means the validated, sanitised values flow straight into the query with no extra transformation.\n\n## Step 4 — Shape the API response\nReturn `{ data: [...users], pagination: { page, size, total_count, total_pages, has_next } }` instead of the bare array.\n**Rationale:** Separating the response-shaping step from the DB step keeps each unit of AI-delegated work small enough to verify in isolation.\n\n## Step 5 — Add edge-case tests\nWrite tests for: page=1 (first page), page=last (last page), page beyond total_pages (should return empty `data` and `has_next: false`), size=0 (400), size=101 (400), non-integer page string (400).\n**Rationale:** Edge cases for pagination are predictable; listing them explicitly ensures the AI assistant generates tests for out-of-range inputs rather than only the happy path.\n\n## Step 6 — Update the OpenAPI spec\nAdd the `page` and `size` query parameters and the new response schema to the existing OpenAPI YAML.\n**Rationale:** Keeping the contract document in sync with the implementation prevents future consumers from building against the old bare-array shape."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Jumps straight to 'write the DB query with LIMIT/OFFSET' as Step 1 — no API contract step, so the defaults and the max-size limit are decided implicitly inside the implementation rather than being visible design decisions",
+      "why_compass_might_suggest_it": "Engineers who are strong on implementation instinctively reach for the data-access layer first. The AI assistant will happily produce a LIMIT/OFFSET query, reinforcing this order. The design decisions end up buried in code rather than in a spec anyone can review.",
+      "detection_signals": [
+        "Plan has no step that mentions 'default', 'maximum', or 'contract'",
+        "First step contains the word 'query' or 'LIMIT' or 'OFFSET'"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Combines param-parsing, DB query, and response-shaping into a single step — the AI handles all three in one generation, making each sub-concern hard to verify independently",
+      "why_compass_might_suggest_it": "Learners optimise for fewer steps (feels more efficient) and ask the AI to 'add pagination' as one prompt. The AI produces working code, so the learner does not notice that three independent failure modes are now entangled and that reverting one requires reverting all three.",
+      "detection_signals": [
+        "Plan has fewer than 4 steps total",
+        "A single step mentions both 'parse' and 'query' or both 'query' and 'response'"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "No mention of updating the OpenAPI spec — plan ends at 'add tests', treating documentation as optional or an afterthought",
+      "why_compass_might_suggest_it": "Early-career engineers often treat API docs as a post-ship task. The AI assistant will not volunteer this step unless explicitly prompted.",
+      "detection_signals": [
+        "Plan contains no step with 'OpenAPI', 'Swagger', 'spec', or 'documentation'"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Plan leads with an API-contract step that explicitly names defaults (page, size) and the maximum page size before any implementation step appears",
+      "weight": 0.30
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Each step is single-concern: param parsing, DB query, response shaping, and testing are each in their own step, not merged",
+      "weight": 0.30
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Plan includes a testing step that names at least two out-of-range edge cases (e.g., page beyond last page, size > max) rather than just 'write tests'",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Plan includes an OpenAPI / documentation update step, acknowledging that the contract document must stay in sync with the implementation",
+      "weight": 0.15
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Define the API contract — nail down defaults (page=1, size=20), max size (100), and the response shape (data + pagination metadata) before writing a line of code",
+      "Step 2: Add query-param parsing and validation — coerce to integers, apply defaults, return 400 for out-of-range values; isolate this so it can be unit-tested without a DB",
+      "Step 3: Rewrite the DB query with LIMIT / OFFSET — pass the validated, sanitised values; include a COUNT(*) for total_count",
+      "Step 4: Shape the API response — return { data, pagination } with total_pages and has_next computed from total_count",
+      "Step 5: Write edge-case tests — page beyond last page (empty data, has_next: false), size=0 (400), size=101 (400), non-integer params (400)",
+      "Step 6: Update the OpenAPI spec — add page/size query params and the new response schema so API consumers see the current contract"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 85,
+    "branching_complexity": 1,
+    "edge_cases": 2,
+    "known_hard_patterns": []
+  }
+}

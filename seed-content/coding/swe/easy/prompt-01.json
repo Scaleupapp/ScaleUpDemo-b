@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "swe",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Razorpay / Postman early-career SWE round — practical task: write a clear specification before delegating code to an AI pair",
+
+  "brief": "You need to add a data-ingestion utility to a Python backend. The goal is to write a prompt that gets an LLM to produce the following function:\n\n```python\ndef parse_user_csv(filepath: str) -> list[dict]:\n    ...\n```\n\nThe function should:\n- Open a CSV file at `filepath` that has a header row with columns `name`, `email`, `age`\n- Validate that `age` is a positive integer (> 0); rows that fail this check must be silently skipped — no exception raised\n- Return a list of dicts where each dict has keys `name` (str), `email` (str), `age` (int)\n- Return an empty list if the file is empty or all rows fail validation\n\n**Your task:** Write the prompt you would send to an LLM coding assistant to generate this function. You are NOT writing the function itself — you are writing the instruction that produces it. Aim for a prompt a competent engineer would be satisfied to hand off.",
+
+  "acceptance_criteria": [
+    "Prompt names the exact function signature including return type",
+    "Prompt specifies the validation rule for age (positive integer, > 0)",
+    "Prompt specifies what to do with invalid rows (skip, not raise)",
+    "Prompt specifies what the function returns for an empty file or all-bad rows"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "gold_prompt.txt",
+        "content": "Write a Python function with the following signature:\n\n    def parse_user_csv(filepath: str) -> list[dict]:\n\nThe function must:\n1. Open the CSV file at `filepath`. The file always has a header row with exactly three columns: `name`, `email`, `age`.\n2. For each data row, attempt to cast `age` to an integer. If the cast fails OR the resulting integer is <= 0, skip the row silently — do not raise an exception.\n3. Return a list of dicts. Each dict has keys `name` (str), `email` (str), `age` (int).\n4. If the file is empty (header only or completely empty) or every row fails validation, return an empty list [].\n5. Do not use any third-party libraries — only the Python standard library `csv` module.\n6. Do not print or log anything; the function is pure (no side effects beyond reading the file).\n\nPlease include a brief docstring. Do not include usage examples or a `main` block."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Vague ask: 'Write a Python function that parses a CSV of users' — no mention of validation rules, error handling for bad age values, or what columns exist",
+      "why_compass_might_suggest_it": "Minimal prompts are the norm for experienced programmers who assume the LLM will infer reasonable behaviour; learner may think less is more",
+      "detection_signals": [
+        "rubric specificity score < 2 out of 4",
+        "prompt does not contain the word 'skip' or 'invalid' or 'validate'"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Omits header-row handling — prompt says nothing about whether row 0 is a header, so LLM may treat the header as a data row and return {'name': 'name', 'email': 'email', 'age': 0} as the first item",
+      "why_compass_might_suggest_it": "Learner mentally simulates the happy path (all valid data rows) and forgets the CSV format detail",
+      "detection_signals": [
+        "gold prompt references 'header row'",
+        "LLM-generated code doesn't use csv.DictReader or skips header explicitly"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt names the exact function signature `parse_user_csv(filepath: str) -> list[dict]` so the LLM cannot invent a different interface",
+      "weight": 0.30
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt states the validation constraint precisely: age must be a positive integer (> 0), not just 'numeric' or 'valid'",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt specifies the error-handling strategy for bad rows: skip silently, never raise an exception — leaving this implicit produces LLMs that raise ValueError",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt handles the edge case of an empty file or all-bad rows: must say 'return empty list []', not leave the behaviour undefined",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Declares the exact function signature including parameter name, type hint, and return type",
+      "Names the CSV columns explicitly (name, email, age) rather than using 'a CSV with user data'",
+      "Specifies the validation rule with a concrete comparison: age > 0, cast to int, not just 'valid age'",
+      "Specifies the error-handling strategy at the row level: skip silently vs. raise — both are valid designs, but the prompt must pick one",
+      "Mentions the header row explicitly so the LLM knows not to parse it as a data row",
+      "Specifies the empty-file return value (empty list) so the function has defined behaviour at the boundary"
+    ],
+    "common_verification_traps": [
+      "Accepting a response that raises ValueError on bad age — the spec says skip, not raise; easy to miss if you only test happy-path CSV input",
+      "Not checking that age=0 is rejected — a common off-by-one: 'positive integer' means > 0, but LLMs sometimes implement >= 0",
+      "Not testing the empty-file case — a function that crashes on an empty file passes all happy-path tests but fails in production"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 75,
+    "branching_complexity": 1,
+    "edge_cases": 3,
+    "known_hard_patterns": []
+  }
+}
