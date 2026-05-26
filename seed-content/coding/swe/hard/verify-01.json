@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "verify",
+  "role_track": "swe",
+  "language": "python",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Flipkart / Meesho senior backend platform interview — distributed systems code review: catch a race condition in a Redis distributed lock before it corrupts inventory",
+
+  "brief": "Your AI coding assistant generated the following Python Redis distributed lock implementation for an inventory-deduction service. Your task is to **review it critically** and identify every correctness bug.\n\nThe lock is supposed to:\n- Acquire a named lock in Redis, set a per-lock random token, and set an expiry so the lock auto-releases if the holder crashes\n- Release ONLY if the caller holds the lock (compare token before deleting)\n- Be safe under concurrent access from multiple processes/threads\n\nHere is the generated implementation:\n\n```python\n# distributed_lock.py\nimport uuid\nimport time\nimport redis\n\nclass DistributedLock:\n    def __init__(self, redis_client: redis.Redis, name: str, ttl_seconds: int = 10):\n        self.redis = redis_client\n        self.name = name\n        self.ttl = ttl_seconds\n        self.token = None\n\n    def acquire(self, timeout: float = 5.0) -> bool:\n        \"\"\"Try to acquire the lock, polling until timeout.\"\"\"\n        self.token = str(uuid.uuid4())\n        deadline = time.time() + timeout\n        while time.time() < deadline:\n            # Bug 1 lives here\n            acquired = self.redis.setnx(self.name, self.token)\n            if acquired:\n                self.redis.expire(self.name, self.ttl)\n                return True\n            time.sleep(0.05)\n        return False\n\n    def release(self) -> bool:\n        \"\"\"Release the lock if we still hold it.\"\"\"\n        # Bug 2 lives here\n        current = self.redis.get(self.name)\n        if current and current.decode() == self.token:\n            self.redis.delete(self.name)\n            return True\n        return False\n\n    def __enter__(self):\n        if not self.acquire():\n            raise TimeoutError(f'Could not acquire lock {self.name}')\n        return self\n\n    def __exit__(self, *args):\n        self.release()\n```\n\nList every bug you find, explain why each one is dangerous, and write the corrected version of the class.",
+
+  "acceptance_criteria": [
+    "Identifies the acquire race condition: `setnx` + `expire` are two separate commands — a crash between them leaves the key with no expiry (lock held forever)",
+    "Provides the correct atomic fix: use `SET key value NX EX ttl` as a single command",
+    "Identifies the release race condition: `GET` + `DELETE` is not atomic — another process can acquire the lock between the GET and the DELETE, causing the wrong holder to be evicted",
+    "Provides the correct atomic fix for release: use a Lua script that atomically checks the token and deletes the key only if it matches",
+    "Corrected implementation passes both bugs without introducing new concurrency issues"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "distributed_lock.py",
+        "content": "import uuid\nimport time\nimport redis\n\n# Lua script: atomically GET + conditional DELETE.\n# Returns 1 if the key was deleted (we held the lock), 0 otherwise.\n_RELEASE_SCRIPT = \"\"\"\nif redis.call('get', KEYS[1]) == ARGV[1] then\n    return redis.call('del', KEYS[1])\nelse\n    return 0\nend\n\"\"\"\n\n\nclass DistributedLock:\n    def __init__(self, redis_client: redis.Redis, name: str, ttl_seconds: int = 10):\n        self.redis = redis_client\n        self.name = name\n        self.ttl = ttl_seconds\n        self.token = None\n        # Pre-register the script for efficiency\n        self._release_script = self.redis.register_script(_RELEASE_SCRIPT)\n\n    def acquire(self, timeout: float = 5.0) -> bool:\n        \"\"\"Try to acquire the lock, polling until timeout.\n\n        Uses SET ... NX EX atomically so there is no window between\n        setting the value and setting the expiry.\n        \"\"\"\n        self.token = str(uuid.uuid4())\n        deadline = time.time() + timeout\n        while time.time() < deadline:\n            # SET key value NX EX ttl is a single atomic Redis command.\n            # It returns True if the key was set (we acquired the lock),\n            # None if the key already existed (someone else holds it).\n            acquired = self.redis.set(\n                self.name,\n                self.token,\n                nx=True,          # Only set if Not eXists\n                ex=self.ttl,      # Set expiry atomically in the same command\n            )\n            if acquired:\n                return True\n            time.sleep(0.05)\n        return False\n\n    def release(self) -> bool:\n        \"\"\"Release the lock only if we still hold it.\n\n        Uses a Lua script to atomically compare-and-delete, preventing\n        the GET-then-DELETE race condition where another process acquires\n        the lock between our GET and our DELETE.\n        \"\"\"\n        result = self._release_script(keys=[self.name], args=[self.token])\n        return bool(result)\n\n    def __enter__(self):\n        if not self.acquire():\n            raise TimeoutError(f'Could not acquire lock {self.name}')\n        return self\n\n    def __exit__(self, *args):\n        self.release()\n"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "distributed_lock.py:acquire — lines 18-19",
+      "bug_description": "Critical race condition: `setnx` and `expire` are two separate Redis commands. If the process crashes, is killed, or loses the network connection after `setnx` succeeds but before `expire` executes, the key remains in Redis with NO TTL. The lock is then held indefinitely — no other process can acquire it, and inventory deduction is permanently blocked for that item. This is the classic 'split-brain lock' bug.",
+      "why_compass_might_suggest_it": "LLMs trained on pre-2.6.12 Redis examples (before SET acquired NX EX support) learned the `setnx` + `expire` two-step pattern. This pattern was correct before Redis 2.6.12 and appears extensively in training data from 2010-2015. The model reproduces it because it looks reasonable and 'worked' in historical examples.",
+      "detection_signals": [
+        "The acquire method calls `self.redis.setnx(...)` and then separately calls `self.redis.expire(...)` — these are two distinct lines/calls rather than a single `self.redis.set(..., nx=True, ex=...)`",
+        "Code review: no single atomic Redis call that combines NX and EX",
+        "Failure simulation: if you mock Redis to raise after setnx but before expire, the key persists with no TTL — lock is permanent"
+      ]
+    },
+    {
+      "location": "distributed_lock.py:release — lines 25-29",
+      "bug_description": "Critical race condition in release: `GET` and `DELETE` are two separate commands. Timeline: Process A holds the lock (token='abc'). Process A calls `get()` → returns 'abc'. A's lock TTL expires between the GET and the DELETE. Process B acquires the lock (token='xyz'). Process A now calls `delete()` — it deletes Process B's valid lock. Process B's lock is gone; a third process can now acquire the lock concurrently with Process B. This is the 'accidental foreign-lock release' bug.",
+      "why_compass_might_suggest_it": "Non-atomic compare-and-delete is the intuitive implementation: read, compare, delete. It appears correct when the developer tests it sequentially. LLMs reproduce this pattern because the concept ('check ownership before deleting') is correct; the subtlety is that the check and the delete must be atomic.",
+      "detection_signals": [
+        "The release method calls `self.redis.get(...)` and then separately calls `self.redis.delete(...)` — two distinct Redis round-trips",
+        "No Lua script or Redis EVAL call in the release method",
+        "Code review: a 'check then act' pattern on a shared resource without atomicity"
+      ]
+    },
+    {
+      "location": "distributed_lock.py:overall",
+      "bug_description": "The `token` attribute is set at the top of `acquire()` before the acquisition attempt, which means if the caller calls `acquire()` twice (e.g., in a retry loop at the application level), the second call overwrites `self.token` with a new UUID — the old token stored in Redis no longer matches, so `release()` will silently fail to delete the key, causing a lock leak.",
+      "why_compass_might_suggest_it": "Placing `self.token = str(uuid.uuid4())` at the start of the method feels natural — 'generate my identity before trying to claim the resource'. The bug only manifests on double-acquire, which is not in the LLM's test scenario.",
+      "detection_signals": [
+        "`self.token` is assigned at the top of `acquire()` unconditionally rather than inside the `if acquired:` branch or reset only on first call",
+        "Calling `acquire()` twice with the same lock instance causes `release()` to return False"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the setnx+expire race condition, names it as 'non-atomic acquire', explains the crash-between-commands scenario, and provides the SET NX EX fix",
+      "weight": 0.35
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Learner identifies the GET+DELETE race condition, names it as 'non-atomic release / foreign-lock eviction', provides the Lua script fix (or GETDEL with pre-check alternative)",
+      "weight": 0.35
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Learner articulates why the LLM produced each bug — historical setnx+expire pattern from pre-2.6.12 Redis docs; intuitive check-then-delete not being atomic under concurrent access",
+      "weight": 0.20
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Corrected code uses a single SET NX EX call and a Lua script for release, introduces no new race conditions, and handles the edge case of release being called when the lock was never acquired (token is None)",
+      "weight": 0.10
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [
+      "Testing the lock with a single process and sequential operations — both bugs are invisible unless you simulate concurrent access or a crash between commands",
+      "Accepting the Lua script fix without verifying the script is registered and called atomically via EVAL — a script that uses GET and DEL in separate EVAL calls still has the race condition",
+      "Missing the token-overwrite bug because it only manifests on double-acquire; single happy-path tests all pass"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 220,
+    "branching_complexity": 4,
+    "edge_cases": 7,
+    "known_hard_patterns": [
+      "race-condition reasoning",
+      "atomic operations in Redis",
+      "token-based lock release",
+      "Lua scripting for compare-and-delete",
+      "non-atomic two-phase patterns"
+    ]
+  }
+}

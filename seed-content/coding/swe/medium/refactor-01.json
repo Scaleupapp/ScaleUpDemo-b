@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "swe",
+  "language": "javascript",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "PhonePe backend lateral round — code modernisation task: convert a callback-heavy data-fetch pipeline to async/await before it blocks Node.js upgrade",
+
+  "brief": "Your team is migrating a legacy Node.js service from callbacks to async/await. Here is a function you need to modernise:\n\n```javascript\n// reportService.js\nconst db = require('./db');\nconst fs = require('fs');\nconst https = require('https');\n\nfunction generateUserReport(userId, outputPath, webhookUrl, callback) {\n  db.query('SELECT * FROM users WHERE id = $1', [userId], function(err, rows) {\n    if (err) return callback(err);\n    if (!rows.length) return callback(new Error('User not found'));\n    const user = rows[0];\n\n    const reportContent = JSON.stringify({ user, generatedAt: new Date() });\n\n    fs.writeFile(outputPath, reportContent, function(err) {\n      if (err) return callback(err);\n\n      const reqBody = JSON.stringify({ userId, reportPath: outputPath });\n      const options = {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(reqBody) }\n      };\n      const req = https.request(webhookUrl, options, function(res) {\n        let data = '';\n        res.on('data', chunk => { data += chunk; });\n        res.on('end', function() {\n          if (res.statusCode >= 400) {\n            return callback(new Error(`Webhook failed: ${res.statusCode}`));\n          }\n          callback(null, { userId, reportPath: outputPath, webhookStatus: res.statusCode });\n        });\n      });\n      req.on('error', callback);\n      req.write(reqBody);\n      req.end();\n    });\n  });\n}\n\nmodule.exports = { generateUserReport };\n```\n\n**Your tasks:**\n1. Rewrite `generateUserReport` as an `async` function that returns a Promise and uses `await` throughout — remove the `callback` parameter entirely.\n2. Replace the raw `https.request` callback with a helper function `postWebhook(url, body)` that returns a Promise.\n3. Use `fs.promises.writeFile` instead of the callback-based `fs.writeFile`.\n4. Propagate errors naturally via `throw` / rejected Promises (callers use try/catch or `.catch()`).\n5. Both visible tests must pass against the refactored code.",
+
+  "acceptance_criteria": [
+    "`generateUserReport` is declared as `async function` and returns a Promise",
+    "The `callback` parameter is removed from `generateUserReport`",
+    "A helper function `postWebhook` exists that wraps the https.request and returns a Promise",
+    "fs.promises.writeFile is used instead of the callback-based fs.writeFile",
+    "Both visible tests pass against the refactored code"
+  ],
+
+  "starter_repo": {
+    "files": [
+      {
+        "path": "reportService.js",
+        "content": "const db = require('./db');\nconst fs = require('fs');\nconst https = require('https');\n\nfunction generateUserReport(userId, outputPath, webhookUrl, callback) {\n  db.query('SELECT * FROM users WHERE id = $1', [userId], function(err, rows) {\n    if (err) return callback(err);\n    if (!rows.length) return callback(new Error('User not found'));\n    const user = rows[0];\n\n    const reportContent = JSON.stringify({ user, generatedAt: new Date() });\n\n    fs.writeFile(outputPath, reportContent, function(err) {\n      if (err) return callback(err);\n\n      const reqBody = JSON.stringify({ userId, reportPath: outputPath });\n      const options = {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(reqBody) }\n      };\n      const req = https.request(webhookUrl, options, function(res) {\n        let data = '';\n        res.on('data', chunk => { data += chunk; });\n        res.on('end', function() {\n          if (res.statusCode >= 400) {\n            return callback(new Error(`Webhook failed: ${res.statusCode}`));\n          }\n          callback(null, { userId, reportPath: outputPath, webhookStatus: res.statusCode });\n        });\n      });\n      req.on('error', callback);\n      req.write(reqBody);\n      req.end();\n    });\n  });\n}\n\nmodule.exports = { generateUserReport };\n"
+      }
+    ]
+  },
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "reportService.js",
+        "content": "const db = require('./db');\nconst fs = require('fs');\nconst https = require('https');\n\n/**\n * POST a JSON body to a URL and resolve with the status code.\n * Rejects if the network request fails or the server returns >= 400.\n *\n * @param {string} url\n * @param {object} body\n * @returns {Promise<number>} HTTP status code\n */\nfunction postWebhook(url, body) {\n  return new Promise((resolve, reject) => {\n    const reqBody = JSON.stringify(body);\n    const options = {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/json',\n        'Content-Length': Buffer.byteLength(reqBody),\n      },\n    };\n    const req = https.request(url, options, (res) => {\n      let data = '';\n      res.on('data', (chunk) => { data += chunk; });\n      res.on('end', () => {\n        if (res.statusCode >= 400) {\n          reject(new Error(`Webhook failed: ${res.statusCode}`));\n        } else {\n          resolve(res.statusCode);\n        }\n      });\n    });\n    req.on('error', reject);\n    req.write(reqBody);\n    req.end();\n  });\n}\n\n/**\n * Generate a JSON report for a user, write it to disk, and notify a webhook.\n *\n * @param {string} userId\n * @param {string} outputPath\n * @param {string} webhookUrl\n * @returns {Promise<{ userId: string, reportPath: string, webhookStatus: number }>}\n */\nasync function generateUserReport(userId, outputPath, webhookUrl) {\n  const rows = await db.query('SELECT * FROM users WHERE id = $1', [userId]);\n  if (!rows.length) throw new Error('User not found');\n  const user = rows[0];\n\n  const reportContent = JSON.stringify({ user, generatedAt: new Date() });\n  await fs.promises.writeFile(outputPath, reportContent);\n\n  const webhookStatus = await postWebhook(webhookUrl, { userId, reportPath: outputPath });\n  return { userId, reportPath: outputPath, webhookStatus };\n}\n\nmodule.exports = { generateUserReport, postWebhook };\n"
+      }
+    ]
+  },
+
+  "visible_tests": [
+    {
+      "name": "generateUserReport_is_async",
+      "command": "node -e \"const s = require('./reportService'); const fn = s.generateUserReport; const isAsync = fn.constructor.name === 'AsyncFunction'; console.assert(isAsync, 'generateUserReport must be async'); if (isAsync) console.log('PASS');\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": ["PASS"]
+    },
+    {
+      "name": "postWebhook_helper_exists",
+      "command": "node -e \"const s = require('./reportService'); console.assert(typeof s.postWebhook === 'function', 'postWebhook must be exported'); console.assert(s.postWebhook.length >= 2, 'postWebhook must accept at least 2 args'); console.log('PASS');\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": ["PASS"]
+    }
+  ],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Wraps the entire callback-based function in `new Promise((resolve, reject) => { generateUserReport(..., (err, result) => err ? reject(err) : resolve(result)) })` — this is a promisification wrapper, NOT a refactor. The callback pyramid is still present; it is just hidden behind a Promise facade.",
+      "why_compass_might_suggest_it": "This is the path of least resistance when you ask an LLM to 'make a function return a Promise'. The model treats promisification as the canonical async conversion pattern and does not restructure the nested callbacks.",
+      "detection_signals": [
+        "The file still contains `function(err, rows)` or nested callbacks after the refactor",
+        "generateUserReport_is_async test passes (it IS async now) but the internal structure is still callback-based"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Keeps `fs.writeFile` with the callback API and wraps it with `util.promisify` explicitly — missing the cleaner `fs.promises.writeFile` which is available since Node 10 and requires no wrapper.",
+      "why_compass_might_suggest_it": "LLMs trained on older Node.js examples reach for `util.promisify(fs.writeFile)` because that pattern appears widely in pre-2020 documentation. The `fs.promises` namespace is less prominent in training data.",
+      "detection_signals": [
+        "File imports `util` and calls `util.promisify(fs.writeFile)` instead of `fs.promises.writeFile`",
+        "The acceptance criterion 'fs.promises.writeFile is used' would fail a grep check"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Extracts `postWebhook` as an inner function inside `generateUserReport` instead of a top-level export — so `require('./reportService').postWebhook` is `undefined` and the visible test fails.",
+      "why_compass_might_suggest_it": "The LLM sees `postWebhook` as a 'private helper' and scopes it inside the outer function. Unless the prompt explicitly says 'export `postWebhook`', the model defaults to keeping it local.",
+      "detection_signals": [
+        "postWebhook_helper_exists test exits with non-zero code",
+        "`module.exports` at the bottom of the file lists only `generateUserReport`, not `postWebhook`"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "code_quality",
+      "check": "`generateUserReport` uses `async/await` throughout with no nested callbacks remaining — all three async operations (db.query, fs.writeFile, https.request) are awaited",
+      "weight": 0.30
+    },
+    {
+      "dimension": "code_quality",
+      "check": "`postWebhook` is extracted as a top-level, exported function that returns a Promise — not a promisify wrapper, not a nested helper",
+      "weight": 0.25
+    },
+    {
+      "dimension": "correctness",
+      "check": "Both visible tests pass — generateUserReport is detected as AsyncFunction and postWebhook is exported with arity >= 2",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt explicitly requested `fs.promises.writeFile` (not util.promisify) AND export of postWebhook — not just 'convert to async/await'",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Specifies 'use `fs.promises.writeFile`' explicitly rather than 'promisify the file write' or 'convert fs.writeFile'",
+      "Names `postWebhook` as the extracted helper and states it must be a top-level export so it can be unit-tested independently",
+      "States 'remove the `callback` parameter entirely — callers should use `.then()/.catch()` or `try/catch`' to prevent the LLM from keeping the callback as an optional parameter"
+    ],
+    "common_verification_traps": [
+      "Running the async test and seeing 'PASS' but not verifying the internal structure — the promisification anti-pattern passes the async test while leaving nested callbacks intact",
+      "Checking that fs.writeFile is no longer called without verifying that fs.promises.writeFile is used instead of util.promisify — both eliminate the callback, but only one matches the acceptance criterion"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 160,
+    "branching_complexity": 3,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "swe",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Razorpay backend internship code-review round — tidy a shipping-discount routine before it lands in the monorepo",
+
+  "brief": "Your team has a Python pricing utility that was written quickly and never cleaned up. Here is the function you need to refactor:\n\n```python\ndef calc(items, c):\n    a = 0\n    for i in items:\n        tmp = i['p'] * i['q']\n        if tmp > 500:\n            tmp = tmp * 0.9\n        a += tmp\n    if c == 1:\n        a = a - 50\n    elif c == 2:\n        a = a - 100\n    return a\n```\n\n**Your tasks:**\n1. Extract a helper function `line_total(item)` that computes `price * quantity` and applies the bulk discount (10% off when the line subtotal exceeds ₹500).\n2. Rename all variables and parameters to be self-documenting (`a` → `total`, `c` → `coupon_tier`, `i` → `item`, `tmp` → `subtotal`, `p` → `price`, `q` → `quantity`).\n3. Replace the magic numbers `500`, `0.9`, `50`, `100` with named constants: `BULK_THRESHOLD = 500`, `BULK_DISCOUNT_RATE = 0.10`, `TIER1_DISCOUNT = 50`, `TIER2_DISCOUNT = 100`.\n4. Keep the observable behaviour identical — the two visible tests below must still pass.",
+
+  "acceptance_criteria": [
+    "A top-level helper function named `line_total` exists and is callable",
+    "All single-letter variable names (`a`, `c`, `i`, `tmp`) are replaced with descriptive names",
+    "Magic numbers 500, 0.9, 50, 100 are replaced with named module-level constants",
+    "Both visible tests pass after the refactor",
+    "The function `calc` is renamed to `calculate_order_total`"
+  ],
+
+  "starter_repo": {
+    "files": [
+      {
+        "path": "pricing.py",
+        "content": "def calc(items, c):\n    a = 0\n    for i in items:\n        tmp = i['p'] * i['q']\n        if tmp > 500:\n            tmp = tmp * 0.9\n        a += tmp\n    if c == 1:\n        a = a - 50\n    elif c == 2:\n        a = a - 100\n    return a\n"
+      }
+    ]
+  },
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "pricing.py",
+        "content": "BULK_THRESHOLD = 500\nBULK_DISCOUNT_RATE = 0.10\nTIER1_DISCOUNT = 50\nTIER2_DISCOUNT = 100\n\n\ndef line_total(item):\n    \"\"\"Return the discounted line total for a single cart item.\n\n    Applies a 10% bulk discount when price * quantity exceeds BULK_THRESHOLD.\n    \"\"\"\n    subtotal = item['price'] * item['quantity']\n    if subtotal > BULK_THRESHOLD:\n        subtotal = subtotal * (1 - BULK_DISCOUNT_RATE)\n    return subtotal\n\n\ndef calculate_order_total(items, coupon_tier):\n    \"\"\"Return the final order total after line discounts and coupon deduction.\n\n    coupon_tier 1 deducts TIER1_DISCOUNT; coupon_tier 2 deducts TIER2_DISCOUNT.\n    coupon_tier 0 (or any other value) applies no coupon discount.\n    \"\"\"\n    total = sum(line_total(item) for item in items)\n    if coupon_tier == 1:\n        total -= TIER1_DISCOUNT\n    elif coupon_tier == 2:\n        total -= TIER2_DISCOUNT\n    return total\n"
+      }
+    ]
+  },
+
+  "visible_tests": [
+    {
+      "name": "line_total_helper_exists_and_callable",
+      "command": "python -c \"import pricing; assert callable(getattr(pricing, 'line_total', None)), 'line_total not found'\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": []
+    },
+    {
+      "name": "order_total_matches_original_behaviour",
+      "command": "python -c \"\nimport pricing\nitems = [{'price': 300, 'quantity': 2}, {'price': 100, 'quantity': 1}]\nresult = pricing.calculate_order_total(items, 1)\nexpected = (300 * 2 * 0.9) - 50 + 100\nassert abs(result - expected) < 0.01, f'got {result}, expected {expected}'\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": []
+    }
+  ],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Renames variables but leaves magic numbers inline — e.g., rewrites `if tmp > 500` as `if subtotal > 500` without extracting a constant. The code reads better but the business rule is still hardcoded.",
+      "why_compass_might_suggest_it": "LLMs optimise for one instruction at a time. If the prompt says 'rename variables', the model will execute that cleanly and skip the constants step unless it is explicitly requested.",
+      "detection_signals": [
+        "File does not contain 'BULK_THRESHOLD' or any module-level constant assignment",
+        "First visible test passes but the constants test (if added) would fail"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Extracts `line_total` as an inner/nested function inside `calculate_order_total` rather than as a top-level function — so `import pricing; pricing.line_total` raises AttributeError and the unit-test fails.",
+      "why_compass_might_suggest_it": "Learners who think of helper functions as 'local details' naturally nest them. The LLM mirrors this pattern when the prompt says 'extract a helper' without specifying module-level placement.",
+      "detection_signals": [
+        "line_total_helper_exists_and_callable test exits with code 1",
+        "The `def line_total` line is indented inside `def calculate_order_total` in the output"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Changes `tmp * 0.9` to `subtotal - subtotal * BULK_DISCOUNT_RATE` but accidentally shifts the discount logic so that even items below the threshold get discounted (i.e., moves the if-check after the discount application).",
+      "why_compass_might_suggest_it": "Rewriting arithmetic in a refactor feels mechanical; the LLM may reorder lines when rephrasing, especially if asked to 'simplify' the conditional block.",
+      "detection_signals": [
+        "order_total_matches_original_behaviour test fails with a numerical mismatch",
+        "The if-guard for BULK_THRESHOLD is absent or appears after the discount multiplication in the extracted helper"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "code_quality",
+      "check": "All four magic numbers are replaced with named module-level constants (`BULK_THRESHOLD`, `BULK_DISCOUNT_RATE`, `TIER1_DISCOUNT`, `TIER2_DISCOUNT`); no bare 500, 0.9, 50, or 100 remain in the function bodies",
+      "weight": 0.30
+    },
+    {
+      "dimension": "code_quality",
+      "check": "`line_total` is a top-level function that takes a single `item` dict and encapsulates the bulk-discount logic; it is importable directly from the module",
+      "weight": 0.25
+    },
+    {
+      "dimension": "correctness",
+      "check": "Both visible tests pass — refactored code preserves identical observable behaviour to the original `calc` function",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt to the AI was specific enough to request module-level constants AND top-level helper placement — not just 'improve the code'",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Specifies the exact new name for the helper (`line_total`) and states it must be a top-level function, not nested",
+      "Lists each rename explicitly (a → total, c → coupon_tier, etc.) rather than saying 'rename to be readable'",
+      "Asks for module-level constants by name (`BULK_THRESHOLD = 500`) rather than 'replace magic numbers'"
+    ],
+    "common_verification_traps": [
+      "Running only the happy-path test and missing that line_total was nested — import succeeds but `pricing.line_total` raises AttributeError at runtime",
+      "Accepting renamed variables without checking that all four magic numbers are gone — grep for bare `500` in the file to catch this"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 80,
+    "branching_complexity": 2,
+    "edge_cases": 3,
+    "known_hard_patterns": []
+  }
+}
