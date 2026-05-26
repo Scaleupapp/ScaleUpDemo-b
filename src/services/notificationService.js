@@ -159,6 +159,10 @@ class NotificationService {
       creator_endorsed: 'creator_application',
       creator_approved: 'creator_application',
       creator_rejected: 'creator_application',
+      // Coding-practice types (Task 30)
+      coding_drill_ready: 'coding_drill_ready',
+      coding_calibration_invitation: 'coding_calibration_invitation',
+      coding_difficulty_change_suggestion: 'coding_difficulty_change_suggestion',
     };
     return map[dataType] || 'journey_update';
   }
