@@ -6385,8 +6385,9 @@ paths:
                         status:
                           type: string
                         overall_score:
-                          type: integer
-                          nullable: true
+                          oneOf:
+                            - type: integer
+                            - type: 'null'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
