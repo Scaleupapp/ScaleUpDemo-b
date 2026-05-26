@@ -24,6 +24,9 @@ info:
     - RN:      https://github.com/drwpow/openapi-typescript
     - Backend: express-openapi-validator middleware in src/app.js
     - Lint:    `npx redocly lint openapi.yaml`
+  license:
+    name: Proprietary
+    url: https://scaleupapp.club
 
 servers:
   - url: https://api.scaleupapp.club/api/v1
