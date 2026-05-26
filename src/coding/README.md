@@ -1,0 +1,1 @@
+The `coding` module delivers AI-augmented coding-practice surfaces — timed drills and capstone projects that train prompting, verification, decomposition, and refactoring meta-skills — backed by a content-generation pipeline, an LLM-powered grader service, and BullMQ worker scaffolds for async job processing.

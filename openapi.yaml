@@ -55,6 +55,8 @@ tags:
     description: Knowledge profile + topic mastery
   - name: Dashboard
     description: Home dashboard aggregate
+  - name: coding
+    description: Coding practice — drills + capstones
 
 components:
   securitySchemes:
@@ -5811,3 +5813,28 @@ paths:
                 $ref: '#/components/schemas/ApiSuccessEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  # =====================================================================
+  # Coding (no /api/v1 version prefix — separate namespace)
+  # =====================================================================
+  /api/coding/health:
+    get:
+      operationId: getCodingHealth
+      tags: [coding]
+      summary: Coding module healthcheck
+      security: []
+      servers:
+        - url: https://api.scaleupapp.club
+          description: Production (coding namespace)
+        - url: http://localhost:5000
+          description: Local development (coding namespace)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  module: { type: string }
+                  status: { type: string }
+                required: [module, status]
