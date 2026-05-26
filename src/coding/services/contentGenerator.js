@@ -87,10 +87,12 @@ async function nearestSeeds({ role_track, drill_subtype, difficulty }, k = 3) {
 /**
  * Generate a draft ArtifactBundle using Claude Opus + Code Execution Tool.
  *
- * @param {{ role_track: string, drill_subtype: string, difficulty: string, language: string, topic_hint?: string }} params
+ * @param {{ role_track: string, drill_subtype: string, difficulty: string, language: string, topic_hint?: string, critique?: string }} params
+ *   critique — optional feedback from a previous validation failure; appended to
+ *              the user prompt so the model can correct identified issues.
  * @returns {Promise<object>}  Saved Mongoose document
  */
-async function generate({ role_track, drill_subtype, difficulty, language, topic_hint }) {
+async function generate({ role_track, drill_subtype, difficulty, language, topic_hint, critique }) {
   const seeds = await nearestSeeds({ role_track, drill_subtype, difficulty });
   if (seeds.length === 0) {
     throw new Error(
@@ -125,7 +127,7 @@ TARGET:
 - language: ${language}
 - difficulty: ${difficulty}
 ${topic_hint ? `- topic_hint: ${topic_hint}` : ''}
-
+${critique ? `\nCRITIQUE FROM PREVIOUS ATTEMPT:\n${critique}\n` : ''}
 Generate a complete ArtifactBundle now. Return only the JSON.`;
 
   const res = await llmCall({
