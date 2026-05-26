@@ -1,7 +1,15 @@
 'use strict';
 
 const router = require('express').Router();
-const { getToday, startDrill, submitDrill, getResult } = require('../controllers/drills.controller');
+const {
+  getToday,
+  startDrill,
+  submitDrill,
+  getResult,
+  startCalibration,
+  submitCalibration,
+  getCalibrationResult,
+} = require('../controllers/drills.controller');
 const auth = require('../../middleware/auth');
 
 /**
@@ -9,6 +17,29 @@ const auth = require('../../middleware/auth');
  * Returns the recommended drill for the authenticated user.
  */
 router.get('/today', auth, getToday);
+
+// ---------------------------------------------------------------------------
+// Calibration routes — must be declared BEFORE /:id/... routes to avoid
+// Express matching "calibration" as the :id parameter.
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/coding/drills/calibration/start
+ * Returns 4 easy-difficulty drill bundles (one per subtype) as a calibration sequence.
+ */
+router.post('/calibration/start', auth, startCalibration);
+
+/**
+ * POST /api/coding/drills/calibration/:calibration_id/submit
+ * Accepts all 4 calibration submissions in one payload; enqueues 4 grader jobs.
+ */
+router.post('/calibration/:calibration_id/submit', auth, submitCalibration);
+
+/**
+ * GET /api/coding/drills/calibration/:calibration_id/result
+ * Returns aggregate calibration result; writes Mastery + DifficultyState when all 4 graded.
+ */
+router.get('/calibration/:calibration_id/result', auth, getCalibrationResult);
 
 /**
  * POST /api/coding/drills/:id/start

@@ -24,6 +24,8 @@ const DrillAttemptSchema = new mongoose.Schema({
     grader_model: String,
   },
   is_calibration: { type: Boolean, default: false },
+  calibration_id: { type: String },
+  calibration_committed: { type: Boolean, default: false },
 }, { timestamps: true });
 
 DrillAttemptSchema.index({ user_id: 1, createdAt: -1 });
