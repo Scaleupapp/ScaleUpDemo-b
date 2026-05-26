@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "CRED ML platform — take-home: write a production-grade few-shot extraction prompt for processing partner merchant contact records",
+
+  "brief": "Your team needs to extract structured contact information from messy email signatures collected from merchant onboarding emails. The data is inconsistent: some fields are missing, phones are in multiple formats, and some signatures contain multiple email addresses.\n\nHere is the extraction spec:\n- Fields to extract: `name` (str), `email` (str), `phone` (str | null), `company` (str | null), `role` (str | null)\n- Missing fields must return `null` — never return an empty string or a placeholder like \"N/A\"\n- If multiple email addresses appear, pick the most likely primary business email (not a shared alias like info@, support@, or noreply@)\n- Phone numbers must be normalized to E.164 format (+91XXXXXXXXXX for Indian numbers, or international format for others) — if normalization is ambiguous or impossible, return `null`\n- Output must be valid JSON — no markdown fences, no prose explanation\n\nHere are three real signatures from the dataset:\n\n**Signature A:**\n```\nRahul Sharma\nSenior Product Manager | Setu Technologies\nrahul.sharma@setu.co | info@setu.co\n+91 98765 43210\n```\n\n**Signature B:**\n```\npriya.menon@razorpay.com\nHead of Partnerships\n```\n\n**Signature C:**\n```\nVishal Kumar\ncontact: 9876543210 or 011-23456789\nvkumar@startup.io\nChief Technology Officer, FintechXYZ\n```\n\n**Your task:** Write the prompt you would send to an LLM to extract structured contact info from a signature. Include 2–3 carefully chosen few-shot examples that cover the tricky cases. You are NOT writing the extraction code — you are writing the prompt.",
+
+  "acceptance_criteria": [
+    "Prompt specifies the exact output schema as JSON with field names and types",
+    "Prompt includes 2–3 few-shot examples that collectively demonstrate: null for missing fields, primary email selection when multiple emails appear, phone normalization to E.164",
+    "Prompt explicitly forbids empty strings and placeholders — null must be used for missing data",
+    "Prompt instructs the model to return valid JSON only, with no markdown fencing or prose",
+    "At least one few-shot example demonstrates phone normalization from an Indian number without country code"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "extraction_prompt.txt",
+        "content": "Extract contact information from the email signature below and return a JSON object with exactly these fields:\n\n{\n  \"name\": string or null,\n  \"email\": string or null,\n  \"phone\": string or null,\n  \"company\": string or null,\n  \"role\": string or null\n}\n\nRules:\n1. Use null (not empty string, not \"N/A\", not \"unknown\") for any field that is absent or cannot be reliably determined.\n2. If multiple email addresses appear, select the most likely personal/direct business email. Exclude shared aliases: do NOT pick addresses starting with info@, support@, noreply@, hello@, contact@, or team@.\n3. Normalize phone numbers to E.164 format. For 10-digit numbers with no country code, assume +91 (India) unless another country is indicated by context. If the number is ambiguous, malformed, or contains letters, return null.\n4. Return ONLY the JSON object — no markdown code fences, no explanation, no prose before or after the JSON.\n\n---\n\nExamples:\n\nSignature:\nAmit Joshi\nProduct Lead | Sarvam AI\namit.joshi@sarvam.ai | team@sarvam.ai\n+91-9812345678\n\nOutput:\n{\"name\": \"Amit Joshi\", \"email\": \"amit.joshi@sarvam.ai\", \"phone\": \"+919812345678\", \"company\": \"Sarvam AI\", \"role\": \"Product Lead\"}\n\n---\n\nSignature:\nnidhi.kapoor@startup.io\nCo-Founder\n\nOutput:\n{\"name\": null, \"email\": \"nidhi.kapoor@startup.io\", \"phone\": null, \"company\": null, \"role\": \"Co-Founder\"}\n\n---\n\nSignature:\nRohan Mehta\nCTO, PayStack India\n9876543210\nrohan@paystackindia.com | info@paystackindia.com\n\nOutput:\n{\"name\": \"Rohan Mehta\", \"email\": \"rohan@paystackindia.com\", \"phone\": \"+919876543210\", \"company\": \"PayStack India\", \"role\": \"CTO\"}\n\n---\n\nNow extract from this signature:\n\n{{SIGNATURE}}"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt says 'return null for missing fields' but the few-shot examples use empty strings (\"\") for missing fields — the LLM learns from the examples, not the rules, and returns empty strings in production",
+      "why_compass_might_suggest_it": "Engineers write the rules correctly but dash off examples quickly without checking consistency. Empty strings are the natural 'nothing here' value in most programming contexts, so they appear in hastily-written examples.",
+      "detection_signals": [
+        "Prompt text says 'null' but any few-shot example output contains '\"\"' for a missing field",
+        "LLM output for Signature B (name missing) returns '\"name\": \"\"' instead of '\"name\": null'"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt instructs 'pick the primary email' but provides no example of multi-email disambiguation — without a few-shot example, the LLM's email selection behaviour is unpredictable (may pick the first, the last, or the alphabetically first)",
+      "why_compass_might_suggest_it": "The rule sounds clear in prose, but LLMs anchor their selection strategy to the examples. Without an example showing `info@setu.co` being rejected in favour of `rahul.sharma@setu.co`, the model may implement the rule inconsistently.",
+      "detection_signals": [
+        "No few-shot example contains two email addresses where one is a shared alias",
+        "When tested with Signature A above, the LLM returns 'info@setu.co' instead of 'rahul.sharma@setu.co'"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Phone normalisation rule says 'E.164 format' but provides no example of a local Indian number (10 digits, no +91 prefix) being normalised — so the LLM returns the raw '9876543210' string rather than '+919876543210'",
+      "why_compass_might_suggest_it": "E.164 is a standard that the LLM knows, but the implicit assumption 'assume +91 for bare 10-digit Indian numbers' is a business rule that the model cannot infer from the E.164 spec alone. Without a worked example, it returns the number as-is.",
+      "detection_signals": [
+        "No few-shot example shows a bare 10-digit number being prefixed with '+91'",
+        "LLM output for Signature B-variant with '9812345678' returns '\"phone\": \"9812345678\"' (no country code)"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt includes a few-shot example where two emails are present and the shared alias is explicitly NOT chosen — demonstrating multi-email selection rather than just stating the rule",
+      "weight": 0.30
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt includes a few-shot example where a bare 10-digit Indian number is normalised to +91XXXXXXXXXX E.164 format",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt forbids non-null missing-field representations (empty string, 'N/A', 'unknown') AND all few-shot examples are internally consistent with this rule",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt instructs JSON-only output with explicit prohibition of markdown fencing and prose — learner demonstrates awareness that LLMs default to wrapping JSON in ```json blocks",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Defines the exact JSON schema with field names, types, and explicit null annotation — not just 'extract name, email, phone'",
+      "Few-shot examples cover orthogonal cases: (1) full record with multi-email disambiguation, (2) mostly-null record, (3) phone normalisation from bare digits — not three similar happy-path examples",
+      "Rule and example are consistent: if rule says 'null', examples use null, not empty string or 'N/A'",
+      "Output format instruction is explicit: 'return ONLY the JSON object — no markdown code fences, no prose'"
+    ],
+    "common_verification_traps": [
+      "Testing only with complete signatures (all fields present) — the null-handling bug only manifests on partial signatures like Signature B",
+      "Not testing multi-email disambiguation: if you only test signatures with one email, the shared-alias exclusion rule is never exercised",
+      "Accepting JSON with markdown fencing (```json ... ```) as correct — downstream JSON parsers will fail on the fences even though the content looks right"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 140,
+    "branching_complexity": 3,
+    "edge_cases": 5,
+    "known_hard_patterns": []
+  },
+
+  "content_hash": "placeholder"
+}

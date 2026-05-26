@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Setu conversational banking team — practical task: write the system prompt for a customer support LLM before the agent goes live on the support channel",
+
+  "brief": "Your team is deploying an LLM-powered customer support bot for a fintech product. The bot should answer FAQs from a knowledge base, stay strictly in scope, escalate billing issues to a human, and never fabricate policies or account details.\n\nHere is the spec:\n- The bot ONLY answers questions about: account setup, KYC verification steps, password reset, UPI transaction limits, and app navigation\n- For ANY billing dispute, incorrect charge, or refund request: the bot must NOT attempt to resolve it — it must escalate with a specific message directing the user to the billing team\n- For questions outside the above scope (e.g., investment advice, unrelated products): the bot must politely decline and state it cannot help with that topic\n- The bot MUST NEVER invent refund policies, fee structures, or regulatory rules that are not in the knowledge base\n- Tone: professional, concise, empathetic — no jargon\n\n**Your task:** Write the system prompt you would give this LLM. You are NOT writing the chat response — you are writing the standing instruction that governs all responses. Aim for a prompt a senior engineer would be comfortable deploying to production.",
+
+  "acceptance_criteria": [
+    "Prompt defines the exact in-scope topic list (account setup, KYC, password reset, UPI limits, app navigation)",
+    "Prompt includes an explicit escalation instruction for billing disputes with the exact message the bot should output",
+    "Prompt forbids the model from inventing policies or facts not present in the knowledge base — with a concrete instruction like 'do not answer if unsure'",
+    "Prompt handles the out-of-scope case: a polite decline rather than a hallucinated answer",
+    "Tone guidance is included (professional, concise, empathetic)"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "system_prompt.txt",
+        "content": "You are a customer support assistant for [Product Name], a fintech app. You assist users with a limited set of topics using only information from the knowledge base provided to you.\n\n## Your scope — topics you CAN help with\n- Account setup and registration\n- KYC (Know Your Customer) verification steps\n- Password and PIN reset\n- UPI transaction limits and daily caps\n- App navigation and feature explanations\n\n## Billing escalation — MANDATORY\nIf the user mentions any of the following: a disputed charge, an incorrect debit, a refund request, a transaction they did not authorise, or any billing complaint — you MUST respond with exactly:\n\"I'm not able to resolve billing or payment disputes directly. Please contact our billing team at billing-support@[product].com or call 1800-XXX-XXXX (Mon–Sat, 9 AM–6 PM). They will resolve your issue within 2 business days.\"\nDo NOT attempt to investigate, explain, or resolve billing issues yourself.\n\n## Out-of-scope topics\nIf the user asks about anything not in your scope list above (for example: investment advice, loans, credit scores, competitor products, unrelated topics), respond with:\n\"I can only help with account setup, KYC, password reset, UPI limits, and app navigation. For other queries, please visit our help centre at help.[product].com or contact our general support team.\"\n\n## Knowledge base constraint — CRITICAL\nYou ONLY answer using information present in the knowledge base documents provided to you. If a policy, fee, or regulatory rule is NOT in the knowledge base, say: \"I don't have that information — please check our help centre or contact support.\" NEVER invent percentages, fees, timelines, or regulatory rules.\n\n## Tone\n- Professional and concise — no filler phrases like \"Great question!\"\n- Empathetic when the user is frustrated or confused\n- Never use technical jargon unless the user introduced it first\n- Keep responses under 150 words unless the user asks for step-by-step instructions"
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt says 'escalate billing issues to support' without specifying the exact message the bot should output — so the LLM improvises escalation language, sometimes including invented phone numbers or SLAs that don't exist",
+      "why_compass_might_suggest_it": "Engineers treat the escalation step as a routing decision ('if billing, redirect') rather than a content constraint. The LLM will generate plausible-sounding contact details and timelines that may be wrong.",
+      "detection_signals": [
+        "System prompt contains 'escalate' or 'redirect' but no literal quoted string showing the exact bot output",
+        "Prompt does not include the phrase 'exactly' or 'respond with exactly' before the escalation message"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt says 'only use information from the knowledge base' but provides no instruction for what to do when the information is absent — so the model fills the gap by hallucinating plausible policies (e.g., inventing a '5-day refund window')",
+      "why_compass_might_suggest_it": "Learners focus on the 'use knowledge base' rule and forget the equally important negative case: what the model should say when the knowledge base is silent. The LLM defaults to being helpful — which means generating an answer — unless explicitly told to stop.",
+      "detection_signals": [
+        "Prompt contains 'use the knowledge base' but no instruction for the case where information is not found",
+        "Prompt does not contain 'do not know', 'not available', 'cannot confirm', or equivalent fallback language"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Out-of-scope instruction is vague: 'politely decline unrelated questions' — without a sample response, the model may generate lengthy apologies, suggest unrelated third-party services, or still attempt a partial answer",
+      "why_compass_might_suggest_it": "Vague tone guidance like 'politely decline' feels sufficient because it mirrors how a human supervisor might describe the behaviour. But LLMs require the actual output format, not just the intention.",
+      "detection_signals": [
+        "Prompt does not contain example out-of-scope response text or a quoted template",
+        "Prompt uses words like 'politely' or 'gently' without specifying what the bot should actually say"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt defines the exact in-scope topics as an explicit list — not just 'fintech questions' — so the model cannot expand scope by inference",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Billing escalation includes a quoted literal response the bot must output verbatim — not a paraphrase instruction",
+      "weight": 0.30
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt addresses the missing-knowledge case: what the bot says when the knowledge base does not contain an answer (fallback to help centre / support, never invent)",
+      "weight": 0.25
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt includes tone guidance and a length constraint, demonstrating awareness that LLM output format must be governed, not just content",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Enumerates the exact in-scope topics as a bulleted list, not as a vague category like 'customer support topics'",
+      "Uses a MANDATORY or CRITICAL label for the billing escalation rule — signalling to the model that this is a hard constraint, not a preference",
+      "Provides a literal quoted string for the escalation message so the model cannot paraphrase and accidentally invent contact details",
+      "Addresses two distinct failure modes: hallucinating out-of-scope answers AND hallucinating missing knowledge-base content",
+      "Includes a word limit or conciseness instruction to prevent the model from generating verbose responses"
+    ],
+    "common_verification_traps": [
+      "Testing only the happy path (in-scope question with a known answer) — billing and out-of-scope cases are where production bots fail, and they require separate test prompts",
+      "Accepting a response that 'escalates' a billing issue but still attempts to partially explain the charge — this is a partial compliance failure that looks helpful but violates the constraint",
+      "Not checking the hallucination boundary: send a question whose answer is NOT in the knowledge base and verify the bot declines rather than inventing an answer"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 90,
+    "branching_complexity": 2,
+    "edge_cases": 3,
+    "known_hard_patterns": []
+  },
+
+  "content_hash": "placeholder"
+}

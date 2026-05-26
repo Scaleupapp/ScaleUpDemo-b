@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "medium",
+  "time_budget_minutes": 10,
+  "interview_parallel": "Razorpay AI platform — lateral round: modernise a monolithic LLM workflow into a LangGraph-style state graph so routing logic can be tested and extended independently",
+
+  "brief": "Your team has a Python LLM workflow that classifies support tickets and routes them to the appropriate responder. It was written quickly as nested function calls and is now hard to test, extend, or trace.\n\nHere is the current implementation:\n\n```python\n# ticket_workflow.py\nfrom anthropic import Anthropic\n\nclient = Anthropic()\n\ndef process_ticket(raw_text: str) -> dict:\n    \"\"\"Full pipeline: extract → classify → route → respond.\"\"\"\n    # Step 1: extract\n    extract_resp = client.messages.create(\n        model='claude-3-5-haiku-20241022', max_tokens=256,\n        messages=[{'role': 'user', 'content': f'Extract the subject and body from this raw ticket text. Return JSON with keys subject and body. Raw text: {raw_text}'}]\n    )\n    extracted = extract_resp.content[0].text  # JSON string\n\n    # Step 2: classify\n    classify_resp = client.messages.create(\n        model='claude-3-5-haiku-20241022', max_tokens=64,\n        messages=[{'role': 'user', 'content': f'Classify this support ticket into one of: billing, technical, general. Return only the category word. Ticket: {extracted}'}]\n    )\n    category = classify_resp.content[0].text.strip()\n\n    # Step 3: route\n    if category == 'billing':\n        queue = 'billing_team'\n    elif category == 'technical':\n        queue = 'engineering_team'\n    else:\n        queue = 'general_support'\n\n    # Step 4: respond\n    respond_resp = client.messages.create(\n        model='claude-3-5-haiku-20241022', max_tokens=512,\n        messages=[{'role': 'user', 'content': f'Write a professional acknowledgement response for a {category} support ticket. Ticket: {extracted}'}]\n    )\n    response_text = respond_resp.content[0].text\n\n    return {'queue': queue, 'category': category, 'response': response_text}\n```\n\n**Your tasks:**\n1. Refactor to a LangGraph-style explicit state graph with 4 named nodes: `extract`, `classify`, `route`, `respond`.\n2. Define a `TicketState` TypedDict that flows through all nodes.\n3. Set `extract` as the entry point of the graph.\n4. Both visible tests must pass: the graph must have exactly 4 nodes and the entry point must be `extract`.",
+
+  "acceptance_criteria": [
+    "A `TicketState` TypedDict is defined with at least: `raw_text`, `extracted`, `category`, `queue`, `response` fields",
+    "The graph has exactly 4 named nodes: `extract`, `classify`, `route`, `respond`",
+    "The entry point of the graph is set to `extract`",
+    "Each node is a pure function that takes `TicketState` and returns a `TicketState` update dict",
+    "Both visible tests pass"
+  ],
+
+  "starter_repo": {
+    "files": [
+      {
+        "path": "ticket_workflow.py",
+        "content": "from anthropic import Anthropic\n\nclient = Anthropic()\n\ndef process_ticket(raw_text: str) -> dict:\n    \"\"\"Full pipeline: extract -> classify -> route -> respond.\"\"\"\n    extract_resp = client.messages.create(\n        model='claude-3-5-haiku-20241022', max_tokens=256,\n        messages=[{'role': 'user', 'content': f'Extract the subject and body from this raw ticket text. Return JSON with keys subject and body. Raw text: {raw_text}'}]\n    )\n    extracted = extract_resp.content[0].text\n\n    classify_resp = client.messages.create(\n        model='claude-3-5-haiku-20241022', max_tokens=64,\n        messages=[{'role': 'user', 'content': f'Classify this support ticket into one of: billing, technical, general. Return only the category word. Ticket: {extracted}'}]\n    )\n    category = classify_resp.content[0].text.strip()\n\n    if category == 'billing':\n        queue = 'billing_team'\n    elif category == 'technical':\n        queue = 'engineering_team'\n    else:\n        queue = 'general_support'\n\n    respond_resp = client.messages.create(\n        model='claude-3-5-haiku-20241022', max_tokens=512,\n        messages=[{'role': 'user', 'content': f'Write a professional acknowledgement response for a {category} support ticket. Ticket: {extracted}'}]\n    )\n    response_text = respond_resp.content[0].text\n\n    return {'queue': queue, 'category': category, 'response': response_text}\n"
+      }
+    ]
+  },
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "ticket_workflow.py",
+        "content": "from typing import TypedDict, Optional\nfrom langgraph.graph import StateGraph, END\nfrom anthropic import Anthropic\n\nclient = Anthropic()\n\n\n# ---------------------------------------------------------------------------\n# State schema — flows through every node\n# ---------------------------------------------------------------------------\n\nclass TicketState(TypedDict):\n    raw_text: str\n    extracted: Optional[str]   # JSON string: {subject, body}\n    category: Optional[str]    # billing | technical | general\n    queue: Optional[str]       # billing_team | engineering_team | general_support\n    response: Optional[str]    # acknowledgement text\n\n\n# ---------------------------------------------------------------------------\n# Nodes — each is a pure function (state -> partial state update)\n# ---------------------------------------------------------------------------\n\ndef extract(state: TicketState) -> dict:\n    \"\"\"Extract structured subject + body from raw ticket text.\"\"\"\n    resp = client.messages.create(\n        model='claude-3-5-haiku-20241022',\n        max_tokens=256,\n        messages=[{\n            'role': 'user',\n            'content': (\n                'Extract the subject and body from this raw ticket text. '\n                'Return ONLY a JSON object with keys \"subject\" and \"body\". '\n                f'Raw text: {state[\"raw_text\"]}'\n            ),\n        }],\n    )\n    return {'extracted': resp.content[0].text}\n\n\ndef classify(state: TicketState) -> dict:\n    \"\"\"Classify the ticket into billing | technical | general.\"\"\"\n    resp = client.messages.create(\n        model='claude-3-5-haiku-20241022',\n        max_tokens=64,\n        messages=[{\n            'role': 'user',\n            'content': (\n                'Classify this support ticket into exactly one of: '\n                'billing, technical, general. Return only the category word, nothing else. '\n                f'Ticket: {state[\"extracted\"]}'\n            ),\n        }],\n    )\n    return {'category': resp.content[0].text.strip().lower()}\n\n\ndef route(state: TicketState) -> dict:\n    \"\"\"Determine the queue based on category — pure deterministic logic, no LLM.\"\"\"\n    mapping = {\n        'billing': 'billing_team',\n        'technical': 'engineering_team',\n    }\n    queue = mapping.get(state['category'], 'general_support')\n    return {'queue': queue}\n\n\ndef respond(state: TicketState) -> dict:\n    \"\"\"Generate a professional acknowledgement response.\"\"\"\n    resp = client.messages.create(\n        model='claude-3-5-haiku-20241022',\n        max_tokens=512,\n        messages=[{\n            'role': 'user',\n            'content': (\n                f'Write a concise, professional acknowledgement response for a '\n                f'{state[\"category\"]} support ticket. '\n                f'Ticket: {state[\"extracted\"]}'\n            ),\n        }],\n    )\n    return {'response': resp.content[0].text}\n\n\n# ---------------------------------------------------------------------------\n# Graph assembly\n# ---------------------------------------------------------------------------\n\ndef build_graph() -> StateGraph:\n    graph = StateGraph(TicketState)\n\n    graph.add_node('extract', extract)\n    graph.add_node('classify', classify)\n    graph.add_node('route', route)\n    graph.add_node('respond', respond)\n\n    graph.set_entry_point('extract')\n    graph.add_edge('extract', 'classify')\n    graph.add_edge('classify', 'route')\n    graph.add_edge('route', 'respond')\n    graph.add_edge('respond', END)\n\n    return graph\n\n\nticket_graph = build_graph()\napp = ticket_graph.compile()\n\n\ndef process_ticket(raw_text: str) -> dict:\n    \"\"\"Public entry point — accepts raw text, returns final TicketState.\"\"\"\n    result = app.invoke({'raw_text': raw_text, 'extracted': None, 'category': None, 'queue': None, 'response': None})\n    return result\n"
+      }
+    ]
+  },
+
+  "visible_tests": [
+    {
+      "name": "graph_has_four_named_nodes",
+      "command": "python -c \"\nfrom ticket_workflow import build_graph\ng = build_graph()\nnode_names = set(g.nodes.keys()) if hasattr(g, 'nodes') else set(g._nodes.keys())\nexpected = {'extract', 'classify', 'route', 'respond'}\nassert expected.issubset(node_names), f'Expected nodes {expected}, got {node_names}'\nprint('PASS')\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": ["PASS"]
+    },
+    {
+      "name": "graph_entry_point_is_extract",
+      "command": "python -c \"\nfrom ticket_workflow import build_graph\ng = build_graph()\n# LangGraph stores entry point in __start__ edge or entry_point attribute\nentry = getattr(g, 'entry_point', None) or getattr(g, '_entry_point', None)\nassert entry == 'extract', f'Expected entry_point=extract, got {entry}'\nprint('PASS')\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": ["PASS"]
+    }
+  ],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "Wraps the original `process_ticket` function in a fake `Graph` class with a `nodes` dict and a `run()` method that calls the function internally — this passes the 'has 4 nodes' test if the dict has the right keys, but each 'node' is just a string label pointing to the original monolithic function, not a separate callable. The graph structure is cosmetic, not functional.",
+      "why_compass_might_suggest_it": "When asked to 'refactor to a state graph', LLMs sometimes add graph scaffolding without restructuring the underlying logic. The mental model is 'I'll add a Graph wrapper' rather than 'I'll decompose the function into 4 separate node functions'. The resulting code looks like a graph but behaves like the original.",
+      "detection_signals": [
+        "The four node functions (`extract`, `classify`, `route`, `respond`) do not exist as independent top-level callables",
+        "The visible test checking entry point would fail or require the code to fake the `entry_point` attribute",
+        "All 4 LLM calls still happen inside a single function scope"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "The `route` node is implemented as an LLM call (asking the model to decide the queue) rather than deterministic conditional logic — this makes routing non-deterministic, impossible to unit-test without mocking the LLM, and adds an unnecessary API call for what is purely a mapping operation.",
+      "why_compass_might_suggest_it": "LLMs naturally model every step as a model call, especially when the task involves 'deciding' something. The concept that routing is a pure function over a known categorical variable (billing → billing_team) does not require an LLM — it requires a dict lookup — is a judgment the model doesn't make unless explicitly guided.",
+      "detection_signals": [
+        "The `route` function calls `client.messages.create(...)` rather than using a dict/if-else mapping",
+        "The `route` node test would be non-deterministic — same input can produce different queue assignments"
+      ]
+    },
+    {
+      "location": "common_bad_refactors",
+      "bug_description": "`TicketState` is defined as a plain `dict` with a comment, not a `TypedDict` — so the visible test checking `TicketState` as a type annotation passes at runtime (Python doesn't enforce TypedDict at runtime) but the type safety benefit is lost and type-checkers like mypy will not catch state mutation errors.",
+      "why_compass_might_suggest_it": "TypedDict is less commonly used than regular dicts in tutorial code. LLMs see more examples of `state = {}` than `state: TicketState = {...}` in training data for LangGraph-style patterns.",
+      "detection_signals": [
+        "The state is typed as `dict` not `TypedDict` — `from typing import TypedDict` is not imported",
+        "mypy run on the file reports 'TypedDict not used' or missing key errors that TypedDict would have caught"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "code_quality",
+      "check": "Each of the 4 nodes is a separate, independently callable function that takes TicketState and returns a partial state dict — not a cosmetic wrapper over the monolithic original",
+      "weight": 0.30
+    },
+    {
+      "dimension": "correctness",
+      "check": "Both visible tests pass: graph has exactly 4 named nodes (`extract`, `classify`, `route`, `respond`) and entry point is `extract`",
+      "weight": 0.30
+    },
+    {
+      "dimension": "code_quality",
+      "check": "`route` node uses deterministic dict/conditional logic — no LLM call — and `TicketState` is a proper TypedDict, not a plain dict annotation",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt explicitly requested 4 named top-level node functions AND a TypedDict state schema — preventing the cosmetic-wrapper anti-pattern",
+      "weight": 0.15
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Specifies 'each node must be a separate top-level function named extract/classify/route/respond, not a nested function' — prevents cosmetic wrapping",
+      "States 'the route node uses deterministic if/dict logic, no LLM call' — prevents the LLM from inserting a model call where logic suffices",
+      "Requests TicketState as a TypedDict (from typing import TypedDict) not a plain dict — makes the state contract explicit and type-checkable"
+    ],
+    "common_verification_traps": [
+      "Running the graph end-to-end successfully with a real API key and assuming the structure is correct — the cosmetic-wrapper anti-pattern produces the right answer but the node functions are not independently testable",
+      "Not checking the entry point attribute — the graph might have 4 nodes but the wrong entry, causing the pipeline to start from the wrong step"
+    ],
+    "decomposition_reference": []
+  },
+
+  "difficulty_signals": {
+    "token_count": 165,
+    "branching_complexity": 3,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  },
+
+  "content_hash": "placeholder"
+}

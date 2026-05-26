@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "decompose",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "easy",
+  "time_budget_minutes": 5,
+  "interview_parallel": "Krutrim LLM serving — take-home: break down a RAG feature request into AI-delegatable steps before writing any code",
+
+  "brief": "Your tech lead has filed the following ticket:\n\n---\n**Ticket AI-101 — Build a RAG system for internal API documentation**\n\nOur backend team has ~200 Markdown files documenting our internal REST APIs. Developers keep asking repetitive questions like 'which endpoint accepts X parameter' or 'what does field Y mean in the response'. We want an LLM-powered Q&A bot that answers these questions with grounded answers and cites which document the answer came from.\n\nRequirements:\n- Input: developer's natural-language question\n- Output: answer + list of source document filenames that grounded the answer\n- Must handle: questions where no document is relevant (return 'I don't know, no relevant docs found')\n- Offline: documents don't change often, so indexing can be a one-time step\n\n---\n\nYour task: **Break this ticket down into 5–7 clearly scoped steps** that you could hand off to an AI coding assistant one at a time. For each step, write:\n1. A one-sentence description of what to do\n2. A one-sentence rationale for why this step exists and why it comes here in the sequence\n\nDo NOT write any code. Focus on the sequencing and completeness of the plan.",
+
+  "acceptance_criteria": [
+    "Plan has between 5 and 7 steps",
+    "Plan includes a chunking step before embedding — not just 'embed the documents'",
+    "Plan specifies the vector store choice and index creation as a distinct step",
+    "Plan includes prompt construction with context injection as an explicit step (not assumed to be part of 'query the LLM')",
+    "Plan includes an evaluation step that names at least one concrete metric (e.g., answer faithfulness, citation accuracy) or a golden Q&A pair approach",
+    "Plan includes a step for handling the no-relevant-docs case"
+  ],
+
+  "reference_solution": {
+    "files": [
+      {
+        "path": "decomposition_reference.md",
+        "content": "# Decomposition: RAG system for internal API documentation\n\n## Step 1 — Chunk the Markdown documents\nSplit each Markdown file into overlapping chunks of ~300 tokens, preserving section headings in each chunk so the model has document context.\n**Rationale:** LLM embedding models have a token limit (e.g., 512 tokens). Whole documents exceed this; per-line chunks lose context. Chunking is the data preparation step everything else depends on — getting it right before building the index saves re-indexing effort later.\n\n## Step 2 — Embed the chunks and store them in a vector index\nEncode each chunk with a sentence-transformer model (e.g., `all-MiniLM-L6-v2`) and store the resulting embeddings in a vector store (e.g., ChromaDB or FAISS), with metadata recording the source filename and chunk position.\n**Rationale:** The vector index is the retrieval backbone. This is a one-time offline step; it must come after chunking so we embed the right-sized inputs.\n\n## Step 3 — Implement the retrieval function\nGiven a user query, embed it with the same model, run a top-k cosine similarity search against the vector index, and return the top 5 chunks along with their source filenames.\n**Rationale:** Retrieval and prompt construction are separate concerns. Testing retrieval in isolation (does the right chunk come back for a known question?) is much easier when it is its own function.\n\n## Step 4 — Construct the prompt with injected context\nBuild the LLM prompt by inserting the retrieved chunks into a structured template that clearly separates system instructions, retrieved context (with source labels), and the user's question. Include a fallback instruction: 'If the context does not contain enough information, say: I don't know, no relevant docs found'.\n**Rationale:** The prompt template governs grounding behaviour. Separating it from the LLM call means you can iterate on the template without touching the retrieval or LLM layers.\n\n## Step 5 — Implement the LLM answer generation\nCall the LLM (e.g., OpenAI GPT-4o or Anthropic Claude) with the constructed prompt and return both the answer text and the list of source filenames from the retrieved chunks.\n**Rationale:** This is the simplest step once prompt construction is handled — it is just an API call. Separating it ensures the system is testable with a mock LLM before incurring real API costs.\n\n## Step 6 — Evaluate quality with golden Q&A pairs\nCreate 10–15 hand-written (question, expected_answer, expected_source_file) triples from real developer questions. Run the pipeline on each and measure: (a) whether the source file was correctly cited, (b) whether the answer is grounded (no facts not in the retrieved chunks).\n**Rationale:** Without evaluation you cannot tell if chunking strategy or retrieval top-k needs tuning. Golden pairs are the minimum viable eval harness before shipping to real users.\n\n## Step 7 — Handle the no-relevant-docs case\nAdd a retrieval-score threshold: if the top-k similarity scores are all below a defined minimum (e.g., 0.3), skip the LLM call entirely and return 'I don't know, no relevant docs found' directly.\n**Rationale:** Without a score threshold, the LLM will hallucinate an answer from the lowest-similarity chunks rather than admitting ignorance. This is the safety gate that makes the bot trustworthy."
+      }
+    ]
+  },
+
+  "visible_tests": [],
+  "hidden_tests": [],
+
+  "seeded_mistakes": [
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Step 1 is 'embed the documents' with no prior chunking step — the plan assumes chunking is a detail inside the embedding step rather than a distinct decision with its own design choices (chunk size, overlap, heading preservation)",
+      "why_compass_might_suggest_it": "Learners who have read RAG tutorials remember 'embed and index' as the key step. The chunking decision is subtle and its impact on retrieval quality is only visible after evaluation — so beginners treat it as an implementation detail rather than a design choice.",
+      "detection_signals": [
+        "Plan has no step mentioning 'chunk', 'split', 'window', or 'MAX_TOKENS'",
+        "First or second step says 'embed the Markdown files' without specifying what is being embedded"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "Plan combines 'retrieve and answer' into a single step — retrieval (vector search) and answer generation (LLM call with injected context) are merged, making it impossible to test or debug either in isolation",
+      "why_compass_might_suggest_it": "The mental model of RAG as 'find relevant docs, then answer' makes the two steps feel like one atomic action. When you ask an AI assistant to 'build RAG', it generates code that does both in one function, and learners copy this structure.",
+      "detection_signals": [
+        "Plan has a step called 'query the system' or 'run RAG' that mentions both similarity search and LLM generation",
+        "Plan has fewer than 5 steps total"
+      ]
+    },
+    {
+      "location": "common_bad_decompositions",
+      "bug_description": "No evaluation step — plan ends at 'the system answers questions' without any mention of testing with real questions, measuring citation accuracy, or establishing a quality baseline before shipping",
+      "why_compass_might_suggest_it": "Eval discipline is the most consistently skipped step by junior AI engineers. The system 'works' in the demo, so it feels ready. The AI assistant will not add an eval step unless explicitly asked.",
+      "detection_signals": [
+        "Plan contains no mention of 'eval', 'golden', 'test', 'metric', 'faithfulness', or 'citation accuracy'",
+        "Final step is 'deploy' or 'integrate into Slack bot' without a quality gate"
+      ]
+    }
+  ],
+
+  "rubric_anchors": [
+    {
+      "dimension": "decomposition",
+      "check": "Plan includes a distinct chunking step before embedding, names a concrete strategy (e.g., token limit, overlap), and explains why chunking is separate from embedding",
+      "weight": 0.30
+    },
+    {
+      "dimension": "decomposition",
+      "check": "Prompt construction is a distinct step that explicitly mentions injecting retrieved context into a structured template — not folded into 'call the LLM'",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Plan includes an evaluation step with a concrete method: golden Q&A pairs, citation accuracy check, or named metric (faithfulness, relevance) — not just 'test it manually'",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Plan includes the no-relevant-docs fallback as a distinct step with a concrete mechanism (score threshold, explicit fallback message) — not as an implicit LLM behaviour",
+      "weight": 0.20
+    }
+  ],
+
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [],
+    "common_verification_traps": [],
+    "decomposition_reference": [
+      "Step 1: Chunk the Markdown documents — split into overlapping ~300-token windows preserving section headings; this is a design decision, not an implementation detail",
+      "Step 2: Embed chunks and build vector index — use a sentence-transformer, store embeddings with source filename metadata in ChromaDB or FAISS",
+      "Step 3: Implement the retrieval function — embed query, cosine top-k search, return chunks + source filenames; test in isolation with known Q&A pairs",
+      "Step 4: Construct the prompt with injected context — structured template separating system instructions, retrieved context (labelled by source), and user question; include fallback instruction",
+      "Step 5: Implement LLM answer generation — API call with the constructed prompt; testable with a mock LLM to avoid costs during iteration",
+      "Step 6: Evaluate with golden Q&A pairs — 10–15 hand-written triples; measure citation accuracy and grounding (no facts outside retrieved chunks)",
+      "Step 7: Add retrieval-score threshold — if all top-k scores below threshold, return 'I don't know' without calling the LLM; prevents hallucination on irrelevant queries"
+    ]
+  },
+
+  "difficulty_signals": {
+    "token_count": 90,
+    "branching_complexity": 1,
+    "edge_cases": 2,
+    "known_hard_patterns": []
+  },
+
+  "content_hash": "placeholder"
+}
