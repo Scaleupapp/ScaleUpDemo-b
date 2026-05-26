@@ -30,6 +30,11 @@
  *                    Replaces the old `review_week` mode; `review_week` still
  *                    accepted as an alias that maps to scope='week' for
  *                    back-compat with older iOS builds.)
+ *   - coder         (AI pair-programmer inside coding drills / Capstone — lives
+ *                    in src/coding/services/compassCoder.js, NOT in this file.
+ *                    Uses the coding llmRouter (taskId: 'compass_coder') and has
+ *                    its own system prompt emphasising specificity + pushback.
+ *                    Coding-feature routes call compassCoder.chat() directly.)
  *
  * This file is the dispatcher. Heavy lifting is delegated to existing v1 services
  * (quizGenerationService, aiTutorService, etc.) — Compass just gives them a
