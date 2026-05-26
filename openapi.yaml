@@ -5876,6 +5876,247 @@ paths:
                     type: string
                   drill_subtype:
                     type: string
+  /api/coding/drills/{id}/start:
+    post:
+      operationId: startCodeDrill
+      tags: [Coding]
+      summary: Start a drill attempt
+      description: Creates a DrillAttempt (status=in_progress) and returns the safe bundle view. Enforces daily quota of 1 non-calibration drill per day.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ArtifactBundle _id
+      responses:
+        '200':
+          description: Drill started — safe bundle view returned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt_id, bundle_id, brief, time_budget_minutes, drill_subtype, difficulty, role_track, language]
+                properties:
+                  attempt_id:
+                    type: string
+                  bundle_id:
+                    type: string
+                  brief:
+                    type: string
+                  time_budget_minutes:
+                    type: integer
+                  drill_subtype:
+                    type: string
+                    enum: [prompt, verify, decompose, refactor]
+                  difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+                  role_track:
+                    type: string
+                    enum: [swe, ds, ai_eng]
+                  language:
+                    type: string
+                  acceptance_criteria:
+                    type: array
+                    items:
+                      type: string
+                  starter_repo:
+                    description: Present only for refactor drills
+                    oneOf:
+                      - type: object
+                      - type: 'null'
+                  visible_tests:
+                    description: Present only for refactor drills; expected_output_contains omitted
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        command:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Bundle not found or not active
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [bundle_not_found]
+        '429':
+          description: Daily drill quota exceeded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [daily_quota_exceeded]
+                  limit:
+                    type: integer
+                    example: 1
+  /api/coding/drills/{id}/submit:
+    post:
+      operationId: submitCodeDrill
+      tags: [Coding]
+      summary: Submit a drill attempt for grading
+      description: Validates submission, marks attempt submitted, enqueues the drill-grader job. Returns 202 with poll URL.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ArtifactBundle _id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [drill_subtype, submission]
+              properties:
+                drill_subtype:
+                  type: string
+                  enum: [prompt, verify, decompose, refactor]
+                submission:
+                  type: object
+      responses:
+        '202':
+          description: Submission accepted and enqueued for grading
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt_id, status, poll_url]
+                properties:
+                  attempt_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [submitted]
+                  poll_url:
+                    type: string
+        '400':
+          description: Invalid submission or subtype mismatch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [invalid_submission, subtype_mismatch]
+                  detail:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Bundle not found or no active attempt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [bundle_not_found, no_active_attempt]
+  /api/coding/drills/{id}/result:
+    get:
+      operationId: getCodeDrillResult
+      tags: [Coding]
+      summary: Poll for drill grading result
+      description: Returns grade if attempt status is graded, otherwise 202 with current status.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ArtifactBundle _id
+      responses:
+        '200':
+          description: Attempt has been graded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt_id, status, overall_score, rubric_breakdown, what_to_try_next, integrity_confidence, graded_at, drill_subtype, difficulty, role_track]
+                properties:
+                  attempt_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [graded]
+                  overall_score:
+                    type: integer
+                    minimum: 0
+                    maximum: 100
+                  rubric_breakdown:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        dimension:
+                          type: string
+                        score:
+                          type: integer
+                        feedback:
+                          type: string
+                  what_to_try_next:
+                    type: string
+                  integrity_confidence:
+                    type: string
+                    enum: [high, medium, low]
+                  graded_at:
+                    type: string
+                    format: date-time
+                  drill_subtype:
+                    type: string
+                    enum: [prompt, verify, decompose, refactor]
+                  difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+                  role_track:
+                    type: string
+                    enum: [swe, ds, ai_eng]
+        '202':
+          description: Attempt not yet graded — poll again
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, attempt_id]
+                properties:
+                  status:
+                    type: string
+                    enum: [in_progress, submitted]
+                  attempt_id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No attempt found for this bundle
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [no_attempt_found]
   /api/coding/health:
     get:
       operationId: getCodingHealth
