@@ -33,7 +33,7 @@
  */
 
 const { ArtifactBundle, DrillAttempt, DifficultyState, MetaSkillMastery } = require('../models');
-const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype } = require('./roleTrackMapper');
+const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype, PHASE_A_DRILL_SUBTYPES } = require('./roleTrackMapper');
 
 // Per spec §19: free tier = 1 drill/day.
 const DAILY_DRILL_QUOTA = 1;
@@ -104,6 +104,7 @@ async function shouldOfferDrillToday(user_id) {
     type: 'drill',
     role_track,
     status: 'active',
+    drill_subtype: { $in: PHASE_A_DRILL_SUBTYPES },
   });
   return Boolean(bundleExists);
 }
@@ -143,11 +144,12 @@ async function getDrillCandidate(user_id) {
   }).sort({ createdAt: -1 }).lean();
 
   if (!bundle) {
-    // Fallback: any active drill in this role_track + difficulty (ignore subtype).
+    // Fallback: any active Phase A drill in this role_track + difficulty.
     bundle = await ArtifactBundle.findOne({
       type: 'drill',
       role_track,
       difficulty,
+      drill_subtype: { $in: PHASE_A_DRILL_SUBTYPES },
       status: 'active',
     }).sort({ createdAt: -1 }).lean();
   }

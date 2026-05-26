@@ -1,7 +1,7 @@
 'use strict';
 
 const { ArtifactBundle, MetaSkillMastery, DifficultyState } = require('../models');
-const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype, subtypeToAxis } = require('../services/roleTrackMapper');
+const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype, subtypeToAxis, PHASE_A_DRILL_SUBTYPES, PHASE_A_AXES } = require('../services/roleTrackMapper');
 const { validateDrillSubmission } = require('../validators/drill.validator');
 const { randomUUID } = require('crypto');
 
@@ -80,12 +80,21 @@ async function getToday(req, res) {
       });
     }
 
-    // Mastery — null is fine; the picker handles the default
+    // Mastery — if absent, user needs to take calibration first.
+    // The mobile Home card uses calibration_required to show the calibration prompt.
     const mastery = await MetaSkillMastery.findOne({ user_id: userId, role_track }).lean();
+
+    // If user has a coding mapping but no MetaSkillMastery doc yet, they need to
+    // take calibration first. The mobile Home card uses this signal to show the
+    // calibration prompt instead of "no drill available".
+    if (!mastery) {
+      return res.status(404).json({ error: 'calibration_required', role_track });
+    }
+
     const weakestAxis = pickWeakestAxis(mastery);
     const drill_subtype = axisToSubtype(weakestAxis);
 
-    // Find the most recent active bundle matching the criteria
+    // Find the most recent active bundle matching the preferred subtype and difficulty.
     const bundle = await ArtifactBundle.findOne({
       type: 'drill',
       role_track,
@@ -94,7 +103,19 @@ async function getToday(req, res) {
       status: 'active',
     }).sort({ createdAt: -1 }).lean();
 
-    if (!bundle) {
+    // Fallback: if no exact-subtype bundle, try any Phase A subtype at this difficulty.
+    let actualBundle = bundle;
+    if (!actualBundle) {
+      actualBundle = await ArtifactBundle.findOne({
+        type: 'drill',
+        role_track,
+        difficulty: diffState.current_difficulty,
+        drill_subtype: { $in: PHASE_A_DRILL_SUBTYPES },
+        status: 'active',
+      }).sort({ createdAt: -1 }).lean();
+    }
+
+    if (!actualBundle) {
       return res.status(404).json({
         error: 'no_drill_available',
         role_track,
@@ -104,15 +125,15 @@ async function getToday(req, res) {
     }
 
     return res.json({
-      bundle_id: bundle._id,
-      brief: bundle.brief,
-      time_budget_minutes: bundle.time_budget_minutes,
+      bundle_id: actualBundle._id,
+      brief: actualBundle.brief,
+      time_budget_minutes: actualBundle.time_budget_minutes,
       drill_subtype,
-      difficulty: bundle.difficulty,
+      difficulty: actualBundle.difficulty,
       role_track,
-      language: bundle.language,
-      acceptance_criteria: bundle.acceptance_criteria,
-      starter_repo: bundle.starter_repo || null,
+      language: actualBundle.language,
+      acceptance_criteria: actualBundle.acceptance_criteria,
+      starter_repo: actualBundle.starter_repo || null,
     });
   } catch (err) {
     console.error('[coding/drills/today]', err);
@@ -282,7 +303,9 @@ function baselineFromDrills(drillAttempts) {
     const axis = subtypeToAxis(a.drill_subtype);
     axes[axis] = a.grade.overall_score;
   }
-  const avg = (axes.prompting + axes.verification + axes.decomposition + axes.refactoring) / 4;
+  // refactoring intentionally stays at 0 — unmeasured in Phase A
+  const measuredScores = PHASE_A_AXES.map(k => axes[k]);
+  const avg = measuredScores.reduce((s, v) => s + v, 0) / measuredScores.length;
   let recommended_difficulty = 'easy';
   if (avg > 90) recommended_difficulty = 'hard';
   else if (avg > 80) recommended_difficulty = 'medium';
@@ -292,8 +315,6 @@ function baselineFromDrills(drillAttempts) {
 // ---------------------------------------------------------------------------
 // POST /api/coding/drills/calibration/start
 // ---------------------------------------------------------------------------
-
-const CALIBRATION_SUBTYPES = ['prompt', 'verify', 'decompose', 'refactor'];
 
 async function startCalibration(req, res) {
   try {
@@ -310,9 +331,9 @@ async function startCalibration(req, res) {
 
     const models = require('../models');
 
-    // Fetch one easy active bundle per subtype
+    // Fetch one easy active bundle per Phase A subtype (prompt, verify, decompose)
     const bundleResults = await Promise.all(
-      CALIBRATION_SUBTYPES.map(subtype =>
+      PHASE_A_DRILL_SUBTYPES.map(subtype =>
         models.ArtifactBundle.findOne({
           type: 'drill',
           role_track,
@@ -323,8 +344,8 @@ async function startCalibration(req, res) {
       )
     );
 
-    // Check all 4 are available
-    const missing = CALIBRATION_SUBTYPES.filter((_, i) => !bundleResults[i]);
+    // Check all 3 Phase A bundles are available
+    const missing = PHASE_A_DRILL_SUBTYPES.filter((_, i) => !bundleResults[i]);
     if (missing.length > 0) {
       return res.status(503).json({
         error: 'calibration_unavailable',
@@ -336,13 +357,13 @@ async function startCalibration(req, res) {
     const calibration_id = randomUUID();
     const now = new Date();
 
-    // Create 4 DrillAttempts atomically
+    // Create 3 DrillAttempts atomically
     const attempts = await Promise.all(
       bundleResults.map((bundle, i) =>
         models.DrillAttempt.create({
           user_id: userId,
           bundle_id: bundle._id,
-          drill_subtype: CALIBRATION_SUBTYPES[i],
+          drill_subtype: PHASE_A_DRILL_SUBTYPES[i],
           status: 'in_progress',
           started_at: now,
           is_calibration: true,
@@ -351,7 +372,7 @@ async function startCalibration(req, res) {
       )
     );
 
-    // Build safe views with time_budget_minutes overridden to 2
+    // Build safe views with time_budget_minutes overridden to 2 (3 drills × 2 min = 6 min total)
     const drills = bundleResults.map((bundle, i) => {
       const view = safeBundleView(bundle, attempts[i]._id);
       view.time_budget_minutes = 2;
@@ -361,7 +382,7 @@ async function startCalibration(req, res) {
     return res.json({
       calibration_id,
       role_track,
-      estimated_minutes: 8,
+      estimated_minutes: 6,
       drills,
     });
   } catch (err) {
@@ -382,9 +403,9 @@ async function submitCalibration(req, res) {
 
     const { submissions } = req.body;
 
-    // Must have exactly 4 submissions
-    if (!Array.isArray(submissions) || submissions.length !== 4) {
-      return res.status(400).json({ error: 'invalid_submission_count', expected: 4, received: submissions ? submissions.length : 0 });
+    // Must have exactly 3 submissions (one per Phase A subtype)
+    if (!Array.isArray(submissions) || submissions.length !== PHASE_A_DRILL_SUBTYPES.length) {
+      return res.status(400).json({ error: 'invalid_submission_count', expected: PHASE_A_DRILL_SUBTYPES.length, received: submissions ? submissions.length : 0 });
     }
 
     // Validate each submission shape
@@ -406,7 +427,7 @@ async function submitCalibration(req, res) {
       calibration_id,
     });
 
-    if (!attempts || attempts.length !== 4) {
+    if (!attempts || attempts.length !== PHASE_A_DRILL_SUBTYPES.length) {
       return res.status(404).json({ error: 'calibration_not_found' });
     }
 
@@ -427,7 +448,7 @@ async function submitCalibration(req, res) {
       })
     );
 
-    // Enqueue 4 grader jobs
+    // Enqueue 3 grader jobs
     const workers = getWorkers();
     await Promise.all(
       submissions.map(sub => {
@@ -496,7 +517,7 @@ async function getCalibrationResult(req, res) {
       });
     }
 
-    // All 4 graded — compute baseline
+    // All 3 Phase A drills graded — compute baseline (refactoring axis stays at 0, unmeasured)
     const { axes, recommended_difficulty } = baselineFromDrills(attempts);
 
     // Write Mastery + DifficultyState if not already committed

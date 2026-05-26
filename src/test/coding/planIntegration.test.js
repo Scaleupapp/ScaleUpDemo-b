@@ -342,3 +342,81 @@ test('prettySubtype("refactor") → "Refactor with AI"', () => {
 test('prettySubtype("unknown") → "unknown" (pass-through)', () => {
   assert.strictEqual(prettySubtype('unknown'), 'unknown');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 13: shouldOfferDrillToday — checks ArtifactBundle.exists with PHASE_A filter
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('shouldOfferDrillToday — ArtifactBundle.exists query must include PHASE_A_DRILL_SUBTYPES filter', async () => {
+  reset();
+  stubUserObjective  = { canonicalTopic: 'software-engineer' };
+  stubCountDocuments = 0;
+
+  // Capture the query passed to ArtifactBundle.exists
+  let capturedQuery = null;
+  models.ArtifactBundle.exists = async (query) => {
+    capturedQuery = query;
+    return true;
+  };
+
+  await shouldOfferDrillToday('user1');
+
+  assert.ok(capturedQuery, 'ArtifactBundle.exists must have been called');
+  assert.ok(
+    capturedQuery.drill_subtype,
+    'query must include a drill_subtype filter'
+  );
+  assert.ok(
+    capturedQuery.drill_subtype.$in,
+    'drill_subtype filter must use $in operator'
+  );
+  const subtypes = capturedQuery.drill_subtype.$in;
+  assert.ok(!subtypes.includes('refactor'), '$in must NOT include refactor');
+  assert.ok(subtypes.includes('prompt'),    '$in must include prompt');
+  assert.ok(subtypes.includes('verify'),    '$in must include verify');
+  assert.ok(subtypes.includes('decompose'), '$in must include decompose');
+
+  // Restore the stub for subsequent tests
+  models.ArtifactBundle.exists = async () => stubBundleExists || null;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 14: getDrillCandidate fallback query must use PHASE_A_DRILL_SUBTYPES
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('getDrillCandidate fallback query must include PHASE_A_DRILL_SUBTYPES $in filter', async () => {
+  reset();
+  stubUserObjective  = { canonicalTopic: 'software-engineer' };
+  stubCountDocuments = 0;
+  stubBundleExists   = true;
+  stubExactBundle    = null;  // force fallback path
+
+  // Capture the queries passed to ArtifactBundle.findOne
+  const capturedQueries = [];
+  models.ArtifactBundle.findOne = (query) => {
+    capturedQueries.push(query);
+    const callIndex = capturedQueries.length;
+    const result = callIndex === 1 ? stubExactBundle : stubFallbackBundle;
+    return { sort: () => ({ lean: () => Promise.resolve(result) }) };
+  };
+
+  await getDrillCandidate('user1');
+
+  // Second call is the fallback
+  assert.ok(capturedQueries.length >= 2, 'expected at least 2 findOne calls (primary + fallback)');
+  const fallbackQuery = capturedQueries[1];
+  assert.ok(fallbackQuery.drill_subtype, 'fallback query must include drill_subtype filter');
+  assert.ok(fallbackQuery.drill_subtype.$in, 'fallback must use $in operator');
+  const subtypes = fallbackQuery.drill_subtype.$in;
+  assert.ok(!subtypes.includes('refactor'), 'fallback $in must NOT include refactor');
+  assert.ok(subtypes.includes('prompt'),    'fallback $in must include prompt');
+  assert.ok(subtypes.includes('verify'),    'fallback $in must include verify');
+  assert.ok(subtypes.includes('decompose'), 'fallback $in must include decompose');
+
+  // Restore
+  models.ArtifactBundle.findOne = (_query) => {
+    findOneCallCount += 1;
+    const result = findOneCallCount === 1 ? stubExactBundle : stubFallbackBundle;
+    return { sort: () => ({ lean: () => Promise.resolve(result) }) };
+  };
+});

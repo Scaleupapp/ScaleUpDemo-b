@@ -135,7 +135,8 @@ test('drills/today controller: returns 401 when req.user is null', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 2: Happy path — swe user, no mastery (defaults to prompting), existing DifficultyState
+// Test 2: Happy path — swe user WITH mastery, existing DifficultyState → 200
+// (Phase A: null mastery now → calibration_required, so test 2 uses real mastery)
 // ---------------------------------------------------------------------------
 
 test('drills/today controller: happy path returns 200 with bundle', async () => {
@@ -145,12 +146,18 @@ test('drills/today controller: happy path returns 200 with bundle', async () => 
     current_difficulty: 'easy',
   };
 
+  const FAKE_MASTERY = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    axes: { prompting: 60, verification: 80, decomposition: 70, refactoring: 50 },
+  };
+
   stubCodingModels({
     ArtifactBundle: {
       findOne: () => ({ sort: () => ({ lean: async () => FAKE_BUNDLE }) }),
     },
     MetaSkillMastery: {
-      findOne: () => ({ lean: async () => null }),  // no mastery yet → defaults to prompting
+      findOne: () => ({ lean: async () => FAKE_MASTERY }),
     },
     DifficultyState: {
       findOne: async () => FAKE_DIFF_STATE,
@@ -175,6 +182,7 @@ test('drills/today controller: happy path returns 200 with bundle', async () => 
 
   assert.strictEqual(res._status, 200);
   assert.strictEqual(res._body.bundle_id, FAKE_BUNDLE._id);
+  // prompting is weakest among Phase A axes (60 < 70 < 80)
   assert.strictEqual(res._body.drill_subtype, 'prompt');
   assert.strictEqual(res._body.difficulty, 'easy');
   assert.strictEqual(res._body.role_track, 'swe');
@@ -213,6 +221,7 @@ test('drills/today controller: returns 404 no_coding_track_for_objective for pla
 
 // ---------------------------------------------------------------------------
 // Test 4: No bundle available → 404 no_drill_available
+// (Phase A: mastery must be present to reach the bundle lookup)
 // ---------------------------------------------------------------------------
 
 test('drills/today controller: returns 404 no_drill_available when no bundle matches', async () => {
@@ -222,11 +231,17 @@ test('drills/today controller: returns 404 no_drill_available when no bundle mat
     current_difficulty: 'easy',
   };
 
+  const FAKE_MASTERY = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    axes: { prompting: 60, verification: 80, decomposition: 70, refactoring: 50 },
+  };
+
   stubCodingModels({
     ArtifactBundle: {
       findOne: () => ({ sort: () => ({ lean: async () => null }) }),  // no bundle
     },
-    MetaSkillMastery: { findOne: () => ({ lean: async () => null }) },
+    MetaSkillMastery: { findOne: () => ({ lean: async () => FAKE_MASTERY }) },
     DifficultyState: {
       findOne: async () => FAKE_DIFF_STATE,
       create: async () => { throw new Error('should not be called'); },
@@ -255,7 +270,10 @@ test('drills/today controller: returns 404 no_drill_available when no bundle mat
 });
 
 // ---------------------------------------------------------------------------
-// Test 5: DifficultyState created when missing
+// Test 5: DifficultyState created when missing (with mastery present)
+// Phase A: mastery must be non-null for the drill to be served; null mastery
+// returns calibration_required. Here we test DifficultyState creation path
+// with mastery present so the happy path proceeds.
 // ---------------------------------------------------------------------------
 
 test('drills/today controller: creates DifficultyState when none exists', async () => {
@@ -267,11 +285,17 @@ test('drills/today controller: creates DifficultyState when none exists', async 
     current_difficulty: 'easy',
   };
 
+  const FAKE_MASTERY = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    axes: { prompting: 60, verification: 80, decomposition: 70, refactoring: 50 },
+  };
+
   stubCodingModels({
     ArtifactBundle: {
       findOne: () => ({ sort: () => ({ lean: async () => FAKE_BUNDLE }) }),
     },
-    MetaSkillMastery: { findOne: () => ({ lean: async () => null }) },
+    MetaSkillMastery: { findOne: () => ({ lean: async () => FAKE_MASTERY }) },
     DifficultyState: {
       findOne: async () => null,  // not found → should trigger create
       create: async (doc) => {
@@ -390,4 +414,130 @@ test('GET /api/coding/drills/today: returns 401 without auth token', async () =>
   const res = await request(app).get('/api/coding/drills/today');
   // Auth middleware returns 401 (possibly wrapped in error envelope)
   assert.strictEqual(res.status, 401);
+});
+
+// ---------------------------------------------------------------------------
+// Test 8: 404 calibration_required when user has a coding mapping but no mastery yet
+// ---------------------------------------------------------------------------
+
+test('drills/today controller: returns 404 calibration_required when user has no MetaSkillMastery', async () => {
+  const FAKE_DIFF_STATE = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    current_difficulty: 'easy',
+  };
+
+  stubCodingModels({
+    ArtifactBundle: {
+      findOne: () => ({ sort: () => ({ lean: async () => FAKE_BUNDLE }) }),
+    },
+    MetaSkillMastery: {
+      findOne: () => ({ lean: async () => null }),  // no mastery doc → calibration required
+    },
+    DifficultyState: {
+      findOne: async () => FAKE_DIFF_STATE,
+      create: async () => { throw new Error('should not be called'); },
+    },
+  });
+  stubModule(USER_OBJECTIVE_PATH, {
+    findOne: () => ({
+      lean: async () => ({
+        userId: FAKE_USER_ID,
+        objectiveType: 'interview_preparation',
+        canonicalTopic: 'software-engineer',
+        isPrimary: true,
+        status: 'active',
+      }),
+    }),
+  });
+
+  const ctrl = loadController();
+  const [req, res] = buildReqRes({ user: { userId: FAKE_USER_ID } });
+  await ctrl.getToday(req, res);
+
+  assert.strictEqual(res._status, 404);
+  assert.strictEqual(res._body.error, 'calibration_required');
+  assert.strictEqual(res._body.role_track, 'swe');
+});
+
+// ---------------------------------------------------------------------------
+// Test 9: getToday never returns a refactor bundle (drill_subtype in query is Phase A only)
+// ---------------------------------------------------------------------------
+
+test('drills/today controller: never queries for refactor bundle even when refactoring is the weakest axis', async () => {
+  const FAKE_DIFF_STATE = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    current_difficulty: 'easy',
+  };
+
+  const PHASE_A_SUBTYPES = ['prompt', 'verify', 'decompose'];
+
+  // Mastery with refactoring as the weakest axis — should be ignored
+  const MASTERY_REFACTOR_WEAKEST = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    axes: { prompting: 80, verification: 60, decomposition: 70, refactoring: 10 },
+  };
+
+  const capturedQueries = [];
+
+  stubCodingModels({
+    ArtifactBundle: {
+      findOne: (query) => {
+        capturedQueries.push(query);
+        return { sort: () => ({ lean: async () => FAKE_BUNDLE }) };
+      },
+    },
+    MetaSkillMastery: {
+      findOne: () => ({ lean: async () => MASTERY_REFACTOR_WEAKEST }),
+    },
+    DifficultyState: {
+      findOne: async () => FAKE_DIFF_STATE,
+      create: async () => { throw new Error('should not be called'); },
+    },
+  });
+  stubModule(USER_OBJECTIVE_PATH, {
+    findOne: () => ({
+      lean: async () => ({
+        userId: FAKE_USER_ID,
+        objectiveType: 'interview_preparation',
+        canonicalTopic: 'software-engineer',
+        isPrimary: true,
+        status: 'active',
+      }),
+    }),
+  });
+
+  const ctrl = loadController();
+  const [req, res] = buildReqRes({ user: { userId: FAKE_USER_ID } });
+  await ctrl.getToday(req, res);
+
+  // Verify at least one findOne was called and none requested 'refactor'
+  assert.ok(capturedQueries.length > 0, 'expected at least one ArtifactBundle.findOne call');
+  for (const q of capturedQueries) {
+    if (q.drill_subtype) {
+      if (typeof q.drill_subtype === 'string') {
+        assert.ok(
+          PHASE_A_SUBTYPES.includes(q.drill_subtype),
+          `drill_subtype '${q.drill_subtype}' must be a Phase A subtype, not 'refactor'`
+        );
+      } else if (q.drill_subtype.$in) {
+        for (const s of q.drill_subtype.$in) {
+          assert.ok(
+            PHASE_A_SUBTYPES.includes(s),
+            `$in subtype '${s}' must be a Phase A subtype`
+          );
+        }
+      }
+    }
+  }
+
+  // Response should not include 'refactor' as drill_subtype
+  if (res._body && res._body.drill_subtype) {
+    assert.ok(
+      PHASE_A_SUBTYPES.includes(res._body.drill_subtype),
+      `response drill_subtype '${res._body.drill_subtype}' must be a Phase A subtype`
+    );
+  }
 });

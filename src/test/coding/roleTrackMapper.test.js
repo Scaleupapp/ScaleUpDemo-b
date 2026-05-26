@@ -168,3 +168,29 @@ test('subtypeToAxis: refactor → refactoring', () => {
 test('subtypeToAxis: unknown → prompting (default)', () => {
   assert.strictEqual(subtypeToAxis('unknown'), 'prompting');
 });
+
+// ---------------------------------------------------------------------------
+// Phase A constants
+// ---------------------------------------------------------------------------
+
+test('PHASE_A_DRILL_SUBTYPES exports 3 subtypes excluding refactor', () => {
+  const { PHASE_A_DRILL_SUBTYPES } = require('../../coding/services/roleTrackMapper');
+  assert.deepEqual([...PHASE_A_DRILL_SUBTYPES].sort(), ['decompose', 'prompt', 'verify']);
+  assert.ok(!PHASE_A_DRILL_SUBTYPES.includes('refactor'));
+});
+
+test('pickWeakestAxis never returns refactoring even when refactoring is the weakest axis', () => {
+  const { pickWeakestAxis } = require('../../coding/services/roleTrackMapper');
+  const mastery = {
+    axes: { prompting: 80, verification: 60, decomposition: 70, refactoring: 10 },
+  };
+  const weakest = pickWeakestAxis(mastery);
+  assert.notEqual(weakest, 'refactoring');
+  assert.equal(weakest, 'verification', 'expected verification (lowest among Phase A axes)');
+});
+
+test('pickWeakestAxis returns prompting default when mastery is null', () => {
+  const { pickWeakestAxis } = require('../../coding/services/roleTrackMapper');
+  assert.equal(pickWeakestAxis(null), 'prompting');
+  assert.equal(pickWeakestAxis({}), 'prompting');
+});

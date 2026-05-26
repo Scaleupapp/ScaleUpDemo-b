@@ -121,7 +121,8 @@ const ALL_BUNDLES = {
   refactor: makeBundle('refactor'),
 };
 
-const SUBTYPES = ['prompt', 'verify', 'decompose', 'refactor'];
+// Phase A uses only 3 subtypes — refactor is Phase B (requires web IDE)
+const PHASE_A_SUBTYPES = ['prompt', 'verify', 'decompose'];
 
 function makeAttempt(subtype, overrides = {}) {
   return {
@@ -140,11 +141,13 @@ function makeAttempt(subtype, overrides = {}) {
 }
 
 const VALID_SUBMISSIONS = {
-  prompt: { drill_subtype: 'prompt', attempt_id: 'attempt-prompt-id', submission: { prompt_text: 'This is my detailed prompt answer with enough text.' } },
-  verify: { drill_subtype: 'verify', attempt_id: 'attempt-verify-id', submission: { bug_locations: [{ file: 'app.py', line: 5, explanation: 'Null pointer is here in the code.' }] } },
+  prompt:    { drill_subtype: 'prompt',    attempt_id: 'attempt-prompt-id',    submission: { prompt_text: 'This is my detailed prompt answer with enough text.' } },
+  verify:    { drill_subtype: 'verify',    attempt_id: 'attempt-verify-id',    submission: { bug_locations: [{ file: 'app.py', line: 5, explanation: 'Null pointer is here in the code.' }] } },
   decompose: { drill_subtype: 'decompose', attempt_id: 'attempt-decompose-id', submission: { decomposition_steps: [{ step: 'Parse input', rationale: 'Need to validate' }, { step: 'Process', rationale: 'Core logic' }] } },
-  refactor: { drill_subtype: 'refactor', attempt_id: 'attempt-refactor-id', submission: { refactored_code: { files: [{ path: 'app.py', content: 'def foo(): return 1' }] } } },
 };
+
+// Phase A valid submissions (all 3 Phase A subtypes)
+const PHASE_A_SUBMISSIONS = [VALID_SUBMISSIONS.prompt, VALID_SUBMISSIONS.verify, VALID_SUBMISSIONS.decompose];
 
 const FAKE_GRADE = {
   overall_score: 75,
@@ -207,9 +210,9 @@ function makeAttemptStore(existingAttempts = []) {
 // Test 1: startCalibration happy path
 // ---------------------------------------------------------------------------
 
-test('startCalibration: happy path — returns 4 easy bundles, one per subtype, all is_calibration', async () => {
+test('startCalibration: happy path — returns 3 easy Phase A bundles (prompt/verify/decompose), no refactor', async () => {
   stubCodingModels({
-    ArtifactBundle: makeBundleFinder(SUBTYPES),
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
     DrillAttempt: {
       create: async (doc) => makeAttempt(doc.drill_subtype, { ...doc, _id: `attempt-${doc.bundle_id}` }),
     },
@@ -235,12 +238,13 @@ test('startCalibration: happy path — returns 4 easy bundles, one per subtype, 
   const body = res._body;
   assert.ok(body.calibration_id, 'should have calibration_id');
   assert.strictEqual(body.role_track, 'swe');
-  assert.strictEqual(body.estimated_minutes, 8);
+  assert.strictEqual(body.estimated_minutes, 6, '3 drills × 2 min = 6 min total');
   assert.ok(Array.isArray(body.drills), 'drills should be array');
-  assert.strictEqual(body.drills.length, 4, 'should have exactly 4 drills');
+  assert.strictEqual(body.drills.length, 3, 'Phase A has exactly 3 drills');
 
   const subtypesReturned = body.drills.map(d => d.drill_subtype).sort();
-  assert.deepStrictEqual(subtypesReturned, ['decompose', 'prompt', 'refactor', 'verify']);
+  assert.deepStrictEqual(subtypesReturned, ['decompose', 'prompt', 'verify']);
+  assert.ok(!subtypesReturned.includes('refactor'), 'refactor must not appear in Phase A calibration');
 
   for (const drill of body.drills) {
     assert.ok(drill.attempt_id, 'each drill must have attempt_id');
@@ -257,10 +261,10 @@ test('startCalibration: happy path — returns 4 easy bundles, one per subtype, 
 // Test 2: startCalibration missing bundles → 503 calibration_unavailable
 // ---------------------------------------------------------------------------
 
-test('startCalibration: only 3 of 4 subtypes have bundles → 503 calibration_unavailable', async () => {
-  // Only prompt, verify, decompose — missing refactor
+test('startCalibration: only 2 of 3 Phase A bundles available (missing decompose) → 503 calibration_unavailable', async () => {
+  // Only prompt and verify available — missing decompose
   stubCodingModels({
-    ArtifactBundle: makeBundleFinder(['prompt', 'verify', 'decompose']),
+    ArtifactBundle: makeBundleFinder(['prompt', 'verify']),
     DrillAttempt: { create: async () => { throw new Error('should not create'); } },
     MetaSkillMastery: { findOne: () => ({ lean: async () => null }) },
     DifficultyState: { findOne: async () => null, create: async () => null },
@@ -282,6 +286,7 @@ test('startCalibration: only 3 of 4 subtypes have bundles → 503 calibration_un
 
   assert.strictEqual(res._status, 503);
   assert.strictEqual(res._body.error, 'calibration_unavailable');
+  assert.ok(res._body.missing_subtypes.includes('decompose'), 'missing_subtypes should name decompose');
 });
 
 // ---------------------------------------------------------------------------
@@ -290,7 +295,7 @@ test('startCalibration: only 3 of 4 subtypes have bundles → 503 calibration_un
 
 test('startCalibration: user has no coding objective → 404', async () => {
   stubCodingModels({
-    ArtifactBundle: makeBundleFinder(SUBTYPES),
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
     DrillAttempt: { create: async () => { throw new Error('should not create'); } },
     MetaSkillMastery: { findOne: () => ({ lean: async () => null }) },
     DifficultyState: { findOne: async () => null, create: async () => null },
@@ -311,12 +316,12 @@ test('startCalibration: user has no coding objective → 404', async () => {
 // Test 4: submitCalibration happy path — 4 submissions accepted, 4 jobs enqueued
 // ---------------------------------------------------------------------------
 
-test('submitCalibration: happy path — 4 valid submissions accepted, 4 grader jobs enqueued', async () => {
-  const existingAttempts = SUBTYPES.map(s => makeAttempt(s));
+test('submitCalibration: happy path — 3 valid Phase A submissions accepted, 3 grader jobs enqueued', async () => {
+  const existingAttempts = PHASE_A_SUBTYPES.map(s => makeAttempt(s));
   const enqueuedJobs = [];
 
   stubCodingModels({
-    ArtifactBundle: makeBundleFinder(SUBTYPES),
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
     DrillAttempt: {
       find: (query) => {
         const calId = query && query.calibration_id;
@@ -344,7 +349,7 @@ test('submitCalibration: happy path — 4 valid submissions accepted, 4 grader j
   const [req, res] = buildReqRes({
     user: { userId: FAKE_USER_ID },
     params: { calibration_id: FAKE_CAL_ID },
-    body: { submissions: Object.values(VALID_SUBMISSIONS) },
+    body: { submissions: PHASE_A_SUBMISSIONS },
   });
   await ctrl.submitCalibration(req, res);
 
@@ -353,20 +358,20 @@ test('submitCalibration: happy path — 4 valid submissions accepted, 4 grader j
   assert.strictEqual(res._body.status, 'submitted');
   assert.ok(res._body.poll_url.includes(FAKE_CAL_ID));
 
-  assert.strictEqual(enqueuedJobs.length, 4, 'exactly 4 grader jobs should be enqueued');
+  assert.strictEqual(enqueuedJobs.length, 3, 'exactly 3 grader jobs should be enqueued');
   const enqueuedSubtypes = enqueuedJobs.map(j => j.data.drill_subtype).sort();
-  assert.deepStrictEqual(enqueuedSubtypes, ['decompose', 'prompt', 'refactor', 'verify']);
+  assert.deepStrictEqual(enqueuedSubtypes, ['decompose', 'prompt', 'verify']);
 });
 
 // ---------------------------------------------------------------------------
 // Test 5: submitCalibration partial submissions (only 3 of 4) → 400
 // ---------------------------------------------------------------------------
 
-test('submitCalibration: only 3 of 4 submissions provided → 400', async () => {
-  const existingAttempts = SUBTYPES.map(s => makeAttempt(s));
+test('submitCalibration: only 2 of 3 submissions provided (incomplete) → 400', async () => {
+  const existingAttempts = PHASE_A_SUBTYPES.map(s => makeAttempt(s));
 
   stubCodingModels({
-    ArtifactBundle: makeBundleFinder(SUBTYPES),
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
     DrillAttempt: {
       find: (query) => {
         return Promise.resolve(existingAttempts.filter(a =>
@@ -381,16 +386,17 @@ test('submitCalibration: only 3 of 4 submissions provided → 400', async () => 
   const ctrl = loadController();
   ctrl._setWorkersModule({ drillGraderQueue: { add: async () => {} } });
 
-  const threeSubmissions = Object.values(VALID_SUBMISSIONS).slice(0, 3);
+  const twoSubmissions = PHASE_A_SUBMISSIONS.slice(0, 2); // only prompt + verify
   const [req, res] = buildReqRes({
     user: { userId: FAKE_USER_ID },
     params: { calibration_id: FAKE_CAL_ID },
-    body: { submissions: threeSubmissions },
+    body: { submissions: twoSubmissions },
   });
   await ctrl.submitCalibration(req, res);
 
   assert.strictEqual(res._status, 400);
   assert.strictEqual(res._body.error, 'invalid_submission_count');
+  assert.strictEqual(res._body.expected, 3);
 });
 
 // ---------------------------------------------------------------------------
@@ -398,10 +404,10 @@ test('submitCalibration: only 3 of 4 submissions provided → 400', async () => 
 // ---------------------------------------------------------------------------
 
 test('submitCalibration: invalid submission shape → 400', async () => {
-  const existingAttempts = SUBTYPES.map(s => makeAttempt(s));
+  const existingAttempts = PHASE_A_SUBTYPES.map(s => makeAttempt(s));
 
   stubCodingModels({
-    ArtifactBundle: makeBundleFinder(SUBTYPES),
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
     DrillAttempt: {
       find: (query) => {
         return Promise.resolve(existingAttempts.filter(a =>
@@ -416,12 +422,11 @@ test('submitCalibration: invalid submission shape → 400', async () => {
   const ctrl = loadController();
   ctrl._setWorkersModule({ drillGraderQueue: { add: async () => {} } });
 
-  // Replace prompt submission with an invalid one (missing prompt_text)
+  // Replace prompt submission with an invalid one (missing prompt_text) — 3 total to pass count check
   const badSubmissions = [
     { drill_subtype: 'prompt', attempt_id: 'attempt-prompt-id', submission: {} }, // invalid: missing prompt_text
     VALID_SUBMISSIONS.verify,
     VALID_SUBMISSIONS.decompose,
-    VALID_SUBMISSIONS.refactor,
   ];
 
   const [req, res] = buildReqRes({
@@ -439,8 +444,8 @@ test('submitCalibration: invalid submission shape → 400', async () => {
 // Test 7: getCalibrationResult all 4 graded → aggregate + writes Mastery + DifficultyState
 // ---------------------------------------------------------------------------
 
-test('getCalibrationResult: all 4 graded → 200 with aggregate + writes Mastery + DifficultyState', async () => {
-  const gradedAttempts = SUBTYPES.map(s => makeAttempt(s, {
+test('getCalibrationResult: all 3 Phase A drills graded → 200 with aggregate, refactoring=0, writes Mastery + DifficultyState', async () => {
+  const gradedAttempts = PHASE_A_SUBTYPES.map(s => makeAttempt(s, {
     status: 'graded',
     calibration_committed: false,
     drill_subtype: s,
@@ -452,7 +457,7 @@ test('getCalibrationResult: all 4 graded → 200 with aggregate + writes Mastery
   let diffStateUpsertCalled = null;
 
   stubCodingModels({
-    ArtifactBundle: makeBundleFinder(SUBTYPES),
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
     DrillAttempt: {
       find: (query) => {
         return Promise.resolve(gradedAttempts.filter(a =>
@@ -488,12 +493,12 @@ test('getCalibrationResult: all 4 graded → 200 with aggregate + writes Mastery
   assert.strictEqual(body.calibration_id, FAKE_CAL_ID);
   assert.strictEqual(body.status, 'graded');
   assert.ok(Array.isArray(body.drills), 'should have drills array');
-  assert.strictEqual(body.drills.length, 4);
+  assert.strictEqual(body.drills.length, 3, 'Phase A produces 3 drill results');
   assert.ok(body.baseline_axes, 'should have baseline_axes');
-  assert.ok('prompting' in body.baseline_axes, 'axes should have prompting');
-  assert.ok('verification' in body.baseline_axes, 'axes should have verification');
-  assert.ok('decomposition' in body.baseline_axes, 'axes should have decomposition');
-  assert.ok('refactoring' in body.baseline_axes, 'axes should have refactoring');
+  assert.strictEqual(body.baseline_axes.prompting, 75, 'prompting axis from drill grade');
+  assert.strictEqual(body.baseline_axes.verification, 75, 'verification axis from drill grade');
+  assert.strictEqual(body.baseline_axes.decomposition, 75, 'decomposition axis from drill grade');
+  assert.strictEqual(body.baseline_axes.refactoring, 0, 'refactoring unmeasured in Phase A — stays 0');
   assert.ok(['easy', 'medium', 'hard'].includes(body.recommended_difficulty));
 
   // Mastery and DifficultyState should have been written
@@ -505,17 +510,16 @@ test('getCalibrationResult: all 4 graded → 200 with aggregate + writes Mastery
 // Test 8: getCalibrationResult partial graded → 202 with status='partial'
 // ---------------------------------------------------------------------------
 
-test('getCalibrationResult: only 2 of 4 graded → 202 with status=partial', async () => {
-  // 2 graded, 2 still submitted
+test('getCalibrationResult: only 2 of 3 Phase A drills graded → 202 with status=partial', async () => {
+  // 2 graded, 1 still submitted
   const mixedAttempts = [
     makeAttempt('prompt',    { status: 'graded',    drill_subtype: 'prompt',    grade: FAKE_GRADE }),
     makeAttempt('verify',    { status: 'graded',    drill_subtype: 'verify',    grade: FAKE_GRADE }),
     makeAttempt('decompose', { status: 'submitted', drill_subtype: 'decompose', grade: null }),
-    makeAttempt('refactor',  { status: 'submitted', drill_subtype: 'refactor',  grade: null }),
   ];
 
   stubCodingModels({
-    ArtifactBundle: makeBundleFinder(SUBTYPES),
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
     DrillAttempt: {
       find: (query) => {
         return Promise.resolve(mixedAttempts.filter(a =>
@@ -545,4 +549,50 @@ test('getCalibrationResult: only 2 of 4 graded → 202 with status=partial', asy
   assert.strictEqual(body.calibration_id, FAKE_CAL_ID);
   assert.strictEqual(body.status, 'partial');
   assert.ok(Array.isArray(body.drills));
+});
+
+// ---------------------------------------------------------------------------
+// Test 9: baselineFromDrills computes average over 3 Phase A axes, refactoring stays 0
+// ---------------------------------------------------------------------------
+
+test('baselineFromDrills: computes average over 3 Phase A axes, refactoring stays 0', () => {
+  const ctrl = loadController();
+
+  // Simulate 3 graded Phase A attempts with varied scores
+  const drillAttempts = [
+    { drill_subtype: 'prompt',    grade: { overall_score: 90 } },
+    { drill_subtype: 'verify',    grade: { overall_score: 60 } },
+    { drill_subtype: 'decompose', grade: { overall_score: 75 } },
+  ];
+
+  const result = ctrl.baselineFromDrills(drillAttempts);
+
+  // Axes
+  assert.strictEqual(result.axes.prompting,    90, 'prompting set from prompt drill');
+  assert.strictEqual(result.axes.verification, 60, 'verification set from verify drill');
+  assert.strictEqual(result.axes.decomposition, 75, 'decomposition set from decompose drill');
+  assert.strictEqual(result.axes.refactoring,   0, 'refactoring unmeasured in Phase A — stays 0');
+
+  // Average is over 3 Phase A axes only: (90+60+75)/3 = 75
+  assert.strictEqual(result.average, 75, 'average is mean of 3 Phase A axes');
+
+  // Difficulty thresholds: avg=75 → easy
+  assert.strictEqual(result.recommended_difficulty, 'easy');
+
+  // High scorer: avg > 90 → hard
+  const highResult = ctrl.baselineFromDrills([
+    { drill_subtype: 'prompt',    grade: { overall_score: 95 } },
+    { drill_subtype: 'verify',    grade: { overall_score: 95 } },
+    { drill_subtype: 'decompose', grade: { overall_score: 95 } },
+  ]);
+  assert.strictEqual(highResult.recommended_difficulty, 'hard');
+  assert.strictEqual(highResult.axes.refactoring, 0, 'refactoring still 0 for high scorer');
+
+  // Medium scorer: avg > 80 → medium
+  const medResult = ctrl.baselineFromDrills([
+    { drill_subtype: 'prompt',    grade: { overall_score: 85 } },
+    { drill_subtype: 'verify',    grade: { overall_score: 85 } },
+    { drill_subtype: 'decompose', grade: { overall_score: 85 } },
+  ]);
+  assert.strictEqual(medResult.recommended_difficulty, 'medium');
 });
