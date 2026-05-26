@@ -1,0 +1,35 @@
+# Redocly lint config for ScaleUp backend OpenAPI spec.
+#
+# Baseline: Redocly's "recommended" ruleset, with explicit overrides below.
+# Goal: clean CI (no errors, no warnings) while preserving meaningful checks.
+#
+# Each disabled rule has a one-line rationale. When the rationale stops being
+# true (e.g., we run the 4xx-response cleanup sprint), re-enable the rule and
+# delete the override.
+
+extends:
+  - recommended
+
+rules:
+  # Stylistic — we document the success body and trust Express + the standard
+  # error envelope (src/utils/apiResponse.js) for 4xx shapes. Cleanup to add
+  # explicit 4xx responses to each endpoint is deferred to a separate sprint;
+  # see docs/superpowers/specs/2026-05-26-coding-practice-design.md §17.
+  operation-4xx-response: off
+
+  # False positives. Several path pairs (e.g. /notes/analytics/{id} vs
+  # /notes/{id}/publish, /quizzes/trigger/{triggerId} vs /quizzes/{id}/start)
+  # are "ambiguous" by OpenAPI's static-vs-parametric rule, but Express
+  # matches by declaration order and the routes work correctly in production.
+  # Restructuring would require coordinated iOS + Android client changes.
+  no-ambiguous-paths: off
+
+  # The global servers: block intentionally includes the localhost dev URL
+  # so the docs render correctly for developers running the API locally.
+  no-server-example.com: off
+
+  # The `Forbidden` (403) response component is intentionally defined even
+  # though no endpoint $refs it yet — it's defensive infrastructure for
+  # auth-restricted endpoints that will be added (admin / TPO / GDPR delete).
+  # Removing it now would just mean re-adding it later.
+  no-unused-components: off
