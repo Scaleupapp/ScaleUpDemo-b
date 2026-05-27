@@ -15,9 +15,10 @@
  */
 
 const { ArtifactBundle, DrillAttempt } = require('../../models');
-const { llmCall }       = require('../llmRouter');
-const { flattenRubric } = require('./rubric');
-const { parseLLMJson }  = require('./parseLLMJson');
+const { llmCall }              = require('../llmRouter');
+const { flattenRubric }        = require('./rubric');
+const { parseLLMJson }         = require('./parseLLMJson');
+const { applyPostGradeUpdates } = require('./postGradeHooks');
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -115,6 +116,15 @@ async function grade({ drillAttemptId }) {
       graded_at:            new Date(),
       grader_model:         res._meta.model,
     },
+  });
+
+  // Propagate the grade into Mastery + Difficulty (best-effort, never throws)
+  await applyPostGradeUpdates({
+    drillAttemptId,
+    userId:       attempt.user_id,
+    roleTrack:    bundle.role_track,
+    drillSubtype: bundle.drill_subtype,
+    score:        overall,
   });
 
   return { overall_score: overall, rubric: fullRubric, what_to_try_next: parsed.what_to_try_next };
