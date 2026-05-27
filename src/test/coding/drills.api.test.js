@@ -541,3 +541,55 @@ test('drills/today controller: never queries for refactor bundle even when refac
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// Test 10 (new signal): general-learning user with SWE skill ratings is now
+// eligible and reaches the calibration_required gate (not no_coding_track_for_objective)
+// ---------------------------------------------------------------------------
+
+test('drills/today controller: general-learning user with SWE skill ratings is eligible (returns calibration_required, not no_coding_track_for_objective)', async () => {
+  const FAKE_DIFF_STATE = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    current_difficulty: 'easy',
+  };
+
+  stubCodingModels({
+    ArtifactBundle: {
+      findOne: () => ({ sort: () => ({ lean: async () => FAKE_BUNDLE }) }),
+    },
+    MetaSkillMastery: {
+      findOne: () => ({ lean: async () => null }),  // no mastery → calibration_required
+    },
+    DifficultyState: {
+      findOne: async () => FAKE_DIFF_STATE,
+      create: async () => { throw new Error('should not be called'); },
+    },
+  });
+  stubModule(USER_OBJECTIVE_PATH, {
+    findOne: () => ({
+      lean: async () => ({
+        userId: FAKE_USER_ID,
+        objectiveType: 'interview_preparation',
+        canonicalTopic: 'general-learning',  // falls through canonicalTopic check
+        topicSelfRatings: {
+          'data-structures-algorithms': 'familiar',
+          'system-design-fundamentals': 'familiar',
+          'oop-concepts': 'familiar',
+        },
+        isPrimary: true,
+        status: 'active',
+      }),
+    }),
+  });
+
+  const ctrl = loadController();
+  const [req, res] = buildReqRes({ user: { userId: FAKE_USER_ID } });
+  await ctrl.getToday(req, res);
+
+  // User IS eligible (skill_ratings signal fired) but has no mastery yet
+  assert.strictEqual(res._status, 404);
+  assert.strictEqual(res._body.error, 'calibration_required',
+    'should reach calibration gate, not no_coding_track_for_objective');
+  assert.strictEqual(res._body.role_track, 'swe');
+});

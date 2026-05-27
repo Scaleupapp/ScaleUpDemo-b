@@ -596,3 +596,46 @@ test('baselineFromDrills: computes average over 3 Phase A axes, refactoring stay
   ]);
   assert.strictEqual(medResult.recommended_difficulty, 'medium');
 });
+
+// ---------------------------------------------------------------------------
+// Test 10 (new signal): general-learning user with SWE skill ratings is now
+// eligible and startCalibration returns their bundles (not 404)
+// ---------------------------------------------------------------------------
+
+test('startCalibration: general-learning user with SWE skill ratings is now eligible (skill_ratings signal)', async () => {
+  stubCodingModels({
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
+    DrillAttempt: {
+      create: async (doc) => makeAttempt(doc.drill_subtype, { ...doc, _id: `attempt-${doc.bundle_id}` }),
+    },
+    MetaSkillMastery: { findOne: () => ({ lean: async () => null }) },
+    DifficultyState: { findOne: async () => null, create: async () => null },
+  });
+  stubModule(USER_OBJECTIVE_PATH, {
+    findOne: () => ({
+      lean: async () => ({
+        userId: FAKE_USER_ID,
+        canonicalTopic: 'general-learning',  // falls through canonicalTopic check
+        topicSelfRatings: {
+          'data-structures-algorithms': 'familiar',
+          'system-design-fundamentals': 'familiar',
+          'oop-concepts': 'familiar',
+        },
+        isPrimary: true,
+        status: 'active',
+      }),
+    }),
+  });
+
+  const ctrl = loadController();
+  const [req, res] = buildReqRes({ user: { userId: FAKE_USER_ID } });
+  await ctrl.startCalibration(req, res);
+
+  // Previously would have returned 404 no_coding_track_for_objective.
+  // With multi-signal eligibility the user reaches the bundle-fetch step.
+  assert.strictEqual(res._status, 200, 'general-learning + SWE skills should now be eligible');
+  const body = res._body;
+  assert.ok(body.calibration_id, 'should have calibration_id');
+  assert.strictEqual(body.role_track, 'swe', 'skill_ratings signal should resolve to swe');
+  assert.strictEqual(body.drills.length, 3);
+});

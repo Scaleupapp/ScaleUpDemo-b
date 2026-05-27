@@ -47,6 +47,21 @@ const OBJECTIVE_TO_TRACK = {
   'system-design': 'swe',
   'machine-learning': 'ai_eng',
   'cloud-engineering': 'swe',
+
+  // Variants observed in prod that previously fell through:
+  'data-science': 'ds',           // 4 users
+  'machine_learning': 'ai_eng',   // underscore variant
+  'sde': 'swe',                   // common India abbreviation
+  'software-development-engineer': 'swe',
+  'swe': 'swe',
+  'fullstack-engineer': 'swe',
+  'mobile-developer': 'swe',
+  'ios-developer': 'swe',
+  'android-developer': 'swe',
+  'sre': 'swe',
+  'ml-engineer': 'ai_eng',
+  'ai-engineer': 'ai_eng',
+  'mlops-engineer': 'ai_eng',
 };
 
 /**

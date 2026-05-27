@@ -194,3 +194,56 @@ test('pickWeakestAxis returns prompting default when mastery is null', () => {
   assert.equal(pickWeakestAxis(null), 'prompting');
   assert.equal(pickWeakestAxis({}), 'prompting');
 });
+
+// ---------------------------------------------------------------------------
+// New prod-variant mappings (Change 1)
+// ---------------------------------------------------------------------------
+
+test('OBJECTIVE_TO_TRACK now maps data-science and machine-learning', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('data-science'), 'ds');
+  assert.equal(mapObjectiveToRoleTrack('machine-learning'), 'ai_eng');
+  assert.equal(mapObjectiveToRoleTrack('sde'), 'swe');
+  assert.equal(mapObjectiveToRoleTrack('frontend-engineer'), 'swe');
+});
+
+test('mapObjectiveToRoleTrack: machine_learning (underscore variant) → ai_eng', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('machine_learning'), 'ai_eng');
+});
+
+test('mapObjectiveToRoleTrack: swe → swe', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('swe'), 'swe');
+});
+
+test('mapObjectiveToRoleTrack: software-development-engineer → swe', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('software-development-engineer'), 'swe');
+});
+
+test('mapObjectiveToRoleTrack: ios-developer and android-developer → swe', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('ios-developer'), 'swe');
+  assert.equal(mapObjectiveToRoleTrack('android-developer'), 'swe');
+});
+
+test('mapObjectiveToRoleTrack: ml-engineer → ai_eng', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('ml-engineer'), 'ai_eng');
+});
+
+test('mapObjectiveToRoleTrack: ai-engineer → ai_eng', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('ai-engineer'), 'ai_eng');
+});
+
+test('mapObjectiveToRoleTrack: mlops-engineer → ai_eng', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('mlops-engineer'), 'ai_eng');
+});
+
+test('mapObjectiveToRoleTrack: sre → swe', () => {
+  const { mapObjectiveToRoleTrack } = require('../../coding/services/roleTrackMapper');
+  assert.equal(mapObjectiveToRoleTrack('sre'), 'swe');
+});

@@ -34,6 +34,7 @@
 
 const { ArtifactBundle, DrillAttempt, DifficultyState, MetaSkillMastery } = require('../models');
 const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype, PHASE_A_DRILL_SUBTYPES } = require('./roleTrackMapper');
+const { evaluateCodingEligibility } = require('./codingEligibility');
 
 // Per spec §19: free tier = 1 drill/day.
 const DAILY_DRILL_QUOTA = 1;
@@ -57,8 +58,8 @@ async function getUserRoleTrack(user_id) {
     status: 'active',
     isPrimary: true,
   }).lean();
-  if (!obj) return null;
-  return mapObjectiveToRoleTrack(obj.canonicalTopic);
+  const eligibility = evaluateCodingEligibility(obj);
+  return eligibility.eligible ? eligibility.role_track : null;
 }
 
 /**

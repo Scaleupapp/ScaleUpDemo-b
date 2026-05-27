@@ -2,6 +2,7 @@
 
 const { ArtifactBundle, MetaSkillMastery, DifficultyState } = require('../models');
 const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype, subtypeToAxis, PHASE_A_DRILL_SUBTYPES, PHASE_A_AXES } = require('../services/roleTrackMapper');
+const { evaluateCodingEligibility } = require('../services/codingEligibility');
 const { validateDrillSubmission } = require('../validators/drill.validator');
 const { randomUUID } = require('crypto');
 
@@ -63,11 +64,11 @@ async function getToday(req, res) {
     const UserObjective = require('../../models/UserObjective');
     const objective = await UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean();
 
-    const canonicalTopic = objective && objective.canonicalTopic;
-    const role_track = mapObjectiveToRoleTrack(canonicalTopic);
-    if (!role_track) {
+    const eligibility = evaluateCodingEligibility(objective);
+    if (!eligibility.eligible) {
       return res.status(404).json({ error: 'no_coding_track_for_objective' });
     }
+    const role_track = eligibility.role_track;
 
     // Difficulty state — create with 'easy' if missing
     let diffState = await DifficultyState.findOne({ user_id: userId, role_track });
@@ -324,10 +325,11 @@ async function startCalibration(req, res) {
     // Get user's role_track
     const UserObjective = require('../../models/UserObjective');
     const objective = await UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean();
-    const role_track = mapObjectiveToRoleTrack(objective && objective.canonicalTopic);
-    if (!role_track) {
+    const eligibility = evaluateCodingEligibility(objective);
+    if (!eligibility.eligible) {
       return res.status(404).json({ error: 'no_coding_track_for_objective' });
     }
+    const role_track = eligibility.role_track;
 
     const models = require('../models');
 
