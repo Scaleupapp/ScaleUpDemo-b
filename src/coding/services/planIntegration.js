@@ -74,8 +74,9 @@ async function hasUsedDailyQuota(user_id) {
   startOfDay.setHours(0, 0, 0, 0);
   const count = await DrillAttempt.countDocuments({
     user_id,
-    createdAt: { $gte: startOfDay },
     is_calibration: { $ne: true },
+    status: 'graded',                   // only fully graded attempts count; abandoned in-progress don't lock the user out
+    submitted_at: { $gte: startOfDay },
   });
   return count >= DAILY_DRILL_QUOTA;
 }

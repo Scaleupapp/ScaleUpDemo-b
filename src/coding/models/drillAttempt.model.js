@@ -25,6 +25,11 @@ const DrillAttemptSchema = new mongoose.Schema({
     overall_score: Number,
     rubric_breakdown: [{ dimension: String, score: Number, feedback: String }],
     what_to_try_next: String,
+    what_you_missed: [{
+      title: String,
+      detail: String,
+      reference: String,
+    }],
     integrity_confidence: { type: String, enum: ['high', 'medium', 'low'] },
     graded_at: Date,
     grader_model: String,

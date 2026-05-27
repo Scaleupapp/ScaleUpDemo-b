@@ -5986,7 +5986,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          description: No drill available or user objective does not map to a coding track
+          description: No drill available, quota used, or user objective does not map to a coding track
           content:
             application/json:
               schema:
@@ -5994,13 +5994,17 @@ paths:
                 properties:
                   error:
                     type: string
-                    enum: [no_coding_track_for_objective, no_drill_available]
+                    enum: [no_coding_track_for_objective, calibration_required, no_drill_available, daily_quota_used]
                   role_track:
                     type: string
                   difficulty:
                     type: string
                   drill_subtype:
                     type: string
+                  next_drill_at:
+                    type: string
+                    format: date-time
+                    description: Present only when error is daily_quota_used
   /api/coding/drills/{id}/start:
     post:
       operationId: startCodeDrill
@@ -6202,6 +6206,19 @@ paths:
                           type: string
                   what_to_try_next:
                     type: string
+                  what_you_missed:
+                    type: array
+                    items:
+                      type: object
+                      required: [title, detail]
+                      properties:
+                        title:
+                          type: string
+                        detail:
+                          type: string
+                        reference:
+                          type: string
+                          nullable: true
                   integrity_confidence:
                     type: string
                     enum: [high, medium, low]

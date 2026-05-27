@@ -50,6 +50,10 @@ const DIFFICULTY_STATE_PATH = path.resolve(
   __dirname,
   '../../coding/models/difficultyState.model.js'
 );
+const DRILL_ATTEMPT_PATH = path.resolve(
+  __dirname,
+  '../../coding/models/drillAttempt.model.js'
+);
 // The coding models index re-exports all three above — stub it too so the
 // controller's `require('../models')` destructuring gets fakes.
 const CODING_MODELS_INDEX_PATH = path.resolve(
@@ -82,17 +86,20 @@ function loadController() {
 }
 
 /**
- * Stub all three coding models (index + individual files) in one call.
+ * Stub all coding models (index + individual files) in one call.
  * This ensures `require('../models')` in the controller gets fakes regardless
  * of whether the index was already cached.
  */
-function stubCodingModels({ ArtifactBundle, MetaSkillMastery, DifficultyState }) {
-  const indexExports = { ArtifactBundle, MetaSkillMastery, DifficultyState };
+function stubCodingModels({ ArtifactBundle, MetaSkillMastery, DifficultyState, DrillAttempt }) {
+  // Default no-op DrillAttempt stub (quota check returns 0 — don't block the test)
+  const drillAttemptStub = DrillAttempt || { countDocuments: async () => 0 };
+  const indexExports = { ArtifactBundle, MetaSkillMastery, DifficultyState, DrillAttempt: drillAttemptStub };
 
   stubModule(CODING_MODELS_INDEX_PATH, indexExports);
   if (ArtifactBundle) stubModule(ARTIFACT_BUNDLE_PATH, ArtifactBundle);
   if (MetaSkillMastery) stubModule(META_SKILL_PATH, MetaSkillMastery);
   if (DifficultyState) stubModule(DIFFICULTY_STATE_PATH, DifficultyState);
+  stubModule(DRILL_ATTEMPT_PATH, drillAttemptStub);
 }
 
 // ---------------------------------------------------------------------------
@@ -592,4 +599,129 @@ test('drills/today controller: general-learning user with SWE skill ratings is e
   assert.strictEqual(res._body.error, 'calibration_required',
     'should reach calibration gate, not no_coding_track_for_objective');
   assert.strictEqual(res._body.role_track, 'swe');
+});
+
+// ---------------------------------------------------------------------------
+// Test 11: daily_quota_used — 404 with next_drill_at when user already graded a drill today
+// ---------------------------------------------------------------------------
+
+test('drills/today controller: returns 404 daily_quota_used when user has already graded a drill today', async () => {
+  const FAKE_DIFF_STATE = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    current_difficulty: 'easy',
+  };
+
+  const FAKE_MASTERY = {
+    user_id: FAKE_USER_ID,
+    role_track: 'swe',
+    axes: { prompting: 60, verification: 80, decomposition: 70, refactoring: 50 },
+  };
+
+  stubCodingModels({
+    ArtifactBundle: {
+      findOne: () => ({ sort: () => ({ lean: async () => FAKE_BUNDLE }) }),
+    },
+    MetaSkillMastery: {
+      findOne: () => ({ lean: async () => FAKE_MASTERY }),
+    },
+    DifficultyState: {
+      findOne: async () => FAKE_DIFF_STATE,
+      create: async () => { throw new Error('should not be called'); },
+    },
+    DrillAttempt: {
+      // Return 1 graded drill today → quota used
+      countDocuments: async () => 1,
+    },
+  });
+  stubModule(USER_OBJECTIVE_PATH, {
+    findOne: () => ({
+      lean: async () => ({
+        userId: FAKE_USER_ID,
+        objectiveType: 'interview_preparation',
+        canonicalTopic: 'software-engineer',
+        isPrimary: true,
+        status: 'active',
+      }),
+    }),
+  });
+
+  const ctrl = loadController();
+  const [req, res] = buildReqRes({ user: { userId: FAKE_USER_ID } });
+  await ctrl.getToday(req, res);
+
+  assert.strictEqual(res._status, 404);
+  assert.strictEqual(res._body.error, 'daily_quota_used', 'error must be daily_quota_used');
+  assert.ok(typeof res._body.next_drill_at === 'string', 'next_drill_at must be a string');
+  assert.ok(
+    new Date(res._body.next_drill_at) > new Date(),
+    'next_drill_at must be in the future'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Test 12: getResult includes what_you_missed in the response
+// ---------------------------------------------------------------------------
+
+test('drills/today controller: getResult includes what_you_missed in graded response', async () => {
+  const DRILL_ATTEMPT_PATH_LOCAL = path.resolve(__dirname, '../../coding/models/drillAttempt.model.js');
+  const BUNDLE_ID = 'bundle-xyz-456';
+  const ATTEMPT_ID = 'attempt-xyz-789';
+
+  const fakeGradedAttempt = {
+    _id: ATTEMPT_ID,
+    user_id: FAKE_USER_ID,
+    bundle_id: BUNDLE_ID,
+    status: 'graded',
+    grade: {
+      overall_score: 80,
+      rubric_breakdown: [
+        { dimension: 'specificity', score: 8, feedback: 'Good specificity.' },
+      ],
+      what_to_try_next: 'Try harder.',
+      what_you_missed: [
+        { title: 'Missing edge case', detail: 'Forgot empty input.', reference: 'Specify empty input handling' },
+      ],
+      integrity_confidence: 'high',
+      graded_at: new Date().toISOString(),
+    },
+  };
+
+  const fakeBundleForResult = {
+    _id: BUNDLE_ID,
+    drill_subtype: 'prompt',
+    difficulty: 'easy',
+    role_track: 'swe',
+  };
+
+  stubCodingModels({
+    ArtifactBundle: {
+      findOne: () => ({ sort: () => ({ lean: async () => null }) }),
+      findById: (id) => ({ lean: async () => fakeBundleForResult }),
+    },
+    MetaSkillMastery: { findOne: () => ({ lean: async () => null }) },
+    DifficultyState: { findOne: async () => null, create: async () => null },
+    DrillAttempt: {
+      countDocuments: async () => 0,
+      findOne: (query) => ({
+        sort: () => ({ lean: async () => fakeGradedAttempt }),
+      }),
+    },
+  });
+  stubModule(USER_OBJECTIVE_PATH, { findOne: () => ({ lean: async () => null }) });
+
+  const ctrl = loadController();
+  const req = { user: { userId: FAKE_USER_ID }, params: { id: BUNDLE_ID } };
+  const res = {
+    _status: 200,
+    _body: null,
+    status(code) { this._status = code; return this; },
+    json(payload) { this._body = payload; return this; },
+  };
+  await ctrl.getResult(req, res);
+
+  assert.strictEqual(res._status, 200);
+  assert.ok(Array.isArray(res._body.what_you_missed), 'what_you_missed must be an array');
+  assert.strictEqual(res._body.what_you_missed.length, 1);
+  assert.strictEqual(res._body.what_you_missed[0].title, 'Missing edge case');
 });

@@ -23,12 +23,13 @@ let STUB_LLM_RESPONSE = {
     text: JSON.stringify({
       overall_score: 78,
       rubric: {
-        specificity:    8,
-        constraints:    7,
-        edge_cases:     7,
-        output_fidelity: 8,
+        specificity:     { score: 8, feedback: 'Good level of specificity.' },
+        constraints:     { score: 7, feedback: 'Missing output format constraint.' },
+        edge_cases:      { score: 7, feedback: 'Does not handle empty input.' },
+        output_fidelity: { score: 8, feedback: 'Would produce correct output.' },
       },
       what_to_try_next: 'Add explicit format constraints.',
+      what_you_missed: [],
     }),
   }],
   _meta: { provider: 'anthropic', model: 'claude-haiku' },
@@ -197,8 +198,14 @@ test('promptGrader: calls applyPostGradeUpdates after writing grade (regression)
     content: [{
       text: JSON.stringify({
         overall_score: 78,
-        rubric: { specificity: 8, constraints: 7, edge_cases: 7, output_fidelity: 8 },
+        rubric: {
+          specificity:     { score: 8, feedback: 'Good.' },
+          constraints:     { score: 7, feedback: 'Missing format.' },
+          edge_cases:      { score: 7, feedback: 'Missing empty input.' },
+          output_fidelity: { score: 8, feedback: 'Correct output.' },
+        },
         what_to_try_next: 'Add explicit format constraints.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-haiku' },
@@ -213,6 +220,58 @@ test('promptGrader: calls applyPostGradeUpdates after writing grade (regression)
   assert.equal(postGradeArgs.drillSubtype, 'prompt');
 });
 
+test('promptGrader: grade() saves what_you_missed=[] when LLM returns empty array', async () => {
+  capturedUpdate = null;
+  await grade({ drillAttemptId: attemptId });
+
+  assert.ok(Array.isArray(capturedUpdate.grade.what_you_missed), 'what_you_missed must be an array');
+  assert.strictEqual(capturedUpdate.grade.what_you_missed.length, 0, 'what_you_missed should be empty when LLM returns []');
+});
+
+test('promptGrader: grade() saves what_you_missed entries when LLM returns them', async () => {
+  const origResponse = STUB_LLM_RESPONSE;
+  STUB_LLM_RESPONSE = {
+    content: [{
+      text: JSON.stringify({
+        overall_score: 60,
+        rubric: {
+          specificity:     { score: 6, feedback: 'Too vague.' },
+          constraints:     { score: 5, feedback: 'No constraints declared.' },
+          edge_cases:      { score: 5, feedback: 'No edge cases.' },
+          output_fidelity: { score: 6, feedback: 'May produce wrong output.' },
+        },
+        what_to_try_next: 'Add explicit constraints.',
+        what_you_missed: [
+          { title: "Didn't specify error handling", detail: 'No error handling specified.', reference: 'Specify: skip silently' },
+        ],
+      }),
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-haiku' },
+  };
+  capturedUpdate = null;
+
+  try {
+    await grade({ drillAttemptId: attemptId });
+    assert.ok(Array.isArray(capturedUpdate.grade.what_you_missed), 'what_you_missed must be an array');
+    assert.strictEqual(capturedUpdate.grade.what_you_missed.length, 1, 'what_you_missed should have 1 entry');
+    assert.ok(capturedUpdate.grade.what_you_missed[0].title, 'entry must have title');
+    assert.ok(capturedUpdate.grade.what_you_missed[0].detail, 'entry must have detail');
+  } finally {
+    STUB_LLM_RESPONSE = origResponse;
+  }
+});
+
+test('promptGrader: rubric_breakdown entries have per-criterion feedback from new { score, feedback } shape', async () => {
+  capturedUpdate = null;
+  await grade({ drillAttemptId: attemptId });
+
+  const breakdown = capturedUpdate.grade.rubric_breakdown;
+  for (const entry of breakdown) {
+    assert.ok(typeof entry.feedback === 'string' && entry.feedback.length > 0,
+      `feedback must be non-empty for dimension ${entry.dimension}`);
+  }
+});
+
 test('promptGrader: handles LLM response wrapped in ```json fences (regression)', async () => {
   const origResponse = STUB_LLM_RESPONSE;
   STUB_LLM_RESPONSE = {
@@ -220,8 +279,14 @@ test('promptGrader: handles LLM response wrapped in ```json fences (regression)'
       type: 'text',
       text: '```json\n' + JSON.stringify({
         overall_score: 65,
-        rubric: { specificity: 7, constraints: 6, edge_cases: 6, output_fidelity: 7 },
+        rubric: {
+          specificity:     { score: 7, feedback: 'Decent.' },
+          constraints:     { score: 6, feedback: 'Missing length constraint.' },
+          edge_cases:      { score: 6, feedback: 'Edge cases not addressed.' },
+          output_fidelity: { score: 7, feedback: 'Mostly correct.' },
+        },
         what_to_try_next: 'Be more specific about edge cases.',
+        what_you_missed: [],
       }) + '\n```',
     }],
     _meta: { provider: 'anthropic', model: 'claude-haiku' },

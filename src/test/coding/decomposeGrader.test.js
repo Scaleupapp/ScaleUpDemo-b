@@ -19,17 +19,19 @@ const mongoose = require('mongoose');
 // ── LLM stub — patched before anything requires llmRouter ────────────────────
 
 // Mutable so individual tests can override the response.
+// Uses new { score, feedback } rubric shape.
 let STUB_LLM_RESPONSE = {
   content: [{
     text: JSON.stringify({
       overall_score: 88,
       rubric: {
-        granularity:               9,
-        ordering:                  9,
-        verification_checkpoints:  8,
-        ai_handoff_appropriateness: 9,
+        granularity:               { score: 9, feedback: 'Steps are well-sized.' },
+        ordering:                  { score: 9, feedback: 'Dependencies respected.' },
+        verification_checkpoints:  { score: 8, feedback: 'Most steps have checks.' },
+        ai_handoff_appropriateness: { score: 9, feedback: 'Good handoff clarity.' },
       },
       what_to_try_next: 'Add explicit acceptance check after step 3.',
+      what_you_missed: [],
     }),
   }],
   _meta: { provider: 'anthropic', model: 'claude-haiku' },
@@ -110,27 +112,34 @@ DrillAttempt.findByIdAndUpdate = async (id, update) => {
 
 const { grade } = require('../../coding/services/drillGrader/decomposeGrader');
 
+// Helper that builds a high-score LLM stub response
+function highScoreResponse(overrides = {}) {
+  return {
+    content: [{
+      text: JSON.stringify({
+        overall_score: 88,
+        rubric: {
+          granularity:               { score: 9, feedback: 'Well-sized steps.' },
+          ordering:                  { score: 9, feedback: 'Good ordering.' },
+          verification_checkpoints:  { score: 8, feedback: 'Most steps checked.' },
+          ai_handoff_appropriateness: { score: 9, feedback: 'Clear handoffs.' },
+        },
+        what_to_try_next: 'Add explicit acceptance check after step 3.',
+        what_you_missed: [],
+        ...overrides,
+      }),
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-haiku' },
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Test A — high score: 5 well-ordered steps with verification checkpoints
 // Mock LLM returns overall_score: 88
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('decomposeGrader [A]: grade() returns overall_score === 88', async () => {
-  STUB_LLM_RESPONSE = {
-    content: [{
-      text: JSON.stringify({
-        overall_score: 88,
-        rubric: {
-          granularity:               9,
-          ordering:                  9,
-          verification_checkpoints:  8,
-          ai_handoff_appropriateness: 9,
-        },
-        what_to_try_next: 'Add explicit acceptance check after step 3.',
-      }),
-    }],
-    _meta: { provider: 'anthropic', model: 'claude-haiku' },
-  };
+  STUB_LLM_RESPONSE = highScoreResponse();
   attemptOverride = null;
   capturedUpdate  = null;
 
@@ -139,21 +148,7 @@ test('decomposeGrader [A]: grade() returns overall_score === 88', async () => {
 });
 
 test('decomposeGrader [A]: saved grade.overall_score === 88', async () => {
-  STUB_LLM_RESPONSE = {
-    content: [{
-      text: JSON.stringify({
-        overall_score: 88,
-        rubric: {
-          granularity:               9,
-          ordering:                  9,
-          verification_checkpoints:  8,
-          ai_handoff_appropriateness: 9,
-        },
-        what_to_try_next: 'Add explicit acceptance check after step 3.',
-      }),
-    }],
-    _meta: { provider: 'anthropic', model: 'claude-haiku' },
-  };
+  STUB_LLM_RESPONSE = highScoreResponse();
   attemptOverride = null;
   capturedUpdate  = null;
 
@@ -163,21 +158,7 @@ test('decomposeGrader [A]: saved grade.overall_score === 88', async () => {
 });
 
 test('decomposeGrader [A]: status set to graded', async () => {
-  STUB_LLM_RESPONSE = {
-    content: [{
-      text: JSON.stringify({
-        overall_score: 88,
-        rubric: {
-          granularity:               9,
-          ordering:                  9,
-          verification_checkpoints:  8,
-          ai_handoff_appropriateness: 9,
-        },
-        what_to_try_next: 'Add explicit acceptance check after step 3.',
-      }),
-    }],
-    _meta: { provider: 'anthropic', model: 'claude-haiku' },
-  };
+  STUB_LLM_RESPONSE = highScoreResponse();
   attemptOverride = null;
   capturedUpdate  = null;
 
@@ -186,21 +167,7 @@ test('decomposeGrader [A]: status set to graded', async () => {
 });
 
 test('decomposeGrader [A]: rubric_breakdown has 4 entries', async () => {
-  STUB_LLM_RESPONSE = {
-    content: [{
-      text: JSON.stringify({
-        overall_score: 88,
-        rubric: {
-          granularity:               9,
-          ordering:                  9,
-          verification_checkpoints:  8,
-          ai_handoff_appropriateness: 9,
-        },
-        what_to_try_next: 'Add explicit acceptance check after step 3.',
-      }),
-    }],
-    _meta: { provider: 'anthropic', model: 'claude-haiku' },
-  };
+  STUB_LLM_RESPONSE = highScoreResponse();
   attemptOverride = null;
   capturedUpdate  = null;
 
@@ -211,21 +178,7 @@ test('decomposeGrader [A]: rubric_breakdown has 4 entries', async () => {
 });
 
 test('decomposeGrader [A]: rubric_breakdown contains all 4 dimensions', async () => {
-  STUB_LLM_RESPONSE = {
-    content: [{
-      text: JSON.stringify({
-        overall_score: 88,
-        rubric: {
-          granularity:               9,
-          ordering:                  9,
-          verification_checkpoints:  8,
-          ai_handoff_appropriateness: 9,
-        },
-        what_to_try_next: 'Add explicit acceptance check after step 3.',
-      }),
-    }],
-    _meta: { provider: 'anthropic', model: 'claude-haiku' },
-  };
+  STUB_LLM_RESPONSE = highScoreResponse();
   attemptOverride = null;
   capturedUpdate  = null;
 
@@ -238,21 +191,7 @@ test('decomposeGrader [A]: rubric_breakdown contains all 4 dimensions', async ()
 });
 
 test('decomposeGrader [A]: what_to_try_next propagated from LLM response', async () => {
-  STUB_LLM_RESPONSE = {
-    content: [{
-      text: JSON.stringify({
-        overall_score: 88,
-        rubric: {
-          granularity:               9,
-          ordering:                  9,
-          verification_checkpoints:  8,
-          ai_handoff_appropriateness: 9,
-        },
-        what_to_try_next: 'Add explicit acceptance check after step 3.',
-      }),
-    }],
-    _meta: { provider: 'anthropic', model: 'claude-haiku' },
-  };
+  STUB_LLM_RESPONSE = highScoreResponse();
   attemptOverride = null;
   capturedUpdate  = null;
 
@@ -274,12 +213,15 @@ test('decomposeGrader [B]: grade() returns overall_score === 42 for 2 vague step
       text: JSON.stringify({
         overall_score: 42,
         rubric: {
-          granularity:               3,
-          ordering:                  5,
-          verification_checkpoints:  2,
-          ai_handoff_appropriateness: 5,
+          granularity:               { score: 3, feedback: 'Steps too vague.' },
+          ordering:                  { score: 5, feedback: 'Ordering acceptable.' },
+          verification_checkpoints:  { score: 2, feedback: 'No verification steps.' },
+          ai_handoff_appropriateness: { score: 5, feedback: 'Unclear handoffs.' },
         },
         what_to_try_next: 'Steps too vague — break further.',
+        what_you_missed: [
+          { title: 'Missing step: Deduplication', detail: 'No dedup step included.', reference: 'Step 2: Deduplicate rows' },
+        ],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-haiku' },
@@ -308,12 +250,13 @@ test('decomposeGrader [B]: saved grade.overall_score === 42', async () => {
       text: JSON.stringify({
         overall_score: 42,
         rubric: {
-          granularity:               3,
-          ordering:                  5,
-          verification_checkpoints:  2,
-          ai_handoff_appropriateness: 5,
+          granularity:               { score: 3, feedback: 'Steps too vague.' },
+          ordering:                  { score: 5, feedback: 'Acceptable.' },
+          verification_checkpoints:  { score: 2, feedback: 'No verification.' },
+          ai_handoff_appropriateness: { score: 5, feedback: 'Unclear.' },
         },
         what_to_try_next: 'Steps too vague — break further.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-haiku' },
@@ -335,6 +278,49 @@ test('decomposeGrader [B]: saved grade.overall_score === 42', async () => {
   await grade({ drillAttemptId: attemptId });
   assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
   assert.strictEqual(capturedUpdate.grade.overall_score, 42);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test C — what_you_missed
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('decomposeGrader: what_you_missed is saved as empty array when LLM returns []', async () => {
+  STUB_LLM_RESPONSE = highScoreResponse({ what_you_missed: [] });
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await grade({ drillAttemptId: attemptId });
+  assert.ok(Array.isArray(capturedUpdate.grade.what_you_missed), 'what_you_missed must be an array');
+  assert.strictEqual(capturedUpdate.grade.what_you_missed.length, 0, 'should be empty');
+});
+
+test('decomposeGrader: what_you_missed entries saved when LLM returns them', async () => {
+  STUB_LLM_RESPONSE = highScoreResponse({
+    overall_score: 60,
+    what_you_missed: [
+      { title: 'Missing step: API contract definition', detail: 'No contract step.', reference: 'Step 1 — Define defaults' },
+    ],
+  });
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await grade({ drillAttemptId: attemptId });
+  assert.ok(Array.isArray(capturedUpdate.grade.what_you_missed), 'what_you_missed must be an array');
+  assert.strictEqual(capturedUpdate.grade.what_you_missed.length, 1, 'should have 1 entry');
+  assert.ok(capturedUpdate.grade.what_you_missed[0].title, 'entry must have title');
+});
+
+test('decomposeGrader: rubric_breakdown entries have per-criterion feedback', async () => {
+  STUB_LLM_RESPONSE = highScoreResponse();
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await grade({ drillAttemptId: attemptId });
+  const breakdown = capturedUpdate.grade.rubric_breakdown;
+  for (const entry of breakdown) {
+    assert.ok(typeof entry.feedback === 'string' && entry.feedback.length > 0,
+      `feedback must be non-empty for dimension ${entry.dimension}`);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,21 +351,7 @@ test('decomposeGrader: calls applyPostGradeUpdates after writing grade (regressi
   delete require.cache[graderPath];
   const { grade: gradeFresh } = require('../../coding/services/drillGrader/decomposeGrader');
 
-  STUB_LLM_RESPONSE = {
-    content: [{
-      text: JSON.stringify({
-        overall_score: 88,
-        rubric: {
-          granularity:               9,
-          ordering:                  9,
-          verification_checkpoints:  8,
-          ai_handoff_appropriateness: 9,
-        },
-        what_to_try_next: 'Add explicit acceptance check after step 3.',
-      }),
-    }],
-    _meta: { provider: 'anthropic', model: 'claude-haiku' },
-  };
+  STUB_LLM_RESPONSE = highScoreResponse();
   attemptOverride = null;
   capturedUpdate  = null;
 
@@ -431,12 +403,13 @@ test('decomposeGrader: handles LLM response wrapped in ```json fences (regressio
       text: '```json\n' + JSON.stringify({
         overall_score: 72,
         rubric: {
-          granularity:               7,
-          ordering:                  8,
-          verification_checkpoints:  6,
-          ai_handoff_appropriateness: 7,
+          granularity:               { score: 7, feedback: 'Decent granularity.' },
+          ordering:                  { score: 8, feedback: 'Good ordering.' },
+          verification_checkpoints:  { score: 6, feedback: 'Some checks missing.' },
+          ai_handoff_appropriateness: { score: 7, feedback: 'Mostly clear.' },
         },
         what_to_try_next: 'Add a verification step after each handoff.',
+        what_you_missed: [],
       }) + '\n```',
     }],
     _meta: { provider: 'anthropic', model: 'claude-haiku' },

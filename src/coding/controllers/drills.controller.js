@@ -6,6 +6,9 @@ const { evaluateCodingEligibility } = require('../services/codingEligibility');
 const { validateDrillSubmission } = require('../validators/drill.validator');
 const { randomUUID } = require('crypto');
 
+// Free-tier daily drill quota (non-calibration graded drills per day)
+const DAILY_DRILL_QUOTA = 1;
+
 // ---------------------------------------------------------------------------
 // Test seam: allows tests to inject a fake workers module
 // ---------------------------------------------------------------------------
@@ -90,6 +93,23 @@ async function getToday(req, res) {
     // calibration prompt instead of "no drill available".
     if (!mastery) {
       return res.status(404).json({ error: 'calibration_required', role_track });
+    }
+
+    // Daily quota: have we already graded a non-calibration drill today?
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const { DrillAttempt: DrillAttemptModel } = require('../models');
+    const drillsToday = await DrillAttemptModel.countDocuments({
+      user_id: userId,
+      is_calibration: { $ne: true },
+      status: 'graded',
+      submitted_at: { $gte: startOfDay },
+    });
+    if (drillsToday >= DAILY_DRILL_QUOTA) {
+      return res.status(404).json({
+        error: 'daily_quota_used',
+        next_drill_at: new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+      });
     }
 
     const weakestAxis = pickWeakestAxis(mastery);
@@ -282,6 +302,7 @@ async function getResult(req, res) {
       overall_score: attempt.grade.overall_score,
       rubric_breakdown: attempt.grade.rubric_breakdown,
       what_to_try_next: attempt.grade.what_to_try_next,
+      what_you_missed: attempt.grade.what_you_missed || [],
       integrity_confidence: attempt.grade.integrity_confidence,
       graded_at: attempt.grade.graded_at,
       drill_subtype: bundle.drill_subtype,
@@ -517,6 +538,7 @@ async function getCalibrationResult(req, res) {
       status: a.status,
       overall_score: a.grade ? a.grade.overall_score : null,
       rubric_breakdown: a.grade ? a.grade.rubric_breakdown : null,
+      what_you_missed: a.grade ? (a.grade.what_you_missed || []) : [],
     }));
 
     if (status !== 'graded') {

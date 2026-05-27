@@ -26,7 +26,21 @@ const SYSTEM = `You grade Verify Drills. The learner is shown code with planted 
 
 You will be given the seeded ground truth, the learner's reported bugs, deterministic match counts, and a request to score root_cause_clarity (0-10) based on explanation quality.
 
-Return strict JSON: { rubric: { root_cause_clarity }, what_to_try_next: string (<=200 chars) }`;
+For root_cause_clarity, also write a short specific 'feedback' sentence (what was strong or what to improve in the explanations).
+
+Then for each seeded_mistake the learner did NOT find (i.e., its location was not in the matched set), add an entry to what_you_missed. If the learner found everything, return an empty array.
+
+Return strict JSON:
+{
+  "rubric": {
+    "root_cause_clarity": { "score": <0-10>, "feedback": "<sentence>" }
+  },
+  "what_to_try_next": "<single sentence, <=200 chars>",
+  "what_you_missed": [
+    { "title": "Missed bug at <file>:<line>", "detail": "<bug_description>", "reference": "<why an LLM would introduce this mistake>" }
+  ]
+}
+Return at most 5 entries in what_you_missed. Return an empty array if the learner found all bugs.`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -81,12 +95,17 @@ async function grade({ drillAttemptId }) {
 
   // ── LLM dimension: root_cause_clarity ────────────────────────────────────
 
+  const unmatched = seeded.filter(s =>
+    !reported.some(r => locationMatches(s.location, r))
+  );
+
   const userMsg = [
     `SEEDED:\n${JSON.stringify(seeded)}`,
     `LEARNER REPORTED:\n${JSON.stringify(reported)}`,
     `MATCHED: ${matched.length}/${seeded.length}`,
     `FALSE POSITIVES: ${false_positives}`,
-    `\nScore root_cause_clarity (0-10) based on the quality of the learner's explanations.`,
+    `UNMATCHED (not found by learner):\n${JSON.stringify(unmatched)}`,
+    `\nScore root_cause_clarity (0-10) based on the quality of the learner's explanations. Populate what_you_missed for each unmatched seeded_mistake.`,
   ].join('\n\n');
 
   const res = await llmCall({
@@ -95,8 +114,12 @@ async function grade({ drillAttemptId }) {
     messages: [{ role: 'user', content: userMsg }],
   });
 
-  const parsed            = parseLLMJson(res.content);
-  const root_cause_clarity = parsed.rubric.root_cause_clarity;
+  const parsed = parseLLMJson(res.content);
+  // root_cause_clarity may be { score, feedback } (new) or a plain number (legacy)
+  const rcRaw = parsed.rubric.root_cause_clarity;
+  const root_cause_clarity = (rcRaw && typeof rcRaw === 'object' && 'score' in rcRaw)
+    ? rcRaw.score
+    : rcRaw;
 
   // ── Blend ─────────────────────────────────────────────────────────────────
 
@@ -104,7 +127,12 @@ async function grade({ drillAttemptId }) {
     (detection_accuracy * 0.5 + root_cause_clarity * 0.3 + false_positive_rate * 0.2) * 10
   );
 
-  const fullRubric = { detection_accuracy, root_cause_clarity, false_positive_rate };
+  // Build full rubric — deterministic dims are plain numbers; LLM dim carries feedback
+  const fullRubric = {
+    detection_accuracy,
+    root_cause_clarity: parsed.rubric.root_cause_clarity,
+    false_positive_rate,
+  };
 
   await DrillAttempt.findByIdAndUpdate(drillAttemptId, {
     status: 'graded',
@@ -112,6 +140,7 @@ async function grade({ drillAttemptId }) {
       overall_score:        overall,
       rubric_breakdown:     flattenRubric(fullRubric),
       what_to_try_next:     parsed.what_to_try_next,
+      what_you_missed:      Array.isArray(parsed.what_you_missed) ? parsed.what_you_missed : [],
       integrity_confidence: 'high',
       graded_at:            new Date(),
       grader_model:         res._meta.model,
@@ -127,7 +156,12 @@ async function grade({ drillAttemptId }) {
     score:        overall,
   });
 
-  return { overall_score: overall, rubric: fullRubric, what_to_try_next: parsed.what_to_try_next };
+  return {
+    overall_score: overall,
+    rubric: fullRubric,
+    what_to_try_next: parsed.what_to_try_next,
+    what_you_missed: Array.isArray(parsed.what_you_missed) ? parsed.what_you_missed : [],
+  };
 }
 
 module.exports = { grade, locationMatches };
