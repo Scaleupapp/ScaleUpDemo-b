@@ -21,16 +21,18 @@ const mongoose = require('mongoose');
 
 // ── LLM stub — patched before anything requires llmRouter ────────────────────
 
-// Default: high-quality explanations → root_cause_clarity = 9
+// Default: high-quality explanations → root_cause_clarity score = 9
 // Overridden per-test for the false-positive scenario.
 let STUB_ROOT_CAUSE_CLARITY = 9;
+let STUB_WHAT_YOU_MISSED = [];
 
 const llmRouter = require('../../coding/services/llmRouter');
 llmRouter.llmCall = async () => ({
   content: [{
     text: JSON.stringify({
-      rubric: { root_cause_clarity: STUB_ROOT_CAUSE_CLARITY },
+      rubric: { root_cause_clarity: { score: STUB_ROOT_CAUSE_CLARITY, feedback: 'Clear explanations.' } },
       what_to_try_next: 'Check boundary conditions more carefully.',
+      what_you_missed: STUB_WHAT_YOU_MISSED,
     }),
   }],
   _meta: { provider: 'anthropic', model: 'claude-haiku' },
@@ -254,6 +256,51 @@ test('verifyGrader [B]: saved grade.overall_score < 70 with false positives', as
     capturedUpdate.grade.overall_score < 70,
     `expected saved overall_score < 70, got ${capturedUpdate.grade.overall_score}`
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test C — what_you_missed
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('verifyGrader: what_you_missed is saved as empty array when LLM returns []', async () => {
+  STUB_ROOT_CAUSE_CLARITY = 9;
+  STUB_WHAT_YOU_MISSED = [];
+  attemptOverride = null;
+  capturedUpdate = null;
+
+  await grade({ drillAttemptId: attemptId });
+  assert.ok(Array.isArray(capturedUpdate.grade.what_you_missed), 'what_you_missed must be an array');
+  assert.strictEqual(capturedUpdate.grade.what_you_missed.length, 0, 'should be empty');
+});
+
+test('verifyGrader: what_you_missed entries saved when LLM returns them', async () => {
+  STUB_ROOT_CAUSE_CLARITY = 5;
+  STUB_WHAT_YOU_MISSED = [
+    { title: 'Missed bug at b.py:20', detail: 'Missing null check.', reference: 'LLM forgets null guards.' },
+  ];
+  attemptOverride = null;
+  capturedUpdate = null;
+
+  try {
+    await grade({ drillAttemptId: attemptId });
+    assert.ok(Array.isArray(capturedUpdate.grade.what_you_missed), 'what_you_missed must be an array');
+    assert.strictEqual(capturedUpdate.grade.what_you_missed.length, 1, 'should have 1 entry');
+    assert.ok(capturedUpdate.grade.what_you_missed[0].title, 'entry must have title');
+  } finally {
+    STUB_WHAT_YOU_MISSED = [];
+  }
+});
+
+test('verifyGrader: root_cause_clarity rubric_breakdown entry has feedback', async () => {
+  STUB_ROOT_CAUSE_CLARITY = 9;
+  STUB_WHAT_YOU_MISSED = [];
+  attemptOverride = null;
+  capturedUpdate = null;
+
+  await grade({ drillAttemptId: attemptId });
+  const rcEntry = capturedUpdate.grade.rubric_breakdown.find(e => e.dimension === 'root_cause_clarity');
+  assert.ok(rcEntry, 'root_cause_clarity entry must exist in rubric_breakdown');
+  assert.ok(typeof rcEntry.feedback === 'string' && rcEntry.feedback.length > 0, 'feedback must be non-empty');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

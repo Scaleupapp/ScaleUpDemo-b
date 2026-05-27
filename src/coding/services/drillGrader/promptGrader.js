@@ -25,7 +25,25 @@ Score 0-10 on each rubric dimension:
 - edge_cases: does it pre-empt failure modes
 - output_fidelity: would a typical LLM produce the expected output
 
-Return strict JSON: { overall_score (0-100), rubric: { specificity, constraints, edge_cases, output_fidelity }, what_to_try_next: string (<=200 chars) }`;
+For each dimension, also write a short specific 'feedback' sentence (what was strong or what to improve).
+
+Then compare the learner's prompt to "good_prompts_look_like" from EXPECTED META-SKILL SIGNALS. For each element in that list NOT present in the learner's prompt, add an entry to what_you_missed. If the learner covered everything well, return an empty array for what_you_missed.
+
+Return strict JSON:
+{
+  "overall_score": <integer 0-100>,
+  "rubric": {
+    "specificity": { "score": <0-10>, "feedback": "<sentence>" },
+    "constraints": { "score": <0-10>, "feedback": "<sentence>" },
+    "edge_cases": { "score": <0-10>, "feedback": "<sentence>" },
+    "output_fidelity": { "score": <0-10>, "feedback": "<sentence>" }
+  },
+  "what_to_try_next": "<single sentence, <=200 chars>",
+  "what_you_missed": [
+    { "title": "<headline>", "detail": "<1-2 sentences>", "reference": "<the missing element>" }
+  ]
+}
+Return at most 5 entries in what_you_missed. Return an empty array if nothing was missed.`;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -66,6 +84,7 @@ async function grade({ drillAttemptId }) {
       overall_score:        parsed.overall_score,
       rubric_breakdown:     flattenRubric(parsed.rubric),
       what_to_try_next:     parsed.what_to_try_next,
+      what_you_missed:      Array.isArray(parsed.what_you_missed) ? parsed.what_you_missed : [],
       integrity_confidence: 'high',
       graded_at:            new Date(),
       grader_model:         res._meta.model,

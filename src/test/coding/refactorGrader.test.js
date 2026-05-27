@@ -21,12 +21,16 @@ const mongoose = require('mongoose');
 
 // ── LLM stub — patched before anything requires llmRouter ────────────────────
 
-// Default: high rubric scores. Overridden per-test.
+// Default: high rubric scores with { score, feedback } shape. Overridden per-test.
 let STUB_LLM_RESPONSE = {
   content: [{
     text: JSON.stringify({
-      rubric: { readability_gain: 9, ai_usage_judgment: 8 },
+      rubric: {
+        readability_gain:  { score: 9, feedback: 'Significantly cleaner.' },
+        ai_usage_judgment: { score: 8, feedback: 'Good use of Compass.' },
+      },
       what_to_try_next: 'Consider extracting helper.',
+      what_you_missed: [],
     }),
   }],
   _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -116,8 +120,12 @@ test('refactorGrader [A]: all tests pass + high LLM rubric → overall_score > 8
   STUB_LLM_RESPONSE = {
     content: [{
       text: JSON.stringify({
-        rubric: { readability_gain: 9, ai_usage_judgment: 8 },
+        rubric: {
+          readability_gain:  { score: 9, feedback: 'Much cleaner.' },
+          ai_usage_judgment: { score: 8, feedback: 'Good Compass usage.' },
+        },
         what_to_try_next: 'Consider extracting helper.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -138,8 +146,12 @@ test('refactorGrader [A]: saved grade.overall_score > 80', async () => {
   STUB_LLM_RESPONSE = {
     content: [{
       text: JSON.stringify({
-        rubric: { readability_gain: 9, ai_usage_judgment: 8 },
+        rubric: {
+          readability_gain:  { score: 9, feedback: 'Much cleaner.' },
+          ai_usage_judgment: { score: 8, feedback: 'Good usage.' },
+        },
         what_to_try_next: 'Consider extracting helper.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -187,8 +199,12 @@ test('refactorGrader [A]: what_to_try_next is propagated from LLM response', asy
   STUB_LLM_RESPONSE = {
     content: [{
       text: JSON.stringify({
-        rubric: { readability_gain: 9, ai_usage_judgment: 8 },
+        rubric: {
+          readability_gain:  { score: 9, feedback: 'Cleaner.' },
+          ai_usage_judgment: { score: 8, feedback: 'Good.' },
+        },
         what_to_try_next: 'Consider extracting helper.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -216,8 +232,12 @@ test('refactorGrader [B]: sandbox returns non-zero → overall_score < 50', asyn
   STUB_LLM_RESPONSE = {
     content: [{
       text: JSON.stringify({
-        rubric: { readability_gain: 5, ai_usage_judgment: 4 },
+        rubric: {
+          readability_gain:  { score: 5, feedback: 'Minor improvements only.' },
+          ai_usage_judgment: { score: 4, feedback: 'Poor Compass usage.' },
+        },
         what_to_try_next: 'Your refactored code breaks the tests.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -239,8 +259,12 @@ test('refactorGrader [B]: saved grade.overall_score < 50 when tests fail', async
   STUB_LLM_RESPONSE = {
     content: [{
       text: JSON.stringify({
-        rubric: { readability_gain: 5, ai_usage_judgment: 4 },
+        rubric: {
+          readability_gain:  { score: 5, feedback: 'Minor.' },
+          ai_usage_judgment: { score: 4, feedback: 'Poor.' },
+        },
         what_to_try_next: 'Your refactored code breaks the tests.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -266,8 +290,12 @@ test('refactorGrader [C]: bundle with no visible_tests → correctness = 10 (ful
   STUB_LLM_RESPONSE = {
     content: [{
       text: JSON.stringify({
-        rubric: { readability_gain: 7, ai_usage_judgment: 7 },
+        rubric: {
+          readability_gain:  { score: 7, feedback: 'Decent refactor.' },
+          ai_usage_judgment: { score: 7, feedback: 'Good usage.' },
+        },
         what_to_try_next: 'Good start.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -309,6 +337,86 @@ test('refactorGrader [C]: bundle with no visible_tests → correctness = 10 (ful
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Test D — what_you_missed
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('refactorGrader: what_you_missed is saved as empty array when LLM returns []', async () => {
+  STUB_LLM_RESPONSE = {
+    content: [{
+      text: JSON.stringify({
+        rubric: {
+          readability_gain:  { score: 9, feedback: 'Great.' },
+          ai_usage_judgment: { score: 8, feedback: 'Good.' },
+        },
+        what_to_try_next: 'All good.',
+        what_you_missed: [],
+      }),
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+  };
+  sbx.runInTempDir = async () => ({ exit_code: 0, stdout: 'ok', stderr: '', timed_out: false });
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await grade({ drillAttemptId: attemptId });
+  assert.ok(Array.isArray(capturedUpdate.grade.what_you_missed), 'what_you_missed must be an array');
+  assert.strictEqual(capturedUpdate.grade.what_you_missed.length, 0, 'should be empty');
+});
+
+test('refactorGrader: what_you_missed entries saved when LLM returns them', async () => {
+  STUB_LLM_RESPONSE = {
+    content: [{
+      text: JSON.stringify({
+        rubric: {
+          readability_gain:  { score: 6, feedback: 'Could be cleaner.' },
+          ai_usage_judgment: { score: 6, feedback: 'Accept/reject needs work.' },
+        },
+        what_to_try_next: 'Extract the helper.',
+        what_you_missed: [
+          { title: 'Missing: extract helper function', detail: 'Reference extracts reusable helper.', reference: 'def _parse_row(row): ...' },
+        ],
+      }),
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+  };
+  sbx.runInTempDir = async () => ({ exit_code: 0, stdout: 'ok', stderr: '', timed_out: false });
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await grade({ drillAttemptId: attemptId });
+  assert.ok(Array.isArray(capturedUpdate.grade.what_you_missed), 'what_you_missed must be an array');
+  assert.strictEqual(capturedUpdate.grade.what_you_missed.length, 1, 'should have 1 entry');
+  assert.ok(capturedUpdate.grade.what_you_missed[0].title, 'entry must have title');
+});
+
+test('refactorGrader: rubric_breakdown entries have per-criterion feedback', async () => {
+  STUB_LLM_RESPONSE = {
+    content: [{
+      text: JSON.stringify({
+        rubric: {
+          readability_gain:  { score: 9, feedback: 'Much cleaner.' },
+          ai_usage_judgment: { score: 8, feedback: 'Good Compass usage.' },
+        },
+        what_to_try_next: 'Consider extracting helper.',
+        what_you_missed: [],
+      }),
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+  };
+  sbx.runInTempDir = async () => ({ exit_code: 0, stdout: 'ok', stderr: '', timed_out: false });
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await grade({ drillAttemptId: attemptId });
+  const breakdown = capturedUpdate.grade.rubric_breakdown;
+  // Only LLM-scored dims have feedback; correctness is deterministic (plain number)
+  const readabilityEntry = breakdown.find(e => e.dimension === 'readability_gain');
+  const aiEntry          = breakdown.find(e => e.dimension === 'ai_usage_judgment');
+  assert.ok(readabilityEntry && readabilityEntry.feedback.length > 0, 'readability_gain must have feedback');
+  assert.ok(aiEntry          && aiEntry.feedback.length > 0,          'ai_usage_judgment must have feedback');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Error path tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -339,8 +447,12 @@ test('refactorGrader: calls applyPostGradeUpdates after writing grade (regressio
   STUB_LLM_RESPONSE = {
     content: [{
       text: JSON.stringify({
-        rubric: { readability_gain: 9, ai_usage_judgment: 8 },
+        rubric: {
+          readability_gain:  { score: 9, feedback: 'Much cleaner.' },
+          ai_usage_judgment: { score: 8, feedback: 'Good usage.' },
+        },
         what_to_try_next: 'Consider extracting helper.',
+        what_you_missed: [],
       }),
     }],
     _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -400,8 +512,12 @@ test('refactorGrader: handles LLM response wrapped in ```json fences (regression
     content: [{
       type: 'text',
       text: '```json\n' + JSON.stringify({
-        rubric: { readability_gain: 8, ai_usage_judgment: 7 },
+        rubric: {
+          readability_gain:  { score: 8, feedback: 'Cleaner code.' },
+          ai_usage_judgment: { score: 7, feedback: 'Mostly good.' },
+        },
         what_to_try_next: 'Extract the helper function for clarity.',
+        what_you_missed: [],
       }) + '\n```',
     }],
     _meta: { provider: 'anthropic', model: 'claude-haiku' },

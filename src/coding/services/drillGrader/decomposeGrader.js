@@ -24,9 +24,27 @@ Score 0-10 each:
 - verification_checkpoints: does each step say how to verify it
 - ai_handoff_appropriateness: each step is something an LLM can do well
 
+For each dimension, also write a short specific 'feedback' sentence (what was strong or what to improve).
+
 Compute overall_score as a weighted blend (granularity 25%, ordering 25%, verification_checkpoints 25%, ai_handoff_appropriateness 25%) on a 0-100 scale (rubric_value * 2.5 each).
 
-Return strict JSON: { overall_score (0-100), rubric: { granularity, ordering, verification_checkpoints, ai_handoff_appropriateness }, what_to_try_next: string (<=200 chars) }`;
+Then compare the learner's decomposition_steps to the REFERENCE DECOMPOSITION. For each reference step NOT meaningfully present in the learner's steps (use judgment, not exact match), add an entry to what_you_missed. If the learner covered everything, return an empty array.
+
+Return strict JSON:
+{
+  "overall_score": <integer 0-100>,
+  "rubric": {
+    "granularity": { "score": <0-10>, "feedback": "<sentence>" },
+    "ordering": { "score": <0-10>, "feedback": "<sentence>" },
+    "verification_checkpoints": { "score": <0-10>, "feedback": "<sentence>" },
+    "ai_handoff_appropriateness": { "score": <0-10>, "feedback": "<sentence>" }
+  },
+  "what_to_try_next": "<single sentence, <=200 chars>",
+  "what_you_missed": [
+    { "title": "Missing step: <short name>", "detail": "<1-2 sentences explaining what was skipped and why it matters>", "reference": "<the reference step text>" }
+  ]
+}
+Return at most 5 entries in what_you_missed. Return an empty array if nothing was missed.`;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -63,6 +81,7 @@ async function grade({ drillAttemptId }) {
       overall_score:        parsed.overall_score,
       rubric_breakdown:     flattenRubric(parsed.rubric),
       what_to_try_next:     parsed.what_to_try_next,
+      what_you_missed:      Array.isArray(parsed.what_you_missed) ? parsed.what_you_missed : [],
       integrity_confidence: 'high',
       graded_at:            new Date(),
       grader_model:         res._meta.model,
