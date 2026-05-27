@@ -9,6 +9,7 @@ const {
   startCalibration,
   submitCalibration,
   getCalibrationResult,
+  requestDrill,
 } = require('../controllers/drills.controller');
 const auth = require('../../middleware/auth');
 
@@ -40,6 +41,13 @@ router.post('/calibration/:calibration_id/submit', auth, submitCalibration);
  * Returns aggregate calibration result; writes Mastery + DifficultyState when all 4 graded.
  */
 router.get('/calibration/:calibration_id/result', auth, getCalibrationResult);
+
+/**
+ * POST /api/coding/drills/request
+ * On-demand drill request — bypasses daily quota. Body: { drill_subtype?, difficulty?, topic_hint? }.
+ * Must be declared BEFORE /:id/... routes to avoid Express matching "request" as :id.
+ */
+router.post('/request', auth, requestDrill);
 
 /**
  * POST /api/coding/drills/:id/start

@@ -106,6 +106,34 @@ components:
 
   schemas:
     # =====================================================================
+    # Compass shared schemas
+    # =====================================================================
+
+    CompassSuggestedAction:
+      type: object
+      nullable: true
+      description: >
+        Optional structured action the iOS client can render as a chat affordance
+        (e.g. a "Start drill" action card). Appended to Compass conversation/tutor/
+        mentor/coach responses when intent detection fires.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [request_drill]
+        drill_subtype:
+          type: string
+          enum: [prompt, verify, decompose]
+          nullable: true
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+          nullable: true
+        topic_hint:
+          type: string
+          nullable: true
+
+    # =====================================================================
     # Envelopes + primitives
     # =====================================================================
     ApiSuccessEnvelope:
@@ -6005,6 +6033,122 @@ paths:
                     type: string
                     format: date-time
                     description: Present only when error is daily_quota_used
+  /api/coding/drills/request:
+    post:
+      operationId: requestOnDemandDrill
+      tags: [Coding]
+      summary: Request an on-demand drill (bypasses daily quota)
+      description: |
+        Creates an on-demand DrillAttempt that bypasses the daily 1-drill quota.
+        All body fields are optional. When omitted, `drill_subtype` is chosen from
+        the user's weakest mastery axis and `difficulty` from their current
+        DifficultyState. Bundles attempted in the last 7 days are excluded (with a
+        last-resort fallback that ignores the exclusion list if none remain).
+        The attempt is flagged `is_user_requested: true` for analytics.
+        Returns the same shape as `startCodeDrill` so iOS can reuse rendering.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                drill_subtype:
+                  type: string
+                  enum: [prompt, verify, decompose]
+                  nullable: true
+                  description: If omitted, weakest mastery axis is used
+                difficulty:
+                  type: string
+                  enum: [easy, medium, hard]
+                  nullable: true
+                  description: If omitted, user's current DifficultyState is used
+                topic_hint:
+                  type: string
+                  nullable: true
+                  description: Optional topic string; matched case-insensitively against bundle brief
+      responses:
+        '200':
+          description: On-demand drill started — same safe bundle view as startCodeDrill
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt_id, bundle_id, brief, time_budget_minutes, drill_subtype, difficulty, role_track, language]
+                properties:
+                  attempt_id:
+                    type: string
+                  bundle_id:
+                    type: string
+                  brief:
+                    type: string
+                  time_budget_minutes:
+                    type: integer
+                  drill_subtype:
+                    type: string
+                    enum: [prompt, verify, decompose, refactor]
+                  difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+                  role_track:
+                    type: string
+                    enum: [swe, ds, ai_eng]
+                  language:
+                    type: string
+                  acceptance_criteria:
+                    type: array
+                    items:
+                      type: string
+                  starter_repo:
+                    description: Present only for refactor drills
+                    oneOf:
+                      - type: object
+                      - type: 'null'
+                  visible_tests:
+                    description: Present only for refactor drills
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        command:
+                          type: string
+        '400':
+          description: Invalid drill_subtype or difficulty value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [invalid_drill_subtype, invalid_difficulty]
+                  allowed:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No coding objective, or no bundle available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [no_coding_track_for_objective, no_drill_available]
+                  role_track:
+                    type: string
+                  difficulty:
+                    type: string
+                  drill_subtype:
+                    type: string
+
   /api/coding/drills/{id}/start:
     post:
       operationId: startCodeDrill

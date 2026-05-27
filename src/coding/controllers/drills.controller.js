@@ -9,6 +9,9 @@ const { randomUUID } = require('crypto');
 // Free-tier daily drill quota (non-calibration graded drills per day)
 const DAILY_DRILL_QUOTA = 1;
 
+// How many days back to look when excluding recently-attempted bundles for on-demand drills
+const RECENT_BUNDLE_EXCLUSION_DAYS = 7;
+
 // ---------------------------------------------------------------------------
 // Test seam: allows tests to inject a fake workers module
 // ---------------------------------------------------------------------------
@@ -612,6 +615,125 @@ async function getCalibrationResult(req, res) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// POST /api/coding/drills/request
+//
+// On-demand drill request — bypasses the daily quota. Picks weakest-axis
+// subtype + current difficulty when not specified. Excludes bundles the user
+// attempted in the last RECENT_BUNDLE_EXCLUSION_DAYS days.
+// ---------------------------------------------------------------------------
+
+async function requestDrill(req, res) {
+  try {
+    const userId = req.user && (req.user.userId || req.user._id || req.user.id);
+    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+    // Validate body — all fields optional
+    const { drill_subtype, difficulty, topic_hint } = req.body || {};
+    if (drill_subtype && !PHASE_A_DRILL_SUBTYPES.includes(drill_subtype)) {
+      return res.status(400).json({ error: 'invalid_drill_subtype', allowed: PHASE_A_DRILL_SUBTYPES });
+    }
+    if (difficulty && !['easy', 'medium', 'hard'].includes(difficulty)) {
+      return res.status(400).json({ error: 'invalid_difficulty' });
+    }
+
+    // Eligibility — must have a coding objective
+    let UserObjective;
+    try { UserObjective = require('../../models/UserObjective'); } catch (e) { UserObjective = require('../../models/userObjective'); }
+    const obj = await UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean();
+    const eligibility = evaluateCodingEligibility(obj);
+    if (!eligibility.eligible) return res.status(404).json({ error: 'no_coding_track_for_objective' });
+    const role_track = eligibility.role_track;
+
+    const models = require('../models');
+
+    // If subtype not specified, pick weakest axis
+    let finalSubtype = drill_subtype;
+    if (!finalSubtype) {
+      const mastery = await models.MetaSkillMastery.findOne({ user_id: userId, role_track }).lean();
+      const weakestAxis = pickWeakestAxis(mastery);
+      finalSubtype = axisToSubtype(weakestAxis);
+    }
+
+    // If difficulty not specified, use current DifficultyState
+    let finalDifficulty = difficulty;
+    if (!finalDifficulty) {
+      const diffState = await models.DifficultyState.findOne({ user_id: userId, role_track }).lean();
+      finalDifficulty = diffState?.current_difficulty || 'easy';
+    }
+
+    // Find bundles NOT consumed by the user in the last RECENT_BUNDLE_EXCLUSION_DAYS days
+    const exclusionDate = new Date(Date.now() - RECENT_BUNDLE_EXCLUSION_DAYS * 24 * 60 * 60 * 1000);
+    const recentAttempts = await models.DrillAttempt.find({
+      user_id: userId,
+      started_at: { $gte: exclusionDate },
+    }).select('bundle_id').lean();
+    const excludeBundleIds = recentAttempts.map(a => a.bundle_id);
+
+    // Build the bundle query
+    const bundleQuery = {
+      type: 'drill',
+      role_track,
+      drill_subtype: finalSubtype,
+      difficulty: finalDifficulty,
+      status: 'active',
+      _id: { $nin: excludeBundleIds },
+    };
+
+    let bundle = null;
+
+    // If topic_hint provided, attempt case-insensitive substring match against brief
+    if (topic_hint && typeof topic_hint === 'string' && topic_hint.trim().length > 0) {
+      bundle = await models.ArtifactBundle.findOne({
+        ...bundleQuery,
+        brief: { $regex: topic_hint.trim(), $options: 'i' },
+      }).lean();
+    }
+
+    // Fallback: any matching bundle (most recent first)
+    if (!bundle) {
+      bundle = await models.ArtifactBundle.findOne(bundleQuery).sort({ createdAt: -1 }).lean();
+    }
+
+    // Last-resort fallback: drop the exclusion list (user has done all bundles in their bucket)
+    if (!bundle) {
+      bundle = await models.ArtifactBundle.findOne({
+        type: 'drill',
+        role_track,
+        drill_subtype: finalSubtype,
+        difficulty: finalDifficulty,
+        status: 'active',
+      }).sort({ createdAt: -1 }).lean();
+    }
+
+    if (!bundle) {
+      return res.status(404).json({
+        error: 'no_drill_available',
+        role_track,
+        difficulty: finalDifficulty,
+        drill_subtype: finalSubtype,
+      });
+    }
+
+    // Create the DrillAttempt — is_user_requested: true flags this as an on-demand extra
+    const attempt = await models.DrillAttempt.create({
+      user_id: userId,
+      bundle_id: bundle._id,
+      drill_subtype: bundle.drill_subtype,
+      status: 'in_progress',
+      started_at: new Date(),
+      is_calibration: false,
+      is_user_requested: true,
+    });
+
+    // Return the same safe bundle view as startDrill — iOS can reuse rendering
+    return res.json(safeBundleView(bundle, attempt._id));
+  } catch (err) {
+    console.error('[coding/drills/request]', err);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+}
+
 module.exports = {
   getToday,
   startDrill,
@@ -621,5 +743,6 @@ module.exports = {
   submitCalibration,
   getCalibrationResult,
   baselineFromDrills,
+  requestDrill,
   _setWorkersModule,
 };
