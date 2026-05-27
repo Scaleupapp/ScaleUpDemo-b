@@ -61,14 +61,20 @@ router.get('/overview', auth, async (req, res) => {
       computeReadinessFromKnowledge(knowledge) ??
       0;
 
-    // Target date and weeks remaining
+    // Target date and weeks remaining / overdue
     let targetDateStr = null;
     let weeksRemaining = null;
+    let weeksOverdue = null;
     if (objective?.targetDate) {
       const target = new Date(objective.targetDate);
       const now = new Date();
-      const days = Math.max(0, Math.ceil((target - now) / (1000 * 60 * 60 * 24)));
-      weeksRemaining = Math.ceil(days / 7);
+      const diffMs = target - now;
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays > 0) {
+        weeksRemaining = Math.ceil(diffDays / 7);
+      } else if (diffDays < 0) {
+        weeksOverdue = Math.ceil(-diffDays / 7);
+      }
       targetDateStr = target.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
     }
 
@@ -101,9 +107,10 @@ router.get('/overview', auth, async (req, res) => {
         },
         readiness: {
           score: readiness,
-          onTrackText: readiness >= 70 ? `On track for ${targetDateStr || 'your target'}` : `${readiness}% ready`,
+          onTrackText: computeOnTrackText({ readiness, targetDateStr, weeksOverdue }),
           targetDate: targetDateStr,
-          weeksRemaining,
+          weeksRemaining,    // null when overdue
+          weeksOverdue,      // set when target date has passed
         },
         weekProgress: weekTotal > 0
           ? { done: weekDone, total: weekTotal, week: currentWeek }
@@ -141,6 +148,27 @@ router.get('/overview', auth, async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to load overview' });
   }
 });
+
+/**
+ * Compute the onTrackText string for the readiness ring.
+ * Never duplicates the percentage shown in the ring — returns a meaningful
+ * status phrase per band instead.
+ *
+ * @param {{ readiness: number, targetDateStr: string|null, weeksOverdue: number|null }} opts
+ * @returns {string}
+ */
+function computeOnTrackText({ readiness, targetDateStr, weeksOverdue }) {
+  if (weeksOverdue !== null) {
+    return 'Past deadline · keep pushing';
+  }
+  if (readiness >= 70) {
+    return `On track for ${targetDateStr || 'your target'}`;
+  }
+  if (readiness >= 40) {
+    return `Building readiness toward ${targetDateStr || 'target'}`;
+  }
+  return 'Early days · keep going';
+}
 
 function computeReadinessFromKnowledge(knowledge) {
   if (!knowledge) return null;
@@ -696,6 +724,7 @@ router.get('/activities', auth, async (req, res) => {
         .reduce((s, q) => s + (q.totalTime || 0), 0) / 60
     );
 
+    // summary is finalised after the drill query below patches in codingDrills.
     const summary = {
       totalQuizzes: completedQuizzes.length,
       totalInterviews: completedInterviews.length,
@@ -785,6 +814,62 @@ router.get('/activities', auth, async (req, res) => {
         messageCount: t.messageCount || 0,
       });
     }
+
+    // Coding drill attempts
+    let drillCountWeek = 0;
+    let drillByType = { totalDrills: 0, averageScore: null, totalMinutes: 0 };
+    try {
+      const drillAttempts = await mongoose.model('DrillAttempt').find({
+        user_id: userId,
+        status: 'graded',
+      }).sort({ submitted_at: -1 }).limit(50).lean();
+
+      drillCountWeek = await mongoose.model('DrillAttempt').countDocuments({
+        user_id: userId,
+        status: 'graded',
+        submitted_at: { $gte: startOfWeek },
+      });
+
+      if (drillAttempts.length > 0) {
+        const bundleIds = [...new Set(drillAttempts.map(a => a.bundle_id))];
+        const bundles = await mongoose.model('ArtifactBundle').find({
+          _id: { $in: bundleIds },
+        }).select('drill_subtype role_track difficulty brief').lean();
+        const bundleById = Object.fromEntries(bundles.map(b => [String(b._id), b]));
+
+        for (const a of drillAttempts.slice(0, 25)) {
+          const bundle = bundleById[String(a.bundle_id)] || {};
+          recent.push({
+            type: 'coding_drill',
+            id: String(a._id),
+            title: `${(a.drill_subtype || 'Drill').replace(/^./, c => c.toUpperCase())} drill`,
+            topic: bundle.role_track || null,
+            score: a.grade?.overall_score ?? null,
+            completedAt: a.submitted_at,
+            durationMin: null,
+            meta: {
+              drill_subtype: a.drill_subtype,
+              role_track: bundle.role_track,
+              difficulty: bundle.difficulty,
+              is_calibration: a.is_calibration || false,
+            },
+          });
+        }
+
+        // Summary stats for byType
+        const scores = drillAttempts
+          .map(a => a.grade?.overall_score)
+          .filter(s => typeof s === 'number');
+        drillByType = {
+          totalDrills: drillAttempts.length,
+          averageScore: scores.length ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length) : null,
+          totalMinutes: 0, // drills don't track duration today
+        };
+      }
+    } catch (e) {
+      console.error('[v2/you/activities] coding drill enrichment failed:', e.message);
+    }
+
     recent.sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0));
     const recentCapped = recent.filter(r => r.completedAt).slice(0, 50);
 
@@ -870,7 +955,12 @@ router.get('/activities', auth, async (req, res) => {
         totalSessions: tutorConversations.length,
         totalMessages: tutorConversations.reduce((s, t) => s + (t.messageCount || 0), 0),
       },
+      coding_drills: drillByType,
     };
+
+    // Patch drill this-week count in now that the drill query has run.
+    summary.thisWeek.codingDrills = drillCountWeek;
+    summary.totalCodingDrills = drillByType.totalDrills;
 
     return res.json({
       success: true,
@@ -879,6 +969,89 @@ router.get('/activities', auth, async (req, res) => {
   } catch (err) {
     console.error('[v2/you/activities] error', err);
     return res.status(500).json({ success: false, message: 'Failed to load activities' });
+  }
+});
+
+/**
+ * GET /api/v2/you/coding-mastery
+ *
+ * Returns the authenticated user's coding meta-skill mastery per role_track,
+ * current difficulty state, recent drill attempts (last 10), and aggregate
+ * stats.  Returns 200 with empty payload if the user has no MetaSkillMastery
+ * docs yet — so iOS can render an empty state instead of 404-handling.
+ */
+router.get('/coding-mastery', auth, async (req, res) => {
+  try {
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: 'unauthorized' });
+
+    const MetaSkillMastery = mongoose.model('MetaSkillMastery');
+    const DifficultyState = mongoose.model('DifficultyState');
+    const DrillAttempt = mongoose.model('DrillAttempt');
+    const ArtifactBundle = mongoose.model('ArtifactBundle');
+
+    const [masteryDocs, diffStates, recentAttempts, allGraded, avgScoreAgg] = await Promise.all([
+      MetaSkillMastery.find({ user_id: userId }).lean(),
+      DifficultyState.find({ user_id: userId }).lean(),
+      DrillAttempt.find({ user_id: userId, status: 'graded' })
+        .sort({ submitted_at: -1 }).limit(10).lean(),
+      DrillAttempt.countDocuments({ user_id: userId, status: 'graded' }),
+      DrillAttempt.aggregate([
+        { $match: { user_id: new mongoose.Types.ObjectId(String(userId)), status: 'graded' } },
+        { $group: { _id: null, avg: { $avg: '$grade.overall_score' } } },
+      ]),
+    ]);
+
+    const avgScore = avgScoreAgg[0]?.avg ? Math.round(avgScoreAgg[0].avg) : null;
+
+    // Enrich recent attempts with bundle subtype/difficulty
+    let attemptsView = [];
+    if (recentAttempts.length > 0) {
+      const bundleIds = [...new Set(recentAttempts.map(a => a.bundle_id))];
+      const bundles = await ArtifactBundle.find({ _id: { $in: bundleIds } })
+        .select('drill_subtype difficulty role_track').lean();
+      const bundleById = Object.fromEntries(bundles.map(b => [String(b._id), b]));
+      attemptsView = recentAttempts.map(a => {
+        const b = bundleById[String(a.bundle_id)] || {};
+        return {
+          id: String(a._id),
+          drill_subtype: a.drill_subtype || b.drill_subtype,
+          difficulty: b.difficulty,
+          role_track: b.role_track,
+          score: a.grade?.overall_score ?? null,
+          submitted_at: a.submitted_at,
+          is_calibration: a.is_calibration || false,
+        };
+      });
+    }
+
+    // Per-track view: join mastery with difficulty state
+    const tracks = masteryDocs.map(m => {
+      const ds = diffStates.find(d => d.role_track === m.role_track);
+      return {
+        role_track: m.role_track,
+        axes: m.axes,
+        confidence: m.confidence,
+        attempt_count: m.attempt_count,
+        current_difficulty: ds?.current_difficulty || 'easy',
+        recommendation_history: (ds?.recommendation_history || []).slice(-5),
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        tracks,                         // [] if user has no MetaSkillMastery yet
+        recent_attempts: attemptsView,  // []
+        stats: {
+          total_drills_graded: allGraded,
+          average_score: avgScore,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('[v2/you/coding-mastery] error', err);
+    return res.status(500).json({ success: false, message: 'Failed to load coding mastery' });
   }
 });
 
