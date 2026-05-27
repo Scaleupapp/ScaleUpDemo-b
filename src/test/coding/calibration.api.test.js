@@ -639,3 +639,69 @@ test('startCalibration: general-learning user with SWE skill ratings is now elig
   assert.strictEqual(body.role_track, 'swe', 'skill_ratings signal should resolve to swe');
   assert.strictEqual(body.drills.length, 3);
 });
+
+// ---------------------------------------------------------------------------
+// Test 11 (regression): submitCalibration matches attempts via drill_subtype
+// Guards against the schema drift bug: attempts.find(a => a.drill_subtype === sub.drill_subtype)
+// only works if drill_subtype is actually stored on the attempt doc.
+// ---------------------------------------------------------------------------
+
+test('submitCalibration: regression — matches attempts to submissions via drill_subtype field on attempt', async () => {
+  // Stub attempts WITH drill_subtype populated (the fix: field now lives on DrillAttempt).
+  const stubAttempts = [
+    { _id: 'attempt-prompt',    drill_subtype: 'prompt',    started_at: new Date(Date.now() - 60000), calibration_id: FAKE_CAL_ID, user_id: FAKE_USER_ID, save: async function() { return this; } },
+    { _id: 'attempt-verify',    drill_subtype: 'verify',    started_at: new Date(Date.now() - 60000), calibration_id: FAKE_CAL_ID, user_id: FAKE_USER_ID, save: async function() { return this; } },
+    { _id: 'attempt-decompose', drill_subtype: 'decompose', started_at: new Date(Date.now() - 60000), calibration_id: FAKE_CAL_ID, user_id: FAKE_USER_ID, save: async function() { return this; } },
+  ];
+
+  const enqueuedJobs = [];
+
+  stubCodingModels({
+    ArtifactBundle: makeBundleFinder(PHASE_A_SUBTYPES),
+    DrillAttempt: {
+      find: (query) => {
+        const calId = query && query.calibration_id;
+        const uid   = query && query.user_id;
+        return Promise.resolve(stubAttempts.filter(a =>
+          (!calId || a.calibration_id === String(calId)) &&
+          (!uid   || String(a.user_id) === String(uid))
+        ));
+      },
+    },
+    MetaSkillMastery: { findOne: () => ({ lean: async () => null }) },
+    DifficultyState:  { findOne: async () => null },
+  });
+
+  const ctrl = loadController();
+  ctrl._setWorkersModule({
+    drillGraderQueue: {
+      add: async (name, data) => {
+        enqueuedJobs.push({ name, data });
+        return { id: `job-${data.drill_subtype}` };
+      },
+    },
+  });
+
+  const [req, res] = buildReqRes({
+    user:   { userId: FAKE_USER_ID },
+    params: { calibration_id: FAKE_CAL_ID },
+    body:   { submissions: PHASE_A_SUBMISSIONS },
+  });
+  await ctrl.submitCalibration(req, res);
+
+  // Must not crash (500 was the bug symptom)
+  assert.strictEqual(res._status, 202, 'should return 202, not 500 crash');
+  assert.strictEqual(res._body.calibration_id, FAKE_CAL_ID);
+  assert.strictEqual(res._body.status, 'submitted');
+
+  // All 3 grader jobs enqueued — drill_subtype match worked for all submissions
+  assert.strictEqual(enqueuedJobs.length, 3, 'all 3 grader jobs must be enqueued (was 0 before fix)');
+  const enqueuedSubtypes = enqueuedJobs.map(j => j.data.drill_subtype).sort();
+  assert.deepStrictEqual(enqueuedSubtypes, ['decompose', 'prompt', 'verify']);
+
+  // Verify attempt IDs are real strings (not undefined._id.toString() crash)
+  for (const job of enqueuedJobs) {
+    assert.ok(typeof job.data.drillAttemptId === 'string', `drillAttemptId must be a string for ${job.data.drill_subtype}`);
+    assert.ok(job.data.drillAttemptId.length > 0, 'drillAttemptId must not be empty');
+  }
+});

@@ -173,6 +173,7 @@ async function startDrill(req, res) {
     const attempt = await models.DrillAttempt.create({
       user_id: userId,
       bundle_id: bundleId,
+      drill_subtype: bundle.drill_subtype,  // denormalized for query matching
       status: 'in_progress',
       started_at: new Date(),
       is_calibration: false,
@@ -438,7 +439,10 @@ async function submitCalibration(req, res) {
     await Promise.all(
       submissions.map(sub => {
         const attempt = attempts.find(a => a.drill_subtype === sub.drill_subtype);
-        if (!attempt) return Promise.resolve();
+        if (!attempt) {
+          console.error('[coding/drills/calibration/submit] save: no attempt for', sub.drill_subtype);
+          return Promise.resolve();
+        }
         const time_taken_seconds = Math.floor(
           (Date.now() - new Date(attempt.started_at).getTime()) / 1000
         );
@@ -455,6 +459,10 @@ async function submitCalibration(req, res) {
     await Promise.all(
       submissions.map(sub => {
         const attempt = attempts.find(a => a.drill_subtype === sub.drill_subtype);
+        if (!attempt) {
+          console.error('[coding/drills/calibration/submit] enqueue: no attempt for', sub.drill_subtype);
+          return Promise.resolve();
+        }
         return workers.drillGraderQueue.add('grade', {
           drillAttemptId: attempt._id.toString(),
           drill_subtype: sub.drill_subtype,
