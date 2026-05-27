@@ -342,3 +342,35 @@ test('refactorGrader: throws when ArtifactBundle not found', async () => {
     ArtifactBundle.findById = origBundleFindById;
   }
 });
+
+test('refactorGrader: handles LLM response wrapped in ```json fences (regression)', async () => {
+  // refactorGrader destructures llmCall at require-time; we mutate
+  // STUB_LLM_RESPONSE (which the stub closure closes over) to return
+  // fenced JSON. parseLLMJson must strip the fences for the test to pass.
+  const origResponse = STUB_LLM_RESPONSE;
+  STUB_LLM_RESPONSE = {
+    content: [{
+      type: 'text',
+      text: '```json\n' + JSON.stringify({
+        rubric: { readability_gain: 8, ai_usage_judgment: 7 },
+        what_to_try_next: 'Extract the helper function for clarity.',
+      }) + '\n```',
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-haiku' },
+  };
+  sbx.runInTempDir = async () => ({ exit_code: 0, stdout: 'ok', stderr: '', timed_out: false });
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  try {
+    const result = await grade({ drillAttemptId: attemptId });
+    // 2/2 tests pass → correctness = 10; readability_gain=8, ai_usage_judgment=7
+    // overall = round((10*0.5 + 8*0.25 + 7*0.25) * 10) = round(87.5) = 88
+    assert.strictEqual(result.overall_score, 88, 'fenced JSON: overall_score should be 88');
+    assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
+    assert.strictEqual(capturedUpdate.grade.overall_score, 88, 'fenced JSON: saved overall_score should be 88');
+    assert.strictEqual(capturedUpdate.status, 'graded', 'fenced JSON: status should be graded');
+  } finally {
+    STUB_LLM_RESPONSE = origResponse;
+  }
+});
