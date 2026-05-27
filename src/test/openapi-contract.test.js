@@ -248,3 +248,77 @@ test('contract: every documented operation has a typed success response', () => 
 
   assert.deepStrictEqual(errs, [], 'spec consistency violations:\n' + errs.join('\n'));
 });
+
+// ---------------------------------------------------------------------------
+// Phase B (Capstones) — explicit coverage check.
+//
+// The parameterized lint above catches structural issues for every endpoint
+// automatically, but capstones are new infrastructure and worth pinning
+// down: if anyone deletes one of these eight endpoints by accident, fail
+// loudly rather than discover it during a client codegen.
+// ---------------------------------------------------------------------------
+test('contract: capstone surface is complete', () => {
+  const expectedOperations = [
+    'listCapstoneLibrary',
+    'startCapstone',
+    'redeemCapstonePairingCode',
+    'getCapstoneSessionStatus',
+    'controlCapstoneSession',
+    'uploadCapstoneVoiceReflection',
+    'getCapstoneResult',
+    'getCapstoneReplay',
+  ];
+
+  const allOperations = new Set();
+  for (const pathItem of Object.values(spec.paths || {})) {
+    for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+      if (pathItem[method]?.operationId) allOperations.add(pathItem[method].operationId);
+    }
+  }
+
+  const missing = expectedOperations.filter((op) => !allOperations.has(op));
+  assert.deepStrictEqual(missing, [], `capstone operations missing from spec: ${missing.join(', ')}`);
+
+  // Anchor on the central schemas too — clients rely on these specifically.
+  const expectedSchemas = [
+    'CapstoneSessionStatus',
+    'CapstoneStartRequest',
+    'CapstoneStartResponse',
+    'CapstonePairRequest',
+    'CapstonePairResponse',
+    'CapstoneControlRequest',
+    'CapstoneSessionView',
+    'CapstoneSessionCounters',
+    'CapstoneBundleView',
+    'CapstoneResult',
+    'CapstoneReplay',
+    'CapstoneLibraryEntry',
+  ];
+  const schemas = spec.components?.schemas || {};
+  const missingSchemas = expectedSchemas.filter((s) => !schemas[s]);
+  assert.deepStrictEqual(
+    missingSchemas,
+    [],
+    `capstone schemas missing from components: ${missingSchemas.join(', ')}`
+  );
+
+  // And the central enum values match the CapstoneSession model exactly —
+  // drift here is the most common way client/server diverge.
+  const statusEnum = schemas.CapstoneSessionStatus?.enum;
+  assert.deepStrictEqual(
+    statusEnum?.sort(),
+    [
+      'aborted',
+      'evaluating',
+      'expired',
+      'graded',
+      'in_progress',
+      'paused',
+      'provisioning',
+      'ready',
+      'scheduled',
+      'submitted',
+    ].sort(),
+    'CapstoneSessionStatus enum must match the CapstoneSession model'
+  );
+});

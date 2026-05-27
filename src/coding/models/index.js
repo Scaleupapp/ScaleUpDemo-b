@@ -7,4 +7,7 @@ module.exports = {
   DifficultyState: require('./difficultyState.model'),
   HumanReviewQueue: require('./humanReviewQueue.model'),
   EvaluationAnchor: require('./evaluationAnchor.model'),
+  CapstoneSession: require('./capstoneSession.model'),
+  PairingCode: require('./pairingCode.model'),
+  CapstoneRecording: require('./capstoneRecording.model'),
 };

@@ -110,28 +110,32 @@ components:
     # =====================================================================
 
     CompassSuggestedAction:
-      type: object
-      nullable: true
       description: >
         Optional structured action the iOS client can render as a chat affordance
         (e.g. a "Start drill" action card). Appended to Compass conversation/tutor/
         mentor/coach responses when intent detection fires.
-      required: [type]
-      properties:
-        type:
-          type: string
-          enum: [request_drill]
-        drill_subtype:
-          type: string
-          enum: [prompt, verify, decompose]
-          nullable: true
-        difficulty:
-          type: string
-          enum: [easy, medium, hard]
-          nullable: true
-        topic_hint:
-          type: string
-          nullable: true
+      oneOf:
+        - type: 'null'
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [request_drill]
+            drill_subtype:
+              oneOf:
+                - type: string
+                  enum: [prompt, verify, decompose]
+                - type: 'null'
+            difficulty:
+              oneOf:
+                - type: string
+                  enum: [easy, medium, hard]
+                - type: 'null'
+            topic_hint:
+              oneOf:
+                - type: string
+                - type: 'null'
 
     # =====================================================================
     # Envelopes + primitives
@@ -655,6 +659,250 @@ components:
                 $ref: '#/components/schemas/CodingMasteryAttemptView'
             stats:
               $ref: '#/components/schemas/CodingMasteryStats'
+
+    # =====================================================================
+    # Capstones (Phase B)
+    # =====================================================================
+    CapstoneSessionStatus:
+      type: string
+      enum:
+        - scheduled
+        - provisioning
+        - ready
+        - in_progress
+        - paused
+        - submitted
+        - evaluating
+        - graded
+        - aborted
+        - expired
+      description: |
+        Lifecycle state per spec §7.2 / §7.3 `session.lifecycle`. Clients pin
+        their UI to this enum — adding a new state is a breaking change.
+
+    CapstoneStartRequest:
+      type: object
+      required: [bundle_id]
+      properties:
+        bundle_id:
+          type: string
+          description: ObjectId of the ArtifactBundle (type=capstone) to start
+        scheduled_for:
+          type: string
+          format: date-time
+          description: Optional — when this is null the session goes to provisioning immediately
+
+    CapstoneStartResponse:
+      type: object
+      required: [session_id, status, pairing_code, expires_at, time_budget_seconds]
+      properties:
+        session_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/CapstoneSessionStatus'
+        pairing_code:
+          type: string
+          description: 6-digit code to redeem on the laptop; null if start was web-only
+        expires_at:
+          type: string
+          format: date-time
+          description: When the pairing code expires (10-min window per spec §7.2)
+        time_budget_seconds:
+          type: integer
+
+    CapstonePairRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: 6-digit pairing code shown on mobile
+
+    CapstonePairResponse:
+      type: object
+      required: [session_id, ws_url, token, bundle]
+      properties:
+        session_id:
+          type: string
+        ws_url:
+          type: string
+          description: WebSocket URL the laptop connects to for `session.*` messages
+        token:
+          type: string
+          description: Short-lived JWT scoped to this session for the WS auth handshake
+        bundle:
+          $ref: '#/components/schemas/CapstoneBundleView'
+
+    CapstoneControlRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [pause, resume, abort, submit]
+
+    CapstoneSessionView:
+      type: object
+      required: [session_id, status, time_budget_seconds]
+      properties:
+        session_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/CapstoneSessionStatus'
+        sandbox_host_url:
+          type: string
+          description: Present once status is `ready`; null otherwise
+        bundle:
+          $ref: '#/components/schemas/CapstoneBundleView'
+        started_at:
+          type: string
+          format: date-time
+        time_budget_seconds:
+          type: integer
+        paused_total_seconds:
+          type: integer
+        counters:
+          $ref: '#/components/schemas/CapstoneSessionCounters'
+
+    CapstoneSessionCounters:
+      type: object
+      description: Heartbeat counters surfaced to mobile every ~10s (spec §7.2 step 8)
+      properties:
+        files_changed: { type: integer }
+        compass_turns: { type: integer }
+        tests_run: { type: integer }
+        tests_passing: { type: integer }
+        tests_total: { type: integer }
+
+    CapstoneBundleView:
+      type: object
+      description: Learner-visible projection of an ArtifactBundle of type=capstone
+      required: [bundle_id, brief, time_budget_minutes, difficulty, role_track, language, acceptance_criteria]
+      properties:
+        bundle_id: { type: string }
+        brief: { type: string }
+        time_budget_minutes:
+          type: integer
+          enum: [60, 75, 90]
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+        role_track:
+          type: string
+          enum: [swe, ds, ai_eng]
+        language: { type: string }
+        stack_variant: { type: string }
+        acceptance_criteria:
+          type: array
+          items: { type: string }
+        starter_repo:
+          type: object
+          properties:
+            files:
+              type: array
+              items:
+                type: object
+                required: [path, content]
+                properties:
+                  path: { type: string }
+                  content: { type: string }
+        visible_tests:
+          type: array
+          items:
+            type: object
+            required: [name, command]
+            properties:
+              name: { type: string }
+              command: { type: string }
+        interview_parallel: { type: string }
+
+    CapstoneResult:
+      type: object
+      description: Populated once status reaches `graded` (spec §8.2)
+      required: [overall_score, dimension_scores, integrity_confidence]
+      properties:
+        overall_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        dimension_scores:
+          type: object
+          required:
+            - correctness
+            - code_quality
+            - ai_pair_effectiveness
+            - verification_discipline
+            - decomposition
+            - reflection_quality
+          properties:
+            correctness: { type: number, minimum: 0, maximum: 10 }
+            code_quality: { type: number, minimum: 0, maximum: 10 }
+            ai_pair_effectiveness: { type: number, minimum: 0, maximum: 10 }
+            verification_discipline: { type: number, minimum: 0, maximum: 10 }
+            decomposition: { type: number, minimum: 0, maximum: 10 }
+            reflection_quality: { type: number, minimum: 0, maximum: 10 }
+        strengths:
+          type: array
+          maxItems: 5
+          items: { type: string }
+        gaps:
+          type: array
+          maxItems: 5
+          items: { type: string }
+        interview_parallel: { type: string }
+        integrity_confidence:
+          type: string
+          enum: [high, medium, low]
+          description: Anti-cheat banner color (spec §13.1 #6)
+        anchor_drift_detected: { type: boolean }
+        graded_at:
+          type: string
+          format: date-time
+
+    CapstoneReplay:
+      type: object
+      description: Presigned URLs + index for the mobile Replay scrubber
+      required: [session_id, event_stream_url, snapshots, flagged_moments, duration_seconds]
+      properties:
+        session_id: { type: string }
+        event_stream_url:
+          type: string
+          description: Presigned S3 URL — newline-delimited JSON event log
+        duration_seconds: { type: integer }
+        snapshots:
+          type: array
+          items:
+            type: object
+            required: [t_seconds, snapshot_url]
+            properties:
+              t_seconds: { type: integer }
+              snapshot_url: { type: string }
+        flagged_moments:
+          type: array
+          items:
+            type: object
+            required: [t_seconds, label]
+            properties:
+              t_seconds: { type: integer }
+              label: { type: string }
+              detail: { type: string }
+              severity:
+                type: string
+                enum: [info, warning, critical]
+
+    CapstoneLibraryEntry:
+      type: object
+      required: [bundle_id, brief, difficulty, role_track, time_budget_minutes, language]
+      properties:
+        bundle_id: { type: string }
+        brief: { type: string }
+        difficulty: { type: string, enum: [easy, medium, hard] }
+        role_track: { type: string, enum: [swe, ds, ai_eng] }
+        time_budget_minutes: { type: integer, enum: [60, 75, 90] }
+        language: { type: string }
+        stack_variant: { type: string }
+        interview_parallel: { type: string }
+        already_completed: { type: boolean }
 
 paths:
   # =====================================================================
@@ -6053,22 +6301,26 @@ paths:
         content:
           application/json:
             schema:
+              # Note: each property here is optional/nullable — when omitted,
+              # backend falls back to (drill_subtype = weakest mastery axis;
+              # difficulty = current DifficultyState; topic_hint = case-insensitive
+              # match against bundle brief).
               type: object
               properties:
                 drill_subtype:
-                  type: string
-                  enum: [prompt, verify, decompose]
-                  nullable: true
-                  description: If omitted, weakest mastery axis is used
+                  oneOf:
+                    - type: string
+                      enum: [prompt, verify, decompose]
+                    - type: 'null'
                 difficulty:
-                  type: string
-                  enum: [easy, medium, hard]
-                  nullable: true
-                  description: If omitted, user's current DifficultyState is used
+                  oneOf:
+                    - type: string
+                      enum: [easy, medium, hard]
+                    - type: 'null'
                 topic_hint:
-                  type: string
-                  nullable: true
-                  description: Optional topic string; matched case-insensitively against bundle brief
+                  oneOf:
+                    - type: string
+                    - type: 'null'
       responses:
         '200':
           description: On-demand drill started — same safe bundle view as startCodeDrill
@@ -6361,8 +6613,9 @@ paths:
                         detail:
                           type: string
                         reference:
-                          type: string
-                          nullable: true
+                          oneOf:
+                            - type: string
+                            - type: 'null'
                   integrity_confidence:
                     type: string
                     enum: [high, medium, low]
@@ -6686,6 +6939,289 @@ paths:
                   error:
                     type: string
                     enum: [calibration_not_found]
+
+  # =====================================================================
+  # Capstones (Phase B)
+  # =====================================================================
+  /api/coding/capstones/library:
+    get:
+      operationId: listCapstoneLibrary
+      tags: [Coding]
+      summary: List capstones the authenticated user can pick
+      description: |
+        Returns capstones filtered by the user's role-track + difficulty
+        recommendation. Each entry marks `already_completed: true` if the
+        user has a graded session for that bundle (re-attempts are allowed
+        but the UI greys them).
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: difficulty
+          schema: { type: string, enum: [easy, medium, hard] }
+        - in: query
+          name: role_track
+          schema: { type: string, enum: [swe, ds, ai_eng] }
+      responses:
+        '200':
+          description: Library
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capstones]
+                properties:
+                  capstones:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CapstoneLibraryEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/coding/capstones/start:
+    post:
+      operationId: startCapstone
+      tags: [Coding]
+      summary: Create a capstone session and mint a pairing code
+      description: |
+        Creates a new CapstoneSession in `scheduled` state, mints a 6-digit
+        pairing code valid for 10 min, and asynchronously requests sandbox
+        provisioning. Client polls `/status` until ready, or pairs from
+        laptop via `/redeem`.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapstoneStartRequest'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapstoneStartResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Bundle not found or not a capstone
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [bundle_not_found, not_a_capstone, no_coding_track_for_objective]
+
+  /api/coding/capstones/redeem:
+    post:
+      operationId: redeemCapstonePairingCode
+      tags: [Coding]
+      summary: Redeem a pairing code from the laptop
+      description: |
+        Laptop posts the 6-digit code (entered manually or scanned from QR).
+        Returns the session id + a short-lived WS token + the bundle so the
+        web IDE can load the starter repo immediately.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapstonePairRequest'
+      responses:
+        '200':
+          description: Paired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapstonePairResponse'
+        '404':
+          description: Code invalid, expired, or already used
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [pairing_code_invalid, pairing_code_expired, pairing_code_used]
+
+  /api/coding/capstones/{session_id}/status:
+    get:
+      operationId: getCapstoneSessionStatus
+      tags: [Coding]
+      summary: Poll the session status (used by mobile while waiting for sandbox)
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current session state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapstoneSessionView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/coding/capstones/{session_id}/control:
+    post:
+      operationId: controlCapstoneSession
+      tags: [Coding]
+      summary: Pause / resume / abort / submit a session
+      description: |
+        Mobile-side control surface (spec §7.3 `session.control`). `submit`
+        is also reachable from the web IDE; both routes go through the same
+        state machine.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapstoneControlRequest'
+      responses:
+        '200':
+          description: Action accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapstoneSessionView'
+        '409':
+          description: Invalid transition for current status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [invalid_transition]
+                  current_status:
+                    $ref: '#/components/schemas/CapstoneSessionStatus'
+
+  /api/coding/capstones/{session_id}/voice-reflection:
+    post:
+      operationId: uploadCapstoneVoiceReflection
+      tags: [Coding]
+      summary: Upload the 60-sec voice reflection (spec §7.2 step 12)
+      description: |
+        Multipart upload of the audio capture. Backend transcribes (existing
+        Whisper pipeline) and re-runs the evaluator to update the Reflection
+        Quality dimension. Auto-generates a structured note via Notes infra.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: Accepted — transcription + re-eval queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id]
+                properties:
+                  session_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/coding/capstones/{session_id}/result:
+    get:
+      operationId: getCapstoneResult
+      tags: [Coding]
+      summary: Get the graded result (returns 202 if still evaluating)
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Graded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapstoneResult'
+        '202':
+          description: Still evaluating
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, status]
+                properties:
+                  session_id: { type: string }
+                  status:
+                    $ref: '#/components/schemas/CapstoneSessionStatus'
+                  evaluating_started_at:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/coding/capstones/{session_id}/replay:
+    get:
+      operationId: getCapstoneReplay
+      tags: [Coding]
+      summary: Get the replay index + presigned S3 URLs (spec §7.4)
+      description: |
+        Returns the event-stream URL and per-snapshot URLs so the mobile and
+        web replay scrubbers can render any moment. Raw stream lives in S3
+        for 90 days; if a presigned URL has expired, calling this again
+        re-issues it.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Replay descriptor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapstoneReplay'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/coding/health:
     get:
