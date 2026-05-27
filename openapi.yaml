@@ -58,6 +58,8 @@ tags:
     description: Knowledge profile + topic mastery
   - name: Dashboard
     description: Home dashboard aggregate
+  - name: YouV2
+    description: v2 You-tab — overview, activities, analytics, coding mastery
   - name: Coding
     description: Coding practice — drills + capstones
 
@@ -505,6 +507,126 @@ components:
         weekNumber: { type: integer }
         startedAt:  { type: string, format: date-time }
       additionalProperties: true
+
+    # =====================================================================
+    # v2 You-tab schemas
+    # =====================================================================
+    ReadinessBlock:
+      type: object
+      required: [score, onTrackText]
+      properties:
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Readiness score (0–100)
+        onTrackText:
+          type: string
+          description: |
+            Meaningful status phrase — never duplicates the numeric percentage
+            shown in the ring. Possible values:
+              "Early days · keep going"
+              "Building readiness toward <date>"
+              "On track for <date>"
+              "Past deadline · keep pushing"
+        targetDate:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: Formatted target date string (e.g. "Jun 2026"), null when no objective
+        weeksRemaining:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+          description: Weeks until target date; null when overdue or no target date
+        weeksOverdue:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+          description: Weeks past the target date; null when on-track or no target date. New in v2.1.
+
+    CodingMasteryTrack:
+      type: object
+      required: [role_track, current_difficulty]
+      properties:
+        role_track:
+          type: string
+          enum: [swe, ds, ai_eng]
+        axes:
+          type: object
+          description: Per-axis mastery scores (keys are axis names, values are 0–100 floats)
+          additionalProperties: true
+        confidence:
+          oneOf:
+            - type: number
+            - type: 'null'
+        attempt_count:
+          type: integer
+        current_difficulty:
+          type: string
+          enum: [easy, medium, hard]
+        recommendation_history:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    CodingMasteryAttemptView:
+      type: object
+      required: [id, submitted_at]
+      properties:
+        id:           { type: string }
+        drill_subtype:
+          oneOf:
+            - type: string
+            - type: 'null'
+        difficulty:
+          oneOf:
+            - type: string
+            - type: 'null'
+        role_track:
+          oneOf:
+            - type: string
+            - type: 'null'
+        score:
+          oneOf:
+            - type: integer
+            - type: 'null'
+        submitted_at: { type: string, format: date-time }
+        is_calibration: { type: boolean }
+
+    CodingMasteryStats:
+      type: object
+      required: [total_drills_graded]
+      properties:
+        total_drills_graded:
+          type: integer
+        average_score:
+          oneOf:
+            - type: integer
+            - type: 'null'
+
+    CodingMasteryResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data:
+          type: object
+          required: [tracks, recent_attempts, stats]
+          properties:
+            tracks:
+              type: array
+              items:
+                $ref: '#/components/schemas/CodingMasteryTrack'
+            recent_attempts:
+              type: array
+              items:
+                $ref: '#/components/schemas/CodingMasteryAttemptView'
+            stats:
+              $ref: '#/components/schemas/CodingMasteryStats'
 
 paths:
   # =====================================================================
@@ -6423,3 +6545,89 @@ paths:
                 required: [module, status]
         '400':
           description: Bad request
+
+  # =====================================================================
+  # v2 You-tab
+  # =====================================================================
+  /api/v2/you/overview:
+    get:
+      operationId: getYouV2Overview
+      tags: [YouV2]
+      summary: You-tab overview (header + readiness ring + streak)
+      description: |
+        Fast aggregate used by the You-tab header. Returns user profile, readiness
+        ring data (including weeksOverdue when target date has passed), week
+        progress, streak, top gap, and role flags.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    properties:
+                      readiness:
+                        $ref: '#/components/schemas/ReadinessBlock'
+                      user:
+                        type: object
+                        additionalProperties: true
+                      weekProgress:
+                        oneOf:
+                          - type: object
+                            additionalProperties: true
+                          - type: 'null'
+                      streak:
+                        type: object
+                        additionalProperties: true
+                      topGap:
+                        oneOf:
+                          - type: object
+                            additionalProperties: true
+                          - type: 'null'
+                      timeInvested:
+                        type: object
+                        additionalProperties: true
+                      flags:
+                        type: object
+                        additionalProperties: true
+                      objectiveLabel:
+                        oneOf:
+                          - type: string
+                          - type: 'null'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v2/you/coding-mastery:
+    get:
+      operationId: getYouV2CodingMastery
+      tags: [YouV2]
+      summary: Coding mastery snapshot for the You-tab analytics view
+      description: |
+        Returns the user's MetaSkillMastery per role_track, current DifficultyState,
+        recent 10 graded drill attempts, and aggregate stats. Always returns 200 —
+        tracks/recent_attempts/stats are empty/null when the user has not yet
+        done any coding drills (so iOS can render an empty state rather than
+        error-handle a 404).
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodingMasteryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
