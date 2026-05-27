@@ -5,6 +5,12 @@ const mongoose = require('mongoose');
 const DrillAttemptSchema = new mongoose.Schema({
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   bundle_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle', required: true },
+  drill_subtype: {
+    type: String,
+    enum: ['prompt', 'verify', 'decompose', 'refactor'],
+    required: true,
+    index: true,  // we query by this in calibration matching
+  },
   status: { type: String, enum: ['scheduled', 'in_progress', 'submitted', 'graded'], default: 'scheduled' },
   started_at: Date,
   submitted_at: Date,

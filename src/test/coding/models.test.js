@@ -144,16 +144,52 @@ test('DrillAttempt: validateSync surfaces error when bundle_id is missing', () =
   assert.ok(err.errors['bundle_id'], 'expected error on "bundle_id" field');
 });
 
-test('DrillAttempt: accepts valid doc with user_id and bundle_id', () => {
+test('DrillAttempt: accepts valid doc with user_id, bundle_id, and drill_subtype', () => {
   const mongoose = require('mongoose');
   const doc = new DrillAttempt({
     user_id: new mongoose.Types.ObjectId(),
     bundle_id: new mongoose.Types.ObjectId(),
+    drill_subtype: 'prompt',
   });
   const err = doc.validateSync();
   assert.strictEqual(err, undefined, `unexpected validation error: ${err}`);
   assert.strictEqual(doc.status, 'scheduled');
   assert.strictEqual(doc.is_calibration, false);
+});
+
+test('DrillAttempt requires drill_subtype enum value', () => {
+  const mongoose = require('mongoose');
+  const attempt = new DrillAttempt({
+    user_id: new mongoose.Types.ObjectId(),
+    bundle_id: new mongoose.Types.ObjectId(),
+    // drill_subtype intentionally missing
+  });
+  const err = attempt.validateSync();
+  assert.ok(err, 'expected a validation error');
+  assert.ok(err.errors.drill_subtype, 'expected drill_subtype to be required');
+});
+
+test('DrillAttempt accepts valid drill_subtype enum value', () => {
+  const mongoose = require('mongoose');
+  const attempt = new DrillAttempt({
+    user_id: new mongoose.Types.ObjectId(),
+    bundle_id: new mongoose.Types.ObjectId(),
+    drill_subtype: 'prompt',
+  });
+  const err = attempt.validateSync();
+  assert.ok(!err || !err.errors.drill_subtype, 'should accept prompt');
+});
+
+test('DrillAttempt rejects invalid drill_subtype', () => {
+  const mongoose = require('mongoose');
+  const attempt = new DrillAttempt({
+    user_id: new mongoose.Types.ObjectId(),
+    bundle_id: new mongoose.Types.ObjectId(),
+    drill_subtype: 'invalid_subtype',
+  });
+  const err = attempt.validateSync();
+  assert.ok(err, 'expected a validation error');
+  assert.ok(err.errors.drill_subtype, 'expected enum violation');
 });
 
 // ---------------------------------------------------------------------------
