@@ -341,6 +341,57 @@ test('decomposeGrader [B]: saved grade.overall_score === 42', async () => {
 // Error path tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+test('decomposeGrader: calls applyPostGradeUpdates after writing grade (regression)', async () => {
+  let postGradeCalled = false;
+  let postGradeArgs   = null;
+
+  // Stub postGradeHooks BEFORE the grader resolves it via require()
+  const postGradeHooksPath = require.resolve('../../coding/services/drillGrader/postGradeHooks');
+  delete require.cache[postGradeHooksPath];
+  require.cache[postGradeHooksPath] = {
+    exports: {
+      applyPostGradeUpdates: async (args) => {
+        postGradeCalled = true;
+        postGradeArgs   = args;
+        return { mastery: null, recommendation: null };
+      },
+    },
+    loaded: true,
+    id: postGradeHooksPath,
+  };
+
+  // Clear the grader from cache so it picks up the fresh postGradeHooks stub
+  const graderPath = require.resolve('../../coding/services/drillGrader/decomposeGrader');
+  delete require.cache[graderPath];
+  const { grade: gradeFresh } = require('../../coding/services/drillGrader/decomposeGrader');
+
+  STUB_LLM_RESPONSE = {
+    content: [{
+      text: JSON.stringify({
+        overall_score: 88,
+        rubric: {
+          granularity:               9,
+          ordering:                  9,
+          verification_checkpoints:  8,
+          ai_handoff_appropriateness: 9,
+        },
+        what_to_try_next: 'Add explicit acceptance check after step 3.',
+      }),
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-haiku' },
+  };
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await gradeFresh({ drillAttemptId: attemptId });
+
+  assert.equal(postGradeCalled, true, 'applyPostGradeUpdates should be called');
+  assert.ok(postGradeArgs, 'postGradeArgs should be set');
+  assert.equal(postGradeArgs.score, 88, 'score should be passed');
+  assert.equal(postGradeArgs.roleTrack, 'swe');
+  assert.equal(postGradeArgs.drillSubtype, 'decompose');
+});
+
 test('decomposeGrader: throws when DrillAttempt not found', async () => {
   attemptOverride = null;
   const origFindById = DrillAttempt.findById;

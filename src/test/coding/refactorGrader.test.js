@@ -312,6 +312,54 @@ test('refactorGrader [C]: bundle with no visible_tests → correctness = 10 (ful
 // Error path tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+test('refactorGrader: calls applyPostGradeUpdates after writing grade (regression)', async () => {
+  let postGradeCalled = false;
+  let postGradeArgs   = null;
+
+  // Stub postGradeHooks BEFORE the grader resolves it via require()
+  const postGradeHooksPath = require.resolve('../../coding/services/drillGrader/postGradeHooks');
+  delete require.cache[postGradeHooksPath];
+  require.cache[postGradeHooksPath] = {
+    exports: {
+      applyPostGradeUpdates: async (args) => {
+        postGradeCalled = true;
+        postGradeArgs   = args;
+        return { mastery: null, recommendation: null };
+      },
+    },
+    loaded: true,
+    id: postGradeHooksPath,
+  };
+
+  // Clear the grader from cache so it picks up the fresh postGradeHooks stub
+  const graderPath = require.resolve('../../coding/services/drillGrader/refactorGrader');
+  delete require.cache[graderPath];
+  const { grade: gradeFresh } = require('../../coding/services/drillGrader/refactorGrader');
+
+  STUB_LLM_RESPONSE = {
+    content: [{
+      text: JSON.stringify({
+        rubric: { readability_gain: 9, ai_usage_judgment: 8 },
+        what_to_try_next: 'Consider extracting helper.',
+      }),
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+  };
+  sbx.runInTempDir = async () => ({ exit_code: 0, stdout: 'ok', stderr: '', timed_out: false });
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await gradeFresh({ drillAttemptId: attemptId });
+
+  // 2/2 tests pass → correctness=10; readability_gain=9, ai_usage_judgment=8
+  // overall = round((10*0.5 + 9*0.25 + 8*0.25) * 10) = round(92.5) = 93
+  assert.equal(postGradeCalled, true, 'applyPostGradeUpdates should be called');
+  assert.ok(postGradeArgs, 'postGradeArgs should be set');
+  assert.equal(postGradeArgs.score, 93, 'score should be passed');
+  assert.equal(postGradeArgs.roleTrack, 'swe');
+  assert.equal(postGradeArgs.drillSubtype, 'refactor');
+});
+
 test('refactorGrader: throws when DrillAttempt not found', async () => {
   const origFindById = DrillAttempt.findById;
   DrillAttempt.findById = () => ({ lean: () => Promise.resolve(null) });

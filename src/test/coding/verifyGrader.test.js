@@ -260,6 +260,45 @@ test('verifyGrader [B]: saved grade.overall_score < 70 with false positives', as
 // Error path tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+test('verifyGrader: calls applyPostGradeUpdates after writing grade (regression)', async () => {
+  let postGradeCalled = false;
+  let postGradeArgs   = null;
+
+  // Stub postGradeHooks BEFORE the grader resolves it via require()
+  const postGradeHooksPath = require.resolve('../../coding/services/drillGrader/postGradeHooks');
+  delete require.cache[postGradeHooksPath];
+  require.cache[postGradeHooksPath] = {
+    exports: {
+      applyPostGradeUpdates: async (args) => {
+        postGradeCalled = true;
+        postGradeArgs   = args;
+        return { mastery: null, recommendation: null };
+      },
+    },
+    loaded: true,
+    id: postGradeHooksPath,
+  };
+
+  // Clear the grader from cache so it picks up the fresh postGradeHooks stub
+  const graderPath = require.resolve('../../coding/services/drillGrader/verifyGrader');
+  delete require.cache[graderPath];
+  const { grade: gradeFresh } = require('../../coding/services/drillGrader/verifyGrader');
+
+  STUB_ROOT_CAUSE_CLARITY = 9;
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  await gradeFresh({ drillAttemptId: attemptId });
+
+  // detection_accuracy=10, root_cause_clarity=9, false_positive_rate=10
+  // overall = round((10*0.5 + 9*0.3 + 10*0.2) * 10) = round(97) = 97
+  assert.equal(postGradeCalled, true, 'applyPostGradeUpdates should be called');
+  assert.ok(postGradeArgs, 'postGradeArgs should be set');
+  assert.equal(postGradeArgs.score, 97, 'score should be passed');
+  assert.equal(postGradeArgs.roleTrack, 'swe');
+  assert.equal(postGradeArgs.drillSubtype, 'verify');
+});
+
 test('verifyGrader: throws when DrillAttempt not found', async () => {
   STUB_ROOT_CAUSE_CLARITY = 9;
   attemptOverride = null;

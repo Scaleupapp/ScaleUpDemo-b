@@ -168,6 +168,51 @@ test('promptGrader: grade() throws when ArtifactBundle not found', async () => {
   }
 });
 
+test('promptGrader: calls applyPostGradeUpdates after writing grade (regression)', async () => {
+  let postGradeCalled = false;
+  let postGradeArgs   = null;
+
+  // Stub postGradeHooks BEFORE the grader resolves it via require()
+  const postGradeHooksPath = require.resolve('../../coding/services/drillGrader/postGradeHooks');
+  delete require.cache[postGradeHooksPath];
+  require.cache[postGradeHooksPath] = {
+    exports: {
+      applyPostGradeUpdates: async (args) => {
+        postGradeCalled = true;
+        postGradeArgs   = args;
+        return { mastery: null, recommendation: null };
+      },
+    },
+    loaded: true,
+    id: postGradeHooksPath,
+  };
+
+  // Clear the grader from cache so it picks up the fresh postGradeHooks stub
+  const graderPath = require.resolve('../../coding/services/drillGrader/promptGrader');
+  delete require.cache[graderPath];
+  const { grade: gradeFresh } = require('../../coding/services/drillGrader/promptGrader');
+
+  capturedUpdate = null;
+  STUB_LLM_RESPONSE = {
+    content: [{
+      text: JSON.stringify({
+        overall_score: 78,
+        rubric: { specificity: 8, constraints: 7, edge_cases: 7, output_fidelity: 8 },
+        what_to_try_next: 'Add explicit format constraints.',
+      }),
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-haiku' },
+  };
+
+  await gradeFresh({ drillAttemptId: attemptId });
+
+  assert.equal(postGradeCalled, true, 'applyPostGradeUpdates should be called');
+  assert.ok(postGradeArgs, 'postGradeArgs should be set');
+  assert.equal(postGradeArgs.score, 78, 'score should be passed');
+  assert.equal(postGradeArgs.roleTrack, 'swe');
+  assert.equal(postGradeArgs.drillSubtype, 'prompt');
+});
+
 test('promptGrader: handles LLM response wrapped in ```json fences (regression)', async () => {
   const origResponse = STUB_LLM_RESPONSE;
   STUB_LLM_RESPONSE = {
