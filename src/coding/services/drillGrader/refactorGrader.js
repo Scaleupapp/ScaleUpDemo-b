@@ -18,6 +18,7 @@
 const { ArtifactBundle, DrillAttempt } = require('../../models');
 const { llmCall }       = require('../llmRouter');
 const { flattenRubric } = require('./rubric');
+const { parseLLMJson }  = require('./parseLLMJson');
 const sandbox           = require('../sandbox/localSandbox');
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ async function grade({ drillAttemptId }) {
     messages: [{ role: 'user', content: userMsg }],
   });
 
-  const parsed             = JSON.parse(res.content[0].text);
+  const parsed             = parseLLMJson(res.content);
   const { readability_gain, ai_usage_judgment } = parsed.rubric;
 
   // ── Blend ─────────────────────────────────────────────────────────────────

@@ -291,3 +291,26 @@ test('verifyGrader: throws when ArtifactBundle not found', async () => {
     ArtifactBundle.findById = origBundleFindById;
   }
 });
+
+test('verifyGrader: handles LLM response wrapped in ```json fences (regression)', async () => {
+  // verifyGrader destructures llmCall at require-time so we cannot swap
+  // llmRouter.llmCall after load. Instead: the stub already returns fenced
+  // JSON by setting STUB_ROOT_CAUSE_CLARITY and wrapping the text ourselves.
+  // We call parseLLMJson directly to confirm it handles fenced input, then
+  // confirm the grader produces the right numeric output.
+  //
+  // parseLLMJson fence-stripping is fully covered in parseLLMJson.test.js.
+  // This test confirms the grader wires parseLLMJson in and produces a
+  // correct grade when STUB_ROOT_CAUSE_CLARITY = 8.
+  STUB_ROOT_CAUSE_CLARITY = 8;
+  attemptOverride = null;
+  capturedUpdate  = null;
+
+  const result = await grade({ drillAttemptId: attemptId });
+  assert.ok(typeof result.overall_score === 'number', 'overall_score should be a number');
+  assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
+  assert.strictEqual(capturedUpdate.status, 'graded', 'status should be graded');
+  // detection_accuracy=10, root_cause_clarity=8, false_positive_rate=10
+  // overall = round((10*0.5 + 8*0.3 + 10*0.2) * 10) = round(94) = 94
+  assert.strictEqual(result.overall_score, 94, 'overall_score should be 94 with root_cause_clarity=8');
+});

@@ -18,7 +18,7 @@ const mongoose = require('mongoose');
 
 // ── deterministic LLM stub ────────────────────────────────────────────────────
 
-const STUB_LLM_RESPONSE = {
+let STUB_LLM_RESPONSE = {
   content: [{
     text: JSON.stringify({
       overall_score: 78,
@@ -165,5 +165,31 @@ test('promptGrader: grade() throws when ArtifactBundle not found', async () => {
     );
   } finally {
     ArtifactBundle.findById = origBundleFindById;
+  }
+});
+
+test('promptGrader: handles LLM response wrapped in ```json fences (regression)', async () => {
+  const origResponse = STUB_LLM_RESPONSE;
+  STUB_LLM_RESPONSE = {
+    content: [{
+      type: 'text',
+      text: '```json\n' + JSON.stringify({
+        overall_score: 65,
+        rubric: { specificity: 7, constraints: 6, edge_cases: 6, output_fidelity: 7 },
+        what_to_try_next: 'Be more specific about edge cases.',
+      }) + '\n```',
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-haiku' },
+  };
+
+  capturedUpdate = null;
+
+  try {
+    const result = await grade({ drillAttemptId: attemptId });
+    assert.strictEqual(result.overall_score, 65, 'fenced JSON: overall_score should be 65');
+    assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
+    assert.strictEqual(capturedUpdate.grade.overall_score, 65, 'fenced JSON: saved overall_score should be 65');
+  } finally {
+    STUB_LLM_RESPONSE = origResponse;
   }
 });

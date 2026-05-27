@@ -370,3 +370,31 @@ test('decomposeGrader: throws when ArtifactBundle not found', async () => {
     ArtifactBundle.findById = origBundleFindById;
   }
 });
+
+test('decomposeGrader: handles LLM response wrapped in ```json fences (regression)', async () => {
+  attemptOverride = null;
+
+  STUB_LLM_RESPONSE = {
+    content: [{
+      type: 'text',
+      text: '```json\n' + JSON.stringify({
+        overall_score: 72,
+        rubric: {
+          granularity:               7,
+          ordering:                  8,
+          verification_checkpoints:  6,
+          ai_handoff_appropriateness: 7,
+        },
+        what_to_try_next: 'Add a verification step after each handoff.',
+      }) + '\n```',
+    }],
+    _meta: { provider: 'anthropic', model: 'claude-haiku' },
+  };
+
+  capturedUpdate = null;
+
+  const result = await grade({ drillAttemptId: attemptId });
+  assert.strictEqual(result.overall_score, 72, 'fenced JSON: overall_score should be 72');
+  assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
+  assert.strictEqual(capturedUpdate.grade.overall_score, 72, 'fenced JSON: saved overall_score should be 72');
+});
