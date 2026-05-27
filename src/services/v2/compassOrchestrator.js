@@ -49,6 +49,7 @@ const CompassConversation = require('../../models/CompassConversation');
 const anthropic = require('../../config/anthropic');
 const redis = require('../../config/redis');
 const userContextService = require('../userContextService');
+const { detectDrillRequest } = require('./compassIntent');
 
 // Persistence: max age of the "active" thread before a new one starts.
 const ACTIVE_THREAD_MAX_AGE_MIN = 60 * 12;  // 12 hours
@@ -279,24 +280,31 @@ async function handle({ userId, mode, payload = {} }) {
   const ctx = await buildUserContext(userId);
   const systemPrompt = buildSystemContext(ctx);
 
+  let response;
+
   switch (mode) {
     case 'greeting':
-      return await greeting({ ctx, systemPrompt, userId, contextHint: payload.message });
+      response = await greeting({ ctx, systemPrompt, userId, contextHint: payload.message });
+      break;
 
     case 'conversation':
-      return await conversation({ ctx, systemPrompt, userId, message: payload.message, history: payload.history });
+      response = await conversation({ ctx, systemPrompt, userId, message: payload.message, history: payload.history });
+      break;
 
     case 'tutor':
       // The merged AI Tutor — Compass scoped to a specific piece of content.
       // Same brain, same unified history (CompassConversation), but the prompt
       // is grounded in the video/article and the turn is tagged with contentRef.
-      return await tutor({ ctx, systemPrompt, userId, contentId: payload.contentId, message: payload.message, history: payload.history });
+      response = await tutor({ ctx, systemPrompt, userId, contentId: payload.contentId, message: payload.message, history: payload.history });
+      break;
 
     case 'quiz_config':
-      return quizConfig({ ctx, payload });
+      response = quizConfig({ ctx, payload });
+      break;
 
     case 'interview_config':
-      return interviewConfig({ ctx, payload });
+      response = interviewConfig({ ctx, payload });
+      break;
 
     case 'note': {
       // Note mode: tells the iOS client to launch the v1 upload flow.
@@ -305,7 +313,7 @@ async function handle({ userId, mode, payload = {} }) {
       // uploads, then completes. We persist the user intent into the thread.
       const reply = "I can turn an upload into a summary, mind map, flashcards, and audio narration. Choose a file (PDF, image, or audio) to get started.";
       await appendToThread(userId, 'assistant', reply, { mode: 'note' });
-      return {
+      response = {
         mode: 'note',
         output: {
           reply,
@@ -321,17 +329,20 @@ async function handle({ userId, mode, payload = {} }) {
           },
         },
       };
+      break;
     }
 
     case 'insight':
-      return await insight({ ctx, systemPrompt, userId });
+      response = await insight({ ctx, systemPrompt, userId });
+      break;
 
     case 'mentor':
-      return await conversation({
+      response = await conversation({
         ctx, userId,
         systemPrompt: systemPrompt + '\n[Mode: mentor — focus on career strategy, decisions, and long-term moves.]',
         message: payload.message, history: payload.history,
       });
+      break;
 
     case 'coach':
     case 'review_week': {
@@ -343,18 +354,48 @@ async function handle({ userId, mode, payload = {} }) {
       // (when the client passes a `message`) flow through conversation with
       // the coach framing pinned to the system prompt.
       if (payload.message) {
-        return await conversation({
+        response = await conversation({
           ctx, userId,
           systemPrompt: systemPrompt + `\n[Mode: coach — ${coachFramingForScope(scope, topic)} Help the learner reflect and commit to a concrete next move.]`,
           message: payload.message, history: payload.history,
         });
+      } else {
+        response = await coachOpener({ ctx, systemPrompt, userId, scope, topic, weekNumber: payload.weekNumber });
       }
-      return await coachOpener({ ctx, systemPrompt, userId, scope, topic, weekNumber: payload.weekNumber });
+      break;
     }
 
     default:
       return { mode: 'unknown', error: `Unknown mode: ${mode}` };
   }
+
+  // ---------------------------------------------------------------------------
+  // Intent detection — run on user messages in conversational modes.
+  // Appends suggested_action when a drill request is detected. Best-effort:
+  // never throws, never delays the response on failure.
+  // Only fires for modes where the user is typing a free-form message.
+  // ---------------------------------------------------------------------------
+  const INTENT_ELIGIBLE_MODES = ['conversation', 'tutor', 'mentor', 'coach', 'review_week'];
+  const userMessage = payload && payload.message;
+  if (
+    INTENT_ELIGIBLE_MODES.includes(mode) &&
+    userMessage &&
+    response &&
+    response.output &&
+    !response.output.suggested_action
+  ) {
+    try {
+      const action = await detectDrillRequest(userMessage);
+      if (action) {
+        response.output.suggested_action = action;
+      }
+    } catch (e) {
+      console.error('[compass intent detection]', e.message);
+      // never throw — intent detection is best-effort
+    }
+  }
+
+  return response;
 }
 
 /**
