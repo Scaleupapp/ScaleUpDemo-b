@@ -1,0 +1,160 @@
+'use strict';
+
+const { Queue, Worker, QueueScheduler } = require('bullmq');
+const Redis = require('ioredis');
+const CapstoneSession = require('../models/capstoneSession.model');
+const sandboxOrchestrator = require('../services/sandboxOrchestrator');
+const stateMachine = require('../services/sessionStateMachine');
+
+/**
+ * Sandbox GC worker — belt-and-suspenders on top of e2b's own wall-clock
+ * limits. Runs every 5 min:
+ *
+ *   1. Kill sandboxes for sessions that have been submitted/graded/aborted
+ *      for > 5 min (e2b also reaps but we don't want to wait for that).
+ *   2. Auto-expire `ready` and `in_progress` sessions past their wall-clock
+ *      budget (spec §12.2 "Timer ends mid-thought → 60s grace + 30s hard
+ *      buffer; auto-submit captures state").
+ *   3. Top up the warm pool toward target sizes (sandboxOrchestrator does
+ *      the work; this worker just calls the function on a schedule).
+ *
+ * The expiry path transitions: in_progress → expired → submitted, which
+ * triggers the same submit-side effects (recording finalize + teardown +
+ * eval enqueue, the latter lands in WS4).
+ */
+
+const QUEUE_NAME = 'capstone-sandbox-gc';
+const TICK_INTERVAL_MS = 5 * 60 * 1000;
+const GRACE_MS_AFTER_SUBMIT = 5 * 60 * 1000;
+const HARD_BUFFER_SECONDS = 30; // matches spec §12.2 (the +30s after the 60s grace warning)
+
+let connection;
+let queue;
+let scheduler;
+let worker;
+
+function getConnection() {
+  if (!connection) {
+    connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+  }
+  return connection;
+}
+
+function getQueue() {
+  if (!queue) {
+    queue = new Queue(QUEUE_NAME, {
+      connection: getConnection(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: { count: 50 },
+        removeOnFail: { count: 50 },
+      },
+    });
+  }
+  return queue;
+}
+
+/**
+ * One GC tick. Exported so tests can call it without spinning a worker.
+ *
+ * @returns {Promise<{ teardowns: number, expired: number, poolTopUp: object }>}
+ */
+async function tick() {
+  const summary = { teardowns: 0, expired: 0, poolTopUp: null };
+
+  // 1. Tear down sandboxes for terminal-state sessions older than 5 min.
+  const teardownCutoff = new Date(Date.now() - GRACE_MS_AFTER_SUBMIT);
+  const teardownCandidates = await CapstoneSession.find({
+    status: { $in: ['submitted', 'evaluating', 'graded', 'aborted'] },
+    sandbox_id: { $ne: null },
+    updatedAt: { $lt: teardownCutoff },
+  })
+    .select('_id sandbox_id')
+    .lean();
+
+  for (const s of teardownCandidates) {
+    try {
+      await sandboxOrchestrator.teardownForSession(s._id);
+      await CapstoneSession.findByIdAndUpdate(s._id, {
+        $unset: { sandbox_id: '', sandbox_host_url: '' },
+      });
+      summary.teardowns += 1;
+    } catch (err) {
+      // Log + continue; one stuck sandbox shouldn't stop the others.
+      // eslint-disable-next-line no-console
+      console.warn('[sandbox-gc] teardown failed:', s._id, err.message);
+    }
+  }
+
+  // 2. Auto-expire over-budget sessions. We use the session's
+  //    started_at + time_budget_seconds + HARD_BUFFER to decide.
+  const inFlight = await CapstoneSession.find({
+    status: { $in: ['in_progress', 'paused'] },
+    started_at: { $ne: null },
+  })
+    .select('_id status started_at paused_total_seconds time_budget_seconds')
+    .lean();
+
+  const now = Date.now();
+  for (const s of inFlight) {
+    const elapsedSec = Math.floor(
+      (now - s.started_at.getTime()) / 1000 - (s.paused_total_seconds || 0)
+    );
+    if (elapsedSec > s.time_budget_seconds + HARD_BUFFER_SECONDS) {
+      try {
+        await stateMachine.transition(s._id, 'expired');
+        await stateMachine.transition(s._id, 'submitted');
+        summary.expired += 1;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[sandbox-gc] expire failed:', s._id, err.message);
+      }
+    }
+  }
+
+  // 3. Warm pool top-up.
+  try {
+    summary.poolTopUp = await sandboxOrchestrator.topUpPool();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[sandbox-gc] pool top-up failed:', err.message);
+  }
+
+  return summary;
+}
+
+function startSandboxGcWorker() {
+  // QueueScheduler is what schedules repeatable jobs in BullMQ < v5; for
+  // v5+ it's bundled with Queue. Guard the import in case both versions
+  // are present in the resolver.
+  try {
+    scheduler = new QueueScheduler(QUEUE_NAME, { connection: getConnection() });
+  } catch {
+    scheduler = null;
+  }
+
+  worker = new Worker(QUEUE_NAME, async () => tick(), {
+    connection: getConnection(),
+    concurrency: 1,
+  });
+
+  // Kick off the recurring tick — bull v4 vs v5 differ, this works on both.
+  getQueue().add(
+    'tick',
+    {},
+    {
+      repeat: { every: TICK_INTERVAL_MS },
+      jobId: 'capstone-sandbox-gc-recurring',
+    }
+  );
+
+  return { worker, scheduler, queue: getQueue() };
+}
+
+module.exports = {
+  tick,
+  startSandboxGcWorker,
+  TICK_INTERVAL_MS,
+  HARD_BUFFER_SECONDS,
+};

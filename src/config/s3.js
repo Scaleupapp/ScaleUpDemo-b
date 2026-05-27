@@ -97,7 +97,39 @@ async function abortMultipartUpload(key, uploadId) {
   return s3.send(command);
 }
 
+/**
+ * Download an object as a Buffer. Returns an empty Buffer if the object
+ * doesn't exist — callers (e.g. capstone recordingService appending to a
+ * not-yet-created stream) treat absence as "start fresh."
+ */
+async function downloadBuffer(key) {
+  const command = new GetObjectCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+  });
+  try {
+    const res = await s3.send(command);
+    const chunks = [];
+    for await (const chunk of res.Body) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  } catch (err) {
+    if (err && (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404)) {
+      return Buffer.alloc(0);
+    }
+    throw err;
+  }
+}
+
+/** Generate a presigned GET URL for a private object. */
+async function generateDownloadURL(key, expiresIn = 3600) {
+  const command = new GetObjectCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+  });
+  return getSignedUrl(s3, command, { expiresIn });
+}
+
 module.exports = {
-  s3, generateUploadURL, uploadStream, uploadBuffer,
+  s3, generateUploadURL, uploadStream, uploadBuffer, downloadBuffer, generateDownloadURL,
   initiateMultipartUpload, getPartUploadURL, completeMultipartUpload, abortMultipartUpload,
 };

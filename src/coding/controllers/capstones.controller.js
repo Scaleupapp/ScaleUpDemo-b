@@ -1,0 +1,282 @@
+'use strict';
+
+const jwt = require('jsonwebtoken');
+const CapstoneSession = require('../models/capstoneSession.model');
+const ArtifactBundle = require('../models/artifactBundle.model');
+const pairingService = require('../services/pairingService');
+const sandboxOrchestrator = require('../services/sandboxOrchestrator');
+const recordingService = require('../services/recordingService');
+const stateMachine = require('../services/sessionStateMachine');
+const sessionRoom = require('../websocket/sessionRoom');
+
+/**
+ * Capstone REST controllers. Wire shape lives in openapi.yaml under
+ * /api/coding/capstones/*; this file does only HTTP↔service translation.
+ *
+ * Each handler is a thin function — argument validation is mostly delegated
+ * to the model + service layer (Joi-style validators are added in WS2.10
+ * tests; for now we surface friendly errors when a required field is
+ * obviously missing).
+ */
+
+/** GET /api/coding/capstones/library */
+async function listLibrary(req, res) {
+  const { difficulty, role_track } = req.query;
+  const filter = { type: 'capstone', status: 'active' };
+  if (difficulty) filter.difficulty = difficulty;
+  if (role_track) filter.role_track = role_track;
+
+  const bundles = await ArtifactBundle.find(filter)
+    .select('_id brief difficulty role_track time_budget_minutes language stack_variant interview_parallel')
+    .lean();
+
+  // Per-user completion lookup — one query, then in-memory join.
+  const sessions = await CapstoneSession.find({
+    user_id: req.user.userId,
+    status: 'graded',
+  }).select('bundle_id').lean();
+  const completedSet = new Set(sessions.map((s) => String(s.bundle_id)));
+
+  res.json({
+    capstones: bundles.map((b) => ({
+      bundle_id: String(b._id),
+      brief: b.brief,
+      difficulty: b.difficulty,
+      role_track: b.role_track,
+      time_budget_minutes: b.time_budget_minutes,
+      language: b.language,
+      stack_variant: b.stack_variant,
+      interview_parallel: b.interview_parallel,
+      already_completed: completedSet.has(String(b._id)),
+    })),
+  });
+}
+
+/** POST /api/coding/capstones/start */
+async function start(req, res) {
+  const { bundle_id } = req.body || {};
+  if (!bundle_id) return res.status(400).json({ error: 'bundle_id required' });
+
+  const bundle = await ArtifactBundle.findById(bundle_id).lean();
+  if (!bundle) return res.status(404).json({ error: 'bundle_not_found' });
+  if (bundle.type !== 'capstone') return res.status(404).json({ error: 'not_a_capstone' });
+
+  const session = await CapstoneSession.create({
+    user_id: req.user.userId,
+    bundle_id: bundle._id,
+    status: 'scheduled',
+    time_budget_seconds: bundle.time_budget_minutes * 60,
+  });
+
+  const { code, expiresAt } = await pairingService.mintCode({
+    userId: req.user.userId,
+    sessionId: session._id,
+  });
+
+  // Async provision — don't make mobile wait. Status poll surfaces ready.
+  sandboxOrchestrator.provisionForSession(session._id).catch((err) => {
+    // Logged inside orchestrator; here we just make sure the error doesn't
+    // float up as unhandled.
+    // eslint-disable-next-line no-console
+    console.warn('[capstones.start] provision failed:', err.message);
+  });
+
+  res.status(201).json({
+    session_id: String(session._id),
+    status: session.status,
+    pairing_code: code,
+    expires_at: expiresAt,
+    time_budget_seconds: session.time_budget_seconds,
+  });
+}
+
+/** POST /api/coding/capstones/redeem */
+async function redeemPairing(req, res) {
+  const { code } = req.body || {};
+  if (!code) return res.status(400).json({ error: 'code required' });
+
+  const result = await pairingService.redeem(code);
+  if (result.kind !== 'ok') {
+    return res.status(404).json({
+      error: `pairing_code_${result.kind}`, // pairing_code_invalid | _expired | _used
+    });
+  }
+
+  const session = await CapstoneSession.findById(result.sessionId);
+  if (!session) return res.status(404).json({ error: 'pairing_code_invalid' });
+
+  const bundle = await ArtifactBundle.findById(session.bundle_id).lean();
+  if (!bundle) return res.status(404).json({ error: 'bundle_not_found' });
+
+  // Short-lived WS token scoped to this session. Expires in 12 hours —
+  // longer than a capstone session itself so reconnects work.
+  const token = jwt.sign(
+    { userId: String(result.userId), sessionId: String(session._id) },
+    process.env.JWT_ACCESS_SECRET,
+    { expiresIn: '12h' }
+  );
+
+  const wsHost = process.env.WS_PUBLIC_URL || process.env.API_PUBLIC_URL || 'wss://api.scaleupapp.club';
+  const wsUrl = `${wsHost.replace(/^http/, 'ws')}/ws/coding?sessionId=${session._id}&token=${token}&role=laptop`;
+
+  res.json({
+    session_id: String(session._id),
+    ws_url: wsUrl,
+    token,
+    bundle: projectBundle(bundle),
+  });
+}
+
+/** GET /api/coding/capstones/:session_id/status */
+async function getStatus(req, res) {
+  const session = await CapstoneSession.findOne({
+    _id: req.params.session_id,
+    user_id: req.user.userId,
+  }).lean();
+  if (!session) return res.status(404).json({ error: 'session_not_found' });
+
+  const bundle = await ArtifactBundle.findById(session.bundle_id).lean();
+
+  res.json({
+    session_id: String(session._id),
+    status: session.status,
+    sandbox_host_url: session.sandbox_host_url || undefined,
+    bundle: bundle ? projectBundle(bundle) : undefined,
+    started_at: session.started_at,
+    time_budget_seconds: session.time_budget_seconds,
+    paused_total_seconds: session.paused_total_seconds || 0,
+    counters: session.counters || {},
+  });
+}
+
+/** POST /api/coding/capstones/:session_id/control */
+async function control(req, res) {
+  const { action } = req.body || {};
+  if (!['pause', 'resume', 'abort', 'submit'].includes(action)) {
+    return res.status(400).json({ error: 'invalid_action' });
+  }
+  try {
+    const result = await applyControl({
+      sessionId: req.params.session_id,
+      userId: req.user.userId,
+      action,
+    });
+    res.json({
+      session_id: String(result._id),
+      status: result.status,
+      sandbox_host_url: result.sandbox_host_url || undefined,
+      started_at: result.started_at,
+      time_budget_seconds: result.time_budget_seconds,
+      paused_total_seconds: result.paused_total_seconds || 0,
+      counters: result.counters || {},
+    });
+  } catch (err) {
+    if (err instanceof stateMachine.InvalidTransitionError) {
+      return res.status(409).json({ error: 'invalid_transition', current_status: err.from });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Shared control-action implementation. Used by the HTTP controller above
+ * AND by sessionRoom's WS `session.control` handler.
+ *
+ * Side effects per action:
+ *   pause   → state machine to `paused`
+ *   resume  → state machine to `in_progress` (accumulates paused time)
+ *   abort   → state machine to `aborted` + sandbox teardown
+ *   submit  → state machine to `submitted` + finalize recording +
+ *             sandbox teardown + enqueue evaluator job (lazy — controllers
+ *             will own the evaluator queue in WS4)
+ *
+ * @param {{ sessionId: string, userId?: string, action: string }} args
+ */
+async function applyControl({ sessionId, userId, action }) {
+  // Authorization: when called from HTTP we filter on user; from the WS
+  // layer userId is omitted (already verified at connect time).
+  const filter = { _id: sessionId };
+  if (userId) filter.user_id = userId;
+  const session = await CapstoneSession.findOne(filter);
+  if (!session) {
+    const err = new Error('session_not_found');
+    err.status = 404;
+    throw err;
+  }
+
+  // Map action → target status. The state machine validates legality.
+  let target;
+  switch (action) {
+    case 'pause':  target = 'paused'; break;
+    case 'resume': target = 'in_progress'; break;
+    case 'abort':  target = 'aborted'; break;
+    case 'submit': target = 'submitted'; break;
+    default:
+      throw new Error(`unknown action ${action}`);
+  }
+
+  const updated = await stateMachine.transition(sessionId, target);
+
+  // Post-transition side effects.
+  if (target === 'aborted' || target === 'submitted') {
+    await recordingService.finalize(sessionId).catch(() => {});
+    await sandboxOrchestrator.teardownForSession(sessionId).catch(() => {});
+  }
+
+  sessionRoom.publishLifecycle(sessionId, updated.status);
+
+  return updated;
+}
+
+/** GET /api/coding/capstones/:session_id/result */
+async function getResult(req, res) {
+  const session = await CapstoneSession.findOne({
+    _id: req.params.session_id,
+    user_id: req.user.userId,
+  }).lean();
+  if (!session) return res.status(404).json({ error: 'session_not_found' });
+
+  if (session.status === 'graded' && session.result) {
+    return res.json({ ...session.result, session_id: String(session._id) });
+  }
+  // Pending — surface 202 with status (matches drill-result polling pattern)
+  return res.status(202).json({
+    session_id: String(session._id),
+    status: session.status,
+    evaluating_started_at: session.evaluating_started_at,
+  });
+}
+
+/**
+ * Project an ArtifactBundle into the learner-visible shape (CapstoneBundleView).
+ * Strips reference_solution, hidden_tests, seeded_mistakes (the things the
+ * learner must not see).
+ */
+function projectBundle(bundle) {
+  return {
+    bundle_id: String(bundle._id),
+    brief: bundle.brief,
+    time_budget_minutes: bundle.time_budget_minutes,
+    difficulty: bundle.difficulty,
+    role_track: bundle.role_track,
+    language: bundle.language,
+    stack_variant: bundle.stack_variant,
+    acceptance_criteria: bundle.acceptance_criteria || [],
+    starter_repo: bundle.starter_repo || { files: [] },
+    visible_tests: (bundle.visible_tests || []).map((t) => ({
+      name: t.name,
+      command: t.command,
+    })),
+    interview_parallel: bundle.interview_parallel,
+  };
+}
+
+module.exports = {
+  listLibrary,
+  start,
+  redeemPairing,
+  getStatus,
+  control,
+  applyControl, // exported for sessionRoom WS handler
+  getResult,
+};

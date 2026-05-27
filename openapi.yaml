@@ -7118,45 +7118,8 @@ paths:
                   current_status:
                     $ref: '#/components/schemas/CapstoneSessionStatus'
 
-  /api/coding/capstones/{session_id}/voice-reflection:
-    post:
-      operationId: uploadCapstoneVoiceReflection
-      tags: [Coding]
-      summary: Upload the 60-sec voice reflection (spec §7.2 step 12)
-      description: |
-        Multipart upload of the audio capture. Backend transcribes (existing
-        Whisper pipeline) and re-runs the evaluator to update the Reflection
-        Quality dimension. Auto-generates a structured note via Notes infra.
-      security:
-        - BearerAuth: []
-      parameters:
-        - in: path
-          name: session_id
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [audio]
-              properties:
-                audio:
-                  type: string
-                  format: binary
-      responses:
-        '202':
-          description: Accepted — transcription + re-eval queued
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [session_id]
-                properties:
-                  session_id: { type: string }
-        '404':
-          $ref: '#/components/responses/NotFound'
+  # /api/coding/capstones/{session_id}/voice-reflection lands in WS8 along
+  # with the full multer → S3 → Whisper → Sonnet re-score → Notes pipeline.
 
   /api/coding/capstones/{session_id}/result:
     get:
