@@ -6,6 +6,7 @@ const CapstoneSession = require('../models/capstoneSession.model');
 const sandboxOrchestrator = require('../services/sandboxOrchestrator');
 const stateMachine = require('../services/sessionStateMachine');
 const capstoneEvalWorker = require('./capstoneEval.worker');
+const snapshotService = require('../services/snapshotService');
 
 /**
  * Sandbox GC worker — belt-and-suspenders on top of e2b's own wall-clock
@@ -132,6 +133,27 @@ async function tick() {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('[sandbox-gc] re-enqueue eval failed:', s._id, err.message);
+    }
+  }
+
+  // 3a. Snapshot capture — for every active session, ask the snapshot
+  //     service to capture (no-ops if SNAPSHOT_INTERVAL_SEC hasn't
+  //     elapsed since the last one). Cheap; bounded by number of active
+  //     sessions × ~MAX_FILES_PER_SNAPSHOT.
+  const active = await CapstoneSession.find({
+    status: { $in: ['in_progress', 'paused'] },
+    sandbox_id: { $ne: null },
+  })
+    .select('_id')
+    .lean();
+  summary.snapshotsCaptured = 0;
+  for (const s of active) {
+    try {
+      const r = await snapshotService.captureForSession(s._id);
+      if (r.captured) summary.snapshotsCaptured += 1;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[sandbox-gc] snapshot capture failed:', s._id, err.message);
     }
   }
 

@@ -4,6 +4,7 @@ const validator = require('./contentValidator.worker');
 const scheduled = require('./scheduledGenerator.worker');
 const sandboxGc = require('./sandbox-gc.worker');
 const capstoneEval = require('./capstoneEval.worker');
+const voiceReflection = require('./voiceReflection.worker');
 
 function startAll() {
   return [
@@ -12,6 +13,7 @@ function startAll() {
     validator.startContentValidatorWorker(),
     sandboxGc.startSandboxGcWorker(),
     capstoneEval.startCapstoneEvalWorker(),
+    voiceReflection.startVoiceReflectionWorker(),
   ];
 }
 
@@ -21,6 +23,7 @@ module.exports = {
   contentValidatorQueue:  validator.contentValidatorQueue,
   sandboxGcTick:          sandboxGc.tick,
   enqueueCapstoneEval:    capstoneEval.enqueueEvaluation,
+  enqueueVoiceReflection: voiceReflection.enqueueTranscription,
   startAll,
   runScheduledGeneration: scheduled.runScheduledGeneration,
 };

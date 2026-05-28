@@ -137,15 +137,33 @@ async function runInstallStep(adapter, sandboxId, language) {
 }
 
 /**
- * Pull the learner's final filetree out of the (still-alive) session
- * sandbox, OR fall back to the recording's last snapshot if the sandbox
- * is gone. Returns null if neither source is available.
+ * Pull the learner's final filetree.
+ *
+ * Source priority:
+ *   1. Live sandbox (if alive) — best fidelity
+ *   2. Most recent snapshot from S3 (if `snapshotS3Key` provided)
+ *   3. Inline `snapshotFiles` (legacy callers)
+ *
+ * Returns null if no source is available.
  */
-async function pullFinalFiles({ sandboxId, snapshotFiles }) {
+async function pullFinalFiles({ sandboxId, snapshotS3Key, snapshotFiles } = {}) {
+  if (sandboxId) {
+    const adapter = getSandboxAdapter();
+    if (await adapter.isAlive(sandboxId).catch(() => false)) {
+      return pullFromSandbox(sandboxId);
+    }
+  }
+  if (snapshotS3Key) {
+    // Lazy require avoids a circular dep with snapshotService.
+    const snap = await require('../snapshotService').loadSnapshot(snapshotS3Key);
+    if (snap?.files?.length) return snap.files;
+  }
   if (snapshotFiles && snapshotFiles.length > 0) return snapshotFiles;
-  if (!sandboxId) return null;
+  return null;
+}
+
+async function pullFromSandbox(sandboxId) {
   const adapter = getSandboxAdapter();
-  if (!(await adapter.isAlive(sandboxId).catch(() => false))) return null;
   // Walk the workspace via a `find` command and pull each file. Cheap on
   // typical capstone (< 30 files); we don't try to mirror gitignore here.
   const ls = await adapter.runCommand(
@@ -158,7 +176,7 @@ async function pullFinalFiles({ sandboxId, snapshotFiles }) {
     .map((p) => p.trim())
     .filter((p) => p && p.startsWith('/home/user/'))
     .map((p) => p.replace(/^\/home\/user\//, ''))
-    .slice(0, 200); // hard cap to keep harness bounded
+    .slice(0, 200);
   const out = [];
   for (const p of paths) {
     try {

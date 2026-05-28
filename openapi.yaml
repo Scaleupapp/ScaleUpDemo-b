@@ -7171,8 +7171,72 @@ paths:
                   current_status:
                     $ref: '#/components/schemas/CapstoneSessionStatus'
 
-  # /api/coding/capstones/{session_id}/voice-reflection lands in WS8 along
-  # with the full multer → S3 → Whisper → Sonnet re-score → Notes pipeline.
+  /api/coding/capstones/{session_id}/voice-reflection:
+    post:
+      operationId: uploadCapstoneVoiceReflection
+      tags: [Coding]
+      summary: Upload the 60-sec voice reflection (spec §7.2 step 12)
+      description: |
+        Multipart upload of the audio capture. Backend stores the audio in
+        S3, enqueues a transcription job (Whisper), re-runs the evaluator
+        in reflection-only mode to update the Reflection-Quality dimension.
+
+        Idempotency: if the session already has a transcript, the call is
+        rejected with 409 reflection_already_recorded. Pass `?replace=true`
+        to overwrite.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: replace
+          required: false
+          schema: { type: boolean }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: audio/* (m4a / mp3 / wav / webm / ogg); max 25 MB
+      responses:
+        '202':
+          description: Accepted — transcription + re-score queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, queued]
+                properties:
+                  session_id: { type: string }
+                  bytes: { type: integer }
+                  queued: { type: boolean }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Session not graded yet, or reflection already recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [session_not_graded, reflection_already_recorded]
+                  current_status: { type: string }
+                  message: { type: string }
 
   /api/coding/capstones/{session_id}/events:
     post:

@@ -4,6 +4,7 @@ const router = require('express').Router();
 const auth = require('../../middleware/auth');
 const capstones = require('../controllers/capstones.controller');
 const replay = require('../controllers/capstoneReplay.controller');
+const voiceReflection = require('../controllers/voiceReflection.controller');
 
 /**
  * Capstone routes — mounted at /api/coding/capstones/* by coding/routes/index.js.
@@ -27,9 +28,11 @@ router.post('/:session_id/files', auth, capstones.persistFiles);
 router.get('/:session_id/result', auth, capstones.getResult);
 router.get('/:session_id/replay', auth, replay.getReplay);
 
-// Voice-reflection upload + transcription + Reflection-Quality re-eval is a
-// full end-to-end pipeline (multer → S3 → Whisper → Sonnet re-score → Notes
-// auto-gen). It lands in WS8 — the route is intentionally not registered
-// here so prod traffic can't hit a half-built handler.
+router.post(
+  '/:session_id/voice-reflection',
+  auth,
+  voiceReflection.audioUpload,
+  voiceReflection.uploadVoiceReflection
+);
 
 module.exports = router;

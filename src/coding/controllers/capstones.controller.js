@@ -9,6 +9,7 @@ const recordingService = require('../services/recordingService');
 const stateMachine = require('../services/sessionStateMachine');
 const sessionRoom = require('../websocket/sessionRoom');
 const capstoneEvalWorker = require('../workers/capstoneEval.worker');
+const snapshotService = require('../services/snapshotService');
 
 /**
  * Capstone REST controllers. Wire shape lives in openapi.yaml under
@@ -219,6 +220,13 @@ async function applyControl({ sessionId, userId, action }) {
   const updated = await stateMachine.transition(sessionId, target);
 
   // Post-transition side effects.
+  if (target === 'submitted') {
+    // Capture a final snapshot BEFORE recording finalize + sandbox
+    // teardown so the evaluator + replay have the last-known filetree
+    // even if the eval job is delayed (sandbox would otherwise be
+    // reaped before pullFinalFiles can read it).
+    await snapshotService.captureForSession(sessionId).catch(() => {});
+  }
   if (target === 'aborted' || target === 'submitted') {
     await recordingService.finalize(sessionId).catch(() => {});
     await sandboxOrchestrator.teardownForSession(sessionId).catch(() => {});
