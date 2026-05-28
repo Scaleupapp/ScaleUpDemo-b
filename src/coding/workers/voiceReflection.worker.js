@@ -67,7 +67,7 @@ async function enqueueTranscription(sessionId) {
   );
 }
 
-async function process({ sessionId }) {
+async function processJob({ sessionId }) {
   const session = await CapstoneSession.findById(sessionId);
   if (!session) throw new Error(`session ${sessionId} not found`);
   if (!session.voice_reflection_s3_key) {
@@ -153,7 +153,7 @@ async function rescoreReflection(sessionId) {
 function startVoiceReflectionWorker() {
   worker = new Worker(
     QUEUE_NAME,
-    async (job) => process(job.data),
+    async (job) => processJob(job.data),
     { connection: getConnection(), concurrency: 2 }
   );
   worker.on('failed', (job, err) => {
