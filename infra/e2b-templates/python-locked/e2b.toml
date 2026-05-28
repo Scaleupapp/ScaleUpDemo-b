@@ -1,0 +1,9 @@
+template_id = "scaleup-python-locked"
+dockerfile  = "Dockerfile"
+start_cmd   = "/usr/local/bin/scaleup-bootstrap.sh"
+cpu_count   = 2
+memory_mb   = 2048
+
+# Push this template:
+#   e2b template build --name scaleup-python-locked
+# Then set the returned id as E2B_TEMPLATE_PYTHON in the backend env.

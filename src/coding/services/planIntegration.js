@@ -33,6 +33,7 @@
  */
 
 const { ArtifactBundle, DrillAttempt, DifficultyState, MetaSkillMastery } = require('../models');
+const CapstoneSession = require('../models/capstoneSession.model');
 const { mapObjectiveToRoleTrack, pickWeakestAxis, axisToSubtype, PHASE_A_DRILL_SUBTYPES } = require('./roleTrackMapper');
 const { evaluateCodingEligibility } = require('./codingEligibility');
 
@@ -200,6 +201,106 @@ function prettySubtype(s) {
   return MAP[s] || s;
 }
 
+// ---------------------------------------------------------------------------
+// Capstone milestone integration (Phase B)
+// ---------------------------------------------------------------------------
+//
+// Cadence: 1 capstone every 7 days per user. The candidate appears in
+// the Plan response as `data.capstoneMilestone` when:
+//   1. user has a coding objective + role_track
+//   2. no graded capstone in the trailing 7 days
+//   3. no in-progress capstone session (don't double-offer)
+//   4. at least one active capstone bundle exists for the role_track
+//
+// Difficulty selection — promote one level above the user's drill
+// difficulty so capstones stay meaningfully harder than daily drills.
+
+const CAPSTONE_INTERVAL_DAYS = 7;
+
+const DIFFICULTY_ORDER = ['easy', 'medium', 'hard', 'staff_plus'];
+
+function nextDifficulty(current) {
+  const i = DIFFICULTY_ORDER.indexOf(current);
+  if (i < 0) return 'medium';
+  return DIFFICULTY_ORDER[Math.min(i + 1, DIFFICULTY_ORDER.length - 1)];
+}
+
+async function hasRecentCapstone(user_id) {
+  const since = new Date(Date.now() - CAPSTONE_INTERVAL_DAYS * 24 * 60 * 60 * 1000);
+  const recent = await CapstoneSession.exists({
+    user_id,
+    status: 'graded',
+    graded_at: { $gte: since },
+  });
+  return Boolean(recent);
+}
+
+async function hasActiveCapstone(user_id) {
+  const active = await CapstoneSession.exists({
+    user_id,
+    status: { $in: ['provisioning', 'ready', 'in_progress', 'paused', 'submitted', 'evaluating'] },
+  });
+  return Boolean(active);
+}
+
+/**
+ * Returns a capstone milestone candidate for the Plan palette, or null
+ * when the user already has one in flight / shouldn't be offered one yet.
+ *
+ * @param {string|ObjectId} user_id
+ * @returns {Promise<Object|null>}
+ */
+async function getCapstoneMilestone(user_id) {
+  if (!user_id) return null;
+
+  const role_track = await getUserRoleTrack(user_id);
+  if (!role_track) return null;
+
+  if (await hasActiveCapstone(user_id)) return null;
+  if (await hasRecentCapstone(user_id)) return null;
+
+  // Pick difficulty: one notch above current drill difficulty.
+  const diffState = await DifficultyState.findOne({ user_id, role_track }).lean();
+  const baseDiff = diffState ? diffState.current_difficulty : 'easy';
+  const targetDiff = nextDifficulty(baseDiff);
+
+  // Try preferred difficulty first; fall back to anything available.
+  let bundle = await ArtifactBundle.findOne({
+    type: 'capstone',
+    role_track,
+    difficulty: targetDiff,
+    status: 'active',
+  }).sort({ createdAt: -1 }).lean();
+
+  if (!bundle) {
+    bundle = await ArtifactBundle.findOne({
+      type: 'capstone',
+      role_track,
+      status: 'active',
+    }).sort({ createdAt: -1 }).lean();
+  }
+
+  if (!bundle) return null;
+
+  return {
+    type: 'capstone_milestone',
+    bundle_id: bundle._id,
+    role_track,
+    difficulty: bundle.difficulty,
+    title: `Capstone — ${prettyDifficulty(bundle.difficulty)}`,
+    brief_preview: bundle.brief.length > 200
+      ? bundle.brief.slice(0, 200) + '…'
+      : bundle.brief,
+    estimated_minutes: bundle.time_budget_minutes,
+    cadence: 'weekly',
+    cta_url: `/api/coding/capstones/${bundle._id}/start`,
+  };
+}
+
+function prettyDifficulty(d) {
+  return { easy: 'Easy', medium: 'Medium', hard: 'Hard', staff_plus: 'Staff+' }[d] || d;
+}
+
 module.exports = {
   shouldOfferDrillToday,
   getDrillCandidate,
@@ -208,4 +309,6 @@ module.exports = {
   buildCandidate,
   prettySubtype,
   DAILY_DRILL_QUOTA,
+  getCapstoneMilestone,
+  CAPSTONE_INTERVAL_DAYS,
 };

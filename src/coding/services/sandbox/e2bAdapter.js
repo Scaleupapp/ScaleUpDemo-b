@@ -172,6 +172,31 @@ async function isAlive(sandboxId) {
   }
 }
 
+/**
+ * Confirms the egress lockdown bootstrap ran inside the sandbox.
+ *
+ * The custom templates (infra/e2b-templates/<lang>-locked/) drop the
+ * marker file `/var/lib/scaleup/egress-locked` after iptables rules are
+ * applied. If the sandbox booted from the default e2b template (no
+ * lockdown), the file is absent and we surface { locked: false }.
+ *
+ * Caller (sandboxOrchestrator) refuses to mark the session 'ready' when
+ * E2B_REQUIRE_EGRESS_LOCKDOWN=true and locked === false.
+ */
+async function verifyEgressLockdown(sandboxId) {
+  try {
+    const sbx = await connect(sandboxId);
+    const r = await sbx.commands.run(
+      'cat /var/lib/scaleup/egress-locked 2>/dev/null || true',
+      { timeoutMs: 5_000 }
+    );
+    const stamp = (r.stdout || '').trim();
+    return { locked: stamp.length > 0, lockedAt: stamp || undefined };
+  } catch {
+    return { locked: false };
+  }
+}
+
 async function destroy(sandboxId) {
   try {
     const sbx = await connect(sandboxId);
@@ -192,6 +217,7 @@ const adapter = {
   getMetrics,
   isAlive,
   destroy,
+  verifyEgressLockdown,
 };
 
 assertAdapter(adapter, 'e2b');

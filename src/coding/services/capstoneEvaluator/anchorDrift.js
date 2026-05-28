@@ -2,6 +2,7 @@
 
 const EvaluationAnchor = require('../../models/evaluationAnchor.model');
 const HumanReviewQueue = require('../../models/humanReviewQueue.model');
+const alerts = require('../alerts');
 
 /**
  * Anchor-drift detection (spec §8.3).
@@ -122,6 +123,24 @@ async function queueHumanReview({ bundleId, sessionId, driftedDimensions, evalua
       overall_score: evaluatorResult?.overall_score,
       integrity_confidence: evaluatorResult?.integrity_confidence,
     }),
+  });
+
+  // Per-session anchor-drift alert. Heavy dedup by bundle so we don't
+  // page on every drifted submission of the same broken bundle — the
+  // bundle is the actionable unit (rebuild anchors or rewrite test).
+  void alerts.fire({
+    category: 'drift.anchor-exceeded',
+    severity: 'warn',
+    title: `Anchor drift on bundle ${bundleId} (session ${sessionId})`,
+    detail: driftedDimensions
+      .map((d) => `• *${d.dimension}* expected≈${d.expected.toFixed(1)} observed=${d.observed} Δ=${d.delta.toFixed(1)}`)
+      .join('\n'),
+    dedupKey: `bundle:${bundleId}`,
+    fields: {
+      bundle_id: String(bundleId),
+      session_id: String(sessionId),
+      overall_score: String(evaluatorResult?.overall_score ?? 'n/a'),
+    },
   });
 }
 

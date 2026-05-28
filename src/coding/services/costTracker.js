@@ -1,6 +1,7 @@
 'use strict';
 
 const LLMSpend = require('../models/llmSpend.model');
+const alerts = require('./alerts');
 
 /**
  * Cost tracking — converts an llmRouter result into a persisted LLMSpend
@@ -76,7 +77,61 @@ async function recordSpend({ result, taskId, actor = {}, outcome = 'ok', errorCl
     error_class: errorClass,
     expires_at: new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000),
   });
+  // Best-effort budget alarms — never block the caller. Read thresholds
+  // each call so they can be tuned in env without a restart.
+  void checkBudgetAlarms({ sessionId: actor.sessionId, userId: actor.userId, taskId, cost });
+
   return { cost_usd: cost, doc_id: String(doc._id) };
+}
+
+const PER_SESSION_ALERT_USD_DEFAULT = 1.0;
+const DAILY_GLOBAL_ALERT_USD_DEFAULT = 50.0;
+
+async function checkBudgetAlarms({ sessionId, userId, taskId, cost }) {
+  try {
+    if (sessionId) {
+      const sessTotal = await sessionCostUsd(sessionId);
+      const ceiling = Number(process.env.COST_ALERT_PER_SESSION_USD) || PER_SESSION_ALERT_USD_DEFAULT;
+      if (sessTotal >= ceiling) {
+        await alerts.fire({
+          category: 'cost.session-over-budget',
+          severity: 'warn',
+          title: `Session ${sessionId} crossed $${ceiling.toFixed(2)} LLM spend`,
+          dedupKey: `session:${sessionId}`,
+          fields: {
+            session_id: String(sessionId),
+            user_id: String(userId || 'n/a'),
+            last_task: String(taskId || 'n/a'),
+            last_call_usd: cost.toFixed(6),
+            total_usd: sessTotal.toFixed(6),
+          },
+        });
+      }
+    }
+
+    // Cheap aggregate — index on createdAt makes this a small scan.
+    const dailyCeiling = Number(process.env.COST_ALERT_DAILY_USD) || DAILY_GLOBAL_ALERT_USD_DEFAULT;
+    if (dailyCeiling > 0) {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const rows = await LLMSpend.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        { $group: { _id: null, total: { $sum: '$cost_usd' } } },
+      ]);
+      const dailyTotal = rows[0]?.total || 0;
+      if (dailyTotal >= dailyCeiling) {
+        await alerts.fire({
+          category: 'cost.daily-over-budget',
+          severity: 'error',
+          title: `Coding LLM spend last 24h: $${dailyTotal.toFixed(2)} (>= $${dailyCeiling.toFixed(2)})`,
+          dedupKey: `daily:${new Date().toISOString().slice(0, 10)}`,
+          fields: { total_usd: dailyTotal.toFixed(4), ceiling_usd: dailyCeiling.toFixed(2) },
+        });
+      }
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[costTracker] budget-alarm check failed:', err.message);
+  }
 }
 
 /**

@@ -1,0 +1,9 @@
+template_id = "scaleup-java-locked"
+dockerfile  = "Dockerfile"
+start_cmd   = "/usr/local/bin/scaleup-bootstrap.sh"
+cpu_count   = 2
+memory_mb   = 3072
+
+# Push this template:
+#   e2b template build --name scaleup-java-locked
+# Then set the returned id as E2B_TEMPLATE_JAVA in the backend env.

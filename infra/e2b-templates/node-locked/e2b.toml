@@ -1,0 +1,8 @@
+# e2b template config — Node 20 with whitelist-only egress.
+# Build:  cd infra/e2b-templates/node-locked && e2b template build --name scaleup-node-locked
+
+template_id = "scaleup-node-locked"
+dockerfile = "Dockerfile"
+start_cmd = "/usr/local/bin/scaleup-bootstrap.sh"
+cpu_count = 2
+memory_mb = 2048

@@ -399,6 +399,12 @@ router.get('/today', auth, async (req, res) => {
       // no longer auto-surfaced as a synthetic plan task in the day_done
       // celebration path either.
 
+      let dayDoneCapstone = null;
+      try {
+        const codingPlan = require('../../coding/services/planIntegration');
+        dayDoneCapstone = await codingPlan.getCapstoneMilestone(userId).catch(() => null);
+      } catch (_) { /* non-fatal */ }
+
       return res.json({
         success: true,
         data: {
@@ -420,6 +426,7 @@ router.get('/today', auth, async (req, res) => {
           bonusTasks: [],
           weeklyInsight: weeklyInsightDayDone,
           message: weekDoneMessage,
+          capstoneMilestone: dayDoneCapstone,
         },
       });
     }
@@ -528,6 +535,22 @@ router.get('/today', auth, async (req, res) => {
       console.warn('[v2/plan/today] bonus synthesis failed (non-fatal):', bonusErr.message);
     }
 
+    // Coding integrations — non-fatal. Daily drill candidate + weekly
+    // capstone milestone are surfaced as separate top-level fields so
+    // the mobile client renders them as distinct cards (not mixed into
+    // the day's task list).
+    let drillCandidate = null;
+    let capstoneMilestone = null;
+    try {
+      const codingPlan = require('../../coding/services/planIntegration');
+      [drillCandidate, capstoneMilestone] = await Promise.all([
+        codingPlan.getDrillCandidate(userId).catch(() => null),
+        codingPlan.getCapstoneMilestone(userId).catch(() => null),
+      ]);
+    } catch (codingErr) {
+      console.warn('[v2/plan/today] coding integration failed (non-fatal):', codingErr.message);
+    }
+
     return res.json({
       success: true,
       data: {
@@ -553,6 +576,8 @@ router.get('/today', auth, async (req, res) => {
         getAheadWeek: nextWeekEntry?.week,
         bonusTasks,
         weeklyInsight,
+        drillCandidate,
+        capstoneMilestone,
       },
     });
   } catch (err) {

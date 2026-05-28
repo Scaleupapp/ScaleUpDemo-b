@@ -3,6 +3,7 @@
 const { Queue, Worker } = require('bullmq');
 const Redis = require('ioredis');
 const evaluator = require('../services/capstoneEvaluator');
+const alerts = require('../services/alerts');
 
 /**
  * Capstone Evaluator worker.
@@ -87,7 +88,14 @@ function startCapstoneEvalWorker() {
         `[capstone-eval] EXHAUSTED for session=${job.data.sessionId} after ${job.attemptsMade} attempts:`,
         err.message
       );
-      // Cost-alert + ops surfaces read from the failed-jobs retention above.
+      void alerts.fire({
+        category: 'worker.job-exhausted',
+        severity: 'error',
+        title: `capstone-eval exhausted for session ${job.data.sessionId}`,
+        detail: '```\n' + (err.stack || err.message) + '\n```',
+        dedupKey: `eval:${job.data.sessionId}`,
+        fields: { session_id: String(job.data.sessionId), attempts: String(job.attemptsMade) },
+      });
     } else {
       // eslint-disable-next-line no-console
       console.warn(

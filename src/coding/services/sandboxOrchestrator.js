@@ -4,6 +4,7 @@ const { getSandboxAdapter } = require('./sandbox/adapterFactory');
 const CapstoneSession = require('../models/capstoneSession.model');
 const ArtifactBundle = require('../models/artifactBundle.model');
 const stateMachine = require('./sessionStateMachine');
+const alerts = require('./alerts');
 
 /**
  * Sandbox orchestrator — the single seam between session lifecycle and the
@@ -143,6 +144,29 @@ async function provisionForSession(sessionId) {
       });
       sandboxId = provisioned.sandboxId;
       hostUrl = provisioned.hostUrl;
+    }
+
+    // Anti-cheat gate: confirm the custom template's iptables lockdown
+    // ran. If E2B_REQUIRE_EGRESS_LOCKDOWN=true and the marker is absent,
+    // destroy the sandbox and fail the session — better to abort than
+    // let a learner work in an unrestricted environment.
+    if (process.env.E2B_REQUIRE_EGRESS_LOCKDOWN === 'true' &&
+        typeof adapter.verifyEgressLockdown === 'function') {
+      const verdict = await adapter.verifyEgressLockdown(sandboxId);
+      if (!verdict.locked) {
+        // eslint-disable-next-line no-console
+        console.error(`[sandboxOrchestrator] egress lockdown NOT applied on ${sandboxId} — aborting`);
+        await alerts.fire({
+          category: 'sandbox.egress-not-locked',
+          severity: 'error',
+          title: `Sandbox booted WITHOUT egress lockdown (sandbox=${sandboxId})`,
+          detail: 'The custom template marker /var/lib/scaleup/egress-locked was missing. Check that E2B_TEMPLATE_<LANG> env vars point at the scaleup-*-locked templates and the templates were pushed.',
+          dedupKey: 'lockdown-missing',
+          fields: { session_id: String(sessionId), sandbox_id: sandboxId },
+        });
+        await adapter.destroy(sandboxId).catch(() => {});
+        throw new Error('sandbox_egress_not_locked');
+      }
     }
   } catch (err) {
     // Provisioning failed — mark session aborted so the user can retry

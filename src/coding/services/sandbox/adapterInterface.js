@@ -74,6 +74,7 @@
  * @property {(sandboxId: string) => Promise<SandboxMetrics>} getMetrics
  * @property {(sandboxId: string) => Promise<boolean>} isAlive
  * @property {(sandboxId: string) => Promise<void>} destroy
+ * @property {(sandboxId: string) => Promise<{ locked: boolean, lockedAt?: string }>} verifyEgressLockdown
  */
 
 const REQUIRED_METHODS = [
@@ -87,6 +88,7 @@ const REQUIRED_METHODS = [
   'getMetrics',
   'isAlive',
   'destroy',
+  'verifyEgressLockdown',
 ];
 
 /**

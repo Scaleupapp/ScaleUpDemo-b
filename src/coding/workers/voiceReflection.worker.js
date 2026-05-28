@@ -6,6 +6,7 @@ const CapstoneSession = require('../models/capstoneSession.model');
 const transcription = require('../services/transcription');
 const evaluator = require('../services/capstoneEvaluator');
 const sessionRoom = require('../websocket/sessionRoom');
+const alerts = require('../services/alerts');
 
 /**
  * Voice-reflection worker — runs after the learner uploads their 60-sec
@@ -108,6 +109,18 @@ async function process({ sessionId }) {
     // Don't throw — transcript is persisted; rescore can be retriggered.
   }
 
+  // Spec §10: auto-generate a structured reflection note. Idempotent —
+  // safe to call on retries. Failure doesn't block the transcript/
+  // rescore path above (note is nice-to-have; the updated score is
+  // the must-have).
+  try {
+    const autoGen = require('../services/capstoneNotesAutoGen');
+    await autoGen.ensureNoteForSession(sessionId);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[voiceReflection] notes auto-gen failed:', err.message);
+  }
+
   return { transcribed: true };
 }
 
@@ -150,6 +163,14 @@ function startVoiceReflectionWorker() {
         `[voice-reflection] EXHAUSTED for session=${job.data.sessionId} after ${job.attemptsMade} attempts:`,
         err.message
       );
+      void alerts.fire({
+        category: 'worker.job-exhausted',
+        severity: 'error',
+        title: `voice-reflection exhausted for session ${job.data.sessionId}`,
+        detail: '```\n' + (err.stack || err.message) + '\n```',
+        dedupKey: `voice:${job.data.sessionId}`,
+        fields: { session_id: String(job.data.sessionId), attempts: String(job.attemptsMade) },
+      });
     }
   });
   return { worker, queue: getQueue() };
