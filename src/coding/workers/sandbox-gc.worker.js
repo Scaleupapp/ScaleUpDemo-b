@@ -5,6 +5,7 @@ const Redis = require('ioredis');
 const CapstoneSession = require('../models/capstoneSession.model');
 const sandboxOrchestrator = require('../services/sandboxOrchestrator');
 const stateMachine = require('../services/sessionStateMachine');
+const capstoneEvalWorker = require('./capstoneEval.worker');
 
 /**
  * Sandbox GC worker — belt-and-suspenders on top of e2b's own wall-clock
@@ -113,7 +114,28 @@ async function tick() {
     }
   }
 
-  // 3. Warm pool top-up.
+  // 3. Recover stuck submits — sessions that have been `submitted` for
+  //    > 2 min without a worker picking up the eval job (Redis blip during
+  //    submit). Idempotent enqueue on sessionId so safe to repeat.
+  const stuckCutoff = new Date(Date.now() - 2 * 60 * 1000);
+  const stuck = await CapstoneSession.find({
+    status: 'submitted',
+    submitted_at: { $lt: stuckCutoff },
+  })
+    .select('_id')
+    .lean();
+  summary.recoveredSubmits = 0;
+  for (const s of stuck) {
+    try {
+      await capstoneEvalWorker.enqueueEvaluation(s._id);
+      summary.recoveredSubmits += 1;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[sandbox-gc] re-enqueue eval failed:', s._id, err.message);
+    }
+  }
+
+  // 4. Warm pool top-up.
   try {
     summary.poolTopUp = await sandboxOrchestrator.topUpPool();
   } catch (err) {

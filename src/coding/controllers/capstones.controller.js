@@ -8,6 +8,7 @@ const sandboxOrchestrator = require('../services/sandboxOrchestrator');
 const recordingService = require('../services/recordingService');
 const stateMachine = require('../services/sessionStateMachine');
 const sessionRoom = require('../websocket/sessionRoom');
+const capstoneEvalWorker = require('../workers/capstoneEval.worker');
 
 /**
  * Capstone REST controllers. Wire shape lives in openapi.yaml under
@@ -221,6 +222,21 @@ async function applyControl({ sessionId, userId, action }) {
   if (target === 'aborted' || target === 'submitted') {
     await recordingService.finalize(sessionId).catch(() => {});
     await sandboxOrchestrator.teardownForSession(sessionId).catch(() => {});
+  }
+  // Submitted sessions need to be graded — enqueue the evaluator job.
+  // jobId on the queue is keyed by sessionId so a duplicate submit (e.g.
+  // a network-retry that wins the state-machine race against the auto-
+  // expire path) doesn't double-grade.
+  if (target === 'submitted') {
+    await capstoneEvalWorker
+      .enqueueEvaluation(sessionId)
+      .catch((err) => {
+        // Don't fail the submit if Redis is briefly unavailable; the
+        // sandbox-gc worker has a fallback that re-enqueues stuck
+        // submitted sessions next tick.
+        // eslint-disable-next-line no-console
+        console.warn('[capstones.control] enqueue eval failed:', err.message);
+      });
   }
 
   sessionRoom.publishLifecycle(sessionId, updated.status);

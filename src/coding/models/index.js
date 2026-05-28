@@ -10,4 +10,5 @@ module.exports = {
   CapstoneSession: require('./capstoneSession.model'),
   PairingCode: require('./pairingCode.model'),
   CapstoneRecording: require('./capstoneRecording.model'),
+  LLMSpend: require('./llmSpend.model'),
 };
