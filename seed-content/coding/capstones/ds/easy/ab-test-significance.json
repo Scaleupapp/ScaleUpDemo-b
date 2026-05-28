@@ -17,7 +17,7 @@
   "starter_repo": {
     "files": [
       { "path": "requirements.txt", "content": "pytest==8.3.3\n" },
-      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/__init__.py", "content": "# package marker" },
       { "path": "src/abtest.py", "content": "\"\"\"A/B test significance — implement analyze().\"\"\"\nimport math\nfrom typing import TypedDict\n\n\nclass Variant(TypedDict):\n    visitors: int\n    conversions: int\n\n\ndef analyze(control: Variant, treatment: Variant, alpha: float = 0.05) -> dict:\n    # TODO: replace this stub with the real z-test.\n    return {\n        'control_rate': 0.0,\n        'treatment_rate': 0.0,\n        'lift': 0.0,\n        'z_score': 0.0,\n        'p_value': 1.0,\n        'significant': False,\n    }\n" },
       { "path": "tests/baseline_test.py", "content": "from src.abtest import analyze\n\ndef test_baseline_returns_shape():\n    out = analyze({'visitors': 100, 'conversions': 10}, {'visitors': 100, 'conversions': 12})\n    for k in ('control_rate', 'treatment_rate', 'lift', 'z_score', 'p_value', 'significant'):\n        assert k in out\n" }
     ]

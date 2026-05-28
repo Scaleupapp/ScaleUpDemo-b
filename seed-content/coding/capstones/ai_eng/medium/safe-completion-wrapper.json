@@ -17,7 +17,7 @@
   "starter_repo": {
     "files": [
       { "path": "requirements.txt", "content": "pytest==8.3.3\n" },
-      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/__init__.py", "content": "# package marker" },
       { "path": "src/markers.py", "content": "INJECTION_MARKERS = [\n    'ignore previous instructions',\n    'disregard all prior',\n    'you are now in developer mode',\n    'system prompt:',\n]\n\nLEAK_MARKERS = [\n    'BEGIN_SYSTEM_PROMPT',\n    'END_SYSTEM_PROMPT',\n    'api_key=',\n    'bearer ',\n]\n" },
       { "path": "src/safety.py", "content": "\"\"\"Safe completion wrapper — implement safe_complete().\"\"\"\nfrom typing import Callable\n\n\ndef safe_complete(prompt: str, llm_call: Callable[[str], str]) -> dict:\n    # TODO\n    return {\n        'text': llm_call(prompt),\n        'blocked': False,\n        'reason': None,\n        'prompt_was_modified': False,\n    }\n" },
       { "path": "tests/baseline_test.py", "content": "from src.safety import safe_complete\n\ndef test_baseline_pass_through():\n    out = safe_complete('hi', lambda p: f'echo: {p}')\n    assert out['blocked'] is False\n    assert 'echo: hi' in out['text']\n" }

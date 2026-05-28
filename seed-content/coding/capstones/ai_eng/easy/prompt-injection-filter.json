@@ -19,7 +19,7 @@
     "files": [
       {
         "path": "requirements.txt",
-        "content": ""
+        "content": "# package marker"
       },
       {
         "path": "guard.py",

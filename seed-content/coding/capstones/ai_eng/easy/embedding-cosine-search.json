@@ -17,7 +17,7 @@
   "starter_repo": {
     "files": [
       { "path": "requirements.txt", "content": "pytest==8.3.3\n" },
-      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/__init__.py", "content": "# package marker" },
       { "path": "src/searcher.py", "content": "\"\"\"Tiny semantic search index.\"\"\"\nfrom typing import Callable\n\n\nclass Searcher:\n    def __init__(self, docs: list):\n        self._docs = docs\n\n    def search(self, query_embedding: list, k: int = 5) -> list:\n        # TODO\n        return []\n\n    def search_by_text(self, query: str, embed: Callable[[str], list], k: int = 5) -> list:\n        # TODO\n        return []\n" },
       { "path": "tests/baseline_test.py", "content": "from src.searcher import Searcher\n\ndef test_baseline_constructs():\n    s = Searcher([{'id': 'a', 'text': 'hi', 'embedding': [1.0, 0.0]}])\n    assert s is not None\n" }
     ]

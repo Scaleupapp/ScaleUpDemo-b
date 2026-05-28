@@ -17,7 +17,7 @@
   "starter_repo": {
     "files": [
       { "path": "requirements.txt", "content": "pytest==8.3.3\npytest-asyncio==0.24.0\n" },
-      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/__init__.py", "content": "# package marker" },
       { "path": "src/poller.py", "content": "\"\"\"Rate-limited concurrent poller.\n\nFill in `poll_all` so it honours both a 10 req/sec global cap and a\nmax-8 concurrency cap. Retries on RetryableError with exponential\nbackoff (0.5s, 1s, 2s).\n\"\"\"\nimport asyncio\nfrom typing import Awaitable, Callable, Iterable\n\n\nclass RetryableError(Exception):\n    pass\n\n\nclass PermanentError(Exception):\n    pass\n\n\nasync def poll_all(ids: Iterable[str], fetch_one: Callable[[str], Awaitable[dict]]) -> dict:\n    # TODO\n    results: dict = {}\n    for i in ids:\n        results[i] = {'ok': True, 'data': await fetch_one(i)}\n    return results\n" },
       { "path": "tests/baseline_test.py", "content": "import asyncio\nimport pytest\nfrom src.poller import poll_all\n\n\n@pytest.mark.asyncio\nasync def test_baseline_returns_results_for_all_ids():\n    async def fetch_one(i):\n        return {'i': i}\n\n    out = await poll_all(['a', 'b', 'c'], fetch_one)\n    assert set(out.keys()) == {'a', 'b', 'c'}\n" },
       { "path": "pytest.ini", "content": "[pytest]\nasyncio_mode = auto\n" }

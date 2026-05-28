@@ -101,15 +101,14 @@ async function main() {
     session = await CapstoneSession.create({
       user_id: SMOKE_USER_ID,
       bundle_id: bundle._id,
-      status: 'pending_pair',
-      time_budget_minutes: bundle.time_budget_minutes,
+      status: 'scheduled',
+      time_budget_seconds: bundle.time_budget_minutes * 60,
       expires_at: new Date(Date.now() + bundle.time_budget_minutes * 60 * 1000),
     });
     log('session', `created session=${session._id}`);
 
     // 3. Transition through the lifecycle the controller would drive.
-    await stateMachine.transition(session._id, 'pairing');
-    await stateMachine.transition(session._id, 'provisioning');
+    // provisionForSession handles the scheduled→provisioning→ready transitions itself.
     await orchestrator.provisionForSession(session._id);
     log('provision', 'sandbox attached');
 

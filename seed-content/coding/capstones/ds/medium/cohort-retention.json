@@ -17,7 +17,7 @@
   "starter_repo": {
     "files": [
       { "path": "requirements.txt", "content": "pytest==8.3.3\n" },
-      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/__init__.py", "content": "# package marker" },
       { "path": "src/cohorts.py", "content": "\"\"\"Cohort retention — implement cohort_retention().\"\"\"\nfrom datetime import date, datetime\nfrom typing import Optional\n\n\ndef cohort_retention(events: list, reference_week: Optional[date] = None) -> dict:\n    # TODO\n    return {'cohort_size': {}, 'retention': {}}\n" },
       { "path": "tests/baseline_test.py", "content": "from src.cohorts import cohort_retention\n\ndef test_baseline_shape():\n    out = cohort_retention([])\n    assert 'cohort_size' in out and 'retention' in out\n" }
     ]
