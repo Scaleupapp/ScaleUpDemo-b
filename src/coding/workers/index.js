@@ -5,6 +5,7 @@ const scheduled = require('./scheduledGenerator.worker');
 const sandboxGc = require('./sandbox-gc.worker');
 const capstoneEval = require('./capstoneEval.worker');
 const voiceReflection = require('./voiceReflection.worker');
+const capstoneFollowup = require('./capstoneFollowup.worker');
 
 function startAll() {
   return [
@@ -14,6 +15,7 @@ function startAll() {
     sandboxGc.startSandboxGcWorker(),
     capstoneEval.startCapstoneEvalWorker(),
     voiceReflection.startVoiceReflectionWorker(),
+    capstoneFollowup.startCapstoneFollowupWorker(),
   ];
 }
 

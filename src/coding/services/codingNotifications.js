@@ -48,6 +48,12 @@ const NOTIFICATION_TYPES = Object.freeze({
 
   /** Sent when the recalibrator recommends a difficulty change. */
   CODING_DIFFICULTY_CHANGE_SUGGESTION: 'coding_difficulty_change_suggestion',
+
+  /** Sent when a fresh capstone milestone becomes available for the user. */
+  CODING_CAPSTONE_AVAILABLE: 'coding_capstone_available',
+
+  /** Sent after a graded capstone bumps the learner's difficulty up one notch. */
+  CODING_LEVEL_UP: 'coding_level_up',
 });
 
 /** @readonly */
@@ -63,6 +69,14 @@ const TEMPLATES = Object.freeze({
   [NOTIFICATION_TYPES.CODING_DIFFICULTY_CHANGE_SUGGESTION]: {
     title: 'Time to step up?',
     body: 'Your recent scores suggest you might be ready for harder drills.',
+  },
+  [NOTIFICATION_TYPES.CODING_CAPSTONE_AVAILABLE]: {
+    title: 'Your weekly capstone is ready',
+    body: 'A 60-90 min project to put your skills together. Tap to preview.',
+  },
+  [NOTIFICATION_TYPES.CODING_LEVEL_UP]: {
+    title: 'You leveled up!',
+    body: 'Your recent capstone bumped you to harder material. Keep going.',
   },
 });
 

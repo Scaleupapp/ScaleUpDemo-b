@@ -10,6 +10,8 @@ const stateMachine = require('../services/sessionStateMachine');
 const sessionRoom = require('../websocket/sessionRoom');
 const capstoneEvalWorker = require('../workers/capstoneEval.worker');
 const snapshotService = require('../services/snapshotService');
+const capstoneSummary = require('../services/capstoneSummary');
+const planIntegration = require('../services/planIntegration');
 
 /**
  * Capstone REST controllers. Wire shape lives in openapi.yaml under
@@ -410,7 +412,12 @@ async function getResult(req, res) {
   if (!session) return res.status(404).json({ error: 'session_not_found' });
 
   if (session.status === 'graded' && session.result) {
-    return res.json({ ...session.result, session_id: String(session._id) });
+    return res.json({
+      ...session.result,
+      session_id: String(session._id),
+      bundle_id: String(session.bundle_id),
+      is_retry: Boolean(session.is_retry),
+    });
   }
   // Pending — surface 202 with status (matches drill-result polling pattern)
   return res.status(202).json({
@@ -444,6 +451,109 @@ function projectBundle(bundle) {
   };
 }
 
+/**
+ * GET /api/coding/capstones/summary
+ *
+ * Aggregated "how am I doing" snapshot for the mobile Compass tab. Returns
+ * eligibility, current difficulty, mastery axes, last 5 graded capstones,
+ * any in-progress session, next-available timestamp, and a one-line
+ * summary suitable for direct display.
+ */
+async function getSummary(req, res) {
+  const summary = await capstoneSummary.buildSummary(req.user.userId);
+  res.json(summary);
+}
+
+/**
+ * POST /api/coding/capstones/retry
+ *
+ * Start a fresh session against a bundle the learner has already graded.
+ * The previous result stays in history; this creates a new session_id +
+ * fresh pairing code. Refuses if:
+ *   - No prior graded session against that bundle (use /start instead)
+ *   - There's an in-progress session (must finish or abort first)
+ */
+async function retry(req, res) {
+  const { bundle_id } = req.body || {};
+  if (!bundle_id) return res.status(400).json({ error: 'bundle_id required' });
+
+  const bundle = await ArtifactBundle.findById(bundle_id).lean();
+  if (!bundle) return res.status(404).json({ error: 'bundle_not_found' });
+  if (bundle.type !== 'capstone') return res.status(404).json({ error: 'not_a_capstone' });
+
+  const priorGraded = await CapstoneSession.exists({
+    user_id: req.user.userId,
+    bundle_id: bundle._id,
+    status: 'graded',
+  });
+  if (!priorGraded) {
+    return res.status(400).json({ error: 'no_prior_attempt', message: 'Use /start for first attempts.' });
+  }
+
+  const inProgress = await CapstoneSession.exists({
+    user_id: req.user.userId,
+    status: { $in: ['provisioning', 'ready', 'in_progress', 'paused', 'submitted', 'evaluating'] },
+  });
+  if (inProgress) {
+    return res.status(409).json({ error: 'session_in_progress', message: 'Finish or abort the current session first.' });
+  }
+
+  const session = await CapstoneSession.create({
+    user_id: req.user.userId,
+    bundle_id: bundle._id,
+    status: 'scheduled',
+    time_budget_seconds: bundle.time_budget_minutes * 60,
+    is_retry: true,
+  });
+
+  const { code, expiresAt } = await pairingService.mintCode({
+    userId: req.user.userId,
+    sessionId: session._id,
+  });
+
+  sandboxOrchestrator.provisionForSession(session._id).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('[capstones.retry] provision failed:', err.message);
+  });
+
+  res.status(201).json({
+    session_id: String(session._id),
+    status: session.status,
+    pairing_code: code,
+    expires_at: expiresAt,
+    time_budget_seconds: session.time_budget_seconds,
+    is_retry: true,
+  });
+}
+
+/**
+ * POST /api/coding/capstones/request
+ *
+ * "Surprise me" — picks the best next capstone for the learner based on
+ * role_track + recalibrated difficulty + weakest mastery axis. Same
+ * eligibility + 7-day cadence rules as the auto-surfaced milestone.
+ *
+ * Returns the bundle (without solution/hidden tests) so the mobile UI can
+ * preview before starting — does NOT auto-start a session. The caller
+ * then POSTs /start with the returned bundle_id.
+ */
+async function requestNext(req, res) {
+  const candidate = await planIntegration.getCapstoneMilestone(req.user.userId);
+  if (!candidate) {
+    return res.status(409).json({
+      error: 'no_capstone_available',
+      message: 'You either have one in progress, completed one in the last 7 days, or have no matching bundle yet.',
+    });
+  }
+  const bundle = await ArtifactBundle.findById(candidate.bundle_id).lean();
+  if (!bundle) return res.status(404).json({ error: 'bundle_disappeared' });
+  res.json({
+    bundle: projectBundle(bundle),
+    cadence: 'weekly',
+    reason: `Picked for ${candidate.role_track} at ${candidate.difficulty} difficulty.`,
+  });
+}
+
 module.exports = {
   listLibrary,
   start,
@@ -455,4 +565,7 @@ module.exports = {
   runInSandbox,
   persistFiles,
   getResult,
+  getSummary,
+  retry,
+  requestNext,
 };

@@ -73,7 +73,16 @@ function startCapstoneEvalWorker() {
     QUEUE_NAME,
     async (job) => {
       const { sessionId } = job.data;
-      return evaluator.evaluate({ sessionId });
+      const result = await evaluator.evaluate({ sessionId });
+      // Post-grade notifications — non-fatal; never block the worker chain.
+      try {
+        const postGrade = require('../services/capstonePostGradeNotify');
+        await postGrade.handleGraded(sessionId);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`[capstone-eval] post-grade notify failed for ${sessionId}: ${err.message}`);
+      }
+      return result;
     },
     {
       connection: getConnection(),

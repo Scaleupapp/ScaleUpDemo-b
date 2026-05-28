@@ -957,6 +957,62 @@ components:
         interview_parallel: { type: string }
         already_completed: { type: boolean }
 
+    CapstoneSummaryMastery:
+      type: object
+      description: Per-axis mastery levels (0-10) used in the Compass-tab summary card.
+      properties:
+        prompting: { type: number, format: float, minimum: 0, maximum: 10 }
+        verification: { type: number, format: float, minimum: 0, maximum: 10 }
+        decomposition: { type: number, format: float, minimum: 0, maximum: 10 }
+        refactoring: { type: number, format: float, minimum: 0, maximum: 10 }
+
+    CapstoneSummaryRecentEntry:
+      type: object
+      required: [session_id, overall_score, graded_at]
+      properties:
+        session_id: { type: string }
+        bundle_id: { type: [string, "null"] }
+        bundle_brief_preview: { type: string }
+        difficulty: { type: [string, "null"], enum: [easy, medium, hard, null] }
+        overall_score: { type: number, format: float, minimum: 0, maximum: 10 }
+        graded_at: { type: string, format: date-time }
+        integrity_confidence: { type: [string, "null"], enum: [high, medium, low, null] }
+        dimension_scores: { type: [object, "null"], additionalProperties: { type: number } }
+
+    CapstoneSummaryInProgress:
+      type: object
+      required: [session_id, bundle_id, status, expires_at]
+      properties:
+        session_id: { type: string }
+        bundle_id: { type: string }
+        status: { type: string }
+        expires_at: { type: string, format: date-time }
+
+    CapstoneSummary:
+      type: object
+      required: [eligible, summary_line, recent_capstones]
+      properties:
+        eligible:
+          type: boolean
+          description: Whether the learner's objective maps to a coding role-track.
+        role_track: { type: [string, "null"], enum: [swe, ds, ai_eng, null] }
+        current_difficulty: { type: [string, "null"], enum: [easy, medium, hard, staff_plus, null] }
+        mastery:
+          oneOf:
+            - $ref: '#/components/schemas/CapstoneSummaryMastery'
+            - type: 'null'
+        recent_capstones:
+          type: array
+          items: { $ref: '#/components/schemas/CapstoneSummaryRecentEntry' }
+        in_progress:
+          oneOf:
+            - $ref: '#/components/schemas/CapstoneSummaryInProgress'
+            - type: 'null'
+        next_available_at: { type: [string, "null"], format: date-time }
+        summary_line:
+          type: string
+          description: One-line, learner-readable status suitable for direct display.
+
 paths:
   # =====================================================================
   # Auth
@@ -7028,6 +7084,114 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/CapstoneLibraryEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/coding/capstones/summary:
+    get:
+      operationId: getCapstoneSummary
+      tags: [Coding]
+      summary: Aggregated coding status for the Compass tab
+      description: |
+        Returns the learner's coding capstone status snapshot — current
+        difficulty, mastery axes, last 5 graded capstones, any in-progress
+        session, and the next-available timestamp. Powers the Coding card
+        on the Compass tab + the Compass chat's "how am I doing on coding"
+        flow.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapstoneSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/coding/capstones/retry:
+    post:
+      operationId: retryCapstone
+      tags: [Coding]
+      summary: Create a fresh session against a previously graded bundle
+      description: |
+        Starts a new capstone session against a bundle the learner has
+        already graded once. Used by the "Try again" CTA on the result
+        screen. Refuses if there's already an in-progress session.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapstoneStartRequest'
+      responses:
+        '201':
+          description: Retry session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapstoneStartResponse'
+        '400':
+          description: No prior attempt against this bundle (use /start)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  message: { type: string }
+        '409':
+          description: A session is already in progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  message: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/coding/capstones/request:
+    post:
+      operationId: requestNextCapstone
+      tags: [Coding]
+      summary: Smart-pick the next best capstone for this learner
+      description: |
+        "Surprise me" — selects the next capstone based on role-track,
+        recalibrated difficulty, and 7-day cadence. Returns the bundle
+        (preview-safe — no solution/hidden tests). Client then calls
+        /start with the returned bundle_id.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Suggested bundle
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bundle, cadence, reason]
+                properties:
+                  bundle:
+                    $ref: '#/components/schemas/CapstoneBundleView'
+                  cadence:
+                    type: string
+                    enum: [weekly]
+                  reason:
+                    type: string
+        '409':
+          description: No capstone available right now
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  message: { type: string }
         '401':
           $ref: '#/components/responses/Unauthorized'
 

@@ -118,6 +118,11 @@ const CapstoneSessionSchema = new mongoose.Schema(
     },
 
     result: SessionResultSchema,
+
+    // True when this session was created via /retry against a previously
+    // graded bundle. Used by the result screen to show a "vs. last attempt"
+    // delta and by analytics to track replay engagement.
+    is_retry: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

@@ -163,6 +163,9 @@ class NotificationService {
       coding_drill_ready: 'coding_drill_ready',
       coding_calibration_invitation: 'coding_calibration_invitation',
       coding_difficulty_change_suggestion: 'coding_difficulty_change_suggestion',
+      // Coding capstone types (Phase B)
+      coding_capstone_available: 'coding_capstone_available',
+      coding_level_up: 'coding_level_up',
     };
     return map[dataType] || 'journey_update';
   }
