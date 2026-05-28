@@ -288,6 +288,16 @@ async function appendEvents(req, res) {
     return res.status(202).json({ accepted: 0, reason: 'session not active' });
   }
 
+  // Lazy-init the recording doc on the FIRST event for this session. Without
+  // this, recordingService.flush silently returns without incrementing
+  // counters because the CapstoneRecording row never exists — which is
+  // why "Files changed: 0" and "Compass turns: 0" showed up even after the
+  // learner edited code and ran a Compass turn.
+  await recordingService.startRecording(session._id).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('[capstones.events] startRecording lazy-init failed:', err.message);
+  });
+
   const limited = events.slice(0, 200);
   let accepted = 0;
   for (const evt of limited) {

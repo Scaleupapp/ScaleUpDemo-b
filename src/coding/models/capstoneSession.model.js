@@ -44,6 +44,10 @@ const SessionResultSchema = new mongoose.Schema(
     anchor_drift_detected: { type: Boolean, default: false },
     evaluator_model: String,
     graded_at: Date,
+    // LLM's narrative explanation of why these scores. Cites specific files,
+    // test names, or Compass turns. Surfaced on the result screen as the
+    // "Detailed analysis" block so learners understand the verdict.
+    evidence_notes: String,
   },
   { _id: false }
 );

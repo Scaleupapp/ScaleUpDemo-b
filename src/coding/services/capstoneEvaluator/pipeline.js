@@ -156,6 +156,7 @@ async function evaluate({ sessionId }) {
     anchor_drift_detected: drift.driftDetected,
     evaluator_model: scored.evaluator_model,
     graded_at: new Date(),
+    evidence_notes: typeof scored.evidence_notes === 'string' ? scored.evidence_notes : '',
   };
 
   await CapstoneSession.findByIdAndUpdate(sessionId, { $set: { result } });
