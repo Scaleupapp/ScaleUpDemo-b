@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "ds",
+  "language": "python",
+  "stack_variant": "pandas-sklearn",
+  "difficulty": "hard",
+  "time_budget_minutes": 90,
+  "brief": "DSC-301 — Daily-revenue forecast with explicit leakage prevention\n\nThe board wants a 14-day forecast for daily revenue. You're given `daily_revenue.csv` covering 365 days. Build a forecast with EXPLICIT leakage prevention:\n\n1. `forecast.py` builds features that include 7- and 28-day lagged revenue + day-of-week one-hots. NONE of those features may peek at the day being predicted.\n2. Train a Ridge regressor. Use **expanding-window time-series cross-validation** (TimeSeriesSplit, n_splits=5) — NOT random k-fold.\n3. Report mean absolute error (MAE) + mean absolute percentage error (MAPE) on the held-out fold means.\n4. Generate a 14-day forecast starting the day after the last observation. The forecast must use feature values that are TRUTHFULLY KNOWN at prediction time (no future leakage).\n5. Write `report.md` with: methodology, CV metrics, the 14-day forecast as a table, and one sentence about how you verified there's no leakage.",
+  "acceptance_criteria": [
+    "`python forecast.py` runs without error and writes `report.md` + `forecast.csv`",
+    "forecast.csv has exactly 14 rows + header (date, predicted_revenue)",
+    "report.md contains 'TimeSeriesSplit' or 'expanding window' (proves you used time-aware CV)",
+    "report.md mentions MAE + MAPE",
+    "Lag features use only PAST observations (verified by the leakage test)",
+    "The 14-day forecast is monotonically dated from the day after the last observation"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "requirements.txt",
+        "content": "pandas==2.2.2\nnumpy==1.26.4\nscikit-learn==1.5.2\n"
+      },
+      {
+        "path": "daily_revenue.csv",
+        "content": "date,revenue\n2025-01-01,1200\n2025-01-02,1180\n2025-01-03,1300\n2025-01-04,1100\n2025-01-05,1050\n2025-01-06,1220\n2025-01-07,1320\n2025-01-08,1280\n2025-01-09,1340\n2025-01-10,1200\n2025-01-11,1150\n2025-01-12,1100\n2025-01-13,1280\n2025-01-14,1350\n2025-01-15,1310\n2025-01-16,1290\n2025-01-17,1370\n2025-01-18,1220\n2025-01-19,1180\n2025-01-20,1330\n2025-01-21,1390\n2025-01-22,1340\n2025-01-23,1400\n2025-01-24,1260\n2025-01-25,1210\n2025-01-26,1380\n2025-01-27,1450\n2025-01-28,1400\n2025-01-29,1460\n2025-01-30,1310\n2025-01-31,1270\n"
+      },
+      {
+        "path": "forecast.py",
+        "content": "# TODO: lag features (no leakage), TimeSeriesSplit Ridge, 14-day forecast, report.md\nimport pandas as pd\nprint(pd.read_csv('daily_revenue.csv').head())\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "forecast.py",
+        "content": "import pandas as pd\nimport numpy as np\nfrom sklearn.linear_model import Ridge\nfrom sklearn.model_selection import TimeSeriesSplit\nfrom sklearn.metrics import mean_absolute_error\n\ndf = pd.read_csv('daily_revenue.csv', parse_dates=['date']).sort_values('date').reset_index(drop=True)\n\n# Lag features (use only PAST observations — fillna(method='ffill') would leak future values).\ndf['lag_7'] = df['revenue'].shift(7)\ndf['lag_28'] = df['revenue'].shift(28)\ndf['dow'] = df['date'].dt.dayofweek\n\nfeatures_df = pd.get_dummies(df[['lag_7', 'lag_28', 'dow']], columns=['dow'], drop_first=False).dropna()\ntarget_df = df.loc[features_df.index, 'revenue']\n\nsplits = TimeSeriesSplit(n_splits=5)\nmae_folds = []\nmape_folds = []\nfor train_idx, val_idx in splits.split(features_df):\n    X_tr, X_val = features_df.iloc[train_idx], features_df.iloc[val_idx]\n    y_tr, y_val = target_df.iloc[train_idx], target_df.iloc[val_idx]\n    if len(X_tr) < 28:\n        continue\n    model = Ridge(alpha=1.0)\n    model.fit(X_tr, y_tr)\n    pred = model.predict(X_val)\n    mae_folds.append(mean_absolute_error(y_val, pred))\n    mape_folds.append(np.mean(np.abs((y_val.values - pred) / y_val.values)) * 100)\n\nmae = float(np.mean(mae_folds)) if mae_folds else float('nan')\nmape = float(np.mean(mape_folds)) if mape_folds else float('nan')\n\n# Refit on all available data for the forward forecast.\nfinal_model = Ridge(alpha=1.0)\nfinal_model.fit(features_df, target_df)\n\n# 14-day forecast — feature values must be truthfully known at prediction time.\n# We carry forward the last KNOWN lag_7/lag_28 by stepping one day at a time.\nlast_date = df['date'].iloc[-1]\nrevenue_history = df['revenue'].tolist()\ndates = []\npredictions = []\nfor i in range(14):\n    d = last_date + pd.Timedelta(days=i + 1)\n    lag_7 = revenue_history[-7]\n    lag_28 = revenue_history[-28] if len(revenue_history) >= 28 else lag_7\n    dow = d.dayofweek\n    row = {col: 0 for col in features_df.columns}\n    row['lag_7'] = lag_7\n    row['lag_28'] = lag_28\n    if f'dow_{dow}' in row:\n        row[f'dow_{dow}'] = 1\n    X = pd.DataFrame([row])[features_df.columns]\n    pred = float(final_model.predict(X)[0])\n    dates.append(d.date())\n    predictions.append(round(pred, 2))\n    revenue_history.append(pred)  # roll forward; future iterations use this pred as lag_7\n\nfcst = pd.DataFrame({'date': dates, 'predicted_revenue': predictions})\nfcst.to_csv('forecast.csv', index=False)\n\nwith open('report.md', 'w') as f:\n    f.write('# Daily-revenue forecast (14d)\\n\\n')\n    f.write('## Methodology\\n\\n')\n    f.write('Ridge regression with lag-7 + lag-28 lags + day-of-week one-hots. Trained with **TimeSeriesSplit** (expanding window, n_splits=5).\\n\\n')\n    f.write('## Cross-validation\\n\\n')\n    f.write(f'- MAE (mean over folds): {mae:.2f}\\n')\n    f.write(f'- MAPE (mean over folds): {mape:.2f}%\\n\\n')\n    f.write('## Forecast\\n\\n')\n    f.write(fcst.to_markdown(index=False) + '\\n\\n')\n    f.write('## Leakage check\\n\\n')\n    f.write('Lag features use `.shift(7)` and `.shift(28)` on the historical revenue series; dropna() removes the first 28 days where lags are unknown. Forward forecast carries the last known revenue forward step-by-step rather than peeking at future values.\\n')\n\nprint(f'mae={mae:.2f} mape={mape:.2f}')\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "install + run + outputs exist",
+      "command": "pip install --quiet -r requirements.txt && python forecast.py && test -s report.md && test -s forecast.csv",
+      "expected_exit_code": 0
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "forecast.csv has 14 rows + header",
+      "command": "test \"$(wc -l < forecast.csv | tr -d ' ')\" = '15'",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "report names time-aware CV + both metrics",
+      "command": "grep -qiE 'TimeSeriesSplit|expanding window' report.md && grep -q 'MAE' report.md && grep -q 'MAPE' report.md",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "no leakage smoke (random k-fold not used)",
+      "command": "! grep -qE 'KFold\\(|train_test_split\\(' forecast.py",
+      "expected_exit_code": 0
+    }
+  ],
+  "seeded_mistakes": [
+    {
+      "location": "forecast.py — random k-fold cross-validation",
+      "bug_description": "Compass may suggest sklearn.model_selection.KFold which shuffles data and leaks future into training.",
+      "why_compass_might_suggest_it": "KFold is the default 'CV' answer; time-aware splits feel optional.",
+      "detection_signals": ["hidden test 'no leakage smoke' fails"]
+    },
+    {
+      "location": "forecast.py — fillna(method='ffill') on lags before split",
+      "bug_description": "Filling lag NaNs with forward-fill leaks values from later rows into earlier rows of the same feature column.",
+      "why_compass_might_suggest_it": "ffill 'just works' for missing-data prompts; the subtle leakage is invisible.",
+      "detection_signals": ["MAE is suspiciously good; surfaces in code review of the feature pipeline"]
+    }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "All visible + hidden tests pass; 14-row forecast.csv produced", "weight": 1.0, "expected_score": 8 },
+    { "dimension": "verification_discipline", "check": "Learner asks Compass to verify no future-data is referenced in features", "weight": 0.9, "expected_score": 8 },
+    { "dimension": "code_quality", "check": "Train-only feature dataframe is built before splits; no inline mutations leak across folds", "weight": 0.7, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Ask Compass to explain why random KFold is wrong for time-series",
+      "Ask how the 14-day forecast handles unknown future lag values"
+    ],
+    "common_verification_traps": [
+      "Reporting CV MAE without per-fold breakdown",
+      "Using shift() but forgetting to dropna() before fitting"
+    ],
+    "decomposition_reference": [
+      "Sort by date",
+      "Build lag features (shift)",
+      "Dropna",
+      "TimeSeriesSplit + Ridge + per-fold MAE",
+      "Refit on all data",
+      "Walk forward 14 days carrying rev history",
+      "Write the report"
+    ]
+  },
+  "difficulty_signals": {
+    "token_count": 280,
+    "branching_complexity": 7,
+    "edge_cases": 10,
+    "known_hard_patterns": ["time-series leakage", "rolling forecast"]
+  },
+  "interview_parallel": "Senior DS take-home — forecasts come up at almost every product-led company.",
+  "content_hash": "capstone-ds-hard-forecast-leakage-v1"
+}

@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "ds",
+  "language": "python",
+  "stack_variant": "pandas-sklearn",
+  "difficulty": "easy",
+  "time_budget_minutes": 60,
+  "brief": "DSC-87 — Churn baseline + honest evaluation\n\nMarketing thinks 'we lose 30% of customers a year'. The CSV (customers.csv) gives you 12 months of cohort data: customer_id, signup_month, last_active_month, plan, country, total_spend.\n\nProduce `analysis.py` that:\n1. Loads customers.csv\n2. Defines churn as `last_active_month was > 60 days ago` and computes the actual churn rate\n3. Fits a SIMPLE logistic regression baseline predicting churn from {plan, country, total_spend, tenure_months}\n4. Reports baseline metrics: accuracy + precision + recall + ROC-AUC, evaluated on a 20% held-out test set (random_state=42)\n5. Writes `report.md` with: actual churn rate, baseline metrics, ONE caveat about what this baseline can't tell us\n\nKeep the model simple — no hyperparameter tuning, no feature engineering past one-hot encoding categoricals. The bar is HONEST baseline + HONEST caveats.",
+  "acceptance_criteria": [
+    "`python analysis.py` runs without error",
+    "`report.md` exists and reports actual churn rate (as %) + the 4 metrics on the test set",
+    "Train/test split uses random_state=42 and 20% test size",
+    "Categorical features (plan, country) are one-hot encoded",
+    "Report mentions at least one caveat about the baseline",
+    "ROC-AUC is between 0.5 and 1.0"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "requirements.txt",
+        "content": "pandas==2.2.2\nnumpy==1.26.4\nscikit-learn==1.5.2\n"
+      },
+      {
+        "path": "customers.csv",
+        "content": "customer_id,signup_month,last_active_month,plan,country,total_spend\nc-1,2025-01,2025-12,pro,US,1200\nc-2,2025-02,2025-04,free,IN,0\nc-3,2025-03,2025-12,pro,US,2400\nc-4,2025-04,2025-06,free,IN,12\nc-5,2025-04,2025-12,pro,UK,800\nc-6,2025-05,2025-07,free,US,40\nc-7,2025-06,2025-08,free,IN,0\nc-8,2025-06,2025-12,pro,US,3000\nc-9,2025-07,2025-09,free,UK,0\nc-10,2025-07,2025-12,pro,IN,1500\nc-11,2025-08,2025-10,free,US,80\nc-12,2025-08,2025-12,pro,UK,2200\nc-13,2025-09,2025-11,free,IN,0\nc-14,2025-09,2025-12,pro,US,950\nc-15,2025-10,2025-12,pro,UK,1100\nc-16,2025-10,2025-11,free,US,30\nc-17,2025-11,2025-12,pro,IN,500\nc-18,2025-11,2025-12,free,US,0\nc-19,2025-12,2025-12,pro,UK,150\nc-20,2025-12,2025-12,free,IN,0\n"
+      },
+      {
+        "path": "analysis.py",
+        "content": "# TODO: load customers.csv, define churn, fit logistic regression baseline, write report.md\nimport pandas as pd\n\ndf = pd.read_csv('customers.csv')\nprint(df.head())\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "analysis.py",
+        "content": "import pandas as pd\nimport numpy as np\nfrom sklearn.linear_model import LogisticRegression\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score\n\ndf = pd.read_csv('customers.csv')\ndf['last_active_month'] = pd.to_datetime(df['last_active_month'])\ndf['signup_month'] = pd.to_datetime(df['signup_month'])\nREFERENCE = pd.Timestamp('2026-01-01')\ndf['days_since_active'] = (REFERENCE - df['last_active_month']).dt.days\ndf['churned'] = (df['days_since_active'] > 60).astype(int)\ndf['tenure_months'] = ((df['last_active_month'] - df['signup_month']).dt.days // 30).clip(lower=0)\n\nchurn_rate = df['churned'].mean()\n\nfeatures = pd.get_dummies(df[['plan', 'country', 'total_spend', 'tenure_months']], drop_first=True)\nX_train, X_test, y_train, y_test = train_test_split(features, df['churned'], test_size=0.2, random_state=42)\n\nmodel = LogisticRegression(max_iter=1000)\nmodel.fit(X_train, y_train)\npreds = model.predict(X_test)\nproba = model.predict_proba(X_test)[:, 1] if len(set(y_test)) > 1 else np.zeros(len(y_test))\n\nacc = accuracy_score(y_test, preds)\nprec = precision_score(y_test, preds, zero_division=0)\nrec = recall_score(y_test, preds, zero_division=0)\ntry:\n    auc = roc_auc_score(y_test, proba)\nexcept ValueError:\n    auc = 0.5  # only one class in test set; degenerate.\n\nwith open('report.md', 'w') as f:\n    f.write('# Churn baseline\\n\\n')\n    f.write(f'**Actual churn rate**: {churn_rate:.0%} of cohort customers are inactive > 60 days as of {REFERENCE.date()}.\\n\\n')\n    f.write(f'**Baseline (logistic regression)**:\\n')\n    f.write(f'- accuracy: {acc:.2f}\\n- precision: {prec:.2f}\\n- recall: {rec:.2f}\\n- ROC-AUC: {auc:.2f}\\n\\n')\n    f.write('**Caveat**: This is a small cohort and our split is random — production churn modeling needs time-aware validation so we do not leak future signal into training.\\n')\n\nprint(f'churn_rate={churn_rate:.2f} accuracy={acc:.2f} auc={auc:.2f}')\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "install + analysis runs + report exists",
+      "command": "pip install --quiet -r requirements.txt && python analysis.py && test -s report.md",
+      "expected_exit_code": 0
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "report has the churn rate + metrics",
+      "command": "grep -q 'churn rate' report.md && grep -qE 'accuracy:' report.md && grep -qE 'precision:' report.md && grep -qE 'recall:' report.md && grep -qE 'ROC-AUC|AUC' report.md",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "report has at least one caveat sentence",
+      "command": "grep -qiE 'caveat|limitation|note|warning' report.md",
+      "expected_exit_code": 0
+    }
+  ],
+  "seeded_mistakes": [
+    {
+      "location": "analysis.py — train_test_split forgets random_state",
+      "bug_description": "Compass may write `train_test_split(features, y, test_size=0.2)` and skip random_state, breaking reproducibility.",
+      "why_compass_might_suggest_it": "random_state is the kind of detail LLMs often elide for brevity.",
+      "detection_signals": ["Re-running analysis.py gives different metrics; surfaces in verification_discipline review"]
+    },
+    {
+      "location": "analysis.py — no caveat",
+      "bug_description": "Compass may produce a clean numeric report without acknowledging the small-cohort limitation or time-leakage risk.",
+      "why_compass_might_suggest_it": "LLM defaults to confident statements; uncertainty disclaimers feel like padding.",
+      "detection_signals": ["hidden test 'report has at least one caveat sentence' fails"]
+    }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "All visible + hidden tests pass", "weight": 1.0, "expected_score": 8 },
+    { "dimension": "verification_discipline", "check": "Learner re-runs analysis.py at least twice to confirm reproducibility", "weight": 0.7, "expected_score": 7 },
+    { "dimension": "reflection_quality", "check": "Report explicitly names the small-cohort or time-leakage limitation", "weight": 0.6, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Ask Compass which features should be one-hot encoded before fitting",
+      "Ask whether random train/test split is appropriate for time-series customer data"
+    ],
+    "common_verification_traps": [
+      "Reporting only accuracy on an imbalanced churn label",
+      "Forgetting that ROC-AUC needs both classes present in y_test"
+    ],
+    "decomposition_reference": [
+      "Define churn",
+      "Compute tenure",
+      "One-hot encode categoricals",
+      "Split train/test",
+      "Fit + score",
+      "Write the narrative + caveat"
+    ]
+  },
+  "difficulty_signals": {
+    "token_count": 200,
+    "branching_complexity": 3,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  },
+  "interview_parallel": "Junior DS take-home — most early DS take-homes are 'given this CSV, model X and tell us why your number is honest'.",
+  "content_hash": "capstone-ds-easy-churn-baseline-v1"
+}

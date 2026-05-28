@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "ai_eng",
+  "language": "python",
+  "stack_variant": "agent-loop",
+  "difficulty": "hard",
+  "time_budget_minutes": 90,
+  "brief": "AI-PLAT-71 — Build a tool-using agent loop with a self-check\n\nBuild a minimal agent that solves arithmetic word problems by calling tools. We provide a deterministic mock LLM (no API calls) so the harness can grade offline.\n\nDeliverables:\n1. `agent.py` exposes `solve(question: str) -> { 'final_answer': str, 'tool_calls': [...], 'iterations': int, 'self_check': str }`\n2. Available tools (already implemented in `tools.py`):\n   - `calc(expression)` — eval a safe arithmetic expression\n   - `lookup_constant(name)` — returns a value for {'pi', 'e', 'g'}\n3. The agent loop reads the mock LLM's response (`mock_llm.next_action(state)`), executes tools, feeds results back, until the mock LLM returns `{ type: 'final', answer: str }` or MAX_STEPS (6) is hit.\n4. After producing a final_answer, run a SELF-CHECK: ask the mock LLM to verify the answer is plausible; record self_check as 'pass' / 'fail' / 'skipped'.\n5. Don't infinite-loop on the same tool call: if the same (tool, input) pair appears twice consecutively, break and return `self_check='fail'` with reason.",
+  "acceptance_criteria": [
+    "`python agent.py 'what is 2+2'` prints a dict containing final_answer=4",
+    "Agent calls calc() and lookup_constant() when the mock LLM requests them",
+    "Agent stops at MAX_STEPS=6 even if the mock keeps requesting tools",
+    "Loop-detection breaks on consecutive duplicate (tool, input)",
+    "self_check is one of {'pass', 'fail', 'skipped'}",
+    "tool_calls list records every tool call with name + input + output"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "requirements.txt",
+        "content": ""
+      },
+      {
+        "path": "tools.py",
+        "content": "import ast, operator\n\n_ALLOWED = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.Pow: operator.pow, ast.USub: operator.neg}\n\ndef _eval(node):\n    if isinstance(node, ast.Num): return node.n\n    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)): return node.value\n    if isinstance(node, ast.BinOp): return _ALLOWED[type(node.op)](_eval(node.left), _eval(node.right))\n    if isinstance(node, ast.UnaryOp): return _ALLOWED[type(node.op)](_eval(node.operand))\n    raise ValueError(f'unsupported node: {type(node).__name__}')\n\ndef calc(expression: str):\n    return _eval(ast.parse(expression, mode='eval').body)\n\ndef lookup_constant(name: str):\n    return {'pi': 3.141592653589793, 'e': 2.718281828459045, 'g': 9.80665}.get(name)\n"
+      },
+      {
+        "path": "mock_llm.py",
+        "content": "# Deterministic mock LLM. Returns the next action given the current state.\n# `state` is { 'question': str, 'history': [{'tool': str, 'input': ..., 'output': ...}], 'self_check_phase': bool }\n\ndef next_action(state):\n    q = state['question'].lower()\n    if state.get('self_check_phase'):\n        # Verify the answer\n        last = state['history'][-1] if state['history'] else None\n        return { 'type': 'self_check', 'verdict': 'pass' if last else 'skipped' }\n\n    if '2+2' in q.replace(' ', ''):\n        if not state['history']:\n            return { 'type': 'tool', 'tool': 'calc', 'input': '2+2' }\n        return { 'type': 'final', 'answer': str(state['history'][-1]['output']) }\n\n    if 'pi' in q and 'times' in q:\n        # ex: 'pi times 2'\n        if not any(h['tool'] == 'lookup_constant' for h in state['history']):\n            return { 'type': 'tool', 'tool': 'lookup_constant', 'input': 'pi' }\n        if not any(h['tool'] == 'calc' for h in state['history']):\n            pi = next(h['output'] for h in state['history'] if h['tool'] == 'lookup_constant')\n            return { 'type': 'tool', 'tool': 'calc', 'input': f'{pi}*2' }\n        return { 'type': 'final', 'answer': str(state['history'][-1]['output']) }\n\n    # Loop trap — keep asking for the same tool\n    return { 'type': 'tool', 'tool': 'calc', 'input': '1+1' }\n"
+      },
+      {
+        "path": "agent.py",
+        "content": "# TODO: implement solve(question)\nimport sys\nfrom tools import calc, lookup_constant\nimport mock_llm\n\nMAX_STEPS = 6\n\ndef solve(question: str):\n    return { 'final_answer': '', 'tool_calls': [], 'iterations': 0, 'self_check': 'skipped' }\n\nif __name__ == '__main__':\n    print(solve(' '.join(sys.argv[1:])))\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "agent.py",
+        "content": "import sys\nfrom tools import calc, lookup_constant\nimport mock_llm\n\nMAX_STEPS = 6\n\nTOOLS = {'calc': calc, 'lookup_constant': lookup_constant}\n\ndef _execute(tool, inp):\n    fn = TOOLS.get(tool)\n    if not fn: return {'error': f'unknown tool {tool}'}\n    try:\n        return fn(inp)\n    except Exception as e:\n        return {'error': str(e)}\n\ndef solve(question: str):\n    state = { 'question': question, 'history': [], 'self_check_phase': False }\n    tool_calls = []\n    final_answer = None\n    self_check = 'skipped'\n    last_call_sig = None\n    for step in range(MAX_STEPS):\n        action = mock_llm.next_action(state)\n        if action.get('type') == 'final':\n            final_answer = action.get('answer', '')\n            break\n        if action.get('type') == 'tool':\n            tool = action['tool']\n            inp = action['input']\n            sig = (tool, inp)\n            if sig == last_call_sig:\n                self_check = 'fail'\n                final_answer = 'loop_detected'\n                break\n            last_call_sig = sig\n            out = _execute(tool, inp)\n            tool_calls.append({ 'tool': tool, 'input': inp, 'output': out })\n            state['history'].append({ 'tool': tool, 'input': inp, 'output': out })\n            continue\n        break\n\n    if final_answer is None:\n        final_answer = 'max_steps_reached'\n        self_check = 'fail'\n\n    if self_check == 'skipped' and final_answer not in ('loop_detected', 'max_steps_reached'):\n        verify_state = { **state, 'self_check_phase': True }\n        verdict = mock_llm.next_action(verify_state)\n        if verdict.get('type') == 'self_check':\n            self_check = verdict.get('verdict', 'skipped')\n\n    return {\n        'final_answer': final_answer,\n        'tool_calls': tool_calls,\n        'iterations': len(tool_calls),\n        'self_check': self_check,\n    }\n\nif __name__ == '__main__':\n    print(solve(' '.join(sys.argv[1:])))\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "baseline 2+2",
+      "command": "python -c \"from agent import solve; r = solve('what is 2+2'); assert r['final_answer'] == '4', r\"",
+      "expected_exit_code": 0
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "tool calls recorded for pi*2",
+      "command": "python -c \"from agent import solve; r = solve('pi times 2'); tools = [c['tool'] for c in r['tool_calls']]; assert 'lookup_constant' in tools and 'calc' in tools, r\"",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "loop detection",
+      "command": "python -c \"from agent import solve; r = solve('the weather today'); assert r['final_answer'] == 'loop_detected', r; assert r['self_check'] == 'fail'\"",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "max steps cap",
+      "command": "python -c \"import mock_llm; orig = mock_llm.next_action\\nimport itertools; counter = itertools.count()\\ndef stub(state):\\n    i = next(counter)\\n    if state.get('self_check_phase'): return { 'type': 'self_check', 'verdict': 'pass' }\\n    return { 'type': 'tool', 'tool': 'calc', 'input': f'1+{i}' }\\nmock_llm.next_action = stub\\nfrom agent import solve\\nr = solve('weird'); assert r['iterations'] <= 6, r\"",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "self_check value is valid",
+      "command": "python -c \"from agent import solve; r = solve('what is 2+2'); assert r['self_check'] in ('pass','fail','skipped'), r\"",
+      "expected_exit_code": 0
+    }
+  ],
+  "seeded_mistakes": [
+    {
+      "location": "agent.py — no loop detection",
+      "bug_description": "Compass may skip the (tool, input) signature check, leaving the agent to call the same tool MAX_STEPS times.",
+      "why_compass_might_suggest_it": "Loop detection is the kind of safety feature that's easy to defer 'until we see it happen'.",
+      "detection_signals": ["hidden test 'loop detection' fails (final_answer != 'loop_detected')"]
+    },
+    {
+      "location": "agent.py — self_check always 'pass'",
+      "bug_description": "Compass may hard-code self_check='pass' instead of actually invoking the mock LLM in verify mode.",
+      "why_compass_might_suggest_it": "Self-verification is fiddly; LLM may shortcut to a constant string.",
+      "detection_signals": ["surfaces in code review; not caught by visible tests directly"]
+    }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "All visible + hidden tests pass", "weight": 1.0, "expected_score": 8 },
+    { "dimension": "ai_pair_effectiveness", "check": "Learner asks Compass to explain the agent loop control structure BEFORE implementing", "weight": 0.9, "expected_score": 8 },
+    { "dimension": "verification_discipline", "check": "Learner runs the loop-detection test explicitly", "weight": 0.8, "expected_score": 7 },
+    { "dimension": "decomposition", "check": "solve() has clear sub-steps: tool dispatch / loop control / max-step bound / self-check", "weight": 0.7, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Ask Compass how to detect a loop without remembering all of history",
+      "Ask what self_check should do when the agent doesn't reach a clean answer"
+    ],
+    "common_verification_traps": [
+      "Testing happy path only; missing the loop trap",
+      "Asserting on self_check string without enumerating valid values"
+    ],
+    "decomposition_reference": [
+      "Define TOOLS registry",
+      "Loop: ask LLM → branch on type",
+      "Add loop-detection signature",
+      "Cap at MAX_STEPS",
+      "Self-check phase",
+      "Shape the return dict"
+    ]
+  },
+  "difficulty_signals": {
+    "token_count": 320,
+    "branching_complexity": 8,
+    "edge_cases": 9,
+    "known_hard_patterns": ["agent loop control", "self-verification"]
+  },
+  "interview_parallel": "AI-platform engineer take-home — agent control loops are increasingly standard.",
+  "content_hash": "capstone-ai_eng-hard-tool-using-agent-v1"
+}

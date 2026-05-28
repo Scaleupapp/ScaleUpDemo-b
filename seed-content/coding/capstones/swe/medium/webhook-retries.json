@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "swe",
+  "language": "javascript",
+  "stack_variant": "node-express",
+  "difficulty": "medium",
+  "time_budget_minutes": 75,
+  "brief": "PROD-3812 — Webhook delivery retries with exponential backoff\n\nOur webhook sender (lib/webhookSender.js) fires-and-forgets. When the receiver returns 5xx or times out we silently drop the event, and customers complain. Add resilient delivery:\n\n- Wrap the existing `send(event, url)` in a `sendWithRetries(event, url, opts)`\n- Retry on 5xx + network errors (NOT on 4xx — those are the receiver telling us 'don't bother')\n- Exponential backoff with jitter: 1s, 2s, 4s, 8s (jitter ±25%); cap at 4 attempts\n- Each attempt has a 5-second timeout\n- Return `{ ok: boolean, attempts: number, last_status: number|null, last_error: string|null }`\n- Persist a delivery record for every attempt in `attempts[]` for observability\n\nKeep the existing `send()` working; sendWithRetries is a wrapper.",
+  "acceptance_criteria": [
+    "sendWithRetries(event, url) succeeds when the receiver eventually returns 2xx within 4 attempts",
+    "Returns ok=false after 4 failed attempts on persistent 5xx",
+    "Does NOT retry on 4xx (returns ok=false, attempts=1, last_status=4xx immediately)",
+    "Total wait between attempts respects 1s/2s/4s base with ±25% jitter",
+    "Each individual fetch attempt is bounded by a 5s timeout",
+    "Existing tests for the bare send() still pass"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "package.json",
+        "content": "{\n  \"name\": \"webhook-retries-capstone\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"scripts\": { \"test\": \"jest --silent\" },\n  \"devDependencies\": { \"jest\": \"^29.7.0\", \"nock\": \"^13.5.4\" }\n}\n"
+      },
+      {
+        "path": "lib/webhookSender.js",
+        "content": "'use strict';\n\nconst http = require('http');\nconst https = require('https');\nconst { URL } = require('url');\n\n/**\n * Fires the webhook once. Resolves with { status } on response;\n * rejects on network error or timeout.\n */\nasync function send(event, url, { timeoutMs = 5000 } = {}) {\n  const u = new URL(url);\n  const mod = u.protocol === 'https:' ? https : http;\n  return new Promise((resolve, reject) => {\n    const req = mod.request(u, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => {\n      res.resume();\n      resolve({ status: res.statusCode });\n    });\n    req.setTimeout(timeoutMs, () => { req.destroy(new Error('timeout')); });\n    req.on('error', reject);\n    req.write(JSON.stringify(event));\n    req.end();\n  });\n}\n\n// TODO: implement sendWithRetries(event, url, opts)\nasync function sendWithRetries(event, url, opts = {}) {\n  // PLACEHOLDER — replace with real retry logic.\n  try {\n    const r = await send(event, url, opts);\n    return { ok: r.status >= 200 && r.status < 300, attempts: 1, last_status: r.status, last_error: null, attempts_log: [] };\n  } catch (e) {\n    return { ok: false, attempts: 1, last_status: null, last_error: e.message, attempts_log: [] };\n  }\n}\n\nmodule.exports = { send, sendWithRetries };\n"
+      },
+      {
+        "path": "tests/send.test.js",
+        "content": "const nock = require('nock');\nconst { send } = require('../lib/webhookSender');\n\nafterEach(() => nock.cleanAll());\n\ntest('send resolves with 200', async () => {\n  nock('http://example.com').post('/hook').reply(200);\n  const r = await send({ a: 1 }, 'http://example.com/hook');\n  expect(r.status).toBe(200);\n});\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "lib/webhookSender.js",
+        "content": "'use strict';\n\nconst http = require('http');\nconst https = require('https');\nconst { URL } = require('url');\n\nasync function send(event, url, { timeoutMs = 5000 } = {}) {\n  const u = new URL(url);\n  const mod = u.protocol === 'https:' ? https : http;\n  return new Promise((resolve, reject) => {\n    const req = mod.request(u, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => {\n      res.resume();\n      resolve({ status: res.statusCode });\n    });\n    req.setTimeout(timeoutMs, () => { req.destroy(new Error('timeout')); });\n    req.on('error', reject);\n    req.write(JSON.stringify(event));\n    req.end();\n  });\n}\n\nconst BACKOFF_BASE_MS = [1000, 2000, 4000, 8000];\nconst MAX_ATTEMPTS = 4;\nconst JITTER = 0.25;\n\nfunction wait(ms) { return new Promise(r => setTimeout(r, ms)); }\nfunction jittered(base) { return Math.round(base * (1 + (Math.random() * 2 - 1) * JITTER)); }\n\nasync function sendWithRetries(event, url, opts = {}) {\n  const attempts_log = [];\n  let lastStatus = null;\n  let lastError = null;\n\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    let status = null;\n    let error = null;\n    try {\n      const r = await send(event, url, { timeoutMs: 5000 });\n      status = r.status;\n    } catch (e) {\n      error = e.message || String(e);\n    }\n    attempts_log.push({ attempt, status, error });\n    lastStatus = status;\n    lastError = error;\n\n    if (status && status >= 200 && status < 300) {\n      return { ok: true, attempts: attempt, last_status: status, last_error: null, attempts_log };\n    }\n    if (status && status >= 400 && status < 500) {\n      // Don't retry on 4xx — receiver said don't bother.\n      return { ok: false, attempts: attempt, last_status: status, last_error: null, attempts_log };\n    }\n    if (attempt < MAX_ATTEMPTS) {\n      await wait(jittered(BACKOFF_BASE_MS[attempt - 1]));\n    }\n  }\n  return { ok: false, attempts: MAX_ATTEMPTS, last_status: lastStatus, last_error: lastError, attempts_log };\n}\n\nmodule.exports = { send, sendWithRetries };\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "install + baseline send",
+      "command": "npm install --silent --no-audit --no-fund && npm test --silent",
+      "expected_exit_code": 0
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "retries succeed after transient 503",
+      "command": "cat > tests/retry.test.js <<'EOF'\nconst nock = require('nock');\nconst { sendWithRetries } = require('../lib/webhookSender');\n\nafterEach(() => nock.cleanAll());\n\ntest('retries to success on 503 then 200', async () => {\n  nock('http://x.com').post('/h').reply(503).post('/h').reply(200);\n  const r = await sendWithRetries({a:1}, 'http://x.com/h');\n  expect(r.ok).toBe(true);\n  expect(r.attempts).toBe(2);\n  expect(r.last_status).toBe(200);\n}, 30000);\n\ntest('does NOT retry on 400', async () => {\n  nock('http://x.com').post('/h').reply(400);\n  const r = await sendWithRetries({a:1}, 'http://x.com/h');\n  expect(r.ok).toBe(false);\n  expect(r.attempts).toBe(1);\n  expect(r.last_status).toBe(400);\n}, 10000);\n\ntest('returns ok=false after 4 persistent 500s', async () => {\n  nock('http://x.com').post('/h').times(4).reply(500);\n  const r = await sendWithRetries({a:1}, 'http://x.com/h');\n  expect(r.ok).toBe(false);\n  expect(r.attempts).toBe(4);\n  expect(r.last_status).toBe(500);\n  expect(r.attempts_log.length).toBe(4);\n}, 30000);\nEOF\nnpm test --silent",
+      "expected_exit_code": 0
+    }
+  ],
+  "seeded_mistakes": [
+    {
+      "location": "lib/webhookSender.js — retries on 4xx",
+      "bug_description": "Compass may treat any non-2xx as retryable (status !== 200 → retry) which retries 4xx receiver errors and wastes 4 attempts.",
+      "why_compass_might_suggest_it": "The simplest 'retry on failure' code path doesn't distinguish 4xx from 5xx.",
+      "detection_signals": ["hidden test 'does NOT retry on 400' fails (attempts=4 instead of 1)"]
+    },
+    {
+      "location": "lib/webhookSender.js — no jitter",
+      "bug_description": "Compass may suggest pure exponential (1s, 2s, 4s, 8s) without jitter, which causes thundering-herd retries.",
+      "why_compass_might_suggest_it": "Jitter is the 'extra' detail; vanilla exponential is shorter and feels complete.",
+      "detection_signals": ["Hidden test for thundering-herd isn't shipped; surfaces in load testing — counts against code_quality score"]
+    }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "Both visible + 3 hidden tests pass", "weight": 1.0, "expected_score": 9 },
+    { "dimension": "verification_discipline", "check": "Learner runs the hidden 4xx-no-retry case at least once", "weight": 0.8, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "Backoff base + jitter factor + max attempts are named constants, not inline magic numbers", "weight": 0.7, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Ask Compass which HTTP status codes are retryable + why",
+      "Ask for the difference between exponential backoff and exponential backoff with jitter"
+    ],
+    "common_verification_traps": [
+      "Forgetting to assert attempts=1 on 4xx",
+      "Mocking the network without timing — never sees the backoff actually elapse"
+    ],
+    "decomposition_reference": [
+      "Plan the wrapper signature",
+      "Decide retryable vs non-retryable",
+      "Implement the backoff schedule",
+      "Add jitter",
+      "Persist the per-attempt log",
+      "Wire timeouts"
+    ]
+  },
+  "difficulty_signals": {
+    "token_count": 220,
+    "branching_complexity": 6,
+    "edge_cases": 8,
+    "known_hard_patterns": ["timeouts", "jitter"]
+  },
+  "interview_parallel": "Razorpay / Stripe backend lateral round — webhook resilience is a standard ask.",
+  "content_hash": "capstone-swe-medium-webhook-retries-v1"
+}

@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "swe",
+  "language": "javascript",
+  "stack_variant": "node",
+  "difficulty": "hard",
+  "time_budget_minutes": 90,
+  "brief": "ORD-5512 — Refactor the order state machine to support partial refunds + chargebacks\n\nWe have a working order state machine in `src/orderState.js` that handles `pending → paid → shipped → delivered`. Two new requirements broke our naive design:\n\n1. **Partial refunds**: an order can be partially refunded multiple times; the order stays in its current state but accumulates a `refunded_total`. A full refund (refunded_total == amount) moves the order to `refunded`.\n2. **Chargebacks**: at any state after `paid`, a chargeback puts the order into `disputed`. From `disputed` it can move to `chargeback_won` (back to prior state) or `chargeback_lost` (terminal).\n\nThe existing state machine is a flat switch statement; we need it to be data-driven so we can add new states without touching the transition code.\n\nDeliverables:\n- Refactor `orderState.js` so transitions are declared in a table, not switch statements\n- Add `applyPartialRefund(order, amount)` and `applyChargeback(order, reason)`\n- Preserve every existing transition (drop nothing)\n- Existing tests in `tests/legacy.test.js` MUST still pass — they encode our current behavior contract.",
+  "acceptance_criteria": [
+    "All transitions from `tests/legacy.test.js` continue to pass without modification",
+    "Partial refunds accumulate; the order remains in its pre-refund state until refunded_total == amount",
+    "Once refunded_total == amount the order moves to `refunded`",
+    "A chargeback from any state in {paid, shipped, delivered} moves to `disputed`",
+    "From `disputed`: chargeback_won returns to the pre-disputed state; chargeback_lost is terminal",
+    "Invalid transitions throw a typed `InvalidTransitionError` with `from`, `to`, and `order_id` fields",
+    "Transitions are defined in ONE data structure (the table), not inline if/switch chains"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "package.json",
+        "content": "{\n  \"name\": \"order-state-capstone\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"scripts\": { \"test\": \"jest --silent\" },\n  \"devDependencies\": { \"jest\": \"^29.7.0\" }\n}\n"
+      },
+      {
+        "path": "src/orderState.js",
+        "content": "'use strict';\n\nclass InvalidTransitionError extends Error {\n  constructor(from, to, order_id) {\n    super(`Invalid transition: ${from} → ${to} for order ${order_id}`);\n    this.from = from; this.to = to; this.order_id = order_id;\n    this.name = 'InvalidTransitionError';\n  }\n}\n\n/** Existing — flat switch. KEEP behaviour intact while refactoring. */\nfunction transition(order, to) {\n  const from = order.status;\n  switch (from) {\n    case 'pending':\n      if (to === 'paid') return { ...order, status: 'paid' };\n      if (to === 'cancelled') return { ...order, status: 'cancelled' };\n      break;\n    case 'paid':\n      if (to === 'shipped') return { ...order, status: 'shipped' };\n      if (to === 'cancelled') return { ...order, status: 'cancelled' };\n      break;\n    case 'shipped':\n      if (to === 'delivered') return { ...order, status: 'delivered' };\n      break;\n    case 'delivered':\n    case 'refunded':\n    case 'cancelled':\n      break;\n  }\n  throw new InvalidTransitionError(from, to, order.order_id);\n}\n\n// TODO: applyPartialRefund + applyChargeback go here. The table-driven\n// rewrite of transition() goes here. Keep InvalidTransitionError exported.\n\nmodule.exports = { transition, InvalidTransitionError };\n"
+      },
+      {
+        "path": "tests/legacy.test.js",
+        "content": "const { transition, InvalidTransitionError } = require('../src/orderState');\n\nconst base = { order_id: 'o1', amount: 100, refunded_total: 0, status: 'pending' };\n\ntest('pending → paid', () => {\n  expect(transition(base, 'paid').status).toBe('paid');\n});\ntest('pending → cancelled', () => {\n  expect(transition(base, 'cancelled').status).toBe('cancelled');\n});\ntest('paid → shipped', () => {\n  expect(transition({ ...base, status: 'paid' }, 'shipped').status).toBe('shipped');\n});\ntest('shipped → delivered', () => {\n  expect(transition({ ...base, status: 'shipped' }, 'delivered').status).toBe('delivered');\n});\ntest('terminal states reject', () => {\n  expect(() => transition({ ...base, status: 'delivered' }, 'paid')).toThrow(InvalidTransitionError);\n});\ntest('illegal transition throws with order_id', () => {\n  try { transition({ ...base, status: 'pending' }, 'shipped'); }\n  catch (e) { expect(e.order_id).toBe('o1'); expect(e.from).toBe('pending'); }\n});\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "src/orderState.js",
+        "content": "'use strict';\n\nclass InvalidTransitionError extends Error {\n  constructor(from, to, order_id) {\n    super(`Invalid transition: ${from} → ${to} for order ${order_id}`);\n    this.from = from; this.to = to; this.order_id = order_id;\n    this.name = 'InvalidTransitionError';\n  }\n}\n\n// Data-driven transition table. Edges are sets so order doesn't matter.\nconst EDGES = {\n  pending:         new Set(['paid', 'cancelled']),\n  paid:            new Set(['shipped', 'cancelled', 'disputed']),\n  shipped:         new Set(['delivered', 'disputed']),\n  delivered:       new Set(['disputed']),\n  disputed:        new Set(['chargeback_won', 'chargeback_lost']),\n  chargeback_won:  new Set([]),   // re-enters via applyChargebackWon to PRIOR state\n  chargeback_lost: new Set([]),\n  refunded:        new Set([]),\n  cancelled:       new Set([]),\n};\n\nfunction transition(order, to) {\n  const from = order.status;\n  const allowed = EDGES[from];\n  if (!allowed || !allowed.has(to)) throw new InvalidTransitionError(from, to, order.order_id);\n  return { ...order, status: to };\n}\n\n/**\n * Accumulate a partial refund. Stays in current state unless the\n * total reaches the order amount, in which case we transition to refunded.\n */\nfunction applyPartialRefund(order, amount) {\n  if (typeof amount !== 'number' || amount <= 0) {\n    throw new Error('refund amount must be positive');\n  }\n  const newTotal = (order.refunded_total || 0) + amount;\n  if (newTotal > order.amount) {\n    throw new Error('refund would exceed order amount');\n  }\n  const next = { ...order, refunded_total: newTotal };\n  if (newTotal === order.amount) return { ...next, status: 'refunded' };\n  return next;\n}\n\n/**\n * Move to disputed if we're in a post-paid state. Records pre_dispute_status\n * so chargeback_won can return us there.\n */\nfunction applyChargeback(order, reason) {\n  if (!['paid', 'shipped', 'delivered'].includes(order.status)) {\n    throw new InvalidTransitionError(order.status, 'disputed', order.order_id);\n  }\n  return { ...order, status: 'disputed', pre_dispute_status: order.status, dispute_reason: reason || 'unspecified' };\n}\n\nfunction applyChargebackWon(order) {\n  if (order.status !== 'disputed') throw new InvalidTransitionError(order.status, 'chargeback_won', order.order_id);\n  return { ...order, status: order.pre_dispute_status || 'paid', pre_dispute_status: null };\n}\n\nfunction applyChargebackLost(order) {\n  if (order.status !== 'disputed') throw new InvalidTransitionError(order.status, 'chargeback_lost', order.order_id);\n  return { ...order, status: 'chargeback_lost' };\n}\n\nmodule.exports = {\n  transition, applyPartialRefund, applyChargeback, applyChargebackWon, applyChargebackLost,\n  InvalidTransitionError, EDGES,\n};\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "install + legacy contract",
+      "command": "npm install --silent --no-audit --no-fund && npm test --silent",
+      "expected_exit_code": 0
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "partial refunds + chargebacks",
+      "command": "cat > tests/new.test.js <<'EOF'\nconst { applyPartialRefund, applyChargeback, applyChargebackWon, applyChargebackLost, InvalidTransitionError, EDGES } = require('../src/orderState');\n\nconst base = { order_id: 'o2', amount: 100, refunded_total: 0, status: 'delivered' };\n\ntest('partial refund accumulates, stays in current state', () => {\n  let o = applyPartialRefund(base, 30);\n  expect(o.status).toBe('delivered');\n  expect(o.refunded_total).toBe(30);\n  o = applyPartialRefund(o, 20);\n  expect(o.refunded_total).toBe(50);\n  expect(o.status).toBe('delivered');\n});\n\ntest('refund reaching amount moves to refunded', () => {\n  let o = applyPartialRefund(base, 70);\n  o = applyPartialRefund(o, 30);\n  expect(o.status).toBe('refunded');\n});\n\ntest('chargeback from paid → disputed; won returns to paid', () => {\n  let o = applyChargeback({ ...base, status: 'paid' }, 'fraud');\n  expect(o.status).toBe('disputed');\n  expect(o.pre_dispute_status).toBe('paid');\n  const back = applyChargebackWon(o);\n  expect(back.status).toBe('paid');\n});\n\ntest('chargeback from pending throws', () => {\n  expect(() => applyChargeback({ ...base, status: 'pending' }, 'r')).toThrow(InvalidTransitionError);\n});\n\ntest('EDGES is a data structure, not inlined', () => {\n  expect(typeof EDGES).toBe('object');\n  expect(EDGES.paid.has('disputed')).toBe(true);\n  expect(EDGES.refunded.size).toBe(0);\n});\nEOF\nnpm test --silent",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "refund overflow rejected",
+      "command": "cat > tests/overflow.test.js <<'EOF'\nconst { applyPartialRefund } = require('../src/orderState');\ntest('refund exceeding amount throws', () => {\n  expect(() => applyPartialRefund({ order_id: 'o3', amount: 100, refunded_total: 80, status: 'delivered' }, 30)).toThrow();\n});\nEOF\nnpm test --silent",
+      "expected_exit_code": 0
+    }
+  ],
+  "seeded_mistakes": [
+    {
+      "location": "src/orderState.js — chargeback_won wrong state",
+      "bug_description": "Compass may always return chargeback_won to 'paid' regardless of pre_dispute_status, breaking the 'delivered → disputed → won → delivered' path.",
+      "why_compass_might_suggest_it": "It's the most common starting state; storing pre_dispute_status feels like extra plumbing.",
+      "detection_signals": ["A hidden test would catch this if extended; surfaces in code review"]
+    },
+    {
+      "location": "src/orderState.js — refund overflow",
+      "bug_description": "Compass may forget to reject refunds that would push refunded_total over amount.",
+      "why_compass_might_suggest_it": "Happy-path code is shorter; overflow checks are the kind of edge case skipped under time pressure.",
+      "detection_signals": ["hidden test 'refund overflow rejected' fails"]
+    }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "All visible + hidden tests pass", "weight": 1.0, "expected_score": 9 },
+    { "dimension": "code_quality", "check": "Transitions live in EDGES table; no remaining switch statements in transition()", "weight": 0.9, "expected_score": 8 },
+    { "dimension": "verification_discipline", "check": "Learner runs legacy.test.js after each refactor step", "weight": 0.8, "expected_score": 7 },
+    { "dimension": "decomposition", "check": "Refactor is broken into: extract EDGES → swap transition() body → add applyPartialRefund → add chargeback funcs", "weight": 0.7, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Ask Compass to list all current transitions BEFORE refactoring",
+      "Ask whether disputed should remember the prior state"
+    ],
+    "common_verification_traps": [
+      "Trusting that 'legacy tests pass' means the refactor is right — refactor without changing behaviour is exactly when you need MORE tests, not fewer",
+      "Skipping the refund-overflow edge case"
+    ],
+    "decomposition_reference": [
+      "Enumerate existing transitions from the switch statement",
+      "Define EDGES table mirroring them",
+      "Replace switch body with EDGES lookup",
+      "Add applyPartialRefund",
+      "Add chargeback trio (apply, won, lost)",
+      "Verify legacy contract"
+    ]
+  },
+  "difficulty_signals": {
+    "token_count": 280,
+    "branching_complexity": 9,
+    "edge_cases": 12,
+    "known_hard_patterns": ["state-machine refactor", "behaviour-preserving rewrite", "data-driven design"]
+  },
+  "interview_parallel": "FAANG senior backend round — refactor with a behaviour-preserving contract is a staple.",
+  "content_hash": "capstone-swe-hard-order-state-v1"
+}
