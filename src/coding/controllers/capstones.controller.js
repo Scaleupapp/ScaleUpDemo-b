@@ -479,6 +479,96 @@ async function getSummary(req, res) {
 }
 
 /**
+ * GET /api/coding/capstones/history?limit=30&offset=0
+ *
+ * Paginated list of every graded capstone for the learner + headline
+ * trend stats. Powers the You-tab "All capstones" history and the
+ * Compass-tab drill-down.
+ */
+async function getHistory(req, res) {
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  const userId = req.user.userId;
+  const baseFilter = { user_id: userId, status: 'graded' };
+
+  const [items, total, allScores] = await Promise.all([
+    CapstoneSession.find(baseFilter)
+      .sort({ graded_at: -1 })
+      .skip(offset)
+      .limit(limit)
+      .populate('bundle_id', 'brief difficulty role_track time_budget_minutes language')
+      .lean(),
+    CapstoneSession.countDocuments(baseFilter),
+    CapstoneSession.find(baseFilter).select('result.overall_score graded_at').lean(),
+  ]);
+
+  const scores = allScores
+    .map((s) => s.result?.overall_score)
+    .filter((n) => typeof n === 'number');
+  const best = scores.length ? Math.max(...scores) : null;
+  const mean = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+
+  // Weekly score series for the last 8 weeks (oldest → newest).
+  const WEEKS = 8;
+  const now = Date.now();
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const weeklySeries = [];
+  for (let i = WEEKS - 1; i >= 0; i -= 1) {
+    const windowStart = now - (i + 1) * weekMs;
+    const windowEnd = now - i * weekMs;
+    const inWindow = allScores.filter((s) => {
+      const t = s.graded_at ? new Date(s.graded_at).getTime() : 0;
+      return t >= windowStart && t < windowEnd;
+    });
+    weeklySeries.push({
+      week_index_from_end: i,
+      count: inWindow.length,
+      mean_score: inWindow.length
+        ? Math.round(inWindow.reduce((a, b) => a + (b.result?.overall_score || 0), 0) / inWindow.length)
+        : null,
+    });
+  }
+
+  const DifficultyState = require('../models/difficultyState.model');
+  let UserObjective;
+  try { UserObjective = require('../../models/UserObjective'); } catch { UserObjective = require('../../models/userObjective'); }
+  const userObjective = await UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean();
+  const roleTrack = userObjective ? require('../services/codingEligibility').evaluateCodingEligibility(userObjective).role_track : null;
+  const diffState = roleTrack ? await DifficultyState.findOne({ user_id: userId, role_track: roleTrack }).lean() : null;
+
+  res.json({
+    items: items.map((s) => ({
+      session_id: String(s._id),
+      bundle_id: s.bundle_id?._id ? String(s.bundle_id._id) : null,
+      bundle_brief_preview: shortenBriefForHistory(s.bundle_id?.brief),
+      difficulty: s.bundle_id?.difficulty ?? null,
+      role_track: s.bundle_id?.role_track ?? null,
+      time_budget_minutes: s.bundle_id?.time_budget_minutes ?? null,
+      overall_score: s.result?.overall_score ?? null,
+      dimension_scores: s.result?.dimension_scores ?? null,
+      integrity_confidence: s.result?.integrity_confidence ?? null,
+      graded_at: s.graded_at,
+      is_retry: !!s.is_retry,
+    })),
+    pagination: { total, limit, offset, returned: items.length },
+    stats: {
+      total_attempts: total,
+      best_score: best,
+      mean_score: mean,
+      current_difficulty: diffState?.current_difficulty ?? null,
+      role_track: roleTrack,
+    },
+    weekly_series: weeklySeries,
+  });
+}
+
+function shortenBriefForHistory(brief) {
+  if (!brief) return '';
+  const oneLine = brief.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 140 ? oneLine.slice(0, 140) + '…' : oneLine;
+}
+
+/**
  * POST /api/coding/capstones/retry
  *
  * Start a fresh session against a bundle the learner has already graded.
@@ -580,6 +670,7 @@ module.exports = {
   persistFiles,
   getResult,
   getSummary,
+  getHistory,
   retry,
   requestNext,
 };

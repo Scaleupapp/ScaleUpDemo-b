@@ -74,6 +74,17 @@ function startCapstoneEvalWorker() {
     async (job) => {
       const { sessionId } = job.data;
       const result = await evaluator.evaluate({ sessionId });
+      // Post-grade recalibration — feeds capstone dimension scores into the
+      // same MetaSkillMastery + DifficultyState loop the drills already use.
+      // Must run BEFORE notifications so the level-up push reflects the
+      // freshly-bumped difficulty.
+      try {
+        const recalibrate = require('../services/capstonePostGradeRecalibrate');
+        await recalibrate.applyPostGradeRecalibrationForCapstone(sessionId);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`[capstone-eval] post-grade recalibration failed for ${sessionId}: ${err.message}`);
+      }
       // Post-grade notifications — non-fatal; never block the worker chain.
       try {
         const postGrade = require('../services/capstonePostGradeNotify');
