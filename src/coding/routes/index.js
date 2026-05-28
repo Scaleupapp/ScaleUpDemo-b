@@ -6,5 +6,6 @@ router.get('/health', (req, res) => res.json({ module: 'coding', status: 'ok' })
 router.use('/drills', require('./drills.routes'));
 router.use('/capstones', require('./capstones.routes'));
 router.use('/compass-coder', require('./compassCoder.routes'));
+router.use('/admin', require('./admin.routes'));
 
 module.exports = router;

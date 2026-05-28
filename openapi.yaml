@@ -7635,6 +7635,143 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  # =====================================================================
+  # Admin / ops dashboards (capstone quality gate — spec §14.2)
+  # =====================================================================
+  /api/coding/admin/anchor-drift:
+    get:
+      operationId: getCapstoneAnchorDrift
+      tags: [Coding]
+      summary: Anchor-drift dashboard (spec §8.3, §14.2 quality gate)
+      description: |
+        Returns the rolling-window drift rate vs the 5% target plus the
+        bundle/anchor pairs that drift most often. Admin-only.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: since_days
+          schema: { type: integer, default: 30 }
+      responses:
+        '200':
+          description: Drift snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [window_days, drift_rate, target_rate, target_met, by_bundle_anchor]
+                properties:
+                  window_days: { type: integer }
+                  total_graded: { type: integer }
+                  drifted_sessions: { type: integer }
+                  drift_rate: { type: number }
+                  target_rate: { type: number }
+                  target_met: { type: boolean }
+                  by_bundle_anchor:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        bundle_id: { type: string }
+                        anchor_id: { type: string }
+                        observations: { type: integer }
+                        mean_drift: { type: number }
+                        max_drift: { type: number }
+                        last_observed_at: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/coding/admin/human-review:
+    get:
+      operationId: getCapstoneHumanReviewQueue
+      tags: [Coding]
+      summary: List bundles flagged for human review (anchor-drift, validator fail)
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, rejected], default: pending }
+      responses:
+        '200':
+          description: Queue snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { type: object }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/coding/admin/cost-summary:
+    get:
+      operationId: getCapstoneCostSummary
+      tags: [Coding]
+      summary: Per-task LLM spend rollup + expensive-session list
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 30 }
+      responses:
+        '200':
+          description: Cost rollup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [window_days, total_cost_usd, by_task]
+                properties:
+                  window_days: { type: integer }
+                  total_cost_usd: { type: number }
+                  by_task:
+                    type: array
+                    items: { type: object }
+                  expensive_sessions:
+                    type: array
+                    items: { type: object }
+                  per_session_alert_threshold_usd: { type: number }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/coding/admin/recent-sessions:
+    get:
+      operationId: getCapstoneRecentSessions
+      tags: [Coding]
+      summary: Session counts by status over a recent window
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 7 }
+      responses:
+        '200':
+          description: Session stats
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [window_days, by_status]
+                properties:
+                  window_days: { type: integer }
+                  by_status: { type: object }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/coding/health:
     get:
       operationId: getCodingHealth

@@ -275,6 +275,11 @@ test('contract: capstone surface is complete', () => {
     'compassCoderTurn',
     'compassCoderResolve',
     'getCompassCoderBudget',
+    // Admin dashboards (WS9)
+    'getCapstoneAnchorDrift',
+    'getCapstoneHumanReviewQueue',
+    'getCapstoneCostSummary',
+    'getCapstoneRecentSessions',
   ];
 
   const allOperations = new Set();
