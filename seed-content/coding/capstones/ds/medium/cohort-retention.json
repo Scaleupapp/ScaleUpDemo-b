@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "ds",
+  "language": "python",
+  "stack_variant": "python-data",
+  "difficulty": "medium",
+  "time_budget_minutes": 75,
+  "brief": "DATA-3041 — Build the weekly cohort retention pipeline\n\nGrowth wants a weekly cohort retention table they can chart. You're given an `events.csv` (columns: user_id, event_at) where each row is a 'session' event. Build `cohort_retention(events: list[dict], reference_week: date | None = None) -> dict` that returns:\n\n```\n{\n  'cohort_size': { 'YYYY-WW': n },\n  'retention': {\n    'YYYY-WW (cohort week)': {\n      'week_0_pct': 1.0,\n      'week_1_pct': 0.0..1.0,\n      ... up to week_7_pct\n    }\n  }\n}\n```\n\nDefinitions:\n- A user's cohort = ISO calendar week of their FIRST session.\n- `week_k_pct` = (# users from that cohort who had ≥1 session in week k) / cohort_size.\n- Track up to 8 weeks (week_0 through week_7).\n- If `reference_week` is given, only include cohorts whose week_0 falls in the trailing 12 weeks of reference_week.\n\nUse only the stdlib (`datetime`, `collections`). The data may be up to ~50k rows.",
+  "acceptance_criteria": [
+    "cohort_size keyed by ISO week (YYYY-WW)",
+    "retention contains week_0_pct (= 1.0) through week_7_pct",
+    "Out-of-cohort users (no event in week k) are not counted",
+    "reference_week filter narrows cohorts to the trailing 12 weeks",
+    "Pipeline handles ~50k events in <2s on the eval sandbox"
+  ],
+  "starter_repo": {
+    "files": [
+      { "path": "requirements.txt", "content": "pytest==8.3.3\n" },
+      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/cohorts.py", "content": "\"\"\"Cohort retention — implement cohort_retention().\"\"\"\nfrom datetime import date, datetime\nfrom typing import Optional\n\n\ndef cohort_retention(events: list, reference_week: Optional[date] = None) -> dict:\n    # TODO\n    return {'cohort_size': {}, 'retention': {}}\n" },
+      { "path": "tests/baseline_test.py", "content": "from src.cohorts import cohort_retention\n\ndef test_baseline_shape():\n    out = cohort_retention([])\n    assert 'cohort_size' in out and 'retention' in out\n" }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      { "path": "src/cohorts.py", "content": "from collections import defaultdict\nfrom datetime import date, datetime, timedelta\nfrom typing import Optional\n\n_WEEKS_TRACKED = 8\n_TRAILING_WEEKS = 12\n\n\ndef _to_iso_week(d: datetime) -> str:\n    iso = d.isocalendar()\n    return f\"{iso.year}-{iso.week:02d}\"\n\n\ndef _parse_dt(v) -> datetime:\n    if isinstance(v, datetime):\n        return v\n    if isinstance(v, date):\n        return datetime(v.year, v.month, v.day)\n    return datetime.fromisoformat(str(v).replace('Z', '+00:00')).replace(tzinfo=None)\n\n\ndef _iso_week_minus(d: date, weeks: int) -> date:\n    return d - timedelta(weeks=weeks)\n\n\ndef cohort_retention(events: list, reference_week: Optional[date] = None) -> dict:\n    by_user_weeks: dict[str, set] = defaultdict(set)\n    first_week: dict[str, str] = {}\n\n    for ev in events:\n        uid = ev['user_id']\n        dt = _parse_dt(ev['event_at'])\n        wk = _to_iso_week(dt)\n        by_user_weeks[uid].add(wk)\n        if uid not in first_week or wk < first_week[uid]:\n            first_week[uid] = wk\n\n    # Cohort: first_week → users.\n    cohorts: dict[str, list] = defaultdict(list)\n    for uid, w in first_week.items():\n        cohorts[w].append(uid)\n\n    # Optional trailing-12-weeks filter.\n    if reference_week is not None:\n        cutoff = _to_iso_week(_parse_dt(_iso_week_minus(reference_week, _TRAILING_WEEKS)))\n        cohorts = {k: v for k, v in cohorts.items() if k >= cutoff}\n\n    cohort_size = {k: len(v) for k, v in cohorts.items()}\n\n    # Index of week-after-cohort: pre-compute next-week strings.\n    retention = {}\n    for cohort_wk, users in cohorts.items():\n        sz = len(users)\n        row = {}\n        for k in range(_WEEKS_TRACKED):\n            target_wk = _shift_iso_week(cohort_wk, k)\n            count = sum(1 for u in users if target_wk in by_user_weeks[u])\n            row[f'week_{k}_pct'] = (count / sz) if sz > 0 else 0.0\n        retention[cohort_wk] = row\n\n    return {'cohort_size': cohort_size, 'retention': retention}\n\n\ndef _shift_iso_week(yyyyww: str, weeks: int) -> str:\n    year, wk = yyyyww.split('-')\n    # Approximate: take Monday of the ISO week, shift, return.\n    monday = datetime.fromisocalendar(int(year), int(wk), 1) + timedelta(weeks=weeks)\n    return _to_iso_week(monday)\n" }
+    ]
+  },
+  "visible_tests": [
+    { "name": "install + baseline", "command": "pip install -q -r requirements.txt && python -m pytest tests/baseline_test.py -q", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "hidden_tests": [
+    { "name": "retention semantics", "command": "pip install -q -r requirements.txt && cat > tests/hidden_test.py <<'EOF'\nfrom datetime import datetime, date\nfrom src.cohorts import cohort_retention\n\ndef test_single_user_returning_next_week():\n    events = [\n        {'user_id': 'u1', 'event_at': '2026-01-05T10:00:00'},  # Mon week 2\n        {'user_id': 'u1', 'event_at': '2026-01-13T10:00:00'},  # Tue week 3\n    ]\n    out = cohort_retention(events)\n    cohort_wk = list(out['cohort_size'].keys())[0]\n    assert out['cohort_size'][cohort_wk] == 1\n    assert out['retention'][cohort_wk]['week_0_pct'] == 1.0\n    assert out['retention'][cohort_wk]['week_1_pct'] == 1.0\n    assert out['retention'][cohort_wk]['week_2_pct'] == 0.0\n\ndef test_cohort_assignment_uses_first_event():\n    events = [\n        {'user_id': 'u1', 'event_at': '2026-01-05T10:00:00'},  # week 2\n        {'user_id': 'u1', 'event_at': '2026-01-12T10:00:00'},  # week 3\n        {'user_id': 'u2', 'event_at': '2026-01-12T10:00:00'},  # week 3 — u2 cohort\n    ]\n    out = cohort_retention(events)\n    # u1 cohort = week 2 (size 1), u2 cohort = week 3 (size 1)\n    assert sum(out['cohort_size'].values()) == 2\n    assert all(sz == 1 for sz in out['cohort_size'].values())\nEOF\npython -m pytest tests/hidden_test.py -q", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "seeded_mistakes": [
+    { "location": "src/cohorts.py — cohort assignment", "bug_description": "Compass may assign cohort by min(event_at).week using a naive `datetime.date.weekday()` calc instead of ISO week, leading to year-boundary bugs.", "why_compass_might_suggest_it": "ISO week edge cases (week 52/53/01) aren't on most engineers' radar.", "detection_signals": ["cohort_size off by 1 on year-boundary inputs"] },
+    { "location": "src/cohorts.py — week_k math", "bug_description": "Compass may compute week_k by adding 7*k days to first event date instead of shifting the ISO week, drifting by a day near DST transitions.", "why_compass_might_suggest_it": "Date arithmetic feels more natural than ISO-week arithmetic.", "detection_signals": ["week_1_pct misses by ~5% on the synthetic test"] }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "ISO weeks correct, week_k semantics correct", "weight": 1.0, "expected_score": 8 },
+    { "dimension": "decomposition", "check": "Cohorts indexed by first_week; week_k is membership not just-presence", "weight": 0.8, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "ISO week + shift helpers isolated, no inline date math", "weight": 0.6, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "How is 'week k' defined — calendar weeks relative to the cohort week, or days since first event?",
+      "What about users with only a single event — do they show up in week_0 and zero elsewhere?",
+      "Are inactive cohorts (sz=0) included in the output?"
+    ],
+    "common_verification_traps": [
+      "Skipping the year-boundary edge case (ISO week 53)",
+      "Not verifying retention is membership-based, not event-count-based"
+    ],
+    "decomposition_reference": [
+      "Parse + ISO-weekify all events",
+      "first_week per user",
+      "Group users into cohorts",
+      "For each (cohort, week_k) count distinct users present",
+      "Optional reference-week filter"
+    ]
+  },
+  "difficulty_signals": { "token_count": 220, "branching_complexity": 6, "edge_cases": 7, "known_hard_patterns": ["ISO week arithmetic"] },
+  "interview_parallel": "Meta / Spotify DS take-homes — cohort retention is the #1 'show me your data skills' question.",
+  "content_hash": "capstone-ds-medium-cohort-retention-v1"
+}

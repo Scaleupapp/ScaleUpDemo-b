@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "swe",
+  "language": "javascript",
+  "stack_variant": "node-express",
+  "difficulty": "medium",
+  "time_budget_minutes": 75,
+  "brief": "PROD-3812 — Add idempotency keys to POST /api/payments\n\nClients sometimes retry payment requests after timeouts, which is currently creating duplicate charges. Implement an Idempotency-Key header so retries with the same key return the prior result instead of charging twice.\n\n- Accept `Idempotency-Key: <uuid>` header on POST /api/payments.\n- First call with a key: process payment normally, persist the result keyed by the idempotency key.\n- Subsequent calls with the same key + same body: return the cached response (same status code + body).\n- Same key with a DIFFERENT body: return 422 `{ error: 'idempotency_key_mismatch' }`.\n- Missing key: behave as today (process, no caching) — backward compat.\n- TTL the cache entries to 24h (use an in-memory Map for the MVP; production would use Redis).\n\nDon't change the payment processor — just wrap it.",
+  "acceptance_criteria": [
+    "Same Idempotency-Key + same body returns identical response on retry",
+    "Same Idempotency-Key + different body returns 422 idempotency_key_mismatch",
+    "Missing Idempotency-Key processes normally (backward compat)",
+    "Cache entries expire after 24 hours",
+    "All baseline tests still pass"
+  ],
+  "starter_repo": {
+    "files": [
+      { "path": "package.json", "content": "{\n  \"name\": \"idempotent-payments\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"scripts\": { \"test\": \"jest --silent\" },\n  \"devDependencies\": { \"jest\": \"^29.7.0\", \"supertest\": \"^7.0.0\" },\n  \"dependencies\": { \"express\": \"^4.21.0\" }\n}\n" },
+      { "path": "src/processor.js", "content": "'use strict';\nlet counter = 0;\nasync function charge({ amount_cents, currency }) {\n  counter += 1;\n  return { charge_id: `ch_${counter}_${Date.now()}`, amount_cents, currency, status: 'succeeded' };\n}\nmodule.exports = { charge, _reset: () => { counter = 0; } };\n" },
+      { "path": "src/server.js", "content": "'use strict';\nconst express = require('express');\nconst processor = require('./processor');\n\nfunction makeApp() {\n  const app = express();\n  app.use(express.json());\n\n  // TODO: add idempotency-key handling.\n  app.post('/api/payments', async (req, res) => {\n    const { amount_cents, currency } = req.body || {};\n    if (!Number.isInteger(amount_cents) || amount_cents <= 0) {\n      return res.status(400).json({ error: 'invalid_amount' });\n    }\n    const result = await processor.charge({ amount_cents, currency });\n    res.status(201).json(result);\n  });\n\n  return app;\n}\n\nmodule.exports = { makeApp };\n" },
+      { "path": "tests/baseline.test.js", "content": "const request = require('supertest');\nconst { makeApp } = require('../src/server');\nconst processor = require('../src/processor');\n\nbeforeEach(() => processor._reset());\n\ntest('baseline: charges create unique ids', async () => {\n  const app = makeApp();\n  const a = await request(app).post('/api/payments').send({ amount_cents: 100, currency: 'INR' });\n  const b = await request(app).post('/api/payments').send({ amount_cents: 100, currency: 'INR' });\n  expect(a.body.charge_id).not.toBe(b.body.charge_id);\n});\n" }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      { "path": "src/server.js", "content": "'use strict';\nconst express = require('express');\nconst processor = require('./processor');\n\nconst TTL_MS = 24 * 60 * 60 * 1000;\nconst cache = new Map(); // key -> { bodyHash, response, status, expiresAt }\n\nfunction hashBody(b) { return JSON.stringify(b || {}); }\n\nfunction sweep() {\n  const now = Date.now();\n  for (const [k, v] of cache) if (v.expiresAt < now) cache.delete(k);\n}\n\nfunction makeApp() {\n  const app = express();\n  app.use(express.json());\n\n  app.post('/api/payments', async (req, res) => {\n    const { amount_cents, currency } = req.body || {};\n    if (!Number.isInteger(amount_cents) || amount_cents <= 0) {\n      return res.status(400).json({ error: 'invalid_amount' });\n    }\n    const key = req.get('Idempotency-Key');\n    if (key) {\n      sweep();\n      const cached = cache.get(key);\n      const bodyHash = hashBody(req.body);\n      if (cached) {\n        if (cached.bodyHash !== bodyHash) {\n          return res.status(422).json({ error: 'idempotency_key_mismatch' });\n        }\n        return res.status(cached.status).json(cached.response);\n      }\n      const result = await processor.charge({ amount_cents, currency });\n      cache.set(key, { bodyHash, response: result, status: 201, expiresAt: Date.now() + TTL_MS });\n      return res.status(201).json(result);\n    }\n    const result = await processor.charge({ amount_cents, currency });\n    res.status(201).json(result);\n  });\n\n  return app;\n}\n\nmodule.exports = { makeApp };\n" }
+    ]
+  },
+  "visible_tests": [
+    { "name": "install + baseline", "command": "npm install --silent --no-audit --no-fund && npm test --silent", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "hidden_tests": [
+    { "name": "idempotency semantics", "command": "npm install --silent --no-audit --no-fund && cat > tests/hidden.test.js <<'EOF'\nconst request = require('supertest');\nconst { makeApp } = require('../src/server');\nconst processor = require('../src/processor');\n\nbeforeEach(() => processor._reset());\n\ntest('same key + same body returns cached response', async () => {\n  const app = makeApp();\n  const a = await request(app).post('/api/payments').set('Idempotency-Key', 'k1').send({ amount_cents: 200, currency: 'INR' });\n  const b = await request(app).post('/api/payments').set('Idempotency-Key', 'k1').send({ amount_cents: 200, currency: 'INR' });\n  expect(a.body.charge_id).toBe(b.body.charge_id);\n});\n\ntest('same key + different body returns 422', async () => {\n  const app = makeApp();\n  await request(app).post('/api/payments').set('Idempotency-Key', 'k2').send({ amount_cents: 200, currency: 'INR' });\n  const r = await request(app).post('/api/payments').set('Idempotency-Key', 'k2').send({ amount_cents: 999, currency: 'INR' });\n  expect(r.status).toBe(422);\n  expect(r.body.error).toBe('idempotency_key_mismatch');\n});\n\ntest('missing key still works', async () => {\n  const app = makeApp();\n  const r = await request(app).post('/api/payments').send({ amount_cents: 100, currency: 'INR' });\n  expect(r.status).toBe(201);\n});\nEOF\nnpm test --silent", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "seeded_mistakes": [
+    { "location": "src/server.js — body comparison", "bug_description": "Compass may use deep-equal on req.body objects without serializing first, missing key-order differences.", "why_compass_might_suggest_it": "Object equality looks 'good enough' until you hit JSON whose key order varies.", "detection_signals": ["422 path passes inconsistently"] },
+    { "location": "src/server.js — TTL", "bug_description": "Compass may forget the sweep, letting the cache grow without bound.", "why_compass_might_suggest_it": "Tests don't directly assert on memory.", "detection_signals": ["no test fails, but memory profile grows linearly"] }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "All visible + hidden tests pass", "weight": 1.0, "expected_score": 9 },
+    { "dimension": "verification_discipline", "check": "Runs tests after each change; explicitly tests the 422 path", "weight": 0.8, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "Cache key + body hash logic is isolated, TTL named", "weight": 0.6, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "What should happen on a key collision with different bodies?",
+      "How long should the idempotency window be?",
+      "What's the contract for the response on a duplicate call — same status code too?"
+    ],
+    "common_verification_traps": [
+      "Forgetting to verify 422 mismatch path",
+      "Not exercising the backward-compat missing-key path"
+    ],
+    "decomposition_reference": [
+      "Parse + validate body",
+      "Read Idempotency-Key header",
+      "Hash body for comparison",
+      "Look up cache, sweep TTLs",
+      "Branch: hit (same body) / mismatch / miss"
+    ]
+  },
+  "difficulty_signals": { "token_count": 180, "branching_complexity": 6, "edge_cases": 6, "known_hard_patterns": ["TTL cache without time injection"] },
+  "interview_parallel": "Stripe / Razorpay backend onsite — idempotency keys come up in nearly every payments take-home.",
+  "content_hash": "capstone-swe-medium-idempotent-payments-v1"
+}

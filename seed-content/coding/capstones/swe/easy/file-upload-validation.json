@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "swe",
+  "language": "javascript",
+  "stack_variant": "node-express",
+  "difficulty": "easy",
+  "time_budget_minutes": 60,
+  "brief": "PROD-1422 — Tighten POST /api/uploads validation\n\nWe currently accept any file on POST /api/uploads, which has led to a couple of incidents (16MB jpegs from camera apps, .exe files renamed to .png). Add validation to the existing route:\n\n- Accept only these MIME types: `image/jpeg`, `image/png`, `image/webp`. Anything else → 415 `{ error: 'unsupported_type' }`.\n- Reject files larger than 5 MB → 413 `{ error: 'file_too_large' }`.\n- Reject if `filename` is missing or contains path separators (`/` or `\\`) → 400 `{ error: 'invalid_filename' }`.\n- The handler currently just echoes the metadata; keep that behaviour after validation passes.\n\nDon't add new dependencies — use Express's body parser only.",
+  "acceptance_criteria": [
+    "MIME types outside the allowlist return 415 unsupported_type",
+    "Files > 5MB return 413 file_too_large",
+    "Missing or path-traversal filenames return 400 invalid_filename",
+    "Valid uploads echo metadata as before (200)",
+    "All baseline tests still pass"
+  ],
+  "starter_repo": {
+    "files": [
+      { "path": "package.json", "content": "{\n  \"name\": \"upload-validation\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"scripts\": { \"test\": \"jest --silent\" },\n  \"devDependencies\": { \"jest\": \"^29.7.0\", \"supertest\": \"^7.0.0\" },\n  \"dependencies\": { \"express\": \"^4.21.0\" }\n}\n" },
+      { "path": "src/server.js", "content": "'use strict';\nconst express = require('express');\n\nfunction makeApp() {\n  const app = express();\n  app.use(express.json({ limit: '20mb' }));\n\n  app.post('/api/uploads', (req, res) => {\n    const { filename, content_type, size_bytes } = req.body || {};\n    // TODO: add validation.\n    res.status(200).json({ stored: { filename, content_type, size_bytes } });\n  });\n\n  return app;\n}\n\nmodule.exports = { makeApp };\n" },
+      { "path": "tests/baseline.test.js", "content": "const request = require('supertest');\nconst { makeApp } = require('../src/server');\n\ntest('baseline: valid upload metadata echoed', async () => {\n  const app = makeApp();\n  const res = await request(app).post('/api/uploads').send({ filename: 'a.png', content_type: 'image/png', size_bytes: 1024 });\n  expect(res.status).toBe(200);\n});\n" }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      { "path": "src/server.js", "content": "'use strict';\nconst express = require('express');\n\nconst ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);\nconst MAX_BYTES = 5 * 1024 * 1024;\n\nfunction validFilename(name) {\n  if (typeof name !== 'string' || name.length === 0) return false;\n  if (name.includes('/') || name.includes('\\\\')) return false;\n  return true;\n}\n\nfunction makeApp() {\n  const app = express();\n  app.use(express.json({ limit: '20mb' }));\n\n  app.post('/api/uploads', (req, res) => {\n    const { filename, content_type, size_bytes } = req.body || {};\n    if (!validFilename(filename)) {\n      return res.status(400).json({ error: 'invalid_filename' });\n    }\n    if (!ALLOWED_TYPES.has(content_type)) {\n      return res.status(415).json({ error: 'unsupported_type' });\n    }\n    if (!Number.isFinite(size_bytes) || size_bytes > MAX_BYTES) {\n      return res.status(413).json({ error: 'file_too_large' });\n    }\n    res.status(200).json({ stored: { filename, content_type, size_bytes } });\n  });\n\n  return app;\n}\n\nmodule.exports = { makeApp };\n" }
+    ]
+  },
+  "visible_tests": [
+    { "name": "install + baseline", "command": "npm install --silent --no-audit --no-fund && npm test --silent", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "hidden_tests": [
+    { "name": "validation", "command": "npm install --silent --no-audit --no-fund && cat > tests/hidden.test.js <<'EOF'\nconst request = require('supertest');\nconst { makeApp } = require('../src/server');\n\nconst app = makeApp();\n\ntest('rejects unsupported type', async () => {\n  const r = await request(app).post('/api/uploads').send({ filename: 'a.exe', content_type: 'application/octet-stream', size_bytes: 100 });\n  expect(r.status).toBe(415);\n  expect(r.body.error).toBe('unsupported_type');\n});\n\ntest('rejects file > 5MB', async () => {\n  const r = await request(app).post('/api/uploads').send({ filename: 'a.png', content_type: 'image/png', size_bytes: 6 * 1024 * 1024 });\n  expect(r.status).toBe(413);\n  expect(r.body.error).toBe('file_too_large');\n});\n\ntest('rejects path traversal filename', async () => {\n  const r = await request(app).post('/api/uploads').send({ filename: '../etc/passwd', content_type: 'image/png', size_bytes: 100 });\n  expect(r.status).toBe(400);\n  expect(r.body.error).toBe('invalid_filename');\n});\n\ntest('accepts valid upload', async () => {\n  const r = await request(app).post('/api/uploads').send({ filename: 'a.png', content_type: 'image/png', size_bytes: 1024 });\n  expect(r.status).toBe(200);\n});\nEOF\nnpm test --silent", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "seeded_mistakes": [
+    { "location": "src/server.js — order of checks", "bug_description": "Compass may check size before MIME, leaking a 413 message for an .exe upload that's also large.", "why_compass_might_suggest_it": "Order rarely matters... until it does (info leak).", "detection_signals": ["status code on (.exe, 6MB) is 413 not 415"] },
+    { "location": "src/server.js — filename validation", "bug_description": "Compass may use `path.basename()` to sanitize instead of rejecting outright, letting `..%2F..%2Fetc%2Fpasswd` slip through if a parser ever URL-decodes.", "why_compass_might_suggest_it": "Sanitize feels more permissive / friendly.", "detection_signals": ["test_rejects_path_traversal fails (200 instead of 400)"] }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "All three rejection paths return the right status + error key", "weight": 1.0, "expected_score": 9 },
+    { "dimension": "verification_discipline", "check": "Filename rejected (not sanitised); MIME allowlist not blocklist — exercises traversal + boundary cases", "weight": 0.8, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "Constants extracted, helper for filename validation", "weight": 0.5, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Should I allowlist or blocklist MIME types?",
+      "What's the right status code for too-large vs wrong-type?",
+      "Sanitize the filename or reject it outright?"
+    ],
+    "common_verification_traps": [
+      "Forgetting to test the path-traversal filename case",
+      "Not testing exactly at the 5MB boundary"
+    ],
+    "decomposition_reference": [
+      "Filename guard",
+      "MIME allowlist check",
+      "Size guard",
+      "Echo metadata on pass"
+    ]
+  },
+  "difficulty_signals": { "token_count": 130, "branching_complexity": 4, "edge_cases": 5, "known_hard_patterns": [] },
+  "interview_parallel": "Razorpay / Cleartrip backend take-home — file upload validation comes up in nearly every 'add this feature' round.",
+  "content_hash": "capstone-swe-easy-file-upload-validation-v1"
+}

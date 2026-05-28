@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "ds",
+  "language": "python",
+  "stack_variant": "python-data",
+  "difficulty": "easy",
+  "time_budget_minutes": 60,
+  "brief": "DATA-1208 — Wire up an A/B test significance calculator for the growth dashboard\n\nThe growth team runs ~5 experiments per week and currently asks data manually whether a result is 'significant.' Build a small module that takes the control + treatment outcomes and returns the per-variant conversion rate plus a two-proportion z-test verdict.\n\nImplement `analyze(control: Variant, treatment: Variant, alpha: float = 0.05) -> AnalysisResult` in `src/abtest.py` where `Variant = {'visitors': int, 'conversions': int}` and `AnalysisResult` is a dict with keys: `control_rate`, `treatment_rate`, `lift`, `z_score`, `p_value`, `significant`.\n\nUse a two-tailed two-proportion z-test. Use only `math` from the stdlib (no scipy).\n\nGuardrails:\n- Reject pre-checks: if `visitors == 0` for either variant, raise ValueError.\n- `significant = p_value < alpha`.\n- `lift = (treatment_rate - control_rate) / control_rate` (relative lift).\n- p_value via two-tailed normal CDF approximation (use `math.erf`).",
+  "acceptance_criteria": [
+    "analyze returns control_rate, treatment_rate, lift, z_score, p_value, significant",
+    "p_value is computed via two-tailed z-test using math.erf (no scipy)",
+    "significant flag flips based on the alpha argument",
+    "Visitors=0 raises ValueError",
+    "Baseline test still passes"
+  ],
+  "starter_repo": {
+    "files": [
+      { "path": "requirements.txt", "content": "pytest==8.3.3\n" },
+      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/abtest.py", "content": "\"\"\"A/B test significance — implement analyze().\"\"\"\nimport math\nfrom typing import TypedDict\n\n\nclass Variant(TypedDict):\n    visitors: int\n    conversions: int\n\n\ndef analyze(control: Variant, treatment: Variant, alpha: float = 0.05) -> dict:\n    # TODO: replace this stub with the real z-test.\n    return {\n        'control_rate': 0.0,\n        'treatment_rate': 0.0,\n        'lift': 0.0,\n        'z_score': 0.0,\n        'p_value': 1.0,\n        'significant': False,\n    }\n" },
+      { "path": "tests/baseline_test.py", "content": "from src.abtest import analyze\n\ndef test_baseline_returns_shape():\n    out = analyze({'visitors': 100, 'conversions': 10}, {'visitors': 100, 'conversions': 12})\n    for k in ('control_rate', 'treatment_rate', 'lift', 'z_score', 'p_value', 'significant'):\n        assert k in out\n" }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      { "path": "src/abtest.py", "content": "import math\nfrom typing import TypedDict\n\n\nclass Variant(TypedDict):\n    visitors: int\n    conversions: int\n\n\ndef _norm_cdf(x: float) -> float:\n    return 0.5 * (1 + math.erf(x / math.sqrt(2)))\n\n\ndef analyze(control: Variant, treatment: Variant, alpha: float = 0.05) -> dict:\n    if control['visitors'] <= 0 or treatment['visitors'] <= 0:\n        raise ValueError('visitors must be > 0 for both variants')\n    pc = control['conversions'] / control['visitors']\n    pt = treatment['conversions'] / treatment['visitors']\n    pooled = (control['conversions'] + treatment['conversions']) / (control['visitors'] + treatment['visitors'])\n    se = math.sqrt(pooled * (1 - pooled) * (1 / control['visitors'] + 1 / treatment['visitors']))\n    z = 0.0 if se == 0 else (pt - pc) / se\n    p_two_tailed = 2 * (1 - _norm_cdf(abs(z)))\n    lift = 0.0 if pc == 0 else (pt - pc) / pc\n    return {\n        'control_rate': pc,\n        'treatment_rate': pt,\n        'lift': lift,\n        'z_score': z,\n        'p_value': p_two_tailed,\n        'significant': p_two_tailed < alpha,\n    }\n" }
+    ]
+  },
+  "visible_tests": [
+    { "name": "install + baseline", "command": "pip install -q -r requirements.txt && python -m pytest tests/baseline_test.py -q", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "hidden_tests": [
+    { "name": "z-test correctness", "command": "pip install -q -r requirements.txt && cat > tests/hidden_test.py <<'EOF'\nimport pytest\nfrom src.abtest import analyze\n\ndef test_clear_winner_is_significant():\n    out = analyze({'visitors': 10000, 'conversions': 500}, {'visitors': 10000, 'conversions': 800})\n    assert out['significant'] is True\n    assert out['z_score'] > 5  # roughly\n    assert out['lift'] > 0.5\n\ndef test_no_effect_not_significant():\n    out = analyze({'visitors': 1000, 'conversions': 100}, {'visitors': 1000, 'conversions': 101})\n    assert out['significant'] is False\n\ndef test_zero_visitors_raises():\n    with pytest.raises(ValueError):\n        analyze({'visitors': 0, 'conversions': 0}, {'visitors': 100, 'conversions': 10})\n\ndef test_alpha_threshold():\n    # Marginal result that's significant at .10 but not .01.\n    out_loose = analyze({'visitors': 500, 'conversions': 50}, {'visitors': 500, 'conversions': 65}, alpha=0.10)\n    out_strict = analyze({'visitors': 500, 'conversions': 50}, {'visitors': 500, 'conversions': 65}, alpha=0.01)\n    assert out_loose['significant'] is True\n    assert out_strict['significant'] is False\nEOF\npython -m pytest tests/hidden_test.py -q", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "seeded_mistakes": [
+    { "location": "src/abtest.py — pooled variance", "bug_description": "Compass may use each variant's own variance for SE instead of pooled. Off by a small amount.", "why_compass_might_suggest_it": "Welch's t-test pattern is more common in stats tutorials than two-proportion z.", "detection_signals": ["marginal alpha threshold tests fail"] },
+    { "location": "src/abtest.py — one-tailed vs two-tailed", "bug_description": "Compass may emit one-tailed p-value (forgot the *2).", "why_compass_might_suggest_it": "math.erf naturally maps to one-tailed CDF.", "detection_signals": ["test_clear_winner returns half the expected significance"] }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "z, p, lift, significant all correct", "weight": 1.0, "expected_score": 9 },
+    { "dimension": "decomposition", "check": "Uses pooled-variance SE, two-tailed p-value — formula decomposed correctly", "weight": 0.9, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "Helpers extracted (_norm_cdf), no magic numbers", "weight": 0.5, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Why pooled-proportion variance vs separate variances?",
+      "One-tailed or two-tailed?",
+      "What's a reasonable alpha to default to?"
+    ],
+    "common_verification_traps": [
+      "Skipping the zero-visitors edge case",
+      "Not testing both alpha=0.01 and alpha=0.10 to confirm threshold logic"
+    ],
+    "decomposition_reference": [
+      "Per-variant conversion rate",
+      "Pooled SE",
+      "Z-score",
+      "Two-tailed p via erf",
+      "Significant flag from alpha"
+    ]
+  },
+  "difficulty_signals": { "token_count": 130, "branching_complexity": 3, "edge_cases": 4, "known_hard_patterns": [] },
+  "interview_parallel": "Meta / Atlassian DS take-home — A/B significance helpers are nearly universal.",
+  "content_hash": "capstone-ds-easy-ab-test-significance-v1"
+}

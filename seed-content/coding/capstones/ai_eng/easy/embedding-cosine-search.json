@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "ai_eng",
+  "language": "python",
+  "stack_variant": "python-llm",
+  "difficulty": "easy",
+  "time_budget_minutes": 60,
+  "brief": "AI-1108 — Build a tiny semantic search index\n\nYou're given ~200 docs already embedded (vectors in JSON). Build a `Searcher` class exposing:\n\n- `Searcher(docs: list[Doc])` — `Doc = {'id': str, 'text': str, 'embedding': list[float]}`\n- `Searcher.search(query_embedding: list[float], k: int = 5) -> list[Hit]` — `Hit = {'id': str, 'text': str, 'score': float}` sorted by descending cosine similarity\n- `Searcher.search_by_text(query: str, embed: Callable[[str], list[float]], k: int = 5) -> list[Hit]` — convenience that runs `embed(query)` first\n\nRules:\n- Implement cosine similarity yourself (no numpy, no sklearn). Use the stdlib `math` module.\n- Validate inputs: empty docs list raises ValueError. Vectors of mismatched length raise ValueError (with a helpful message).\n- Score is a float in [-1, 1]. Don't normalize the score at the end — that's already what cosine returns.",
+  "acceptance_criteria": [
+    "Searcher.search returns k hits ordered by descending cosine score",
+    "search_by_text composes embed() + search() correctly",
+    "Empty docs raises ValueError",
+    "Vector length mismatch raises ValueError",
+    "Cosine is computed correctly (no numpy)"
+  ],
+  "starter_repo": {
+    "files": [
+      { "path": "requirements.txt", "content": "pytest==8.3.3\n" },
+      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/searcher.py", "content": "\"\"\"Tiny semantic search index.\"\"\"\nfrom typing import Callable\n\n\nclass Searcher:\n    def __init__(self, docs: list):\n        self._docs = docs\n\n    def search(self, query_embedding: list, k: int = 5) -> list:\n        # TODO\n        return []\n\n    def search_by_text(self, query: str, embed: Callable[[str], list], k: int = 5) -> list:\n        # TODO\n        return []\n" },
+      { "path": "tests/baseline_test.py", "content": "from src.searcher import Searcher\n\ndef test_baseline_constructs():\n    s = Searcher([{'id': 'a', 'text': 'hi', 'embedding': [1.0, 0.0]}])\n    assert s is not None\n" }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      { "path": "src/searcher.py", "content": "import math\nfrom typing import Callable\n\n\ndef _cosine(a: list, b: list) -> float:\n    if len(a) != len(b):\n        raise ValueError(f'vector length mismatch: {len(a)} vs {len(b)}')\n    dot = sum(x * y for x, y in zip(a, b))\n    na = math.sqrt(sum(x * x for x in a))\n    nb = math.sqrt(sum(y * y for y in b))\n    if na == 0 or nb == 0:\n        return 0.0\n    return dot / (na * nb)\n\n\nclass Searcher:\n    def __init__(self, docs: list):\n        if not docs:\n            raise ValueError('docs must not be empty')\n        self._docs = docs\n\n    def search(self, query_embedding: list, k: int = 5) -> list:\n        scored = [\n            {'id': d['id'], 'text': d['text'], 'score': _cosine(query_embedding, d['embedding'])}\n            for d in self._docs\n        ]\n        scored.sort(key=lambda h: h['score'], reverse=True)\n        return scored[:k]\n\n    def search_by_text(self, query: str, embed: Callable[[str], list], k: int = 5) -> list:\n        return self.search(embed(query), k)\n" }
+    ]
+  },
+  "visible_tests": [
+    { "name": "install + baseline", "command": "pip install -q -r requirements.txt && python -m pytest tests/baseline_test.py -q", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "hidden_tests": [
+    { "name": "cosine semantics", "command": "pip install -q -r requirements.txt && cat > tests/hidden_test.py <<'EOF'\nimport math\nimport pytest\nfrom src.searcher import Searcher\n\nDOCS = [\n    {'id': 'a', 'text': 'a', 'embedding': [1.0, 0.0, 0.0]},\n    {'id': 'b', 'text': 'b', 'embedding': [0.0, 1.0, 0.0]},\n    {'id': 'c', 'text': 'c', 'embedding': [1.0, 1.0, 0.0]},\n]\n\ndef test_top_hit_for_perfect_match():\n    s = Searcher(DOCS)\n    hits = s.search([1.0, 0.0, 0.0], k=3)\n    assert hits[0]['id'] == 'a'\n    assert math.isclose(hits[0]['score'], 1.0, abs_tol=1e-6)\n\ndef test_results_sorted_descending():\n    s = Searcher(DOCS)\n    hits = s.search([1.0, 0.5, 0.0], k=3)\n    scores = [h['score'] for h in hits]\n    assert scores == sorted(scores, reverse=True)\n\ndef test_empty_docs_raises():\n    with pytest.raises(ValueError):\n        Searcher([])\n\ndef test_vector_length_mismatch_raises():\n    s = Searcher(DOCS)\n    with pytest.raises(ValueError):\n        s.search([1.0, 0.0], k=2)\n\ndef test_search_by_text_composes():\n    s = Searcher(DOCS)\n    hits = s.search_by_text('whatever', embed=lambda q: [0.0, 1.0, 0.0], k=1)\n    assert hits[0]['id'] == 'b'\nEOF\npython -m pytest tests/hidden_test.py -q", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "seeded_mistakes": [
+    { "location": "src/searcher.py — sort order", "bug_description": "Compass may sort ascending by default and forget the reverse=True flag.", "why_compass_might_suggest_it": "Default sort is ascending; lambda + reverse is one extra thing to remember.", "detection_signals": ["test_top_hit_for_perfect_match fails (a is last not first)"] },
+    { "location": "src/searcher.py — zero vector", "bug_description": "Compass may divide by zero norm when an embedding is all zeros.", "why_compass_might_suggest_it": "The 'real world' rarely has zero vectors; the guard is easy to omit.", "detection_signals": ["ZeroDivisionError on edge inputs"] }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "Cosine + ordering + composition all correct", "weight": 1.0, "expected_score": 9 },
+    { "dimension": "verification_discipline", "check": "Empty docs + vector mismatch raise ValueError with useful messages — boundaries tested", "weight": 0.7, "expected_score": 8 },
+    { "dimension": "code_quality", "check": "_cosine extracted, no inline math in search()", "weight": 0.6, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "What happens when an embedding is all zeros?",
+      "Should I normalise embeddings up front for speed, or recompute norms?",
+      "Is descending order assumed by the caller?"
+    ],
+    "common_verification_traps": [
+      "Skipping the zero-vector edge case",
+      "Not testing the search_by_text path"
+    ],
+    "decomposition_reference": [
+      "Helper: cosine(a, b)",
+      "Constructor validation",
+      "Score → sort → slice",
+      "Compose search_by_text on top of search"
+    ]
+  },
+  "difficulty_signals": { "token_count": 130, "branching_complexity": 3, "edge_cases": 4, "known_hard_patterns": [] },
+  "interview_parallel": "OpenAI / Pinecone AI-eng take-home — building a tiny vector store from scratch is a standard warmup.",
+  "content_hash": "capstone-ai-eng-easy-embedding-cosine-search-v1"
+}

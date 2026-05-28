@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "swe",
+  "language": "python",
+  "stack_variant": "python-stdlib",
+  "difficulty": "hard",
+  "time_budget_minutes": 90,
+  "brief": "INF-7102 — Build a polling worker that respects a strict 10 req/sec global cap\n\nWe need to poll a flaky upstream API for ~500 ids. The API limits us to 10 requests/second GLOBALLY (across all workers), retries on 429/5xx are required (exponential backoff, max 3 retries), and the work must complete with at-most-N=8 concurrent in-flight requests.\n\nImplement `poll_all(ids, fetch_one) -> dict[id, result_or_error]` in `src/poller.py`:\n\n- Honour BOTH the 10 req/sec global cap AND the max-8 concurrency cap.\n- Retry on `RetryableError` (defined in starter) with 0.5s, 1s, 2s backoffs; give up after 3 retries.\n- A `PermanentError` from `fetch_one` is NOT retried; record `{ 'error': str(e) }` for that id.\n- Successful results: `{ 'ok': True, 'data': <payload> }`.\n- Total wall-clock for 500 ids @ 10 rps should be ≈50s + small overhead (don't accidentally serialize).\n\nUse only the stdlib (asyncio is allowed; no `aiohttp` etc.). `fetch_one` is async.",
+  "acceptance_criteria": [
+    "Global rate is at most 10 req/sec across all in-flight tasks",
+    "At most 8 concurrent fetch_one calls in flight at any time",
+    "RetryableError triggers 3 retries with exponential backoff (0.5, 1, 2 seconds)",
+    "PermanentError is not retried, error is captured in the result dict",
+    "All ids appear in the result dict exactly once"
+  ],
+  "starter_repo": {
+    "files": [
+      { "path": "requirements.txt", "content": "pytest==8.3.3\npytest-asyncio==0.24.0\n" },
+      { "path": "src/__init__.py", "content": "" },
+      { "path": "src/poller.py", "content": "\"\"\"Rate-limited concurrent poller.\n\nFill in `poll_all` so it honours both a 10 req/sec global cap and a\nmax-8 concurrency cap. Retries on RetryableError with exponential\nbackoff (0.5s, 1s, 2s).\n\"\"\"\nimport asyncio\nfrom typing import Awaitable, Callable, Iterable\n\n\nclass RetryableError(Exception):\n    pass\n\n\nclass PermanentError(Exception):\n    pass\n\n\nasync def poll_all(ids: Iterable[str], fetch_one: Callable[[str], Awaitable[dict]]) -> dict:\n    # TODO\n    results: dict = {}\n    for i in ids:\n        results[i] = {'ok': True, 'data': await fetch_one(i)}\n    return results\n" },
+      { "path": "tests/baseline_test.py", "content": "import asyncio\nimport pytest\nfrom src.poller import poll_all\n\n\n@pytest.mark.asyncio\nasync def test_baseline_returns_results_for_all_ids():\n    async def fetch_one(i):\n        return {'i': i}\n\n    out = await poll_all(['a', 'b', 'c'], fetch_one)\n    assert set(out.keys()) == {'a', 'b', 'c'}\n" },
+      { "path": "pytest.ini", "content": "[pytest]\nasyncio_mode = auto\n" }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      { "path": "src/poller.py", "content": "\"\"\"Rate-limited concurrent poller — reference solution.\"\"\"\nimport asyncio\nimport time\nfrom typing import Awaitable, Callable, Iterable\n\n\nclass RetryableError(Exception):\n    pass\n\n\nclass PermanentError(Exception):\n    pass\n\n\n_MAX_CONCURRENCY = 8\n_RATE_PER_SEC = 10\n_BACKOFFS = [0.5, 1.0, 2.0]\n\n\nclass _TokenBucket:\n    def __init__(self, rate_per_sec: int):\n        self._capacity = rate_per_sec\n        self._tokens = rate_per_sec\n        self._rate = rate_per_sec\n        self._lock = asyncio.Lock()\n        self._last = time.monotonic()\n\n    async def acquire(self):\n        async with self._lock:\n            while True:\n                now = time.monotonic()\n                elapsed = now - self._last\n                self._tokens = min(self._capacity, self._tokens + elapsed * self._rate)\n                self._last = now\n                if self._tokens >= 1:\n                    self._tokens -= 1\n                    return\n                wait = (1 - self._tokens) / self._rate\n                await asyncio.sleep(wait)\n\n\nasync def _one(id_, fetch_one, sem, bucket):\n    async with sem:\n        for attempt in range(len(_BACKOFFS) + 1):\n            await bucket.acquire()\n            try:\n                data = await fetch_one(id_)\n                return id_, {'ok': True, 'data': data}\n            except PermanentError as e:\n                return id_, {'error': str(e)}\n            except RetryableError as e:\n                if attempt >= len(_BACKOFFS):\n                    return id_, {'error': f'retries_exhausted: {e}'}\n                await asyncio.sleep(_BACKOFFS[attempt])\n\n\nasync def poll_all(ids, fetch_one):\n    sem = asyncio.Semaphore(_MAX_CONCURRENCY)\n    bucket = _TokenBucket(_RATE_PER_SEC)\n    tasks = [asyncio.create_task(_one(i, fetch_one, sem, bucket)) for i in ids]\n    results = {}\n    for t in asyncio.as_completed(tasks):\n        id_, r = await t\n        results[id_] = r\n    return results\n" }
+    ]
+  },
+  "visible_tests": [
+    { "name": "install + baseline", "command": "pip install -q -r requirements.txt && python -m pytest tests/baseline_test.py -q", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "hidden_tests": [
+    { "name": "concurrency + retries", "command": "pip install -q -r requirements.txt && cat > tests/hidden_test.py <<'EOF'\nimport asyncio\nimport time\nimport pytest\nfrom src.poller import poll_all, RetryableError, PermanentError\n\n\n@pytest.mark.asyncio\nasync def test_rate_cap():\n    # 30 ids at 10 rps should take >= ~3 seconds, not less.\n    async def fetch_one(i):\n        await asyncio.sleep(0)\n        return {'i': i}\n    t0 = time.monotonic()\n    out = await poll_all([str(i) for i in range(30)], fetch_one)\n    elapsed = time.monotonic() - t0\n    assert len(out) == 30\n    assert elapsed >= 2.0, f'too fast: {elapsed}s — rate cap not enforced'\n\n\n@pytest.mark.asyncio\nasync def test_retries_then_recovers():\n    attempts = {'n': 0}\n    async def fetch_one(i):\n        attempts['n'] += 1\n        if attempts['n'] < 3:\n            raise RetryableError('flap')\n        return {'i': i}\n    out = await poll_all(['x'], fetch_one)\n    assert out['x']['ok'] is True\n\n\n@pytest.mark.asyncio\nasync def test_permanent_error_not_retried():\n    n = {'n': 0}\n    async def fetch_one(i):\n        n['n'] += 1\n        raise PermanentError('bad input')\n    out = await poll_all(['y'], fetch_one)\n    assert 'error' in out['y']\n    assert n['n'] == 1\nEOF\npython -m pytest tests/hidden_test.py -q", "expected_exit_code": 0, "expected_output_contains": [] }
+  ],
+  "seeded_mistakes": [
+    { "location": "src/poller.py — rate limiter", "bug_description": "Compass may use a sliding window of timestamps instead of a token bucket, leading to bursts at second boundaries.", "why_compass_might_suggest_it": "Sliding window is intuitive but lets all 10 fire at once at the second mark.", "detection_signals": ["test_rate_cap occasionally fails on fast hardware"] },
+    { "location": "src/poller.py — retry budget", "bug_description": "Compass may retry permanent errors because the type check is loose.", "why_compass_might_suggest_it": "`except Exception` is shorter than `except RetryableError`.", "detection_signals": ["test_permanent_error_not_retried fails (attempts > 1)"] }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "Concurrency, rate cap, retry classification all enforced", "weight": 1.0, "expected_score": 8 },
+    { "dimension": "verification_discipline", "check": "Learner writes a timing-based test BEFORE shipping rate limiter", "weight": 0.9, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "Token bucket isolated, constants named, no busy-wait", "weight": 0.7, "expected_score": 6 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Token bucket vs sliding window — which avoids burstiness at the second boundary?",
+      "Should the retry counter reset on a different error type?",
+      "How should I structure the test that verifies rate limiting without flaking on slow CI?"
+    ],
+    "common_verification_traps": [
+      "Forgetting to test the rate cap with a timing assertion",
+      "Not testing the permanent-error path's attempt count"
+    ],
+    "decomposition_reference": [
+      "Token-bucket rate limiter as its own class",
+      "Bounded-concurrency wrapper via Semaphore",
+      "Per-id retry loop with explicit error taxonomy",
+      "Coordinator (poll_all) wires them together"
+    ]
+  },
+  "difficulty_signals": { "token_count": 280, "branching_complexity": 9, "edge_cases": 8, "known_hard_patterns": ["asyncio rate limiter", "retry budget by error type"] },
+  "interview_parallel": "Uber / Atlassian senior backend onsite — async rate-limited orchestrators are a staple system-design coding question.",
+  "content_hash": "capstone-swe-hard-rate-limited-poller-v1"
+}
