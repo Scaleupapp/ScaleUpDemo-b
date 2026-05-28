@@ -43,27 +43,58 @@ function templateFor(image) {
   return TEMPLATE_BY_LANG[image] || undefined;
 }
 
+// e2b hard caps sandbox `timeoutMs` at 1 hour. Capstones can run up to 90 min,
+// so we provision at the hard cap and extend the timeout periodically while
+// the session is active (see `extendTimeout` below + heartbeat in orchestrator).
+const E2B_MAX_TIMEOUT_MS = 60 * 60 * 1000;
+// Safety margin so we don't tickle the boundary.
+const PROVISION_TIMEOUT_MS = 55 * 60 * 1000;
+
 async function provision({ image, files = [], env = {}, limits = {} } = {}) {
   const t0 = Date.now();
   const tpl = templateFor(image);
+  const requested = limits.wallClockMs || PROVISION_TIMEOUT_MS;
+  const timeoutMs = Math.min(requested, E2B_MAX_TIMEOUT_MS - 60_000);
   const sbx = await Sandbox.create({
     ...(tpl ? { template: tpl } : {}),
     envs: env,
-    timeoutMs: limits.wallClockMs || 90 * 60 * 1000, // default 90 min (max capstone duration)
+    timeoutMs,
   });
 
   for (const f of files) {
     await sbx.files.write(f.path, f.content);
   }
 
-  // e2b 1.x exposes the sandbox ID via sandboxId. The host URL is for any
-  // HTTP server the sandbox might run on a given port — used by the web IDE
-  // iframe for live preview (port 3000 is the convention).
   return {
     sandboxId: sbx.sandboxId,
     hostUrl: typeof sbx.getHost === 'function' ? sbx.getHost(3000) : undefined,
     provisionMs: Date.now() - t0,
   };
+}
+
+/**
+ * Extend an active sandbox's auto-kill timeout. e2b allows setting the
+ * timeout on a connected sandbox at any time, clamped to the per-sandbox
+ * 1-hour cap. We call this from the orchestrator's status-poll path so
+ * a learner's 90-min capstone stays alive past the 55-min initial cap.
+ *
+ * No-op when the sandbox is gone (treated as success — the caller doesn't
+ * need to differentiate).
+ */
+async function extendTimeout(sandboxId, requestedMs) {
+  try {
+    const sbx = await connect(sandboxId);
+    const safeMs = Math.min(requestedMs || PROVISION_TIMEOUT_MS, E2B_MAX_TIMEOUT_MS - 60_000);
+    if (typeof sbx.setTimeout === 'function') {
+      await sbx.setTimeout(safeMs);
+      return { extended: true, timeoutMs: safeMs };
+    }
+    return { extended: false, reason: 'setTimeout_unavailable' };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[e2bAdapter] extendTimeout failed for ${sandboxId}: ${err.message}`);
+    return { extended: false, error: err.message };
+  }
 }
 
 async function connect(sandboxId) {
@@ -218,6 +249,7 @@ const adapter = {
   isAlive,
   destroy,
   verifyEgressLockdown,
+  extendTimeout,
 };
 
 assertAdapter(adapter, 'e2b');

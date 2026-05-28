@@ -141,6 +141,10 @@ async function getStatus(req, res) {
 
   const bundle = await ArtifactBundle.findById(session.bundle_id).lean();
 
+  // Opportunistic sandbox keepalive — e2b caps initial timeout at 1 hr;
+  // every status poll re-extends to 55 min. Mobile polls every ~5 sec.
+  void sandboxOrchestrator.heartbeatExtend(session._id);
+
   res.json({
     session_id: String(session._id),
     status: session.status,

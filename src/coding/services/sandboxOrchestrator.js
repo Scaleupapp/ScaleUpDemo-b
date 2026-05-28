@@ -79,7 +79,9 @@ async function topUpPool() {
           image,
           files: [],
           env: {},
-          limits: { wallClockMs: 90 * 60 * 1000 },
+          // e2b caps at 1 hr; orchestrator extends mid-session via
+          // adapter.extendTimeout when warm pool member is claimed.
+          limits: { wallClockMs: 55 * 60 * 1000 },
         });
         if (!pool.has(image)) pool.set(image, []);
         pool.get(image).push({
@@ -136,11 +138,17 @@ async function provisionForSession(sessionId) {
         await adapter.uploadFiles(sandboxId, starterFiles);
       }
     } else {
+      // e2b caps initial timeout at 1 hour. Longer capstones (75/90 min) get
+      // their timeout extended mid-session via heartbeatExtend below.
+      const initialMs = Math.min(
+        bundle.time_budget_minutes * 60 * 1000 + 5 * 60 * 1000,
+        55 * 60 * 1000
+      );
       const provisioned = await adapter.provision({
         image: bundle.language,
         files: starterFiles,
         env: {},
-        limits: { wallClockMs: bundle.time_budget_minutes * 60 * 1000 + 5 * 60 * 1000 },
+        limits: { wallClockMs: initialMs },
       });
       sandboxId = provisioned.sandboxId;
       hostUrl = provisioned.hostUrl;
@@ -219,6 +227,31 @@ async function getSessionMetrics(sessionId) {
   }
 }
 
+/**
+ * Keep the sandbox alive past e2b's 1-hour cap. Called opportunistically
+ * from /capstones/:id/status. Each call extends the auto-kill timer to
+ * 55 minutes from NOW (e2b clamps internally; we stay under their cap).
+ *
+ * Sessions shorter than 55 min never need this — the initial provision
+ * timeout outlasts them. For 75/90 min capstones, the mobile heartbeat
+ * (polls every 5 sec) extends naturally throughout the session.
+ *
+ * Idempotent and best-effort: failure is logged but doesn't propagate.
+ */
+async function heartbeatExtend(sessionId) {
+  const session = await CapstoneSession.findById(sessionId).lean();
+  if (!session || !session.sandbox_id) return { extended: false };
+  if (session.status !== 'in_progress' && session.status !== 'ready' && session.status !== 'paused') {
+    return { extended: false, reason: 'session_inactive' };
+  }
+  if (typeof adapter.extendTimeout !== 'function') return { extended: false };
+  try {
+    return await adapter.extendTimeout(session.sandbox_id, 55 * 60 * 1000);
+  } catch {
+    return { extended: false };
+  }
+}
+
 /** Run a command in the session's sandbox. Wraps adapter.runCommand. */
 async function runInSession(sessionId, cmd, opts) {
   const session = await CapstoneSession.findById(sessionId).lean();
@@ -232,6 +265,7 @@ module.exports = {
   provisionForSession,
   teardownForSession,
   getSessionMetrics,
+  heartbeatExtend,
   runInSession,
   topUpPool,
   claimWarmSandbox,
