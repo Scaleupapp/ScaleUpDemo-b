@@ -266,6 +266,11 @@ test('contract: capstone surface is complete', () => {
     'controlCapstoneSession',
     'getCapstoneResult',
     'getCapstoneReplay',
+    // Compass-Coder (WS5)
+    'compassCoderChat',
+    'compassCoderTurn',
+    'compassCoderResolve',
+    'getCompassCoderBudget',
     // uploadCapstoneVoiceReflection lands in WS8 along with the full
     // multer→S3→Whisper→re-score pipeline; the endpoint is intentionally
     // not exposed until then.
