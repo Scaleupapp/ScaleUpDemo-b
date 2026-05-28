@@ -244,6 +244,155 @@ async function applyControl({ sessionId, userId, action }) {
   return updated;
 }
 
+/**
+ * POST /api/coding/capstones/:session_id/events
+ *
+ * Browser-side recording client posts batched events here. Each event is
+ * normalised against the recordingService catalogue (file_write,
+ * file_read, command_run, test_result, compass_turn, tab_blur, paste,
+ * focus_change). Unknown event types are dropped silently — the client
+ * may emit new types ahead of a backend bump and we don't want to break
+ * the IDE for it.
+ *
+ * Cap of 200 events per batch — protects against a runaway client.
+ */
+async function appendEvents(req, res) {
+  const { events } = req.body || {};
+  if (!Array.isArray(events)) return res.status(400).json({ error: 'events array required' });
+
+  // Verify session ownership before accepting any event.
+  const session = await CapstoneSession.findOne({
+    _id: req.params.session_id,
+    user_id: req.user.userId,
+  })
+    .select('_id status')
+    .lean();
+  if (!session) return res.status(404).json({ error: 'session_not_found' });
+  if (!['ready', 'in_progress', 'paused'].includes(session.status)) {
+    // Events from a terminal-state session are useless — accept-and-drop
+    // so the client doesn't see a hard failure on the trailing flush.
+    return res.status(202).json({ accepted: 0, reason: 'session not active' });
+  }
+
+  const limited = events.slice(0, 200);
+  let accepted = 0;
+  for (const evt of limited) {
+    if (!evt || typeof evt.type !== 'string') continue;
+    recordingService.emit(session._id, { type: evt.type, payload: evt.payload || {} });
+    accepted += 1;
+  }
+  res.json({ accepted });
+}
+
+/**
+ * POST /api/coding/capstones/:session_id/run
+ *
+ * Run a shell command in the session's sandbox. Web IDE terminal panel
+ * calls this. Hard cap on cmd length (4096 chars) + 30 s wall-clock.
+ */
+async function runInSandbox(req, res) {
+  const { cmd } = req.body || {};
+  if (typeof cmd !== 'string' || cmd.length === 0 || cmd.length > 4096) {
+    return res.status(400).json({ error: 'cmd required (string, 1..4096 chars)' });
+  }
+  const session = await CapstoneSession.findOne({
+    _id: req.params.session_id,
+    user_id: req.user.userId,
+  })
+    .select('_id status sandbox_id')
+    .lean();
+  if (!session) return res.status(404).json({ error: 'session_not_found' });
+  if (!['ready', 'in_progress', 'paused'].includes(session.status)) {
+    return res.status(409).json({ error: 'session_not_active', current_status: session.status });
+  }
+  if (!session.sandbox_id) {
+    return res.status(409).json({ error: 'sandbox_not_provisioned' });
+  }
+
+  try {
+    const r = await sandboxOrchestrator.runInSession(session._id, cmd, { timeoutMs: 30_000 });
+    recordingService.emit(session._id, {
+      type: 'command_run',
+      payload: {
+        cmd: cmd.slice(0, 256),
+        exit: r.exitCode,
+        duration_ms: r.durationMs,
+        by: 'learner',
+      },
+    });
+    res.json({
+      stdout: (r.stdout || '').slice(0, 16_000),
+      stderr: (r.stderr || '').slice(0, 8_000),
+      exitCode: r.exitCode,
+      durationMs: r.durationMs,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'sandbox_error', message: err.message });
+  }
+}
+
+/**
+ * POST /api/coding/capstones/:session_id/files
+ *
+ * Persist a batch of file edits from the web IDE into the session sandbox.
+ * Client-side debounce should batch keystrokes; this endpoint enforces a
+ * hard cap of 50 files per call + 512 KB total to bound abuse.
+ */
+async function persistFiles(req, res) {
+  const { files } = req.body || {};
+  if (!Array.isArray(files)) return res.status(400).json({ error: 'files array required' });
+  if (files.length > 50) return res.status(400).json({ error: 'too many files in one batch' });
+
+  const totalBytes = files.reduce(
+    (s, f) => s + (typeof f?.content === 'string' ? f.content.length : 0),
+    0
+  );
+  if (totalBytes > 512 * 1024) {
+    return res.status(400).json({ error: 'batch exceeds 512 KB' });
+  }
+
+  const session = await CapstoneSession.findOne({
+    _id: req.params.session_id,
+    user_id: req.user.userId,
+  })
+    .select('_id status sandbox_id')
+    .lean();
+  if (!session) return res.status(404).json({ error: 'session_not_found' });
+  if (!['ready', 'in_progress', 'paused'].includes(session.status)) {
+    return res.status(409).json({ error: 'session_not_active', current_status: session.status });
+  }
+  if (!session.sandbox_id) {
+    return res.status(409).json({ error: 'sandbox_not_provisioned' });
+  }
+
+  // Path safety: reject .. and empty segments before the adapter sees them.
+  const safe = [];
+  for (const f of files) {
+    if (!f || typeof f.path !== 'string' || typeof f.content !== 'string') continue;
+    const stripped = f.path.replace(/^\/+/, '');
+    if (stripped.split('/').some((s) => s === '..' || s === '')) continue;
+    safe.push({ path: `/home/user/${stripped}`, content: f.content });
+  }
+
+  try {
+    const adapter = sandboxOrchestrator._adapter;
+    await adapter.uploadFiles(session.sandbox_id, safe);
+    for (const f of safe) {
+      recordingService.emit(session._id, {
+        type: 'file_write',
+        payload: {
+          path: f.path.replace(/^\/home\/user\//, ''),
+          bytes: f.content.length,
+          by: 'learner',
+        },
+      });
+    }
+    res.json({ persisted: safe.length });
+  } catch (err) {
+    res.status(500).json({ error: 'sandbox_error', message: err.message });
+  }
+}
+
 /** GET /api/coding/capstones/:session_id/result */
 async function getResult(req, res) {
   const session = await CapstoneSession.findOne({
@@ -294,5 +443,8 @@ module.exports = {
   getStatus,
   control,
   applyControl, // exported for sessionRoom WS handler
+  appendEvents,
+  runInSandbox,
+  persistFiles,
   getResult,
 };

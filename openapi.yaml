@@ -7174,6 +7174,186 @@ paths:
   # /api/coding/capstones/{session_id}/voice-reflection lands in WS8 along
   # with the full multer → S3 → Whisper → Sonnet re-score → Notes pipeline.
 
+  /api/coding/capstones/{session_id}/events:
+    post:
+      operationId: appendCapstoneEvents
+      tags: [Coding]
+      summary: Append browser-side recording events (web IDE only)
+      description: |
+        The web IDE's recording client batches events (file_write, tab_blur,
+        paste, focus_change, etc.) and posts them here every ~5 s. Backend
+        normalises against the recordingService catalogue and persists via
+        the same S3 ndjson stream the server-side emissions land in.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [type]
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                          - file_write
+                          - file_read
+                          - command_run
+                          - test_result
+                          - compass_turn
+                          - tab_blur
+                          - paste
+                          - focus_change
+                      payload:
+                        type: object
+      responses:
+        '200':
+          description: Events accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted]
+                properties:
+                  accepted: { type: integer }
+        '202':
+          description: Session in terminal state — events accepted-and-dropped
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted]
+                properties:
+                  accepted: { type: integer }
+                  reason: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/coding/capstones/{session_id}/run:
+    post:
+      operationId: runCapstoneCommand
+      tags: [Coding]
+      summary: Run a shell command in the session sandbox (web IDE terminal)
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cmd]
+              properties:
+                cmd:
+                  type: string
+                  minLength: 1
+                  maxLength: 4096
+      responses:
+        '200':
+          description: Command output
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stdout, stderr, exitCode, durationMs]
+                properties:
+                  stdout: { type: string }
+                  stderr: { type: string }
+                  exitCode: { type: integer }
+                  durationMs: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Session not active or sandbox not provisioned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [session_not_active, sandbox_not_provisioned]
+
+  /api/coding/capstones/{session_id}/files:
+    post:
+      operationId: persistCapstoneFiles
+      tags: [Coding]
+      summary: Persist a batch of file edits into the session sandbox
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [path, content]
+                    properties:
+                      path: { type: string }
+                      content: { type: string }
+      responses:
+        '200':
+          description: Files persisted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [persisted]
+                properties:
+                  persisted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Session not active or sandbox not provisioned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+
   /api/coding/capstones/{session_id}/result:
     get:
       operationId: getCapstoneResult

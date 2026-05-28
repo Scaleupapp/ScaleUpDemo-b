@@ -264,6 +264,9 @@ test('contract: capstone surface is complete', () => {
     'redeemCapstonePairingCode',
     'getCapstoneSessionStatus',
     'controlCapstoneSession',
+    'appendCapstoneEvents',
+    'runCapstoneCommand',
+    'persistCapstoneFiles',
     'getCapstoneResult',
     'getCapstoneReplay',
     // Compass-Coder (WS5)

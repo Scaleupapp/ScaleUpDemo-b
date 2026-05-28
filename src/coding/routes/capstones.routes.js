@@ -21,6 +21,9 @@ router.post('/redeem', capstones.redeemPairing);
 
 router.get('/:session_id/status', auth, capstones.getStatus);
 router.post('/:session_id/control', auth, capstones.control);
+router.post('/:session_id/events', auth, capstones.appendEvents);
+router.post('/:session_id/run', auth, capstones.runInSandbox);
+router.post('/:session_id/files', auth, capstones.persistFiles);
 router.get('/:session_id/result', auth, capstones.getResult);
 router.get('/:session_id/replay', auth, replay.getReplay);
 
