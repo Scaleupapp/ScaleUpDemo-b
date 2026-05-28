@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "ds",
+  "language": "python",
+  "stack_variant": "jupyter-pandas",
+  "difficulty": "medium",
+  "time_budget_minutes": 75,
+  "brief": "DSC-118 — Quarterly sales EDA + outlier write-up\n\nProduct asks: 'Why did Q3 conversion drop from 7.1% to 5.4% MoM?' You have a CSV of 50k orders with these columns: order_id, ts, country, product_sku, channel, gross_amount, refund_amount, discount_pct.\n\nProduce `analysis.py` that:\n1. Loads `orders.csv` (already in the starter)\n2. Computes monthly conversion proxies: orders/day, gross/day, refund rate, net AOV\n3. Writes a short Markdown summary to `report.md` with the single best hypothesis for the drop and what evidence supports it\n4. Saves a small CSV of the 5 most-impacted (country, product_sku) cells to `top_segments.csv`\n\nDon't go deep on ML — the bar is honest exploratory analysis with a defensible take.",
+  "acceptance_criteria": [
+    "`python analysis.py` runs without error on the starter dataset",
+    "`report.md` exists and is at least 200 chars",
+    "`top_segments.csv` exists and has exactly 5 rows + a header",
+    "The hypothesis names a SPECIFIC mechanism (e.g. 'refund rate doubled in IN/sku-7') not a generic 'conversion dropped'",
+    "Conversion-proxy numbers reproduce when re-run on the same input"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "requirements.txt",
+        "content": "pandas==2.2.2\nnumpy==1.26.4\n"
+      },
+      {
+        "path": "orders.csv",
+        "content": "order_id,ts,country,product_sku,channel,gross_amount,refund_amount,discount_pct\no-1,2026-07-01,US,sku-1,web,100,0,0\no-2,2026-07-02,IN,sku-7,web,80,80,0\no-3,2026-08-15,US,sku-1,app,120,0,5\no-4,2026-09-05,IN,sku-7,web,80,80,0\no-5,2026-09-10,IN,sku-7,web,90,90,0\no-6,2026-09-22,US,sku-1,web,100,0,0\n"
+      },
+      {
+        "path": "analysis.py",
+        "content": "# TODO: produce report.md + top_segments.csv per the brief.\nimport pandas as pd\n\ndf = pd.read_csv('orders.csv')\nprint(df.head())\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "analysis.py",
+        "content": "import pandas as pd\nimport numpy as np\n\ndf = pd.read_csv('orders.csv', parse_dates=['ts'])\ndf['month'] = df['ts'].dt.to_period('M').astype(str)\ndf['is_refunded'] = df['refund_amount'] > 0\ndf['net_amount'] = df['gross_amount'] - df['refund_amount']\n\nmonthly = df.groupby('month').agg(\n    orders=('order_id', 'count'),\n    gross=('gross_amount', 'sum'),\n    refund_rate=('is_refunded', 'mean'),\n    net_aov=('net_amount', 'mean'),\n).round(3)\n\nseg = (\n    df.assign(refund=df['refund_amount'])\n      .groupby(['country', 'product_sku'])\n      .agg(orders=('order_id', 'count'), refund_rate=('is_refunded', 'mean'), gross_lost=('refund_amount', 'sum'))\n      .reset_index()\n      .sort_values('gross_lost', ascending=False)\n      .head(5)\n)\nseg.to_csv('top_segments.csv', index=False)\n\nwith open('report.md', 'w') as f:\n    f.write('# Conversion drop analysis\\n\\n')\n    f.write('## Monthly proxies\\n')\n    f.write(monthly.to_markdown() + '\\n\\n')\n    f.write('## Hypothesis\\n\\n')\n    worst = seg.iloc[0]\n    f.write(\n        f'The drop is concentrated in (country={worst.country}, sku={worst.product_sku}) '\n        f'where refund_rate={worst.refund_rate:.0%} drives `gross_lost={worst.gross_lost:.0f}`. '\n        f'Hypothesis: a return-driving quality/fulfilment issue in this segment, not a top-of-funnel shift.\\n'\n    )\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "analysis runs and writes outputs",
+      "command": "pip install --quiet -r requirements.txt && python analysis.py && test -s report.md && test -s top_segments.csv && wc -l < top_segments.csv | awk '{ if ($1 == 6) exit 0; else exit 1 }'",
+      "expected_exit_code": 0
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "report mentions a specific segment",
+      "command": "grep -E '(IN|US|sku-[0-9]+)' report.md | head -1",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "top_segments.csv has expected columns",
+      "command": "head -1 top_segments.csv | grep -q 'country' && head -1 top_segments.csv | grep -q 'product_sku'",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "monthly proxies present in report",
+      "command": "grep -q 'orders' report.md && grep -q 'refund_rate' report.md",
+      "expected_exit_code": 0
+    }
+  ],
+  "seeded_mistakes": [
+    {
+      "location": "analysis.py — generic hypothesis",
+      "bug_description": "Compass may write a vague 'overall conversion declined; recommend further investigation' line.",
+      "why_compass_might_suggest_it": "Default LLM-safe phrasing is non-committal; specific takes feel risky.",
+      "detection_signals": ["hidden test 'report mentions a specific segment' fails"]
+    },
+    {
+      "location": "analysis.py — leaky refund handling",
+      "bug_description": "Treating refund_amount as a column to drop rather than the signal source confuses the segment ranking.",
+      "why_compass_might_suggest_it": "Refund columns are often cleaned out in templates.",
+      "detection_signals": ["top_segments.csv ordering doesn't match the high-refund segment"]
+    }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "All visible + hidden tests pass", "weight": 1.0, "expected_score": 9 },
+    { "dimension": "verification_discipline", "check": "Learner runs analysis.py at least twice and inspects outputs", "weight": 0.7, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "Uses pandas groupby+agg idiomatically; no for-loop joins", "weight": 0.6, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Ask Compass to compute the right unit of analysis (orders/day vs orders/user)",
+      "Ask for a hypothesis specific enough to test (segment + mechanism)"
+    ],
+    "common_verification_traps": [
+      "Skipping head() inspection of the loaded data",
+      "Trusting Compass's summary numbers without re-running"
+    ],
+    "decomposition_reference": [
+      "Load + parse dates",
+      "Group by month",
+      "Compute refund-rate + AOV",
+      "Rank segments",
+      "Write the narrative"
+    ]
+  },
+  "difficulty_signals": {
+    "token_count": 180,
+    "branching_complexity": 5,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  },
+  "interview_parallel": "Atlan / data-team take-home — 'here's a CSV, tell us what story it tells.'",
+  "content_hash": "capstone-ds-medium-sales-eda-v1"
+}

@@ -37,6 +37,11 @@ const rubricAnchorSchema = Joi.object({
   check: Joi.string().required(),
   deterministic_test: Joi.string().optional(),
   weight: Joi.number().required(),
+  // Optional baseline a passing solution should score on this dimension
+  // (0..10). Drives the WS4 anchor-drift detector — evaluator scores
+  // diverging from expected_score by > 2 points trigger a strict re-run
+  // + HumanReviewQueue entry (spec §8.3).
+  expected_score: Joi.number().min(0).max(10).optional(),
 });
 
 // ---------------------------------------------------------------------------

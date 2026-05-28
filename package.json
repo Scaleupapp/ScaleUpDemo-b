@@ -10,6 +10,7 @@
     "migrate:youtube-to-s3": "node scripts/migrateYoutubeToS3.js",
     "seed:content": "node scripts/seedContent.js",
     "seed:coding": "node scripts/seed-coding-library.js",
+    "seed:capstones": "node scripts/seed-coding-library.js",
     "test": "node scripts/run-tests.js",
     "openapi:lint": "redocly lint openapi.yaml --max-problems 200",
     "openapi:contract-test": "node scripts/run-tests.js src/test/openapi-contract.test.js"

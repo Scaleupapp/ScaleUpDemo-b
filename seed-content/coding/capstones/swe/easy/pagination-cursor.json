@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "swe",
+  "language": "javascript",
+  "stack_variant": "node-express",
+  "difficulty": "easy",
+  "time_budget_minutes": 60,
+  "brief": "PROD-2451 — Add cursor-based pagination to GET /api/items\n\nOur public API currently returns the full item list on every call. As we cross 1k items per merchant, the payload is too big and clients are timing out. Add cursor-based pagination to the existing handler:\n\n- Accept `?limit=N&cursor=...` query params (default limit 20, max 100).\n- Return `{ items: [...], next_cursor: string|null }`.\n- A cursor encodes the last item's id so the next page is items after that id (lexicographic on the `_id` field).\n- Preserve existing behaviour when no params are passed (still return up to 20 items + a cursor).\n\nThe codebase uses Express + an in-memory ItemStore module. Don't touch the storage layer; just extend the route handler.",
+  "acceptance_criteria": [
+    "GET /api/items returns at most `limit` items (default 20, capped at 100)",
+    "Response includes a `next_cursor` field; null when the page is the last one",
+    "GET /api/items?cursor=<value-from-prior-response> returns the page that follows",
+    "Invalid limit (negative, non-numeric, > 100) returns 400 with `{ error: 'invalid_limit' }`",
+    "Invalid cursor (not present in the store) returns 400 with `{ error: 'invalid_cursor' }`",
+    "All existing tests still pass"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "package.json",
+        "content": "{\n  \"name\": \"pagination-capstone\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"scripts\": { \"test\": \"jest --silent\" },\n  \"devDependencies\": { \"jest\": \"^29.7.0\", \"supertest\": \"^7.0.0\" },\n  \"dependencies\": { \"express\": \"^4.21.0\" }\n}\n"
+      },
+      {
+        "path": "src/itemStore.js",
+        "content": "'use strict';\n\n// Pretend-database. Items are inserted in id order; query helpers preserve\n// that order so cursor pagination has stable semantics.\nconst items = Array.from({ length: 50 }, (_, i) => ({\n  _id: String(i + 1).padStart(4, '0'),\n  name: `Item ${i + 1}`,\n  created_at: new Date(2026, 0, i + 1).toISOString(),\n}));\n\nfunction listAll() { return items.slice(); }\n\nfunction findById(id) { return items.find(it => it._id === id) || null; }\n\nmodule.exports = { listAll, findById };\n"
+      },
+      {
+        "path": "src/server.js",
+        "content": "'use strict';\n\nconst express = require('express');\nconst itemStore = require('./itemStore');\n\nfunction makeApp() {\n  const app = express();\n  app.use(express.json());\n\n  // TODO: add cursor-based pagination.\n  app.get('/api/items', (req, res) => {\n    const items = itemStore.listAll();\n    res.json({ items, next_cursor: null });\n  });\n\n  return app;\n}\n\nmodule.exports = { makeApp };\n\nif (require.main === module) {\n  const app = makeApp();\n  app.listen(3000, () => console.log('listening on :3000'));\n}\n"
+      },
+      {
+        "path": "tests/baseline.test.js",
+        "content": "const request = require('supertest');\nconst { makeApp } = require('../src/server');\n\nconst app = makeApp();\n\ntest('baseline: GET /api/items returns items', async () => {\n  const res = await request(app).get('/api/items');\n  expect(res.status).toBe(200);\n  expect(Array.isArray(res.body.items)).toBe(true);\n  expect(res.body.items.length).toBeGreaterThan(0);\n});\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "src/server.js",
+        "content": "'use strict';\n\nconst express = require('express');\nconst itemStore = require('./itemStore');\n\nconst DEFAULT_LIMIT = 20;\nconst MAX_LIMIT = 100;\n\nfunction makeApp() {\n  const app = express();\n  app.use(express.json());\n\n  app.get('/api/items', (req, res) => {\n    let limit = req.query.limit === undefined ? DEFAULT_LIMIT : Number(req.query.limit);\n    if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {\n      return res.status(400).json({ error: 'invalid_limit' });\n    }\n\n    const all = itemStore.listAll();\n    let startIdx = 0;\n    if (req.query.cursor !== undefined) {\n      const idx = all.findIndex(it => it._id === String(req.query.cursor));\n      if (idx === -1) return res.status(400).json({ error: 'invalid_cursor' });\n      startIdx = idx + 1;\n    }\n\n    const slice = all.slice(startIdx, startIdx + limit);\n    const next_cursor = startIdx + limit < all.length ? slice[slice.length - 1]._id : null;\n    res.json({ items: slice, next_cursor });\n  });\n\n  return app;\n}\n\nmodule.exports = { makeApp };\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "install + baseline",
+      "command": "npm install --silent --no-audit --no-fund && npm test --silent",
+      "expected_exit_code": 0,
+      "expected_output_contains": []
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "limit and cursor",
+      "command": "npm install --silent --no-audit --no-fund && cat > tests/hidden.test.js <<'EOF'\nconst request = require('supertest');\nconst { makeApp } = require('../src/server');\nconst app = makeApp();\n\ntest('default limit is 20', async () => {\n  const r = await request(app).get('/api/items');\n  expect(r.body.items.length).toBe(20);\n  expect(r.body.next_cursor).toBeTruthy();\n});\n\ntest('cursor advances the page', async () => {\n  const a = await request(app).get('/api/items?limit=5');\n  const b = await request(app).get(`/api/items?limit=5&cursor=${a.body.next_cursor}`);\n  expect(b.body.items.map(i => i._id)).not.toEqual(a.body.items.map(i => i._id));\n  expect(b.body.items.length).toBe(5);\n});\n\ntest('invalid limit returns 400', async () => {\n  const r = await request(app).get('/api/items?limit=999');\n  expect(r.status).toBe(400);\n  expect(r.body.error).toBe('invalid_limit');\n});\n\ntest('invalid cursor returns 400', async () => {\n  const r = await request(app).get('/api/items?cursor=does-not-exist');\n  expect(r.status).toBe(400);\n  expect(r.body.error).toBe('invalid_cursor');\n});\nEOF\nnpm test --silent",
+      "expected_exit_code": 0,
+      "expected_output_contains": []
+    }
+  ],
+  "seeded_mistakes": [
+    {
+      "location": "src/server.js — cursor offset",
+      "bug_description": "Compass may suggest `startIdx = idx` (off-by-one) which returns the cursor item again on the next page.",
+      "why_compass_might_suggest_it": "The cursor 'points to' the last returned item; an inexperienced model returns slice.start = cursor index instead of cursor index + 1.",
+      "detection_signals": ["hidden test 'cursor advances the page' fails (page B contains page A's last id)"]
+    },
+    {
+      "location": "src/server.js — limit cap",
+      "bug_description": "Compass may forget to cap limit at 100, letting a client request 10000 items in one go.",
+      "why_compass_might_suggest_it": "Common pattern is to default missing values; the cap is the easier check to skip.",
+      "detection_signals": ["hidden test 'invalid limit returns 400' fails when limit=999"]
+    }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "Both visible + hidden tests pass", "weight": 1.0, "expected_score": 9 },
+    { "dimension": "verification_discipline", "check": "Learner runs tests at least twice and after each change", "weight": 0.8, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "Cursor parsing is centralised, not duplicated; constants named", "weight": 0.6, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Ask for cursor semantics (does cursor point at the last returned item or the next one?)",
+      "Ask about behaviour when cursor is invalid",
+      "Ask about default vs maximum limit"
+    ],
+    "common_verification_traps": [
+      "Forgetting to run the test that exercises 'limit > MAX' rejection",
+      "Not testing the cursor=invalid path"
+    ],
+    "decomposition_reference": [
+      "Parse limit",
+      "Validate limit",
+      "Locate cursor index in the store",
+      "Slice + compute next_cursor",
+      "Wire 400 paths"
+    ]
+  },
+  "difficulty_signals": {
+    "token_count": 120,
+    "branching_complexity": 4,
+    "edge_cases": 5,
+    "known_hard_patterns": []
+  },
+  "interview_parallel": "Razorpay backend lateral round — paginated list endpoints come up in nearly every backend take-home.",
+  "content_hash": "capstone-swe-easy-pagination-cursor-v1"
+}

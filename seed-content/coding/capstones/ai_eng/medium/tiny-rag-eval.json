@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "type": "capstone",
+  "role_track": "ai_eng",
+  "language": "python",
+  "stack_variant": "rag-eval",
+  "difficulty": "medium",
+  "time_budget_minutes": 75,
+  "brief": "AI-PLAT-44 — Tiny RAG with an eval harness\n\nBuild a small retrieval-augmented QA component over a fixed 5-doc corpus, with an eval harness that scores it on accuracy + latency. The corpus is text files about how ScaleUp's coding feature works (drills, capstones, integrity).\n\nDeliverables:\n1. `rag.py` exposing `answer(question: str) -> { 'answer': str, 'cited_docs': [str], 'latency_ms': int }`\n2. Use exact-match keyword retrieval — no embedding model, no API calls. The grading harness runs offline.\n3. `eval.py` reads `eval_set.jsonl` (provided) and prints overall accuracy + p50 latency.\n\nNon-goals: prompt engineering for an LLM, full BM25, optimisations. Honest, working code beats cleverness.",
+  "acceptance_criteria": [
+    "`python rag.py 'How does the capstone evaluator score reflection_quality?'` returns a non-empty answer + at least one cited doc",
+    "`python eval.py` runs over `eval_set.jsonl` and prints `accuracy=` and `p50_latency_ms=`",
+    "All retrieval is deterministic — same question returns the same answer + cites",
+    "rag.py exposes `answer(question)` as a callable function (importable)"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "requirements.txt",
+        "content": ""
+      },
+      {
+        "path": "docs/drills.txt",
+        "content": "ScaleUp drills are 10-minute coding exercises. Each drill belongs to one of four subtypes: prompt, verify, decompose, refactor. Drills are graded synchronously by a Claude Haiku model; results land in under 8 seconds.\n"
+      },
+      {
+        "path": "docs/capstones.txt",
+        "content": "ScaleUp capstones are 60 to 90 minute sessions run on the laptop while mobile shows session stats. Each capstone has a brief, starter repo, acceptance criteria, visible tests, and hidden tests. The grading pipeline scores six rubric dimensions: correctness, code_quality, ai_pair_effectiveness, verification_discipline, decomposition, and reflection_quality.\n"
+      },
+      {
+        "path": "docs/integrity.txt",
+        "content": "ScaleUp marks every capstone result with an integrity_confidence value of high, medium, or low. Heavy paste activity, tab-blur frequency, and Compass-acceptance ratios that look unusual drive integrity_confidence down. The reflection_quality dimension scores the 60-second voice reflection a learner records after results land.\n"
+      },
+      {
+        "path": "docs/compass-coder.txt",
+        "content": "Compass-as-Coder is the AI pair surface available during capstone sessions. It supports four tools: read_file, write_file, run_command, and run_tests. Each tool call runs inside the session sandbox. Compass-Coder turns are logged and inform the ai_pair_effectiveness rubric dimension.\n"
+      },
+      {
+        "path": "docs/evaluator.txt",
+        "content": "The capstone evaluator is an asynchronous BullMQ job that fires when a session transitions to submitted. It runs the visible and hidden tests in a fresh sandbox, diffs the starter repo against the final filetree, analyses the Compass log, and calls Claude Sonnet to score the six rubric dimensions. Anchor-drift detection flags suspicious results for human review.\n"
+      },
+      {
+        "path": "eval_set.jsonl",
+        "content": "{\"q\":\"How long is a drill?\",\"keyword\":\"10-minute\"}\n{\"q\":\"What four tools does Compass-Coder support?\",\"keyword\":\"read_file\"}\n{\"q\":\"What does the evaluator do on submit?\",\"keyword\":\"asynchronous\"}\n{\"q\":\"What integrity values can a result have?\",\"keyword\":\"high\"}\n{\"q\":\"How many rubric dimensions are there?\",\"keyword\":\"six\"}\n"
+      },
+      {
+        "path": "rag.py",
+        "content": "# TODO: implement answer(question) -> { answer, cited_docs, latency_ms }\nimport sys\n\ndef answer(question: str):\n    return {'answer': '', 'cited_docs': [], 'latency_ms': 0}\n\nif __name__ == '__main__':\n    q = ' '.join(sys.argv[1:])\n    print(answer(q))\n"
+      },
+      {
+        "path": "eval.py",
+        "content": "# TODO: load eval_set.jsonl, call answer(question), score against keyword.\nimport json\n\nrecords = [json.loads(l) for l in open('eval_set.jsonl')]\nprint(f'records={len(records)} accuracy=0 p50_latency_ms=0')\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "rag.py",
+        "content": "import os, re, time, sys\n\ndef _load_corpus():\n    docs = {}\n    for name in sorted(os.listdir('docs')):\n        if not name.endswith('.txt'): continue\n        docs[name] = open(os.path.join('docs', name)).read()\n    return docs\n\ndef _score(question, doc_text):\n    q_tokens = set(re.findall(r'[a-z_0-9]+', question.lower()))\n    d_tokens = set(re.findall(r'[a-z_0-9]+', doc_text.lower()))\n    return len(q_tokens & d_tokens)\n\ndef answer(question: str):\n    t0 = time.time()\n    docs = _load_corpus()\n    ranked = sorted(docs.items(), key=lambda kv: _score(question, kv[1]), reverse=True)\n    top = [name for name, txt in ranked[:2] if _score(question, txt) > 0]\n    if not top:\n        return {'answer': \"I couldn't find anything relevant.\", 'cited_docs': [], 'latency_ms': int((time.time() - t0) * 1000)}\n    body = '\\n\\n'.join(docs[name] for name in top)\n    return {'answer': body.strip()[:600], 'cited_docs': top, 'latency_ms': int((time.time() - t0) * 1000)}\n\nif __name__ == '__main__':\n    q = ' '.join(sys.argv[1:])\n    print(answer(q))\n"
+      },
+      {
+        "path": "eval.py",
+        "content": "import json\nfrom rag import answer\n\nrecords = [json.loads(l) for l in open('eval_set.jsonl')]\nlatencies = []\nright = 0\nfor r in records:\n    out = answer(r['q'])\n    latencies.append(out['latency_ms'])\n    if r['keyword'].lower() in out['answer'].lower(): right += 1\nlatencies.sort()\np50 = latencies[len(latencies)//2] if latencies else 0\nprint(f'records={len(records)} accuracy={right/len(records):.2f} p50_latency_ms={p50}')\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "rag returns a non-empty answer + cite",
+      "command": "python -c \"from rag import answer; r = answer('How long is a drill?'); assert r['answer'] and r['cited_docs'], r\"",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "eval prints accuracy + latency",
+      "command": "python eval.py | grep -qE 'accuracy=[0-9.]+ p50_latency_ms=[0-9]+'",
+      "expected_exit_code": 0
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "accuracy is at least 60% on the eval set",
+      "command": "python eval.py | python -c \"import sys,re; line = sys.stdin.read(); m = re.search(r'accuracy=([0-9.]+)', line); assert m and float(m.group(1)) >= 0.6, line\"",
+      "expected_exit_code": 0
+    },
+    {
+      "name": "rag answer is deterministic across two calls",
+      "command": "python -c \"from rag import answer; a = answer('How many rubric dimensions are there?'); b = answer('How many rubric dimensions are there?'); assert a['cited_docs'] == b['cited_docs'], (a, b)\"",
+      "expected_exit_code": 0
+    }
+  ],
+  "seeded_mistakes": [
+    {
+      "location": "rag.py — nondeterministic ranking",
+      "bug_description": "Compass may suggest set ordering for the tokens which is nondeterministic across Python runs prior to 3.7; or shuffle ties non-stably.",
+      "why_compass_might_suggest_it": "Set comprehensions look clean and 'work'; the ordering bug is subtle.",
+      "detection_signals": ["hidden test 'rag answer is deterministic' fails"]
+    },
+    {
+      "location": "eval.py — accuracy denominator off-by-one",
+      "bug_description": "Counting only matches without dividing by len(records) or dividing by len(records) - 1 gives a wrong number that looks plausible.",
+      "why_compass_might_suggest_it": "Off-by-one in denominator is the classic eval-loop bug.",
+      "detection_signals": ["hidden test 'accuracy is at least 60%' fails on a correct retriever"]
+    }
+  ],
+  "rubric_anchors": [
+    { "dimension": "correctness", "check": "Both visible + hidden tests pass + accuracy >= 0.6", "weight": 1.0, "expected_score": 8 },
+    { "dimension": "verification_discipline", "check": "Learner runs eval.py at least twice and inspects the accuracy number", "weight": 0.8, "expected_score": 7 },
+    { "dimension": "code_quality", "check": "answer() is importable and side-effect-free", "weight": 0.6, "expected_score": 7 }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Ask Compass for a deterministic ranking rule",
+      "Ask how to keep eval.py and rag.py loosely coupled"
+    ],
+    "common_verification_traps": [
+      "Eyeballing one good answer instead of running the full eval set",
+      "Trusting Compass's accuracy number without re-running eval.py"
+    ],
+    "decomposition_reference": [
+      "Load docs",
+      "Score each doc against question",
+      "Sort + take top-k",
+      "Return answer + cites + latency",
+      "Wire the eval loop"
+    ]
+  },
+  "difficulty_signals": {
+    "token_count": 180,
+    "branching_complexity": 4,
+    "edge_cases": 4,
+    "known_hard_patterns": []
+  },
+  "interview_parallel": "AI/ML engineer take-home — 'build a tiny RAG over these docs + an eval harness.'",
+  "content_hash": "capstone-ai_eng-medium-tiny-rag-v1"
+}

@@ -58,26 +58,25 @@ function extractJson(content) {
  * @param {number} [k=3]
  * @returns {Promise<object[]>}
  */
-async function nearestSeeds({ role_track, drill_subtype, difficulty }, k = 3) {
-  const exactMatch = await ArtifactBundle.find({
-    type: 'drill',
+async function nearestSeeds({ type = 'drill', role_track, drill_subtype, difficulty }, k = 3) {
+  // Capstones: filter by (type, role_track, difficulty). Drills: also filter
+  // by drill_subtype.
+  const baseFilter = {
+    type,
     role_track,
-    drill_subtype,
-    difficulty,
     status: 'active',
     'generated_by.human_reviewed': true,
-  }).limit(k).lean();
+  };
+  if (type === 'drill') baseFilter.drill_subtype = drill_subtype;
+
+  const exactMatch = await ArtifactBundle.find({ ...baseFilter, difficulty })
+    .limit(k)
+    .lean();
 
   if (exactMatch.length >= k) return exactMatch;
 
-  // Fallback: same role_track + drill_subtype, any difficulty
-  const fallback = await ArtifactBundle.find({
-    type: 'drill',
-    role_track,
-    drill_subtype,
-    status: 'active',
-    'generated_by.human_reviewed': true,
-  }).limit(k).lean();
+  // Fallback: drop difficulty constraint.
+  const fallback = await ArtifactBundle.find(baseFilter).limit(k).lean();
 
   return fallback;
 }
@@ -92,15 +91,53 @@ async function nearestSeeds({ role_track, drill_subtype, difficulty }, k = 3) {
  *              the user prompt so the model can correct identified issues.
  * @returns {Promise<object>}  Saved Mongoose document
  */
-async function generate({ role_track, drill_subtype, difficulty, language, topic_hint, critique }) {
-  const seeds = await nearestSeeds({ role_track, drill_subtype, difficulty });
+/**
+ * Generate a new ArtifactBundle of either type.
+ *
+ * For drills: pass drill_subtype + difficulty + role_track + language.
+ * For capstones: pass type='capstone' + role_track + language + difficulty
+ *   + time_budget_minutes (60 | 75 | 90). drill_subtype is omitted.
+ *
+ * @param {{
+ *   type?: 'drill' | 'capstone',
+ *   role_track: string,
+ *   drill_subtype?: string,
+ *   difficulty: string,
+ *   language: string,
+ *   time_budget_minutes?: 60 | 75 | 90,
+ *   topic_hint?: string,
+ *   critique?: string,
+ * }} opts
+ */
+async function generate({
+  type = 'drill',
+  role_track,
+  drill_subtype,
+  difficulty,
+  language,
+  time_budget_minutes,
+  topic_hint,
+  critique,
+}) {
+  if (type === 'drill' && !drill_subtype) {
+    throw new Error('drill_subtype required when generating a drill bundle');
+  }
+  if (type === 'capstone' && !time_budget_minutes) {
+    // Sensible default per difficulty.
+    time_budget_minutes = difficulty === 'easy' ? 60 : difficulty === 'medium' ? 75 : 90;
+  }
+
+  const seeds = await nearestSeeds({ type, role_track, drill_subtype, difficulty });
   if (seeds.length === 0) {
+    const key = type === 'capstone' ? `${type}/${role_track}/${difficulty}` : `${role_track}/${drill_subtype}/${difficulty}`;
     throw new Error(
-      `No seed bundles found for ${role_track}/${drill_subtype}/${difficulty} — seed the library first`,
+      `No seed bundles found for ${key} — seed the library first`,
     );
   }
 
-  // Strip large/internal fields from seeds — keep only what the model needs
+  // Strip large/internal fields from seeds — keep only what the model needs.
+  // For capstones we keep starter_repo + hidden_tests because the generator
+  // must produce both. For drills we omit them (drills rarely have starters).
   const seedExamples = seeds.map(s => ({
     type: s.type,
     drill_subtype: s.drill_subtype,
@@ -110,22 +147,42 @@ async function generate({ role_track, drill_subtype, difficulty, language, topic
     time_budget_minutes: s.time_budget_minutes,
     brief: s.brief,
     acceptance_criteria: s.acceptance_criteria,
+    starter_repo: type === 'capstone' ? s.starter_repo : undefined,
     reference_solution: s.reference_solution,
+    visible_tests: type === 'capstone' ? s.visible_tests : undefined,
+    hidden_tests: type === 'capstone' ? s.hidden_tests : undefined,
     seeded_mistakes: s.seeded_mistakes,
     rubric_anchors: s.rubric_anchors,
     expected_meta_skill_signals: s.expected_meta_skill_signals,
     difficulty_signals: s.difficulty_signals,
   }));
 
+  const targetLines =
+    type === 'capstone'
+      ? [
+          `- type: capstone`,
+          `- role_track: ${role_track}`,
+          `- language: ${language}`,
+          `- difficulty: ${difficulty}`,
+          `- time_budget_minutes: ${time_budget_minutes}`,
+          `- starter_repo: REQUIRED (multi-file starting state for the learner)`,
+          `- visible_tests + hidden_tests: REQUIRED (3–5 each; distinct)`,
+          `- seeded_mistakes: REQUIRED (1–2 plausible bugs)`,
+          `- rubric_anchors: REQUIRED (3–5 deterministic checks)`,
+        ]
+      : [
+          `- type: drill`,
+          `- drill_subtype: ${drill_subtype}`,
+          `- role_track: ${role_track}`,
+          `- language: ${language}`,
+          `- difficulty: ${difficulty}`,
+        ];
+
   const userPrompt = `SEED EXAMPLES (${seeds.length}):
 ${JSON.stringify(seedExamples, null, 2)}
 
 TARGET:
-- type: drill
-- drill_subtype: ${drill_subtype}
-- role_track: ${role_track}
-- language: ${language}
-- difficulty: ${difficulty}
+${targetLines.join('\n')}
 ${topic_hint ? `- topic_hint: ${topic_hint}` : ''}
 ${critique ? `\nCRITIQUE FROM PREVIOUS ATTEMPT:\n${critique}\n` : ''}
 Generate a complete ArtifactBundle now. Return only the JSON.`;

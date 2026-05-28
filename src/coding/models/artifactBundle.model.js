@@ -31,6 +31,9 @@ const RubricAnchorSchema = new mongoose.Schema({
   check: { type: String, required: true },
   deterministic_test: String,
   weight: { type: Number, required: true },
+  // Baseline a passing solution should score on this dimension (0..10).
+  // Drives anchor-drift detection (spec §8.3).
+  expected_score: { type: Number, min: 0, max: 10 },
 }, { _id: false });
 
 const ArtifactBundleSchema = new mongoose.Schema({
