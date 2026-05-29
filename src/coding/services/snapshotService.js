@@ -34,13 +34,19 @@ async function captureForSession(sessionId) {
   const session = await CapstoneSession.findById(sessionId).lean();
   if (!session) return { captured: false, t_seconds: 0 };
   if (!session.sandbox_id) return { captured: false, t_seconds: 0 };
-  if (!['ready', 'in_progress', 'paused'].includes(session.status)) {
+  // 'submitted' is included BECAUSE the submit-time capture in applyControl
+  // runs AFTER the state transition but BEFORE sandbox teardown. Without
+  // it, the final snapshot is never written, the sandbox is reaped, and
+  // the evaluator sees an empty filetree — the diff renders as "all
+  // implementation was deleted" and scores ~1/100 for a learner who
+  // actually wrote code.
+  if (!['ready', 'in_progress', 'paused', 'submitted'].includes(session.status)) {
     return { captured: false, t_seconds: 0 };
   }
-  if (!session.started_at) return { captured: false, t_seconds: 0 };
 
+  const startedAt = session.started_at || session.createdAt || new Date();
   const tSeconds = Math.floor(
-    (Date.now() - session.started_at.getTime()) / 1000 - (session.paused_total_seconds || 0)
+    (Date.now() - new Date(startedAt).getTime()) / 1000 - (session.paused_total_seconds || 0)
   );
 
   // Don't capture a snapshot more often than SNAPSHOT_INTERVAL_SEC.

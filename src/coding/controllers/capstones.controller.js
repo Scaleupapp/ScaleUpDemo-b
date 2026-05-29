@@ -223,16 +223,29 @@ async function applyControl({ sessionId, userId, action }) {
       throw new Error(`unknown action ${action}`);
   }
 
+  // PRE-TRANSITION snapshot for submit. Capturing while session.status
+  // is still in_progress/paused guarantees:
+  //   1. The snapshotService's status gate passes
+  //   2. The sandbox is still alive when pullFinalFiles reads from it
+  //   3. The captured filetree is what the learner actually had at submit
+  // This was the cause of the "all implementation deleted" 1/100 bug:
+  // the snapshot was being attempted post-transition, so the gate
+  // rejected status='submitted' and no filetree was persisted before
+  // the sandbox got torn down.
+  if (target === 'submitted') {
+    const snap = await snapshotService.captureForSession(sessionId).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[capstones.control] pre-submit snapshot failed:', err.message);
+      return { captured: false };
+    });
+    if (!snap?.captured) {
+      // eslint-disable-next-line no-console
+      console.warn(`[capstones.control] pre-submit snapshot did NOT capture for ${sessionId}; evaluator may see empty filetree`);
+    }
+  }
+
   const updated = await stateMachine.transition(sessionId, target);
 
-  // Post-transition side effects.
-  if (target === 'submitted') {
-    // Capture a final snapshot BEFORE recording finalize + sandbox
-    // teardown so the evaluator + replay have the last-known filetree
-    // even if the eval job is delayed (sandbox would otherwise be
-    // reaped before pullFinalFiles can read it).
-    await snapshotService.captureForSession(sessionId).catch(() => {});
-  }
   if (target === 'aborted' || target === 'submitted') {
     await recordingService.finalize(sessionId).catch(() => {});
     await sandboxOrchestrator.teardownForSession(sessionId).catch(() => {});
