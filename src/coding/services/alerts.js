@@ -58,30 +58,110 @@ async function fire({ category, title, detail, dedupKey, severity = 'warn', fiel
   const key = `${category}::${dedupKey || category}`;
   if (withinDedupWindow(key, now)) return;
 
-  const url = process.env.ALERT_WEBHOOK_URL;
-  if (!url) {
-    // No webhook configured — log and return. Dev / test path.
-    // eslint-disable-next-line no-console
-    console.warn(`[alerts/${severity}] ${category}: ${title}${detail ? `\n${detail}` : ''}`);
-    return;
+  // Tier 1: stderr log (ALWAYS — this is the on-server fallback so the
+  // record exists in pm2 logs even if email/webhook fail).
+  // eslint-disable-next-line no-console
+  console.warn(`[alerts/${severity}] ${category}: ${title}${detail ? `\n${detail}` : ''}${
+    fields ? `\n${Object.entries(fields).map(([k, v]) => `  ${k}: ${v}`).join('\n')}` : ''
+  }`);
+
+  // Tier 2: email (when ALERT_EMAIL_TO is set — primary channel for prod).
+  const emailTo = process.env.ALERT_EMAIL_TO;
+  if (emailTo) {
+    void sendAlertEmail({ to: emailTo, category, title, detail, severity, fields }).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(`[alerts] email failed for ${category}:`, err.message);
+    });
   }
 
-  const payload = buildSlackPayload({ category, title, detail, severity, fields });
-  try {
-    // Node 18+ has global fetch.
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
+  // Tier 3: webhook (Slack / Discord — optional).
+  const url = process.env.ALERT_WEBHOOK_URL;
+  if (url) {
+    const payload = buildSlackPayload({ category, title, detail, severity, fields });
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        // eslint-disable-next-line no-console
+        console.error(`[alerts] webhook returned ${res.status} for ${category}`);
+      }
+    } catch (err) {
       // eslint-disable-next-line no-console
-      console.error(`[alerts] webhook returned ${res.status} for ${category}`);
+      console.error(`[alerts] webhook POST failed for ${category}:`, err.message);
     }
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[alerts] webhook POST failed for ${category}:`, err.message);
   }
+}
+
+/**
+ * Email alert via the existing SMTP transport. Lazy-requires nodemailer so
+ * test environments without SMTP creds don't crash on import.
+ */
+async function sendAlertEmail({ to, category, title, detail, severity, fields }) {
+  const nodemailer = require('nodemailer');
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    throw new Error('SMTP not configured');
+  }
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT) || 587,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  });
+
+  const color = severity === 'error' ? '#c0392b'
+              : severity === 'info'  ? '#3498db'
+              : '#f39c12';
+  const env = process.env.NODE_ENV || 'unknown';
+
+  const fieldsHtml = fields
+    ? `<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px">${
+        Object.entries(fields).slice(0, 12).map(([k, v]) => `
+          <tr>
+            <td style="padding:4px 8px;background:#f4f4f8;font-weight:600;width:30%;border:1px solid #e5e7eb">${escapeHtml(k)}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb"><code>${escapeHtml(String(v))}</code></td>
+          </tr>`).join('')
+      }</table>`
+    : '';
+  const detailHtml = detail
+    ? `<div style="margin-top:12px;padding:12px;background:#f4f4f8;border-radius:6px;white-space:pre-wrap;font-family:Menlo,Consolas,monospace;font-size:12px">${escapeHtml(detail)}</div>`
+    : '';
+
+  const html = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px">
+      <div style="background:${color};color:#fff;padding:12px 16px;border-radius:6px 6px 0 0;font-weight:700">
+        ${severity.toUpperCase()} — ScaleUp Coding Alert
+      </div>
+      <div style="border:1px solid #e5e7eb;border-top:0;padding:16px;border-radius:0 0 6px 6px;background:#fff">
+        <div style="font-size:16px;font-weight:600;color:#111827">${escapeHtml(title)}</div>
+        ${detailHtml}
+        ${fieldsHtml}
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280">
+          category: <code>${escapeHtml(category)}</code> · env: <code>${escapeHtml(env)}</code> · ${new Date().toISOString()}
+        </div>
+      </div>
+    </div>`;
+
+  const recipients = String(to).split(',').map((s) => s.trim()).filter(Boolean);
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || 'ScaleUp Alerts <noreply@scaleup.app>',
+    to: recipients,
+    subject: `[ScaleUp ${severity.toUpperCase()}] ${title}`,
+    text: `${title}\n\n${detail || ''}\n\nCategory: ${category}\nEnv: ${env}\n${
+      fields ? Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join('\n') : ''
+    }`,
+    html,
+  });
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function buildSlackPayload({ category, title, detail, severity, fields }) {
