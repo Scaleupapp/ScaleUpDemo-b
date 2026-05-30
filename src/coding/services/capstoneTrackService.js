@@ -101,15 +101,24 @@ async function enrollAutoTrack(userId, roleTrack) {
     completed_at: null,
   }));
 
-  const enrollment = await TrackEnrollment.create({
-    user_id: userId,
-    role_track: roleTrack,
-    title: TITLE_BY_TRACK[roleTrack] || 'Capstone track',
-    steps,
-    current_step: 0,
-    is_active: true,
-  });
-  return enrollment.toObject();
+  try {
+    const enrollment = await TrackEnrollment.create({
+      user_id: userId,
+      role_track: roleTrack,
+      title: TITLE_BY_TRACK[roleTrack] || 'Capstone track',
+      steps,
+      current_step: 0,
+      is_active: true,
+    });
+    return enrollment.toObject();
+  } catch (err) {
+    // Lost a create race (partial-unique index on {user_id, is_active:true}
+    // rejected the duplicate). Return whoever won — never two active tracks.
+    if (err && err.code === 11000) {
+      return TrackEnrollment.findOne({ user_id: userId, is_active: true }).lean();
+    }
+    throw err;
+  }
 }
 
 /**
@@ -125,41 +134,82 @@ async function enrollAutoTrack(userId, roleTrack) {
  * @param {number} overallScore
  */
 async function advanceOnGrade(userId, bundleId, sessionId, overallScore) {
-  const enrollment = await TrackEnrollment.findOne({ user_id: userId, is_active: true });
-  if (!enrollment) return { advanced: false };
-
-  const idx = enrollment.steps.findIndex(
-    (s) => String(s.bundle_id) === String(bundleId) && s.status === 'active'
+  // STEP 1 — atomically flip the matching ACTIVE step to completed. The
+  // positional filter (`steps.bundle_id` + `steps.status:'active'`) means a
+  // concurrent re-grade / BullMQ retry that races here finds no active step
+  // to match and returns null — so the step can never be double-completed.
+  const completed = await TrackEnrollment.findOneAndUpdate(
+    {
+      user_id: userId,
+      is_active: true,
+      steps: { $elemMatch: { bundle_id: bundleId, status: 'active' } },
+    },
+    {
+      $set: {
+        'steps.$.status': 'completed',
+        'steps.$.session_id': sessionId,
+        'steps.$.overall_score': typeof overallScore === 'number' ? overallScore : null,
+        'steps.$.completed_at': new Date(),
+      },
+    },
+    { new: true }
   );
-  if (idx === -1) return { advanced: false };
+  if (!completed) return { advanced: false };
 
-  enrollment.steps[idx].status = 'completed';
-  enrollment.steps[idx].session_id = sessionId;
-  enrollment.steps[idx].overall_score = typeof overallScore === 'number' ? overallScore : null;
-  enrollment.steps[idx].completed_at = new Date();
-
-  if (idx + 1 < enrollment.steps.length) {
-    enrollment.steps[idx + 1].status = 'active';
-    enrollment.current_step = idx + 1;
-  } else {
-    enrollment.current_step = enrollment.steps.length;
-    enrollment.is_active = false;
-    enrollment.completed_at = new Date();
+  // STEP 2 — unlock the next step (or complete the track). Done as a second
+  // targeted update; idempotent because step 1 already consumed the race.
+  const idx = completed.steps.findIndex((s) => String(s.bundle_id) === String(bundleId));
+  if (idx >= 0 && idx + 1 < completed.steps.length) {
+    await TrackEnrollment.updateOne(
+      { _id: completed._id, [`steps.${idx + 1}.status`]: 'locked' },
+      { $set: { [`steps.${idx + 1}.status`]: 'active', current_step: idx + 1 } }
+    );
+    return { advanced: true, completed: false, next_step: idx + 1 };
   }
-
-  await enrollment.save();
-  return { advanced: true, completed: !enrollment.is_active, next_step: enrollment.current_step };
+  // Last step done → close the track.
+  await TrackEnrollment.updateOne(
+    { _id: completed._id, is_active: true },
+    { $set: { is_active: false, current_step: completed.steps.length, completed_at: new Date() } }
+  );
+  return { advanced: true, completed: true, next_step: completed.steps.length };
 }
 
 /**
  * The active step's bundle_id for a learner's track, or null. Used by
  * planIntegration to prefer the track's next capstone over a random one.
+ *
+ * Self-healing (fixes the "stuck if a step bundle is retired mid-track"
+ * bug): if the active step's bundle is no longer an attemptable capstone
+ * (retired / archived / deleted / role-track changed), we skip it —
+ * marking it completed-but-skipped and unlocking the next step — until we
+ * land on an attemptable step or the track runs out (then close it). This
+ * guarantees a learner can never be permanently stuck on a dead step.
  */
-async function getActiveStepBundleId(userId) {
-  const enrollment = await TrackEnrollment.findOne({ user_id: userId, is_active: true }).lean();
-  if (!enrollment) return null;
-  const step = enrollment.steps.find((s) => s.status === 'active');
-  return step ? String(step.bundle_id) : null;
+async function getActiveStepBundleId(userId, expectedRoleTrack = null) {
+  // Bounded loop: at most one pass over the steps.
+  for (let guard = 0; guard < 32; guard += 1) {
+    const enrollment = await TrackEnrollment.findOne({ user_id: userId, is_active: true }).lean();
+    if (!enrollment) return null;
+    const step = enrollment.steps.find((s) => s.status === 'active');
+    if (!step) return null;
+
+    const bundle = await ArtifactBundle.findById(step.bundle_id)
+      .select('status role_track')
+      .lean();
+    const attemptable =
+      bundle &&
+      bundle.status === 'active' &&
+      (!expectedRoleTrack || bundle.role_track === expectedRoleTrack);
+
+    if (attemptable) return String(step.bundle_id);
+
+    // Dead/stale step — skip it via the same atomic advance machinery.
+    const res = await advanceOnGrade(userId, step.bundle_id, null, null);
+    if (!res.advanced) return null; // someone else moved it; bail to be safe
+    if (res.completed) return null; // skipped the last step → track closed
+    // else loop and re-check the newly-active step
+  }
+  return null;
 }
 
 function shorten(brief) {

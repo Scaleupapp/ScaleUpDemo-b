@@ -264,7 +264,11 @@ async function getCapstoneMilestone(user_id) {
   // "next capstone" follows the sequence.
   try {
     const trackService = require('./capstoneTrackService');
-    const stepBundleId = await trackService.getActiveStepBundleId(user_id);
+    // getActiveStepBundleId self-heals: it skips retired / role-mismatched
+    // steps (advancing past them) so a dead step can't strand the learner,
+    // and only returns a bundle id that is currently attemptable for THIS
+    // role_track.
+    const stepBundleId = await trackService.getActiveStepBundleId(user_id, role_track);
     if (stepBundleId) {
       const stepBundle = await ArtifactBundle.findById(stepBundleId).lean();
       if (stepBundle && stepBundle.status === 'active') {

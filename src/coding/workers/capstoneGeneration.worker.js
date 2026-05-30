@@ -54,7 +54,19 @@ function startCapstoneGenerationWorker() {
     QUEUE_NAME,
     async (job) => {
       const service = require('../services/capstoneGenerationService');
-      await service.runGeneration(job.data.requestId);
+      try {
+        await service.runGeneration(job.data.requestId);
+      } catch (err) {
+        // runGeneration handles its own errors, but belt-and-suspenders: if
+        // anything escapes, ensure the request doesn't linger mid-status.
+        try {
+          const Req = require('../models/capstoneGenerationRequest.model');
+          await Req.findByIdAndUpdate(job.data.requestId, {
+            $set: { status: 'failed', error: `worker error: ${err.message}` },
+          });
+        } catch { /* ignore */ }
+        throw err;
+      }
       return { done: true };
     },
     { connection: getConnection(), concurrency: 1 }

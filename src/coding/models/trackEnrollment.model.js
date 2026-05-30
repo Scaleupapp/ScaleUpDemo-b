@@ -42,8 +42,13 @@ const TrackEnrollmentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// One active enrollment per user; quick lookups.
-TrackEnrollmentSchema.index({ user_id: 1, is_active: 1 });
+// Exactly one ACTIVE enrollment per user — enforced at the DB level so a
+// race between two enroll calls can't create duplicate active tracks. The
+// partial filter lets a user accumulate many *inactive* (completed) tracks.
+TrackEnrollmentSchema.index(
+  { user_id: 1, is_active: 1 },
+  { unique: true, partialFilterExpression: { is_active: true } }
+);
 
 module.exports =
   mongoose.models.TrackEnrollment ||

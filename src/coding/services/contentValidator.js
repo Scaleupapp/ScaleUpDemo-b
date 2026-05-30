@@ -247,13 +247,23 @@ async function validate({ bundle_id }) {
     }
   }
 
-  // All checks passed — stamp and mark validated
+  // All checks passed — stamp and mark validated. Guard the transition to
+  // `draft` only: a bundle that has since been activated/retired/manually
+  // overridden by another process must NOT be silently flipped back to
+  // 'validated' (that would, e.g., demote a live 'active' bundle out of the
+  // attemptable library). If it's no longer 'draft', the validation result
+  // still returns ok — we just don't clobber the newer status.
   const validator_model = 'gemini-2.5-pro';
-  await ArtifactBundle.findByIdAndUpdate(bundle_id, {
-    status: 'validated',
-    'generated_by.validator_model': validator_model,
-    'generated_by.validated_at': new Date(),
-  });
+  await ArtifactBundle.findOneAndUpdate(
+    { _id: bundle_id, status: 'draft' },
+    {
+      $set: {
+        status: 'validated',
+        'generated_by.validator_model': validator_model,
+        'generated_by.validated_at': new Date(),
+      },
+    }
+  );
 
   return { ok: true, results };
 }

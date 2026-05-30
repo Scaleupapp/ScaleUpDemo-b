@@ -781,10 +781,22 @@ async function generateCapstone(req, res) {
     status: 'queued',
   });
 
-  capstoneGenerationWorker.enqueueGeneration(reqDoc._id).catch((err) => {
+  // Enqueue is awaited: if the queue (Redis) is down, the job would never
+  // run and the learner would poll a 'queued' request forever. Mark the
+  // request failed and tell the client now, rather than hang silently.
+  try {
+    await capstoneGenerationWorker.enqueueGeneration(reqDoc._id);
+  } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[capstones.generate] enqueue failed:', err.message);
-  });
+    console.error('[capstones.generate] enqueue failed:', err.message);
+    await CapstoneGenerationRequest.findByIdAndUpdate(reqDoc._id, {
+      $set: { status: 'failed', error: 'Could not queue generation. Try again shortly.' },
+    }).catch(() => {});
+    return res.status(503).json({
+      error: 'generation_unavailable',
+      message: 'Generation is temporarily unavailable. Please try again in a moment.',
+    });
+  }
 
   res.status(202).json({
     request_id: String(reqDoc._id),
