@@ -6,6 +6,7 @@ const sandboxGc = require('./sandbox-gc.worker');
 const capstoneEval = require('./capstoneEval.worker');
 const voiceReflection = require('./voiceReflection.worker');
 const capstoneFollowup = require('./capstoneFollowup.worker');
+const capstoneGeneration = require('./capstoneGeneration.worker');
 
 function startAll() {
   return [
@@ -16,6 +17,7 @@ function startAll() {
     capstoneEval.startCapstoneEvalWorker(),
     voiceReflection.startVoiceReflectionWorker(),
     capstoneFollowup.startCapstoneFollowupWorker(),
+    capstoneGeneration.startCapstoneGenerationWorker(),
   ];
 }
 
@@ -26,6 +28,7 @@ module.exports = {
   sandboxGcTick:          sandboxGc.tick,
   enqueueCapstoneEval:    capstoneEval.enqueueEvaluation,
   enqueueVoiceReflection: voiceReflection.enqueueTranscription,
+  enqueueCapstoneGeneration: capstoneGeneration.enqueueGeneration,
   startAll,
   runScheduledGeneration: scheduled.runScheduledGeneration,
 };

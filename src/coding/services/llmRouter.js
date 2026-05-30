@@ -15,6 +15,7 @@ const gemini    = require('../integrations/gemini.client');
 const ROUTING_TABLE = {
   content_generator_draft:   { provider: 'anthropic', model: 'claude-opus-4-7',              tools: ['code_execution'] },
   content_validator_cross:   { provider: 'google',    model: 'gemini-2.5-pro',               tools: ['code_execution'] },
+  capstone_quality_cross:    { provider: 'google',    model: 'gemini-2.5-pro' },
   reference_solution_solver: { provider: 'anthropic', model: 'claude-opus-4-7',              tools: ['code_execution'] },
   drill_grade_prompt:        { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
   drill_grade_verify:        { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },

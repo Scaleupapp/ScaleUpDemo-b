@@ -12,6 +12,22 @@ const capstoneEvalWorker = require('../workers/capstoneEval.worker');
 const snapshotService = require('../services/snapshotService');
 const capstoneSummary = require('../services/capstoneSummary');
 const planIntegration = require('../services/planIntegration');
+const CapstoneGenerationRequest = require('../models/capstoneGenerationRequest.model');
+const capstoneGenerationWorker = require('../workers/capstoneGeneration.worker');
+const DifficultyState = require('../models/difficultyState.model');
+const { evaluateCodingEligibility } = require('../services/codingEligibility');
+
+// Default language per role-track for generated capstones (learner can't pick
+// an arbitrary language; we map their track to its canonical language).
+const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
+
+async function resolveRoleTrackForUser(userId) {
+  let UserObjective;
+  try { UserObjective = require('../../models/UserObjective'); } catch { UserObjective = require('../../models/userObjective'); }
+  const obj = await UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean();
+  const eligibility = evaluateCodingEligibility(obj);
+  return eligibility.eligible ? eligibility.role_track : null;
+}
 
 /**
  * Capstone REST controllers. Wire shape lives in openapi.yaml under
@@ -715,6 +731,102 @@ async function requestNext(req, res) {
   });
 }
 
+/**
+ * POST /api/coding/capstones/generate
+ *
+ * Learner-initiated custom capstone generation from a job description / topic.
+ * Open to any eligible learner (rate-limited). Returns immediately with a
+ * request_id; the heavy generate→validate→cross-check→activate work runs in a
+ * worker. Client polls GET /capstones/generations/:request_id.
+ *
+ * Body: { job_description?: string, topic_hint?: string, difficulty?: 'easy'|'medium'|'hard' }
+ */
+async function generateCapstone(req, res) {
+  const { job_description = '', topic_hint = '', difficulty } = req.body || {};
+  const jd = String(job_description).trim();
+  const hint = String(topic_hint).trim();
+  if (jd.length === 0 && hint.length === 0) {
+    return res.status(400).json({ error: 'need_input', message: 'Provide a job description or a topic.' });
+  }
+  if (jd.length > 8000 || hint.length > 500) {
+    return res.status(400).json({ error: 'input_too_long' });
+  }
+
+  const roleTrack = await resolveRoleTrackForUser(req.user.userId);
+  if (!roleTrack) {
+    return res.status(409).json({
+      error: 'no_coding_track',
+      message: 'Set a coding objective (SWE / Data Science / AI engineering) to generate capstones.',
+    });
+  }
+
+  // Difficulty: honour an explicit valid choice, else use the learner's
+  // recalibrated level, else default medium.
+  let diff = ['easy', 'medium', 'hard'].includes(difficulty) ? difficulty : null;
+  if (!diff) {
+    const ds = await DifficultyState.findOne({ user_id: req.user.userId, role_track: roleTrack }).lean();
+    const cur = ds?.current_difficulty;
+    diff = ['easy', 'medium', 'hard'].includes(cur) ? cur : 'medium';
+  }
+
+  const language = LANG_BY_TRACK[roleTrack] || 'python';
+
+  const reqDoc = await CapstoneGenerationRequest.create({
+    user_id: req.user.userId,
+    job_description: jd,
+    topic_hint: hint,
+    role_track: roleTrack,
+    difficulty: diff,
+    language,
+    status: 'queued',
+  });
+
+  capstoneGenerationWorker.enqueueGeneration(reqDoc._id).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('[capstones.generate] enqueue failed:', err.message);
+  });
+
+  res.status(202).json({
+    request_id: String(reqDoc._id),
+    status: 'queued',
+    role_track: roleTrack,
+    difficulty: diff,
+    language,
+    estimated_seconds: 120,
+  });
+}
+
+/**
+ * GET /api/coding/capstones/generations/:request_id
+ *
+ * Poll a generation request. When status==='ready', includes the attemptable
+ * bundle (preview-safe projection). When 'failed', includes a learner-readable
+ * reason + allows a retry from the client.
+ */
+async function getGenerationStatus(req, res) {
+  const reqDoc = await CapstoneGenerationRequest.findOne({
+    _id: req.params.request_id,
+    user_id: req.user.userId,
+  }).lean();
+  if (!reqDoc) return res.status(404).json({ error: 'request_not_found' });
+
+  const out = {
+    request_id: String(reqDoc._id),
+    status: reqDoc.status,
+    role_track: reqDoc.role_track,
+    difficulty: reqDoc.difficulty,
+    attempts: reqDoc.attempts || 0,
+  };
+  if (reqDoc.status === 'failed') {
+    out.error = reqDoc.error || 'generation failed';
+  }
+  if (reqDoc.status === 'ready' && reqDoc.bundle_id) {
+    const bundle = await ArtifactBundle.findById(reqDoc.bundle_id).lean();
+    if (bundle) out.bundle = projectBundle(bundle);
+  }
+  res.json(out);
+}
+
 module.exports = {
   listLibrary,
   start,
@@ -731,4 +843,6 @@ module.exports = {
   getLatestSnapshot,
   retry,
   requestNext,
+  generateCapstone,
+  getGenerationStatus,
 };
