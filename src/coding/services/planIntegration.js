@@ -259,6 +259,30 @@ async function getCapstoneMilestone(user_id) {
   if (await hasActiveCapstone(user_id)) return null;
   if (await hasRecentCapstone(user_id)) return null;
 
+  // If the learner is in an auto-assembled track, the milestone IS the track's
+  // current active step — prefer it over a random capstone so the surfaced
+  // "next capstone" follows the sequence.
+  try {
+    const trackService = require('./capstoneTrackService');
+    const stepBundleId = await trackService.getActiveStepBundleId(user_id);
+    if (stepBundleId) {
+      const stepBundle = await ArtifactBundle.findById(stepBundleId).lean();
+      if (stepBundle && stepBundle.status === 'active') {
+        return {
+          type: 'capstone_milestone',
+          bundle_id: stepBundle._id,
+          role_track,
+          difficulty: stepBundle.difficulty,
+          title: `Capstone — ${prettyDifficulty(stepBundle.difficulty)}`,
+          brief_preview: (stepBundle.brief || '').slice(0, 200),
+          estimated_minutes: stepBundle.time_budget_minutes,
+          cadence: 'track',
+          cta_url: `/api/coding/capstones/${stepBundle._id}/start`,
+        };
+      }
+    }
+  } catch (_) { /* fall through to single-capstone selection */ }
+
   // Pick difficulty: one notch above current drill difficulty.
   const diffState = await DifficultyState.findOne({ user_id, role_track }).lean();
   const baseDiff = diffState ? diffState.current_difficulty : 'easy';

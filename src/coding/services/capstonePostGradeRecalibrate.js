@@ -106,6 +106,21 @@ async function applyPostGradeRecalibrationForCapstone(sessionId) {
     console.warn('[capstonePostGradeRecalibrate] difficulty bump failed:', err.message);
   }
 
+  // Advance the learner's auto-assembled track if this graded capstone was its
+  // active step (unlock-on-grade). Best-effort.
+  try {
+    const trackService = require('./capstoneTrackService');
+    await trackService.advanceOnGrade(
+      session.user_id,
+      bundle._id,
+      session._id,
+      session.result.overall_score
+    );
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[capstonePostGradeRecalibrate] track advance failed:', err.message);
+  }
+
   return { applied: true, masteryResults, difficulty };
 }
 

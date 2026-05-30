@@ -28,6 +28,7 @@ const voiceReflection = require('../controllers/voiceReflection.controller');
 router.get('/library', auth, rl({ endpoint: 'library', max: 120 }), capstones.listLibrary);
 router.get('/summary', auth, rl({ endpoint: 'summary', max: 120 }), capstones.getSummary);
 router.get('/history', auth, rl({ endpoint: 'history', max: 60 }), capstones.getHistory);
+router.get('/track', auth, rl({ endpoint: 'track', max: 60 }), capstones.getTrack);
 router.post('/start', auth, rl({ endpoint: 'start', max: 6 }), capstones.start);
 router.post('/retry', auth, rl({ endpoint: 'retry', max: 6 }), capstones.retry);
 router.post('/request', auth, rl({ endpoint: 'request', max: 12 }), capstones.requestNext);

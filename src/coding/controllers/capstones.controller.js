@@ -827,6 +827,44 @@ async function getGenerationStatus(req, res) {
   res.json(out);
 }
 
+/**
+ * GET /api/coding/capstones/track
+ *
+ * Returns the learner's auto-assembled track. If they're eligible and not yet
+ * enrolled, auto-enrolls them (assembling a ramping sequence) on first call.
+ * Returns { enrolled: false } when the learner has no coding track or there
+ * aren't enough bundles to build one.
+ */
+async function getTrack(req, res) {
+  const trackService = require('../services/capstoneTrackService');
+  const roleTrack = await resolveRoleTrackForUser(req.user.userId);
+  if (!roleTrack) return res.json({ enrolled: false, reason: 'no_coding_track' });
+
+  let enrollment = await trackService.getActiveEnrollment(req.user.userId);
+  if (!enrollment) {
+    enrollment = await trackService.enrollAutoTrack(req.user.userId, roleTrack);
+  }
+  if (!enrollment) return res.json({ enrolled: false, reason: 'not_enough_bundles' });
+
+  res.json({
+    enrolled: true,
+    title: enrollment.title,
+    role_track: enrollment.role_track,
+    current_step: enrollment.current_step,
+    total_steps: enrollment.steps.length,
+    completed: !enrollment.is_active,
+    steps: enrollment.steps.map((s, i) => ({
+      index: i,
+      bundle_id: String(s.bundle_id),
+      difficulty: s.difficulty,
+      brief_preview: s.brief_preview,
+      status: s.status,
+      overall_score: s.overall_score,
+      completed_at: s.completed_at,
+    })),
+  });
+}
+
 module.exports = {
   listLibrary,
   start,
@@ -845,4 +883,5 @@ module.exports = {
   requestNext,
   generateCapstone,
   getGenerationStatus,
+  getTrack,
 };
