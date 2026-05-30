@@ -85,6 +85,10 @@ app.use('/api/v1/mindmaps', require('./routes/mindmaps'));
 app.use('/api/v1/audio-summaries', require('./routes/audioSummaries'));
 app.use('/api/v1/note-requests', require('./routes/noteRequests'));
 app.use('/api/v1/interviews', require('./routes/interviews'));
+// Public, unauthenticated coding routes (opt-in shared profiles). Mounted
+// BEFORE the auth-gated /api/coding router so the public profile read needs
+// no token.
+app.use('/api/coding/public', require('./coding/routes/publicProfiles.routes'));
 app.use('/api/coding', require('./coding').routes);
 
 // --- v2 API namespace (parallel rollout) ---
