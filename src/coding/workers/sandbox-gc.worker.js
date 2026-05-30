@@ -29,6 +29,12 @@ const QUEUE_NAME = 'capstone-sandbox-gc';
 const TICK_INTERVAL_MS = 5 * 60 * 1000;
 const GRACE_MS_AFTER_SUBMIT = 5 * 60 * 1000;
 const HARD_BUFFER_SECONDS = 30; // matches spec §12.2 (the +30s after the 60s grace warning)
+// A session created from the mobile "Start" tap sits at scheduled → provisioning
+// → ready until the learner pairs and begins on their laptop. If they never do
+// (closed the app, provisioning hung, sandbox died), it has no started_at and no
+// expires_at, so the over-budget sweep below never touches it — it would block
+// the learner's next capstone forever. Reap anything stuck unstarted past this.
+const STALE_UNSTARTED_MS = 30 * 60 * 1000;
 
 let connection;
 let queue;
@@ -112,6 +118,31 @@ async function tick() {
         // eslint-disable-next-line no-console
         console.warn('[sandbox-gc] expire failed:', s._id, err.message);
       }
+    }
+  }
+
+  // 2b. Reap stale NEVER-STARTED sessions (scheduled/provisioning/ready with no
+  //     started_at, untouched for > STALE_UNSTARTED_MS). These have no expiry to
+  //     time out against, so step 2 ignores them; left alone they (a) block the
+  //     learner's "Start a capstone" CTA indefinitely and (b) surfaced on the
+  //     summary as an in_progress with no expires_at. Abort them; step 1 reaps
+  //     any sandbox they hold on a later tick.
+  const unstartedCutoff = new Date(Date.now() - STALE_UNSTARTED_MS);
+  const unstarted = await CapstoneSession.find({
+    status: { $in: ['scheduled', 'provisioning', 'ready'] },
+    started_at: null,
+    updatedAt: { $lt: unstartedCutoff },
+  })
+    .select('_id status')
+    .lean();
+  summary.reapedUnstarted = 0;
+  for (const s of unstarted) {
+    try {
+      await stateMachine.transition(s._id, 'aborted');
+      summary.reapedUnstarted += 1;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[sandbox-gc] reap unstarted failed:', s._id, err.message);
     }
   }
 

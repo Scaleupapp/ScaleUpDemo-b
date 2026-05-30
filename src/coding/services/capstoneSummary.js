@@ -93,7 +93,11 @@ async function buildSummary(userId) {
           session_id: String(inProgressSession._id),
           bundle_id: String(inProgressSession.bundle_id),
           status: inProgressSession.status,
-          expires_at: inProgressSession.expires_at,
+          // A not-yet-started session (scheduled/provisioning/ready) has no
+          // wall-clock deadline yet — `expires_at` is only stamped when the
+          // session actually starts. Emit an explicit null (never undefined)
+          // so the field is always present in the contract.
+          expires_at: inProgressSession.expires_at || null,
         }
       : null,
     next_available_at: nextAvailableAt,
