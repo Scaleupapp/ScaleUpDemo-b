@@ -41,7 +41,7 @@ const ArtifactBundleSchema = new mongoose.Schema({
   type: { type: String, enum: ['drill', 'capstone'], required: true },
   drill_subtype: { type: String, enum: ['prompt', 'verify', 'decompose', 'refactor'] },
   role_track: { type: String, enum: ['swe', 'ds', 'ai_eng'], required: true },
-  language: { type: String, enum: ['python', 'javascript', 'typescript', 'java', 'sql'], required: true },
+  language: { type: String, enum: ['python', 'javascript', 'typescript', 'java', 'sql', 'go', 'rust', 'kotlin', 'swift', 'cpp'], required: true },
   stack_variant: String,
   difficulty: { type: String, enum: ['easy', 'medium', 'hard'], required: true },
   time_budget_minutes: { type: Number, required: true },

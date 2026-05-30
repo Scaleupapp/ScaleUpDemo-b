@@ -34,6 +34,16 @@ const TEMPLATE_BY_LANG = {
   typescript: process.env.E2B_TEMPLATE_NODE || undefined,
   java: process.env.E2B_TEMPLATE_JAVA || undefined,
   sql: process.env.E2B_TEMPLATE_PYTHON || undefined,            // SQL runs in Python sandbox
+  // Phase 3 languages. Each maps to a locked template id when the env var is
+  // set; when unset, templateFor() returns undefined and the sandbox falls
+  // back to e2b's default image (open egress) — so these languages WORK
+  // immediately, and tighten to locked egress once the Docker templates are
+  // built + the env vars populated. Kotlin shares the JVM/Maven Java box.
+  go: process.env.E2B_TEMPLATE_GO || undefined,
+  rust: process.env.E2B_TEMPLATE_RUST || undefined,
+  kotlin: process.env.E2B_TEMPLATE_KOTLIN || process.env.E2B_TEMPLATE_JAVA || undefined,
+  swift: process.env.E2B_TEMPLATE_SWIFT || undefined,
+  cpp: process.env.E2B_TEMPLATE_CPP || undefined,
 };
 
 function templateFor(image) {

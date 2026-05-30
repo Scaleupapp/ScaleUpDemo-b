@@ -26,6 +26,14 @@ const DEFAULT_LINT_BY_LANG = {
   typescript: 'npx --yes tsc --noEmit 2>&1 || true',
   java: 'find . -name "*.java" -exec javac -d /tmp/out {} + 2>&1 || true',
   sql: 'echo skip-lint',
+  // Phase 3 languages — each lints best-effort and never hard-fails the
+  // harness (|| true / echo skip-lint), so a missing linter degrades to
+  // "no lint signal" rather than a false zero.
+  go: 'gofmt -l . 2>&1 || true',
+  rust: 'cargo clippy --quiet 2>&1 || cargo check --quiet 2>&1 || true',
+  kotlin: 'ktlint 2>&1 || echo skip-lint',
+  swift: 'swiftlint 2>&1 || swift build 2>&1 || echo skip-lint',
+  cpp: 'find . \\( -name "*.cpp" -o -name "*.cc" \\) -print0 | xargs -0 -r clang++ -fsyntax-only -Wall 2>&1 || true',
 };
 
 const HARNESS_TIMEOUT_MS = 60 * 1000; // each test command capped at 60s
@@ -130,6 +138,12 @@ async function runInstallStep(adapter, sandboxId, language) {
     typescript: 'npm install --silent --no-audit --no-fund 2>&1 || true',
     java: 'echo skip-install',
     sql: 'echo skip-install',
+    // Phase 3 languages — pull deps only if the manifest exists, never hard-fail.
+    go: 'test -f go.mod && go mod download 2>&1 || echo skip-install',
+    rust: 'test -f Cargo.toml && cargo fetch --quiet 2>&1 || echo skip-install',
+    kotlin: 'echo skip-install',
+    swift: 'test -f Package.swift && swift package resolve 2>&1 || echo skip-install',
+    cpp: 'echo skip-install',
   };
   const c = cmds[language];
   if (!c) return;

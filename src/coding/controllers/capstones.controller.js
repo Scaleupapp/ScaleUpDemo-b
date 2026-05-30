@@ -424,10 +424,54 @@ async function persistFiles(req, res) {
         },
       });
     }
+    // Crash-recovery: opportunistically snapshot the live filetree to S3 on
+    // file flush. snapshotService dedups internally (≤ 1 / SNAPSHOT_INTERVAL_SEC),
+    // so calling it on every flush is cheap — it no-ops if a snapshot was taken
+    // in the last 60s. This ties snapshot freshness to actual editing activity
+    // (exactly when there's work worth recovering) so a browser reload / sandbox
+    // crash loses at most ~60s of edits instead of everything.
+    void snapshotService.captureForSession(session._id).catch(() => {});
     res.json({ persisted: safe.length });
   } catch (err) {
     res.status(500).json({ error: 'sandbox_error', message: err.message });
   }
+}
+
+/**
+ * GET /api/coding/capstones/:session_id/latest-snapshot
+ *
+ * Crash-recovery read path. Returns the most recent snapshot's filetree so the
+ * web IDE can rehydrate the editor after a browser reload / sandbox reprovision.
+ * Returns { has_snapshot: false } when none exists (fresh session) — the client
+ * then falls back to the bundle's starter_repo.
+ */
+async function getLatestSnapshot(req, res) {
+  const session = await CapstoneSession.findOne({
+    _id: req.params.session_id,
+    user_id: req.user.userId,
+  })
+    .select('_id status')
+    .lean();
+  if (!session) return res.status(404).json({ error: 'session_not_found' });
+
+  const CapstoneRecording = require('../models/capstoneRecording.model');
+  const recording = await CapstoneRecording.findOne({ session_id: session._id })
+    .select('snapshots')
+    .lean();
+  const snaps = recording?.snapshots || [];
+  if (snaps.length === 0) {
+    return res.json({ has_snapshot: false });
+  }
+  const latest = snaps[snaps.length - 1];
+  const loaded = await snapshotService.loadSnapshot(latest.s3_key).catch(() => null);
+  if (!loaded || !Array.isArray(loaded.files)) {
+    return res.json({ has_snapshot: false });
+  }
+  res.json({
+    has_snapshot: true,
+    t_seconds: latest.t_seconds,
+    files: loaded.files.map((f) => ({ path: f.path, content: f.content })),
+  });
 }
 
 /** GET /api/coding/capstones/:session_id/result */
@@ -684,6 +728,7 @@ module.exports = {
   getResult,
   getSummary,
   getHistory,
+  getLatestSnapshot,
   retry,
   requestNext,
 };

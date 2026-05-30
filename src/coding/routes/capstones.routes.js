@@ -43,6 +43,7 @@ router.post('/:session_id/events', auth, rl({ endpoint: 'events', max: 60 }), ca
 router.post('/:session_id/run', auth, rl({ endpoint: 'run', max: 40 }), capstones.runInSandbox);
 router.post('/:session_id/files', auth, rl({ endpoint: 'files', max: 60 }), capstones.persistFiles);
 router.get('/:session_id/result', auth, rl({ endpoint: 'result', max: 120 }), capstones.getResult);
+router.get('/:session_id/latest-snapshot', auth, rl({ endpoint: 'latest-snapshot', max: 60 }), capstones.getLatestSnapshot);
 router.get('/:session_id/replay', auth, rl({ endpoint: 'replay', max: 60 }), replay.getReplay);
 
 router.post(

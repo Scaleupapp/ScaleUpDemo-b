@@ -61,7 +61,7 @@ const bundleSchema = Joi.object({
 
   // Classification
   role_track: Joi.string().valid('swe', 'ds', 'ai_eng').required(),
-  language: Joi.string().valid('python', 'javascript', 'typescript', 'java', 'sql').required(),
+  language: Joi.string().valid('python', 'javascript', 'typescript', 'java', 'sql', 'go', 'rust', 'kotlin', 'swift', 'cpp').required(),
   stack_variant: Joi.string().optional(),
   difficulty: Joi.string().valid('easy', 'medium', 'hard').required(),
   time_budget_minutes: Joi.number().integer().min(1).max(180).required(),
