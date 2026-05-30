@@ -968,25 +968,31 @@ components:
 
     CapstoneSummaryRecentEntry:
       type: object
-      required: [session_id, overall_score, graded_at]
+      # overall_score / graded_at are sent as `?? null` by the backend (a graded
+      # session can legitimately lack a numeric score or timestamp). They are NOT
+      # required — marking them so made one null row brick the whole summary decode.
+      required: [session_id]
       properties:
         session_id: { type: string }
         bundle_id: { type: [string, "null"] }
         bundle_brief_preview: { type: string }
         difficulty: { type: [string, "null"], enum: [easy, medium, hard, null] }
-        overall_score: { type: number, format: float, minimum: 0, maximum: 10 }
-        graded_at: { type: string, format: date-time }
+        overall_score: { type: [number, "null"], format: float, minimum: 0, maximum: 10 }
+        graded_at: { type: [string, "null"], format: date-time }
         integrity_confidence: { type: [string, "null"], enum: [high, medium, low, null] }
         dimension_scores: { type: [object, "null"], additionalProperties: { type: number } }
 
     CapstoneSummaryInProgress:
       type: object
-      required: [session_id, bundle_id, status, expires_at]
+      # expires_at is null until the session actually starts (a scheduled/
+      # provisioning/ready session has no wall-clock deadline yet), so it is NOT
+      # required — requiring it crashed the summary decode for unstarted sessions.
+      required: [session_id, bundle_id, status]
       properties:
         session_id: { type: string }
         bundle_id: { type: string }
         status: { type: string }
-        expires_at: { type: string, format: date-time }
+        expires_at: { type: [string, "null"], format: date-time }
 
     CapstoneSummary:
       type: object
