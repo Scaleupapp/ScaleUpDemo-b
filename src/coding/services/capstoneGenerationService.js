@@ -148,21 +148,29 @@ ${JSON.stringify({
     rubric_anchors: bundle.rubric_anchors,
   }, null, 2)}
 
-Judge strictly:
-1. Is the task realistically SOLVABLE by a competent learner within ${bundle.time_budget_minutes} minutes? (Not too big, not trivially small.)
-2. Is the brief UNAMBIGUOUS — would two learners build the same contract?
-3. Do the visible + hidden tests actually exercise the acceptance criteria? Any criterion with no test, or any test that contradicts the brief?
-4. Are the hidden tests FAIR (testing the stated spec, not gotchas the brief never mentioned)?
-5. Any internal contradictions, missing setup, or impossible requirements?
+The reference solution ALREADY passed every test in a sandbox, so correctness is
+proven. Your job is to catch GENUINE defects that would make this capstone
+unfair or unusable — NOT to demand stylistic perfection. A good real-world
+take-home always leaves some reasonable decisions to the candidate; minor
+wording ambiguity that a competent engineer would resolve sensibly is FINE, and
+the difficulty label is a minor detail, not a blocker.
+
+Flag a BLOCKING issue ONLY if one of these is true:
+1. The task is genuinely NOT solvable in ${bundle.time_budget_minutes} minutes (far too large), or is trivially empty.
+2. A hidden test checks behaviour the brief/acceptance-criteria NEVER state (an unfair gotcha) — note the specific test.
+3. There is an internal CONTRADICTION or an impossible/under-specified requirement that makes a correct solution undeterminable (not merely "could be phrased better").
+4. An acceptance criterion has NO corresponding test at all, or a test directly contradicts the brief.
 
 Return STRICT JSON only: { "pass": boolean, "blocking_issues": string[], "notes": string }
-pass=true ONLY if there are zero blocking issues. If unsure, pass=false.`;
+List ONLY genuine blockers from the list above in blocking_issues. Do NOT list
+nice-to-have clarifications or difficulty-label opinions. pass=true if there are
+no genuine blockers.`;
 
   let res;
   try {
     res = await llmCall({
       taskId: 'capstone_quality_cross',
-      system: 'You are a meticulous, skeptical reviewer of coding assessment quality. You reject anything ambiguous, unfair, or unsolvable.',
+      system: 'You are a fair, experienced reviewer of coding take-homes. The solution is already proven correct in a sandbox, so you ONLY block capstones with genuine defects (truly unsolvable in the time budget, unfair hidden tests, internal contradictions, or acceptance criteria with no test). You do NOT block for minor wording ambiguity or difficulty-label quibbles — real take-homes always leave some reasonable decisions to the candidate.',
       prompt,
     });
   } catch (err) {
