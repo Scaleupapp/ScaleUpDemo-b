@@ -83,10 +83,15 @@ function coerceRepoFiles(repo) {
   if (repo && Array.isArray(repo.files)) {
     repo.files = repo.files
       .filter((f) => f && typeof f === 'object' && typeof f.path === 'string' && f.path.trim().length > 0)
-      // `content` is required by the model schema; the generator occasionally
-      // emits an intentionally-empty stub file with the field missing — coerce
-      // to an empty string rather than reject the whole bundle.
-      .map((f) => ({ ...f, content: typeof f.content === 'string' ? f.content : '' }));
+      // `content` is required by the Mongoose schema, and Mongoose's String
+      // `required` rejects '' too — so an intentionally-empty stub the model
+      // left contentless must become a non-empty placeholder (a newline) rather
+      // than fail the whole bundle. Real content is preserved untouched; for
+      // validation the reference_solution overlays these stubs anyway.
+      .map((f) => ({
+        ...f,
+        content: (typeof f.content === 'string' && f.content.length > 0) ? f.content : '\n',
+      }));
   }
 }
 
