@@ -119,7 +119,10 @@ const bundleSchema = Joi.object({
  * @returns {{ error?: import('joi').ValidationError, value: object }}
  */
 function validateBundle(payload) {
-  return bundleSchema.validate(payload, { abortEarly: false });
+  // stripUnknown: the generator occasionally decorates objects with extra keys
+  // (e.g. a "_comment" on a file). Those are harmless — drop them rather than
+  // fail the whole generation. The required fields are still enforced.
+  return bundleSchema.validate(payload, { abortEarly: false, stripUnknown: true });
 }
 
 module.exports = { bundleSchema, validateBundle };
