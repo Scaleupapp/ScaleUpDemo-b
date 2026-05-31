@@ -178,11 +178,23 @@ async function pullFinalFiles({ sandboxId, snapshotS3Key, snapshotFiles } = {}) 
 
 async function pullFromSandbox(sandboxId) {
   const adapter = getSandboxAdapter();
-  // Walk the workspace via a `find` command and pull each file. Cheap on
-  // typical capstone (< 30 files); we don't try to mirror gitignore here.
+  // Walk the workspace via `find` and pull each file — but capture ONLY the
+  // learner's PROJECT files. /home/user also holds shell dotfiles (.bashrc,
+  // .bash_logout) and, once `npm install`/`pip` run, large caches (~/.npm,
+  // ~/.cache) and registry metadata. Including those buried the real diff in
+  // ~200 junk files, so the evaluator saw "no change to src/server.js" and
+  // scored a correct submission ~2/100. Exclude every dot-path (covers .npm,
+  // .cache, .git, .venv, dotfiles) plus node_modules and common build dirs.
   const ls = await adapter.runCommand(
     sandboxId,
-    'find /home/user -type f -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/__pycache__/*" 2>&1',
+    'find /home/user -type f ' +
+      '-not -path "*/.*" ' +
+      '-not -path "*/node_modules/*" ' +
+      '-not -path "*/venv/*" ' +
+      '-not -path "*/dist/*" ' +
+      '-not -path "*/build/*" ' +
+      '-not -path "*/target/*" ' +
+      '-not -path "*/__pycache__/*" 2>&1',
     { timeoutMs: 15_000 }
   );
   const paths = (ls.stdout || '')
@@ -190,6 +202,8 @@ async function pullFromSandbox(sandboxId) {
     .map((p) => p.trim())
     .filter((p) => p && p.startsWith('/home/user/'))
     .map((p) => p.replace(/^\/home\/user\//, ''))
+    // Belt-and-suspenders: drop any dotfile/dot-dir entries find still surfaced.
+    .filter((p) => !p.split('/').some((seg) => seg.startsWith('.')))
     .slice(0, 200);
   const out = [];
   for (const p of paths) {
