@@ -22,6 +22,10 @@ const InterviewSession = require('../models/InterviewSession');
 const ExternalContentTouch = require('../models/ExternalContentTouch');
 const DiagnosticAttempt = require('../models/DiagnosticAttempt');
 const UserObjective = require('../models/UserObjective');
+const DrillAttempt = require('../coding/models/drillAttempt.model');
+const CapstoneSession = require('../coding/models/capstoneSession.model');
+const { getCodingEngagementSignal } = require('../coding/services/planRecalibrationSignal');
+const { evaluateCodingEligibility } = require('../coding/services/codingEligibility');
 const taskCatalogService = require('../services/plan/taskCatalogService');
 const { notificationQueue } = require('../config/queue');
 
@@ -29,13 +33,19 @@ const SIGNAL_THRESHOLD = 5;
 const MIN_DAYS_SINCE_LAST_ATTEMPT = 7;
 
 async function computeSignal(userId, since) {
-  const [tasksCompleted, contentProgresses, interviews, externalTouches] = await Promise.all([
-    QuizAttempt.countDocuments({ userId, status: 'completed', completedAt: { $gte: since } }),
-    ContentProgress.countDocuments({ userId, isCompleted: true, completedAt: { $gte: since } }),
-    InterviewSession.countDocuments({ userId, status: 'evaluated', completedAt: { $gte: since } }),
-    ExternalContentTouch.countDocuments({ userId, completedAt: { $gte: since } }),
-  ]);
-  return tasksCompleted + contentProgresses + 2 * interviews + externalTouches;
+  const [tasksCompleted, contentProgresses, interviews, externalTouches, drillsGraded, capstonesGraded] =
+    await Promise.all([
+      QuizAttempt.countDocuments({ userId, status: 'completed', completedAt: { $gte: since } }),
+      ContentProgress.countDocuments({ userId, isCompleted: true, completedAt: { $gte: since } }),
+      InterviewSession.countDocuments({ userId, status: 'evaluated', completedAt: { $gte: since } }),
+      ExternalContentTouch.countDocuments({ userId, completedAt: { $gte: since } }),
+      // Coding work now counts toward the plan-adaptation trigger (previously a
+      // coding-only week never realigned the plan). Capstones are weighted like
+      // interviews (high-effort, high-signal).
+      DrillAttempt.countDocuments({ user_id: userId, status: 'graded', submitted_at: { $gte: since } }),
+      CapstoneSession.countDocuments({ user_id: userId, status: 'graded', graded_at: { $gte: since } }),
+    ]);
+  return tasksCompleted + contentProgresses + 2 * interviews + externalTouches + drillsGraded + 2 * capstonesGraded;
 }
 
 /**
@@ -166,11 +176,34 @@ async function runWeeklyAutoCalibration() {
       );
       if (weeksTouched > 0) {
         touched++;
+
+        // Coding-engagement signal (drills + capstones) — feeds the realign
+        // notification copy so coding performance is reflected in MyPlan.
+        let codingNote = '';
+        try {
+          const elig = evaluateCodingEligibility(obj);
+          if (elig.eligible) {
+            const sig = await getCodingEngagementSignal({
+              userId: plan.userId,
+              weekStart: sevenDaysAgo,
+              weekEnd: new Date(),
+              role_track: elig.role_track,
+            });
+            const codingActivity = (sig.drillCount || 0) + (sig.capstoneCount || 0);
+            if (codingActivity > 0) {
+              if (sig.trendDirection === 'up') codingNote = ' Your coding is trending up — keep going.';
+              else if (sig.trendDirection === 'down') codingNote = ' Your recent coding scores dipped — we added easier reps to rebuild momentum.';
+            }
+          }
+        } catch (sigErr) {
+          console.warn(`[weeklyAutoCalibration] coding signal failed for ${plan._id}:`, sigErr.message);
+        }
+
         try {
           await notificationQueue.add('send', {
             userId: String(plan.userId),
             title: 'Your plan adapted to this week',
-            body: "Tasks refreshed based on your recent progress. Open Plan to see what's new.",
+            body: `Tasks refreshed based on your recent progress.${codingNote} Open Plan to see what's new.`,
             data: { type: 'plan_auto_realigned', planId: String(plan._id) },
           });
         } catch (notifErr) {

@@ -1,6 +1,6 @@
 'use strict';
 
-const { DrillAttempt, MetaSkillMastery, DifficultyState } = require('../models');
+const { DrillAttempt, MetaSkillMastery, DifficultyState, CapstoneSession } = require('../models');
 
 /**
  * Recalibration signal contribution from drills.
@@ -33,14 +33,32 @@ async function getCodingEngagementSignal({ userId, weekStart, weekEnd, role_trac
   if (!userId) throw new Error('userId required');
   if (!weekStart || !weekEnd) throw new Error('weekStart and weekEnd required');
 
-  const attempts = await DrillAttempt.find({
-    user_id: userId,
-    status: 'graded',
-    submitted_at: { $gte: weekStart, $lte: weekEnd },
-  }).sort({ submitted_at: 1 }).lean();
+  // Coding engagement spans BOTH drills and capstones (the learner asked for
+  // both to feed recalibration). We merge them into one chronological score
+  // series for trend/mean, and report counts separately.
+  const [attempts, capstones] = await Promise.all([
+    DrillAttempt.find({
+      user_id: userId,
+      status: 'graded',
+      submitted_at: { $gte: weekStart, $lte: weekEnd },
+    }).sort({ submitted_at: 1 }).lean(),
+    CapstoneSession.find({
+      user_id: userId,
+      status: 'graded',
+      graded_at: { $gte: weekStart, $lte: weekEnd },
+    }).sort({ graded_at: 1 }).lean(),
+  ]);
 
   const drillCount = attempts.length;
-  const scores = attempts.map(a => a.grade && a.grade.overall_score).filter(s => typeof s === 'number');
+  const capstoneCount = capstones.length;
+  // Build a single time-ordered series of 0-100 scores across drills + capstones.
+  const series = [
+    ...attempts.map(a => ({ at: a.submitted_at, score: a.grade && a.grade.overall_score })),
+    ...capstones.map(c => ({ at: c.graded_at, score: c.result && c.result.overall_score })),
+  ]
+    .filter(x => typeof x.score === 'number')
+    .sort((a, b) => new Date(a.at) - new Date(b.at));
+  const scores = series.map(x => x.score);
   const meanScore = scores.length === 0 ? null : (scores.reduce((s, v) => s + v, 0) / scores.length);
 
   let trendDirection = 'insufficient';
@@ -64,12 +82,13 @@ async function getCodingEngagementSignal({ userId, weekStart, weekEnd, role_trac
     currentDifficulty = diff ? diff.current_difficulty : null;
   }
 
-  const recommendedTaskMix = computeMix({ drillCount, meanScore });
+  const recommendedTaskMix = computeMix({ activityCount: drillCount + capstoneCount, meanScore });
 
   return {
     userId,
     window: { start: weekStart, end: weekEnd },
     drillCount,
+    capstoneCount,
     meanScore,
     trendDirection,
     metaSkillSnapshot,
@@ -78,12 +97,13 @@ async function getCodingEngagementSignal({ userId, weekStart, weekEnd, role_trac
   };
 }
 
-function computeMix({ drillCount, meanScore }) {
-  // Default mix (when no drill data): drill 0, content 0.6, quiz 0.4
-  if (drillCount === 0) return { drill: 0, content: 0.6, quiz: 0.4 };
+function computeMix({ activityCount, meanScore }) {
+  // Default mix (when no coding data): drill 0, content 0.6, quiz 0.4
+  if (!activityCount) return { drill: 0, content: 0.6, quiz: 0.4 };
 
-  // Engaged user: scale drill weight by recent engagement (1-7 drills = 0.06-0.42, capped at 0.4)
-  let drill = Math.min(0.4, drillCount * 0.06);
+  // Engaged user: scale drill weight by recent coding engagement (drills +
+  // capstones; 1-7 = 0.06-0.42, capped at 0.4)
+  let drill = Math.min(0.4, activityCount * 0.06);
 
   // If struggling (mean < 50), lower drill weight — fundamentals first via content
   if (typeof meanScore === 'number' && meanScore < 50) drill = Math.max(0, drill - 0.1);

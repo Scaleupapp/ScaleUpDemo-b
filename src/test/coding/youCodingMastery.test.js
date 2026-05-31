@@ -251,6 +251,11 @@ test('GET /v2/you/coding-mastery — empty state for user with no mastery yet', 
       countDocuments: async () => 0,
       aggregate: async () => [],
     },
+    CapstoneSession: {
+      find: () => ({ sort: () => ({ limit: () => ({ populate: () => ({ lean: async () => [] }) }) }) }),
+      countDocuments: async () => 0,
+      aggregate: async () => [],
+    },
     ArtifactBundle: { find: () => ({ select: () => ({ lean: async () => [] }) }) },
   });
 
@@ -334,6 +339,11 @@ test('GET /v2/you/coding-mastery — populated user', async () => {
       find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [fakeAttempt] }) }) }),
       countDocuments: async () => 1,
       aggregate: async () => [{ _id: null, avg: 82 }],
+    },
+    CapstoneSession: {
+      find: () => ({ sort: () => ({ limit: () => ({ populate: () => ({ lean: async () => [] }) }) }) }),
+      countDocuments: async () => 0,
+      aggregate: async () => [],
     },
     ArtifactBundle: {
       find: () => ({ select: () => ({ lean: async () => [fakeBundle] }) }),

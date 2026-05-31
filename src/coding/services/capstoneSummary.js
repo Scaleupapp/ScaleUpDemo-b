@@ -54,9 +54,17 @@ async function buildSummary(userId) {
   const [diffState, mastery, inProgressSession, recent] = await Promise.all([
     DifficultyState.findOne({ user_id: userId, role_track: roleTrack }).lean(),
     MetaSkillMastery.findOne({ user_id: userId, role_track: roleTrack }).lean(),
+    // Only a GENUINELY-active session counts as "in progress". A session the
+    // learner has actually begun always has `started_at` stamped (on first
+    // entry to in_progress — see sessionStateMachine). Never-started sessions
+    // (scheduled/provisioning/ready) are deliberately excluded so a capstone
+    // that was minted but never paired/begun on the laptop does not linger as
+    // a phantom "in progress" card on Home + Coding. submitted/evaluating are
+    // kept so the learner sees a "being graded" state until the result lands.
     CapstoneSession.findOne({
       user_id: userId,
-      status: { $in: ['provisioning', 'ready', 'in_progress', 'paused', 'submitted', 'evaluating'] },
+      status: { $in: ['in_progress', 'paused', 'submitted', 'evaluating'] },
+      started_at: { $ne: null },
     }).lean(),
     CapstoneSession.find({
       user_id: userId,
@@ -141,12 +149,16 @@ async function getRoleTrack(userId) {
 
 function shapeMastery(doc) {
   if (!doc) return null;
-  // The model stores per-axis levels 0..10; the frontend wants a flat 4-key object.
+  // The model stores per-axis values 0..100 under `axes` (see
+  // metaSkillMastery.model.js); the Compass summary card renders them on a
+  // 0..10 scale, so divide by 10. (Previously read doc.<axis>.level, which
+  // never existed on the model — every summary mastery snapshot was {0,0,0,0}.)
+  const axes = doc.axes || {};
   return {
-    prompting: round1(doc.prompting?.level ?? 0),
-    verification: round1(doc.verification?.level ?? 0),
-    decomposition: round1(doc.decomposition?.level ?? 0),
-    refactoring: round1(doc.refactoring?.level ?? 0),
+    prompting: round1((axes.prompting ?? 0) / 10),
+    verification: round1((axes.verification ?? 0) / 10),
+    decomposition: round1((axes.decomposition ?? 0) / 10),
+    refactoring: round1((axes.refactoring ?? 0) / 10),
   };
 }
 
@@ -172,6 +184,9 @@ function computeNextAvailableAt(recent) {
 
 function buildSummaryLine({ recentShaped, diffState, inProgressSession, nextAvailableAt }) {
   if (inProgressSession) {
+    if (inProgressSession.status === 'submitted' || inProgressSession.status === 'evaluating') {
+      return 'Your capstone is being graded — your results will be ready shortly.';
+    }
     return 'You have a capstone in progress — finish it on your laptop.';
   }
   if (recentShaped.length === 0) {

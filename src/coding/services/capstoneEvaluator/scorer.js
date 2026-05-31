@@ -34,6 +34,8 @@ Score 0-10 on each dimension; weights are:
 
 Combine to overall_score on a 0–100 scale using the weights above.
 
+TRANSPARENCY REQUIREMENT: the learner will SEE your per-dimension "why" and "to_improve" and your overall_rationale. For every dimension, state plainly WHY it earned that score citing the concrete evidence (which hidden/visible tests failed, which seeded mistakes were missed, specific files/Compass turns), and give ONE concrete, actionable thing they could have done to score higher on THAT dimension. The overall_rationale must explain the number against the weights so a learner who felt they "did well" understands exactly what cost them points (e.g. "correctness is 25% and 3 of 5 hidden edge-case tests failed"). Be specific and honest, never generic.
+
 Anti-cheat signals:
 - High paste_count relative to turn_count + accept_ratio near 1.0 → low integrity_confidence
 - tab_blur_count high → lower integrity_confidence
@@ -51,6 +53,15 @@ Return STRICT JSON only (no prose, no markdown fences):
     "reflection_quality": <0-10>
   },
   "overall_score": <0-100 integer>,
+  "dimension_feedback": {
+    "correctness": { "why": "<1-2 sentences citing the specific evidence (e.g. which hidden/visible tests failed) that produced this score>", "to_improve": "<one concrete, actionable thing the learner could have done to score higher on THIS dimension>" },
+    "code_quality": { "why": "<...>", "to_improve": "<...>" },
+    "ai_pair_effectiveness": { "why": "<...>", "to_improve": "<...>" },
+    "verification_discipline": { "why": "<...>", "to_improve": "<...>" },
+    "decomposition": { "why": "<...>", "to_improve": "<...>" },
+    "reflection_quality": { "why": "<...>", "to_improve": "<...>" }
+  },
+  "overall_rationale": "<2-3 sentences explaining the overall score against the weights: name which dimensions and which hidden/visible test failures or missed seeded-mistakes drove the number up or down, so a learner who felt they did well understands what cost them points>",
   "strengths": ["<up to 5 specific, evidence-backed phrases>"],
   "gaps": ["<up to 5 specific, actionable phrases>"],
   "interview_parallel": "<single sentence linking this to an interview round, e.g. 'Razorpay backend lateral round, payments-integration block'>",
@@ -61,6 +72,52 @@ Return STRICT JSON only (no prose, no markdown fences):
 const SYSTEM_STRICT_PREAMBLE = `Your previous evaluation of this session disagreed with the bundle's deterministic rubric anchors by more than 2 points on at least one dimension. Re-evaluate, prioritising the anchor checks below over your free judgment. Match the anchor's expected score on the anchored dimensions unless the underlying observation is clearly different.
 
 `;
+
+// The six scored dimensions and their weights toward overall_score (0..1).
+// Single source of truth — surfaced to the learner so they can see exactly
+// how the overall number is composed (grading-transparency).
+const DIMENSIONS = [
+  'correctness',
+  'code_quality',
+  'ai_pair_effectiveness',
+  'verification_discipline',
+  'decomposition',
+  'reflection_quality',
+];
+
+const RUBRIC_WEIGHTS = {
+  correctness: 0.25,
+  code_quality: 0.15,
+  ai_pair_effectiveness: 0.2,
+  verification_discipline: 0.15,
+  decomposition: 0.1,
+  reflection_quality: 0.15,
+};
+
+/**
+ * Ensure dimension_feedback is a complete {why,to_improve} map over all six
+ * dimensions and overall_rationale is a string. Sonnet reliably emits these
+ * given the prompt, but a partial response must never brick a grade — we
+ * backfill missing entries rather than throw.
+ */
+function normalizeFeedback(parsed) {
+  const raw = parsed.dimension_feedback && typeof parsed.dimension_feedback === 'object'
+    ? parsed.dimension_feedback
+    : {};
+  const dimension_feedback = {};
+  for (const d of DIMENSIONS) {
+    const entry = raw[d] && typeof raw[d] === 'object' ? raw[d] : {};
+    dimension_feedback[d] = {
+      why: typeof entry.why === 'string' ? entry.why.trim() : '',
+      to_improve: typeof entry.to_improve === 'string' ? entry.to_improve.trim() : '',
+    };
+  }
+  const overall_rationale =
+    typeof parsed.overall_rationale === 'string' && parsed.overall_rationale.trim()
+      ? parsed.overall_rationale.trim()
+      : (typeof parsed.evidence_notes === 'string' ? parsed.evidence_notes : '');
+  return { dimension_feedback, overall_rationale };
+}
 
 /**
  * @param {object} args
@@ -136,8 +193,12 @@ async function score({
   const parsed = parseLLMJson(result.content);
   validate(parsed);
 
+  const { dimension_feedback, overall_rationale } = normalizeFeedback(parsed);
+
   return {
     ...parsed,
+    dimension_feedback,
+    overall_rationale,
     evaluator_model: result._meta?.model || 'unknown',
   };
 }
@@ -224,4 +285,4 @@ function validate(parsed) {
   }
 }
 
-module.exports = { score, SYSTEM_NORMAL };
+module.exports = { score, SYSTEM_NORMAL, DIMENSIONS, RUBRIC_WEIGHTS, normalizeFeedback };

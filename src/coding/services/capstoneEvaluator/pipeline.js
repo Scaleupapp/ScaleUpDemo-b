@@ -146,9 +146,22 @@ async function evaluate({ sessionId }) {
   }
 
   // 8. Persist result + transition + notify
+  // Deterministic test split behind the correctness score — surfaced to the
+  // learner so "I did well but scored low" is self-explanatory.
+  const test_summary = {
+    visible_passed: harness.visible.filter((t) => t.passed).length,
+    visible_total: harness.visible.length,
+    hidden_passed: harness.hidden.filter((t) => t.passed).length,
+    hidden_total: harness.hidden.length,
+    lint_passed: !!harness.lint?.passed,
+  };
   const result = {
     overall_score: Math.round(scored.overall_score),
     dimension_scores: scored.dimension_scores,
+    dimension_feedback: scored.dimension_feedback || null,
+    overall_rationale: typeof scored.overall_rationale === 'string' ? scored.overall_rationale : '',
+    test_summary,
+    rubric_weights: scorer.RUBRIC_WEIGHTS,
     strengths: Array.isArray(scored.strengths) ? scored.strengths.slice(0, 5) : [],
     gaps: Array.isArray(scored.gaps) ? scored.gaps.slice(0, 5) : [],
     interview_parallel: scored.interview_parallel,
@@ -241,22 +254,29 @@ async function _rescoreReflectionOnly(sessionId) {
     decomposition: oldDims.decomposition ?? 0,
     reflection_quality: scored.dimension_scores.reflection_quality,
   };
-  const weights = {
-    correctness: 0.25,
-    code_quality: 0.15,
-    ai_pair_effectiveness: 0.2,
-    verification_discipline: 0.15,
-    decomposition: 0.1,
-    reflection_quality: 0.15,
-  };
+  const weights = scorer.RUBRIC_WEIGHTS;
   const overall = Math.round(
     Object.entries(weights).reduce((s, [k, w]) => s + (newDims[k] || 0) * 10 * w, 0)
   );
+
+  // Preserve the original per-dimension feedback (the harness was skipped this
+  // run, so only reflection_quality's narrative is reliable from this rescore);
+  // overwrite reflection_quality's feedback and refresh the overall rationale.
+  const mergedFeedback = {
+    ...(session.result?.dimension_feedback || {}),
+    reflection_quality:
+      scored.dimension_feedback?.reflection_quality ||
+      session.result?.dimension_feedback?.reflection_quality ||
+      null,
+  };
 
   await CapstoneSession.findByIdAndUpdate(sessionId, {
     $set: {
       'result.dimension_scores': newDims,
       'result.overall_score': overall,
+      'result.dimension_feedback': mergedFeedback,
+      'result.overall_rationale':
+        scored.overall_rationale || session.result?.overall_rationale || '',
       'result.strengths': scored.strengths?.slice(0, 5) || session.result?.strengths || [],
       'result.gaps': scored.gaps?.slice(0, 5) || session.result?.gaps || [],
       'result.graded_at': new Date(),

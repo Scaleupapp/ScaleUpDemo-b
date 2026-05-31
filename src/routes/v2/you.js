@@ -34,6 +34,8 @@ const CreatorProfile = require('../../models/CreatorProfile');
 const CreatorApplication = require('../../models/CreatorApplication');
 const DiagnosticAttempt = require('../../models/DiagnosticAttempt');
 const planService = require('../../services/v2/planService');
+const readinessUpdater = require('../../coding/services/readinessUpdater');
+const { evaluateCodingEligibility } = require('../../coding/services/codingEligibility');
 
 const router = express.Router();
 
@@ -54,12 +56,41 @@ router.get('/overview', auth, async (req, res) => {
       CreatorApplication.findOne({ userId }).sort({ createdAt: -1 }).select('status').lean(),
     ]);
 
-    // Readiness
-    const readiness =
+    // Readiness — base from the existing waterfall…
+    const baseReadiness =
       plan?.readinessScore ??
       journey?.readinessScore ??
       computeReadinessFromKnowledge(knowledge) ??
       0;
+
+    // …then blend in coding performance for coding objectives. MetaSkillMastery
+    // is written by BOTH drills and capstones (via applyMasteryDelta), so this
+    // single component reflects all coding practice. The weight ramps 0→0.10 as
+    // combined attempts go 5→10 (backfill-safe: 0 below 5 attempts), so it never
+    // perturbs non-coders or new users, and the blend stays bounded to 0..100.
+    let readiness = baseReadiness;
+    let codingComponent = null;
+    try {
+      const elig = evaluateCodingEligibility(objective);
+      if (elig.eligible && baseReadiness > 0) {
+        const comp = await readinessUpdater.getMetaSkillComponent({
+          user_id: userId,
+          role_track: elig.role_track,
+        });
+        if (comp.weight > 0) {
+          readiness = Math.max(0, Math.min(100,
+            Math.round(baseReadiness * (1 - comp.weight) + comp.value * comp.weight)));
+          codingComponent = {
+            value: Math.round(comp.value),
+            weight: Number(comp.weight.toFixed(3)),
+            attempt_count: comp.attempt_count,
+          };
+        }
+      }
+    } catch (e) {
+      // Coding is one signal among many — never let it break the readiness ring.
+      console.warn('[v2/you/overview] coding readiness blend skipped:', e.message);
+    }
 
     // Target date and weeks remaining / overdue
     let targetDateStr = null;
@@ -111,6 +142,10 @@ router.get('/overview', auth, async (req, res) => {
           targetDate: targetDateStr,
           weeksRemaining,    // null when overdue
           weeksOverdue,      // set when target date has passed
+          // Present only for coding objectives once the learner has enough
+          // practice for coding to influence readiness (else null). Lets the
+          // client explain "coding practice is shaping your readiness".
+          coding: codingComponent,
         },
         weekProgress: weekTotal > 0
           ? { done: weekDone, total: weekTotal, week: currentWeek }
@@ -275,6 +310,47 @@ router.get('/analytics', auth, async (req, res) => {
     const completedQuizzes = quizAttempts.filter(q => q.completedAt);
     const completedInterviews = interviews.filter(i => i.completedAt);
 
+    // --- Coding (drills + capstones) — surfaced in the deep You/analytics tab ---
+    let coding = null;
+    let recentDrills = [];
+    let recentCapstones = [];
+    try {
+      const DrillAttempt = mongoose.model('DrillAttempt');
+      const CapstoneSession = mongoose.model('CapstoneSession');
+      const MetaSkillMastery = mongoose.model('MetaSkillMastery');
+      const DifficultyState = mongoose.model('DifficultyState');
+      const uid = new mongoose.Types.ObjectId(String(userId));
+      const [drillsGraded, capstonesGraded, drillAvgAgg, capAvgAgg, masteryDocs, diffStates, dRecent, cRecent] =
+        await Promise.all([
+          DrillAttempt.countDocuments({ user_id: userId, status: 'graded' }),
+          CapstoneSession.countDocuments({ user_id: userId, status: 'graded' }),
+          DrillAttempt.aggregate([{ $match: { user_id: uid, status: 'graded' } }, { $group: { _id: null, avg: { $avg: '$grade.overall_score' } } }]),
+          CapstoneSession.aggregate([{ $match: { user_id: uid, status: 'graded' } }, { $group: { _id: null, avg: { $avg: '$result.overall_score' } } }]),
+          MetaSkillMastery.find({ user_id: userId }).lean(),
+          DifficultyState.find({ user_id: userId }).lean(),
+          DrillAttempt.find({ user_id: userId, status: 'graded' }).select('drill_subtype grade.overall_score submitted_at').sort({ submitted_at: -1 }).limit(10).lean(),
+          CapstoneSession.find({ user_id: userId, status: 'graded' }).select('result.overall_score graded_at').sort({ graded_at: -1 }).limit(10).lean(),
+        ]);
+      recentDrills = dRecent;
+      recentCapstones = cRecent;
+      if (drillsGraded > 0 || capstonesGraded > 0 || masteryDocs.length > 0) {
+        coding = {
+          drillsGraded,
+          capstonesGraded,
+          avgDrillScore: drillAvgAgg[0]?.avg != null ? Math.round(drillAvgAgg[0].avg) : null,
+          avgCapstoneScore: capAvgAgg[0]?.avg != null ? Math.round(capAvgAgg[0].avg) : null,
+          tracks: masteryDocs.map((m) => ({
+            role_track: m.role_track,
+            axes: m.axes,
+            attempt_count: m.attempt_count,
+            current_difficulty: (diffStates.find((d) => d.role_track === m.role_track)?.current_difficulty) || 'easy',
+          })),
+        };
+      }
+    } catch (e) {
+      console.warn('[v2/you/analytics] coding section skipped:', e.message);
+    }
+
     // --- Lifetime counts ---
     const counts = {
       quizzesTaken: completedQuizzes.length,
@@ -383,6 +459,22 @@ router.get('/analytics', auth, async (req, res) => {
         detail: i.evaluation?.overallScore != null ? `${Math.round(i.evaluation.overallScore)}/100` : null,
       });
     }
+    for (const d of recentDrills) {
+      activity.push({
+        type: 'drill',
+        at: d.submitted_at,
+        title: `${(d.drill_subtype || 'coding').replace(/_/g, ' ')} drill`,
+        detail: d.grade?.overall_score != null ? `${Math.round(d.grade.overall_score)}/100` : null,
+      });
+    }
+    for (const c of recentCapstones) {
+      activity.push({
+        type: 'capstone',
+        at: c.graded_at,
+        title: 'Capstone graded',
+        detail: c.result?.overall_score != null ? `${Math.round(c.result.overall_score)}/100` : null,
+      });
+    }
     activity.sort((a, b) => new Date(b.at) - new Date(a.at));
     const recentActivity = activity.filter(a => a.at).slice(0, 20);
 
@@ -423,6 +515,7 @@ router.get('/analytics', auth, async (req, res) => {
         timeInvested,
         velocity,
         masteryMap,
+        coding, // null until the user has any graded drill/capstone
         strengths: knowledge?.strengths || [],
         weaknesses: knowledge?.weaknesses || [],
         cognitive: cog,
@@ -989,8 +1082,18 @@ router.get('/coding-mastery', auth, async (req, res) => {
     const DifficultyState = mongoose.model('DifficultyState');
     const DrillAttempt = mongoose.model('DrillAttempt');
     const ArtifactBundle = mongoose.model('ArtifactBundle');
+    const CapstoneSession = mongoose.model('CapstoneSession');
 
-    const [masteryDocs, diffStates, recentAttempts, allGraded, avgScoreAgg] = await Promise.all([
+    const [
+      masteryDocs,
+      diffStates,
+      recentAttempts,
+      allGraded,
+      avgScoreAgg,
+      recentCapstones,
+      allCapstonesGraded,
+      avgCapstoneAgg,
+    ] = await Promise.all([
       MetaSkillMastery.find({ user_id: userId }).lean(),
       DifficultyState.find({ user_id: userId }).lean(),
       DrillAttempt.find({ user_id: userId, status: 'graded' })
@@ -1000,9 +1103,39 @@ router.get('/coding-mastery', auth, async (req, res) => {
         { $match: { user_id: new mongoose.Types.ObjectId(String(userId)), status: 'graded' } },
         { $group: { _id: null, avg: { $avg: '$grade.overall_score' } } },
       ]),
+      // Capstone results now surface in Progress alongside drills.
+      CapstoneSession.find({ user_id: userId, status: 'graded' })
+        .sort({ graded_at: -1 }).limit(10)
+        .populate('bundle_id', 'brief difficulty role_track').lean(),
+      CapstoneSession.countDocuments({ user_id: userId, status: 'graded' }),
+      CapstoneSession.aggregate([
+        { $match: { user_id: new mongoose.Types.ObjectId(String(userId)), status: 'graded' } },
+        { $group: { _id: null, avg: { $avg: '$result.overall_score' } } },
+      ]),
     ]);
 
     const avgScore = avgScoreAgg[0]?.avg ? Math.round(avgScoreAgg[0].avg) : null;
+    const avgCapstoneScore = avgCapstoneAgg[0]?.avg ? Math.round(avgCapstoneAgg[0].avg) : null;
+
+    // Capstone results — overall_score is 0..100 (distinct from drills); the
+    // brief's first line is the title.
+    const capstonesView = recentCapstones.map((s) => {
+      const b = s.bundle_id && typeof s.bundle_id === 'object' ? s.bundle_id : {};
+      const firstLine = b.brief
+        ? (String(b.brief).split('\n').find((l) => l.trim().length > 0) || '').trim()
+        : '';
+      return {
+        id: String(s._id),
+        bundle_id: b._id ? String(b._id) : (s.bundle_id ? String(s.bundle_id) : null),
+        title: firstLine.length > 100 ? firstLine.slice(0, 100).trimEnd() + '…' : firstLine,
+        difficulty: b.difficulty ?? null,
+        role_track: b.role_track ?? null,
+        overall_score: s.result?.overall_score ?? null,
+        integrity_confidence: s.result?.integrity_confidence ?? null,
+        graded_at: s.graded_at,
+        is_retry: Boolean(s.is_retry),
+      };
+    });
 
     // Enrich recent attempts with bundle subtype/difficulty
     let attemptsView = [];
@@ -1043,9 +1176,12 @@ router.get('/coding-mastery', auth, async (req, res) => {
       data: {
         tracks,                         // [] if user has no MetaSkillMastery yet
         recent_attempts: attemptsView,  // []
+        recent_capstones: capstonesView, // [] — graded capstone results
         stats: {
           total_drills_graded: allGraded,
           average_score: avgScore,
+          total_capstones_graded: allCapstonesGraded,
+          average_capstone_score: avgCapstoneScore,
         },
       },
     });

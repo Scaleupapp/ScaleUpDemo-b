@@ -11,31 +11,39 @@ const QuizAttempt = require('../models/QuizAttempt');
 const ContentProgress = require('../models/ContentProgress');
 const InterviewSession = require('../models/InterviewSession');
 const ExternalContentTouch = require('../models/ExternalContentTouch');
+const DrillAttempt = require('../coding/models/drillAttempt.model');
+const CapstoneSession = require('../coding/models/capstoneSession.model');
 const taskCatalogService = require('../services/plan/taskCatalogService');
 
-test('computeSignal: aggregates counts across 4 collections', async () => {
+test('computeSignal: aggregates counts across quiz/content/interview/external + coding', async () => {
   const origs = [
     QuizAttempt.countDocuments,
     ContentProgress.countDocuments,
     InterviewSession.countDocuments,
     ExternalContentTouch.countDocuments,
+    DrillAttempt.countDocuments,
+    CapstoneSession.countDocuments,
   ];
   QuizAttempt.countDocuments = async () => 3;
   ContentProgress.countDocuments = async () => 2;
   InterviewSession.countDocuments = async () => 1;
   ExternalContentTouch.countDocuments = async () => 1;
+  DrillAttempt.countDocuments = async () => 2;
+  CapstoneSession.countDocuments = async () => 1;
   try {
     const signal = await worker._internal.computeSignal(
       new mongoose.Types.ObjectId(),
       new Date()
     );
-    // 3 + 2 + 2*1 + 1 = 8
-    assert.strictEqual(signal, 8);
+    // 3 + 2 + 2*1 + 1 + drills(2) + 2*capstones(1) = 12
+    assert.strictEqual(signal, 12);
   } finally {
     QuizAttempt.countDocuments = origs[0];
     ContentProgress.countDocuments = origs[1];
     InterviewSession.countDocuments = origs[2];
     ExternalContentTouch.countDocuments = origs[3];
+    DrillAttempt.countDocuments = origs[4];
+    CapstoneSession.countDocuments = origs[5];
   }
 });
 

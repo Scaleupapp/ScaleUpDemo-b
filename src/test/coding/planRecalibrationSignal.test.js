@@ -18,6 +18,7 @@ const assert   = require('node:assert/strict');
 // ── Stub state ────────────────────────────────────────────────────────────────
 
 let stubAttempts    = [];    // array of DrillAttempt-like objects returned by find().sort().lean()
+let stubCapstones   = [];    // array of CapstoneSession-like graded results
 let stubMastery     = null;  // MetaSkillMastery.findOne result | null
 let stubDiffState   = null;  // DifficultyState.findOne result   | null
 
@@ -28,6 +29,12 @@ const models = require('../../coding/models');
 // DrillAttempt.find() returns a sort().lean() chain
 models.DrillAttempt.find = (_query) => ({
   sort: () => ({ lean: () => Promise.resolve(stubAttempts) }),
+});
+
+// CapstoneSession.find() returns a sort().lean() chain (coding engagement now
+// spans drills + capstones).
+models.CapstoneSession.find = (_query) => ({
+  sort: () => ({ lean: () => Promise.resolve(stubCapstones) }),
 });
 
 // MetaSkillMastery.findOne() returns a lean() chain
@@ -51,6 +58,7 @@ const {
 
 function reset() {
   stubAttempts  = [];
+  stubCapstones = [];
   stubMastery   = null;
   stubDiffState = null;
 }
@@ -217,7 +225,7 @@ test('role_track absent → metaSkillSnapshot null, currentDifficulty null', asy
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('computeMix: drillCount=0 → { drill:0, content:0.6, quiz:0.4 }', () => {
-  const mix = computeMix({ drillCount: 0, meanScore: null });
+  const mix = computeMix({ activityCount: 0, meanScore: null });
   assert.strictEqual(mix.drill, 0);
   assert.strictEqual(mix.content, 0.6);
   assert.strictEqual(mix.quiz, 0.4);
@@ -228,7 +236,7 @@ test('computeMix: drillCount=0 → { drill:0, content:0.6, quiz:0.4 }', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('computeMix: 5 drills, meanScore=70 → drill clamped to min(0.4, 5*0.06)=0.3', () => {
-  const mix = computeMix({ drillCount: 5, meanScore: 70 });
+  const mix = computeMix({ activityCount: 5, meanScore: 70 });
   // drill = min(0.4, 5*0.06) = min(0.4, 0.3) = 0.3
   assert.strictEqual(mix.drill, 0.3);
   // remaining = 0.7; content = 0.7 * 0.6 = 0.42; quiz = 0.7 * 0.4 = 0.28
@@ -243,8 +251,8 @@ test('computeMix: 5 drills, meanScore=70 → drill clamped to min(0.4, 5*0.06)=0
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('computeMix: 4 drills, meanScore=40 (< 50) → drill weight lowered', () => {
-  const normalMix   = computeMix({ drillCount: 4, meanScore: 70 }); // no adjustment
-  const strugglingMix = computeMix({ drillCount: 4, meanScore: 40 });  // mean < 50
+  const normalMix   = computeMix({ activityCount: 4, meanScore: 70 }); // no adjustment
+  const strugglingMix = computeMix({ activityCount: 4, meanScore: 40 });  // mean < 50
 
   // Struggling user should have a lower drill weight
   assert.ok(
@@ -263,8 +271,8 @@ test('computeMix: 4 drills, meanScore=40 (< 50) → drill weight lowered', () =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('computeMix: 3 drills, meanScore=90 (> 85) → drill weight increased', () => {
-  const normalMix    = computeMix({ drillCount: 3, meanScore: 70 }); // no adjustment
-  const masteringMix = computeMix({ drillCount: 3, meanScore: 90 }); // mean > 85
+  const normalMix    = computeMix({ activityCount: 3, meanScore: 70 }); // no adjustment
+  const masteringMix = computeMix({ activityCount: 3, meanScore: 90 }); // mean > 85
 
   // Mastering user should have a higher drill weight
   assert.ok(
@@ -278,6 +286,31 @@ test('computeMix: 3 drills, meanScore=90 (> 85) → drill weight increased', () 
   );
   // drill should be capped at 0.5
   assert.ok(masteringMix.drill <= 0.5, `drill weight must not exceed 0.5, got ${masteringMix.drill}`);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 11b: capstones are merged into the engagement signal
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('capstones merge into drillCount/capstoneCount + mean across both', async () => {
+  reset();
+  stubAttempts = [makeAttempt(60)]; // submitted 2026-05-20
+  stubCapstones = [
+    { status: 'graded', graded_at: new Date('2026-05-21T10:00:00.000Z'), result: { overall_score: 90 } },
+  ];
+
+  const signal = await getCodingEngagementSignal({
+    userId: 'user1',
+    weekStart: WEEK_START,
+    weekEnd: WEEK_END,
+  });
+
+  assert.strictEqual(signal.drillCount, 1);
+  assert.strictEqual(signal.capstoneCount, 1);
+  // mean of [60, 90] across drills + capstones = 75
+  assert.strictEqual(signal.meanScore, 75);
+  // engagement = 2 activities → drill mix = min(0.4, 2*0.06) = 0.12
+  assert.ok(Math.abs(signal.recommendedTaskMix.drill - 0.12) < 0.0001);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

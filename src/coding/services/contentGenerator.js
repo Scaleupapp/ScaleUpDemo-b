@@ -12,6 +12,7 @@ const { ArtifactBundle } = require('../models');
 const { llmCall } = require('./llmRouter');
 const { validateBundle } = require('./bundleSchema');
 const { computeContentHash } = require('./contentHash');
+const alerts = require('./alerts');
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ const SYSTEM_PROMPT = `You generate ArtifactBundles for ScaleUp coding practice.
 Hard requirements:
 - type must match what was requested
 - role_track, language, difficulty, drill_subtype must match the target spec
+- difficulty is a CONTRACT, not a label: honour the DIFFICULTY CONTRACT in the target spec exactly (scope, edge-case count, hidden-test rigor, failure modes, time-to-solve). A Medium/Hard problem that a junior could finish in a few minutes is WRONG output.
 - reference_solution must be a complete, working solution that passes every visible_test and hidden_test (it will be executed in a sandbox to verify, so it must actually run)
 - THE PROJECT MUST BE SELF-CONTAINED AND INSTALLABLE IN A CLEAN SANDBOX with only \`npm install\` / \`pip install\` (no preinstalled global tools). If a test script invokes a tool (jest, mocha, vitest, pytest, supertest, etc.), that tool MUST be declared in the dependency manifest's devDependencies/dev-requirements with a REAL, published, stable version. Never reference a binary you have not declared.
 - starter_repo MUST include the dependency manifest (package.json / requirements.txt / go.mod …) AND the test files. reference_solution contains the COMPLETED source files that OVERLAY starter_repo (you need not repeat unchanged starter files); the MERGED project must \`install\` cleanly and then pass the test command.
@@ -69,6 +71,93 @@ function extractJson(content) {
 
 // The six meta-skill dimensions a rubric_anchor may target.
 const RUBRIC_DIMS = ['correctness', 'code_quality', 'ai_pair_effectiveness', 'verification_discipline', 'decomposition', 'reflection_quality'];
+
+// ── Difficulty contract ─────────────────────────────────────────────────────
+// Difficulty was previously a bare label with no teeth — the same quantitative
+// bar was set for easy and hard, so "hard" problems came out too easy. This
+// spec gives the generator MEASURABLE, per-difficulty targets (scope, edge
+// cases, hidden-test rigor, failure modes, time-to-solve) so raising the
+// difficulty actually raises the problem. `min_*` floors back a SOFT,
+// non-blocking conformance check (we warn the operator, we do not reject).
+const DIFFICULTY_ORDER = { easy: 0, medium: 1, hard: 2 };
+
+const DIFFICULTY_SPEC = {
+  easy: {
+    label: 'Easy',
+    scope: 'A single focused component / module with one primary code path.',
+    edge_cases: 'at least 3 edge cases (empty input, a boundary value, one invalid input)',
+    hidden_tests: '3 hidden tests covering the obvious edge cases',
+    seeded_mistakes: '1–2 plausible bugs',
+    failure_modes: 'basic input validation',
+    bar: 'A junior engineer should finish comfortably inside the time budget.',
+    min_edge_cases: 3,
+    min_hidden_tests: 3,
+  },
+  medium: {
+    label: 'Medium',
+    scope: '2–3 interacting components/modules with more than one code path.',
+    edge_cases: 'at least 6 edge cases including boundary conditions, malformed input, and at least one state-dependent or ordering case',
+    hidden_tests: '4–5 hidden tests, at least one targeting a subtle correctness trap not obvious from the brief',
+    seeded_mistakes: '2 plausible bugs',
+    failure_modes: 'input validation + error handling + at least one non-happy-path behaviour',
+    bar: 'A mid-level engineer needs most of the time budget; a junior will likely miss some hidden edge cases.',
+    min_edge_cases: 6,
+    min_hidden_tests: 4,
+  },
+  hard: {
+    label: 'Hard',
+    scope: '3+ interacting components, OR a single component with real algorithmic/systems depth (performance constraints, tricky invariants).',
+    edge_cases: 'at least 10 edge cases including boundary, malformed, adversarial, ordering/concurrency, large-input/performance, and at least two cases a naive solution will fail',
+    hidden_tests: '5+ hidden tests; SEVERAL must target failure modes that a plausible-but-wrong solution passes the VISIBLE tests yet fails — so passing the visible tests must NOT imply correctness',
+    seeded_mistakes: '2–3 plausible bugs, at least one subtle',
+    failure_modes: 'input validation + error handling + performance/scaling + at least two subtle correctness traps',
+    bar: 'A strong engineer needs close to the full time budget; a naive solution passes the visible tests but fails multiple hidden tests.',
+    min_edge_cases: 10,
+    min_hidden_tests: 5,
+  },
+};
+
+/** Human-readable, measurable difficulty contract injected into the prompt. */
+function difficultyContractBlock(difficulty) {
+  const spec = DIFFICULTY_SPEC[difficulty];
+  if (!spec) return '';
+  return [
+    `DIFFICULTY CONTRACT — "${spec.label}" is a hard requirement, not a vibe. The problem MUST satisfy:`,
+    `- Scope: ${spec.scope}`,
+    `- Edge cases: ${spec.edge_cases}.`,
+    `- Hidden tests: ${spec.hidden_tests}.`,
+    `- Failure modes the solution must handle: ${spec.failure_modes}.`,
+    `- Calibration: ${spec.bar}`,
+    `- Set difficulty_signals.edge_cases to the ACTUAL number of distinct edge cases your tests exercise (must be >= ${spec.min_edge_cases} for ${spec.label}).`,
+    `Do NOT produce a trivially easy problem for a Medium/Hard request — depth and adversarial hidden tests are what make it the requested difficulty.`,
+  ].join('\n');
+}
+
+/**
+ * SOFT, non-blocking difficulty conformance check. Returns the floors a
+ * generated bundle fell short of for its stated difficulty. We surface these
+ * as an operator warning (alerts.js) but never reject the bundle — product
+ * decision: warn-only so generation stays fast and never "couldn't build that".
+ *
+ * @param {object} bundle
+ * @returns {{ ok: boolean, warnings: string[] }}
+ */
+function checkDifficultyConformance(bundle) {
+  const spec = DIFFICULTY_SPEC[bundle?.difficulty];
+  if (!spec) return { ok: true, warnings: [] };
+  const warnings = [];
+  const edgeCases = Number(bundle?.difficulty_signals?.edge_cases ?? 0);
+  if (edgeCases < spec.min_edge_cases) {
+    warnings.push(`difficulty_signals.edge_cases=${edgeCases} < ${spec.min_edge_cases} expected for '${bundle.difficulty}'`);
+  }
+  if (bundle?.type === 'capstone') {
+    const hiddenCount = Array.isArray(bundle.hidden_tests) ? bundle.hidden_tests.length : 0;
+    if (hiddenCount < spec.min_hidden_tests) {
+      warnings.push(`hidden_tests=${hiddenCount} < ${spec.min_hidden_tests} expected for '${bundle.difficulty}'`);
+    }
+  }
+  return { ok: warnings.length === 0, warnings };
+}
 
 /**
  * Coerce the model's minor schema deviations so a single stray field doesn't
@@ -135,10 +224,19 @@ async function nearestSeeds({ type = 'drill', role_track, drill_subtype, difficu
 
   if (exactMatch.length >= k) return exactMatch;
 
-  // Fallback: drop difficulty constraint.
-  const fallback = await ArtifactBundle.find(baseFilter).limit(k).lean();
-
-  return fallback;
+  // Fallback: drop the difficulty constraint, but SEED HYGIENE — never anchor a
+  // hard generation on easy examples. Pull a pool, then rank exact-difficulty
+  // first, then harder, then easier, and take the top k. (Imitating an easier
+  // seed was a contributor to "hard" problems coming out too easy.)
+  const pool = await ArtifactBundle.find(baseFilter).limit(k * 4).lean();
+  const target = DIFFICULTY_ORDER[difficulty] ?? 1;
+  const rank = (seed) => {
+    const d = (DIFFICULTY_ORDER[seed.difficulty] ?? 1) - target;
+    if (d === 0) return 0; // exact difficulty — best
+    if (d > 0) return d; // harder — mild penalty (prefer over easier)
+    return 2 - d; // easier — bigger penalty (2-d > 2)
+  };
+  return pool.sort((a, b) => rank(a) - rank(b)).slice(0, k);
 }
 
 // ── Core generator ────────────────────────────────────────────────────────────
@@ -217,6 +315,7 @@ async function generate({
     difficulty_signals: s.difficulty_signals,
   }));
 
+  const diffSpec = DIFFICULTY_SPEC[difficulty] || DIFFICULTY_SPEC.medium;
   const targetLines =
     type === 'capstone'
       ? [
@@ -226,8 +325,10 @@ async function generate({
           `- difficulty: ${difficulty}`,
           `- time_budget_minutes: ${time_budget_minutes}`,
           `- starter_repo: REQUIRED (multi-file starting state for the learner)`,
-          `- visible_tests + hidden_tests: REQUIRED (3–5 each; distinct)`,
-          `- seeded_mistakes: REQUIRED (1–2 plausible bugs)`,
+          `- visible_tests: REQUIRED (3–5, distinct from hidden_tests)`,
+          `- hidden_tests: REQUIRED — ${diffSpec.hidden_tests}`,
+          `- seeded_mistakes: REQUIRED (${diffSpec.seeded_mistakes})`,
+          `- difficulty_signals: REQUIRED — set edge_cases to the real count (>= ${diffSpec.min_edge_cases} for ${diffSpec.label}); set branching_complexity and token_count honestly`,
           `- rubric_anchors: REQUIRED (3–5 deterministic checks). Each anchor's "dimension" MUST be exactly one of: correctness, code_quality, ai_pair_effectiveness, verification_discipline, decomposition, reflection_quality (do not invent domain-specific dimension names).`,
         ]
       : [
@@ -244,6 +345,8 @@ ${JSON.stringify(seedExamples, null, 2)}
 TARGET:
 ${targetLines.join('\n')}
 ${topic_hint ? `- topic_hint: ${topic_hint}` : ''}
+
+${difficultyContractBlock(difficulty)}
 ${critique ? `\nCRITIQUE FROM PREVIOUS ATTEMPT:\n${critique}\n` : ''}
 Generate a complete ArtifactBundle now. Return only the JSON.`;
 
@@ -273,9 +376,39 @@ Generate a complete ArtifactBundle now. Return only the JSON.`;
   value.status = 'draft';
 
   const saved = await ArtifactBundle.create(value);
+
+  // SOFT difficulty conformance — warn the operator (never block) when the
+  // generated bundle falls short of its difficulty floor. Product decision is
+  // warn-only, so a too-easy "hard" still ships but is visible for review.
+  const conformance = checkDifficultyConformance(value);
+  if (!conformance.ok) {
+    void alerts
+      .fire({
+        category: 'content.difficulty-conformance',
+        severity: 'warn',
+        title: `Generated ${value.type} below '${value.difficulty}' difficulty floor`,
+        detail: conformance.warnings.join('\n'),
+        dedupKey: `${value.type}:${value.role_track}:${value.difficulty}`,
+        fields: {
+          bundle_id: String(saved._id),
+          type: value.type,
+          role_track: value.role_track,
+          difficulty: value.difficulty,
+        },
+      })
+      .catch(() => {});
+  }
+
   return saved;
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────
 
-module.exports = { generate, nearestSeeds, extractJson };
+module.exports = {
+  generate,
+  nearestSeeds,
+  extractJson,
+  checkDifficultyConformance,
+  difficultyContractBlock,
+  DIFFICULTY_SPEC,
+};

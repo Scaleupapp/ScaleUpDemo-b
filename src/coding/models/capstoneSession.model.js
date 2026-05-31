@@ -31,10 +31,68 @@ const DimensionScoresSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Per-dimension narrative: WHY the dimension earned its score and ONE concrete
+// thing the learner could have done to score higher (grading-transparency).
+const DimensionFeedbackEntrySchema = new mongoose.Schema(
+  { why: String, to_improve: String },
+  { _id: false }
+);
+
+const DimensionFeedbackSchema = new mongoose.Schema(
+  {
+    correctness: DimensionFeedbackEntrySchema,
+    code_quality: DimensionFeedbackEntrySchema,
+    ai_pair_effectiveness: DimensionFeedbackEntrySchema,
+    verification_discipline: DimensionFeedbackEntrySchema,
+    decomposition: DimensionFeedbackEntrySchema,
+    reflection_quality: DimensionFeedbackEntrySchema,
+  },
+  { _id: false }
+);
+
+// Deterministic test outcome split surfaced to the learner so "I did well but
+// scored low" is self-explanatory (hidden edge-case tests failing drive
+// correctness, which is 25% of the weight).
+const TestSummarySchema = new mongoose.Schema(
+  {
+    visible_passed: Number,
+    visible_total: Number,
+    hidden_passed: Number,
+    hidden_total: Number,
+    lint_passed: Boolean,
+  },
+  { _id: false }
+);
+
+// The 0..1 weight each dimension contributes to overall_score. Snapshotted on
+// the result so the client can show "correctness · 25%" without hardcoding,
+// and so a future weight change doesn't retroactively mislabel old results.
+const RubricWeightsSchema = new mongoose.Schema(
+  {
+    correctness: Number,
+    code_quality: Number,
+    ai_pair_effectiveness: Number,
+    verification_discipline: Number,
+    decomposition: Number,
+    reflection_quality: Number,
+  },
+  { _id: false }
+);
+
 const SessionResultSchema = new mongoose.Schema(
   {
     overall_score: Number,
     dimension_scores: DimensionScoresSchema,
+    // Per-dimension why + how-to-improve (grading-transparency). Forward-only:
+    // sessions graded before this field shipped will have it null — clients
+    // must null-guard.
+    dimension_feedback: DimensionFeedbackSchema,
+    // Narrative explaining the OVERALL number against the weights.
+    overall_rationale: String,
+    // Visible/hidden test split + lint outcome behind the correctness score.
+    test_summary: TestSummarySchema,
+    // Weight (0..1) each dimension contributes to overall_score.
+    rubric_weights: RubricWeightsSchema,
     strengths: [String],
     gaps: [String],
     interview_parallel: String,

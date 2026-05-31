@@ -64,10 +64,18 @@ async function resolveRoleTrackForUser(userId) {
 
 /** GET /api/coding/capstones/library */
 async function listLibrary(req, res) {
-  const { difficulty, role_track } = req.query;
+  const { difficulty, role_track, q } = req.query;
   const filter = { type: 'capstone', status: 'active' };
   if (difficulty) filter.difficulty = difficulty;
   if (role_track) filter.role_track = role_track;
+  // Free-text browse across the whole catalog (title/brief, language, and the
+  // interview-parallel blurb). Escape regex metacharacters so user input can't
+  // throw or inject a pathological pattern.
+  if (typeof q === 'string' && q.trim()) {
+    const safe = q.trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(safe, 'i');
+    filter.$or = [{ brief: rx }, { language: rx }, { interview_parallel: rx }];
+  }
 
   const bundles = await ArtifactBundle.find(filter)
     .select('_id brief difficulty role_track time_budget_minutes language stack_variant interview_parallel')
