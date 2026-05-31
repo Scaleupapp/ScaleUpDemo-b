@@ -67,6 +67,30 @@ function extractJson(content) {
   throw new Error('No JSON object found in LLM response');
 }
 
+// The six meta-skill dimensions a rubric_anchor may target.
+const RUBRIC_DIMS = ['correctness', 'code_quality', 'ai_pair_effectiveness', 'verification_discipline', 'decomposition', 'reflection_quality'];
+
+/**
+ * Coerce the model's minor schema deviations so a single stray field doesn't
+ * fail the whole generation. The sandbox proof (reference solution passes the
+ * tests) is the real guarantee; these are cosmetic/enum slips.
+ *
+ * Today: rubric_anchor dimensions sometimes come back as invented,
+ * domain-specific names (e.g. "query_accuracy") — coerce those to the closest
+ * valid dimension ('correctness') rather than reject the bundle.
+ */
+function sanitizeDraft(draft) {
+  if (!draft || typeof draft !== 'object') return draft;
+  if (Array.isArray(draft.rubric_anchors)) {
+    draft.rubric_anchors = draft.rubric_anchors.map((a) =>
+      a && typeof a === 'object' && !RUBRIC_DIMS.includes(a.dimension)
+        ? { ...a, dimension: 'correctness' }
+        : a
+    );
+  }
+  return draft;
+}
+
 /**
  * Retrieve up to k seed bundles that are nearest to the target spec.
  * First tries an exact match on role_track + drill_subtype + difficulty.
@@ -186,7 +210,7 @@ async function generate({
           `- starter_repo: REQUIRED (multi-file starting state for the learner)`,
           `- visible_tests + hidden_tests: REQUIRED (3–5 each; distinct)`,
           `- seeded_mistakes: REQUIRED (1–2 plausible bugs)`,
-          `- rubric_anchors: REQUIRED (3–5 deterministic checks)`,
+          `- rubric_anchors: REQUIRED (3–5 deterministic checks). Each anchor's "dimension" MUST be exactly one of: correctness, code_quality, ai_pair_effectiveness, verification_discipline, decomposition, reflection_quality (do not invent domain-specific dimension names).`,
         ]
       : [
           `- type: drill`,
@@ -211,7 +235,7 @@ Generate a complete ArtifactBundle now. Return only the JSON.`;
     messages: [{ role: 'user', content: userPrompt }],
   });
 
-  const draft = extractJson(res.content);
+  const draft = sanitizeDraft(extractJson(res.content));
 
   // Stamp + hash + validate
   draft.content_hash = computeContentHash(draft);
