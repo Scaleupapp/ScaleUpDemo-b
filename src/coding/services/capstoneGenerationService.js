@@ -49,55 +49,76 @@ async function runGeneration(requestId) {
   try {
     await setStatus(reqDoc, 'generating');
 
-    // 1 + 2: generate + deterministic sandbox validation (with retry/critique).
-    const pipelineResult = await generationPipeline.runPipeline(
-      {
-        type: 'capstone',
-        role_track: reqDoc.role_track,
-        difficulty: reqDoc.difficulty,
-        language: reqDoc.language,
-        time_budget_minutes: DEFAULT_TIME_BUDGET[reqDoc.difficulty] || 75,
-        topic_hint: buildTopicHint(reqDoc),
-      },
-      { maxRetries: 3 }
-    );
+    // Outer loop: generate+validate, then cross-check. If the independent
+    // reviewer rejects on quality (ambiguous brief, weak coverage, etc.), feed
+    // its feedback back into a fresh generation so the model can FIX it — the
+    // same converge-on-critique idea the sandbox validation already uses, but
+    // for the human-judgment gate. Without this, a single quality nitpick fails
+    // the whole request and the learner just sees "Couldn't build that one".
+    const MAX_CROSS_ROUNDS = 2;
+    let crossFeedback = null;
+    let totalAttempts = 0;
+    let lastCrossNotes = null;
 
-    reqDoc.attempts = pipelineResult.attempts || 0;
-    if (pipelineResult.bundle_id) reqDoc.bundle_id = pipelineResult.bundle_id;
+    for (let round = 1; round <= MAX_CROSS_ROUNDS; round += 1) {
+      // 1 + 2: generate + deterministic sandbox validation (with retry/critique).
+      const pipelineResult = await generationPipeline.runPipeline(
+        {
+          type: 'capstone',
+          role_track: reqDoc.role_track,
+          difficulty: reqDoc.difficulty,
+          language: reqDoc.language,
+          time_budget_minutes: DEFAULT_TIME_BUDGET[reqDoc.difficulty] || 75,
+          topic_hint: buildTopicHint(reqDoc) + (crossFeedback
+            ? `\n\nIMPORTANT: a previous version was REJECTED by an independent quality reviewer for these blocking issues: ${crossFeedback}\nProduce a NEW capstone that fixes them — make the brief fully unambiguous (define behavior for every edge case it mentions), ensure the visible + hidden tests cover every acceptance criterion, and keep it solvable within the time budget.`
+            : ''),
+        },
+        { maxRetries: 3 }
+      );
 
-    if (!pipelineResult.ok) {
-      // runPipeline already routed it to the human-review queue.
-      await fail(reqDoc, `validation failed after ${pipelineResult.attempts} attempts: ${(pipelineResult.errors || []).join('; ')}`);
-      return;
+      totalAttempts += pipelineResult.attempts || 0;
+      reqDoc.attempts = totalAttempts;
+      if (pipelineResult.bundle_id) reqDoc.bundle_id = pipelineResult.bundle_id;
+
+      if (!pipelineResult.ok) {
+        // runPipeline already routed it to the human-review queue.
+        await fail(reqDoc, `validation failed after ${pipelineResult.attempts} attempts: ${(pipelineResult.errors || []).join('; ')}`);
+        return;
+      }
+
+      await setStatus(reqDoc, 'cross_checking');
+
+      // 3: distinct-model adversarial review of the validated bundle.
+      const bundle = await ArtifactBundle.findById(pipelineResult.bundle_id).lean();
+      if (!bundle) {
+        await fail(reqDoc, 'bundle disappeared after validation');
+        return;
+      }
+      const cross = await crossCheckCapstone(bundle);
+      reqDoc.cross_check_notes = cross.notes || null;
+      lastCrossNotes = cross.notes;
+
+      if (cross.pass) {
+        // 4: activate — both the sandbox proof AND the cross-model review passed.
+        await ArtifactBundle.findByIdAndUpdate(pipelineResult.bundle_id, {
+          $set: {
+            status: 'active',
+            'generated_by.validator_model': 'gemini-2.5-pro',
+            'generated_by.validated_at': new Date(),
+            'generated_by.human_reviewed': false,
+          },
+        });
+        await setStatus(reqDoc, 'ready');
+        return;
+      }
+
+      // Rejected on quality — leave the draft inactive, capture the feedback,
+      // and (if rounds remain) regenerate against it.
+      crossFeedback = cross.notes;
+      if (round < MAX_CROSS_ROUNDS) await setStatus(reqDoc, 'generating');
     }
 
-    await setStatus(reqDoc, 'cross_checking');
-
-    // 3: distinct-model adversarial review of the validated bundle.
-    const bundle = await ArtifactBundle.findById(pipelineResult.bundle_id).lean();
-    if (!bundle) {
-      await fail(reqDoc, 'bundle disappeared after validation');
-      return;
-    }
-    const cross = await crossCheckCapstone(bundle);
-    reqDoc.cross_check_notes = cross.notes || null;
-    if (!cross.pass) {
-      // Keep the bundle as draft (not active) and record why.
-      await fail(reqDoc, `cross-check rejected: ${cross.notes || 'no detail'}`);
-      return;
-    }
-
-    // 4: activate — both the sandbox proof AND the cross-model review passed.
-    await ArtifactBundle.findByIdAndUpdate(pipelineResult.bundle_id, {
-      $set: {
-        status: 'active',
-        'generated_by.validator_model': 'gemini-2.5-pro',
-        'generated_by.validated_at': new Date(),
-        'generated_by.human_reviewed': false,
-      },
-    });
-
-    await setStatus(reqDoc, 'ready');
+    await fail(reqDoc, `cross-check rejected after ${MAX_CROSS_ROUNDS} rounds: ${lastCrossNotes || 'no detail'}`);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error(`[capstoneGeneration] request ${requestId} crashed:`, err);
