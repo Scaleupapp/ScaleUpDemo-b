@@ -44,9 +44,13 @@ async function checkStarterBuilds(bundle) {
  */
 async function runTestsOn(files, tests) {
   if (!tests || tests.length === 0) return { allPass: true, results: [] };
+  // Test commands routinely `npm install` / `pip install` first, which takes
+  // far longer than the old 15s cap — every Node/Python reference solution was
+  // SIGTERM-killed mid-install and reported as "did not pass", so validation
+  // (and therefore generation) could never succeed. 120s covers a cold install.
   const results = await Promise.all(
     tests.map(t =>
-      sandbox.runInTempDir({ files, command: t.command, timeout_ms: 15000 })
+      sandbox.runInTempDir({ files, command: t.command, timeout_ms: 120000 })
     )
   );
   const allPass = results.every((r, i) =>
@@ -72,9 +76,18 @@ async function checkReferenceSolution(bundle) {
   const { allPass, results } = await runTestsOn(files, allTests);
   if (!allPass) {
     const failed = results
-      .map((r, i) => ({ test: allTests[i].name, exit_code: r.exit_code, stderr: r.stderr?.slice(0, 200) }))
+      .map((r, i) => ({
+        test: allTests[i].name,
+        exit_code: r.exit_code,
+        timed_out: !!r.timed_out,
+        stderr: (r.stderr || '').slice(0, 200),
+      }))
       .filter((_, i) => results[i].exit_code !== (allTests[i].expected_exit_code || 0));
-    return { ok: false, error: 'reference_solution did not pass all tests', failed };
+    // Fold the first failure's detail into the error so the generation request's
+    // error message tells us WHY (timeout vs missing toolchain vs real failure).
+    const f0 = failed[0] || {};
+    const detail = `${f0.test || '?'} exit=${f0.exit_code}${f0.timed_out ? ' TIMEOUT' : ''} ${(f0.stderr || '').replace(/\s+/g, ' ').trim()}`.slice(0, 240);
+    return { ok: false, error: `reference_solution did not pass all tests — ${detail}`, failed };
   }
   return { ok: true };
 }
