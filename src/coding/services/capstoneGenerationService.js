@@ -73,7 +73,7 @@ async function runGeneration(requestId) {
             ? `\n\nIMPORTANT: a previous version was REJECTED by an independent quality reviewer for these blocking issues: ${crossFeedback}\nProduce a NEW capstone that fixes them — make the brief fully unambiguous (define behavior for every edge case it mentions), ensure the visible + hidden tests cover every acceptance criterion, and keep it solvable within the time budget.`
             : ''),
         },
-        { maxRetries: 3 }
+        { maxRetries: 2 }
       );
 
       totalAttempts += pipelineResult.attempts || 0;

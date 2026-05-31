@@ -21,6 +21,9 @@ Hard requirements:
 - type must match what was requested
 - role_track, language, difficulty, drill_subtype must match the target spec
 - reference_solution must be a complete, working solution that passes every visible_test and hidden_test (it will be executed in a sandbox to verify, so it must actually run)
+- THE PROJECT MUST BE SELF-CONTAINED AND INSTALLABLE IN A CLEAN SANDBOX with only \`npm install\` / \`pip install\` (no preinstalled global tools). If a test script invokes a tool (jest, mocha, vitest, pytest, supertest, etc.), that tool MUST be declared in the dependency manifest's devDependencies/dev-requirements with a REAL, published, stable version. Never reference a binary you have not declared.
+- starter_repo MUST include the dependency manifest (package.json / requirements.txt / go.mod …) AND the test files. reference_solution contains the COMPLETED source files that OVERLAY starter_repo (you need not repeat unchanged starter files); the MERGED project must \`install\` cleanly and then pass the test command.
+- pin dependency versions to well-known existing releases; do not invent versions or use "latest"
 - visible_tests and hidden_tests must be distinct
 - seeded_mistakes (where applicable) must each be a plausible bug Compass might suggest
 - expected_meta_skill_signals must be populated with realistic guidance
