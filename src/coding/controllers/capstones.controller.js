@@ -262,50 +262,45 @@ async function applyControl({ sessionId, userId, action }) {
       throw new Error(`unknown action ${action}`);
   }
 
-  // PRE-TRANSITION snapshot for submit. Capturing while session.status
-  // is still in_progress/paused guarantees:
-  //   1. The snapshotService's status gate passes
-  //   2. The sandbox is still alive when pullFinalFiles reads from it
-  //   3. The captured filetree is what the learner actually had at submit
-  // This was the cause of the "all implementation deleted" 1/100 bug:
-  // the snapshot was being attempted post-transition, so the gate
-  // rejected status='submitted' and no filetree was persisted before
-  // the sandbox got torn down.
-  if (target === 'submitted') {
-    const snap = await snapshotService.captureForSession(sessionId).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.warn('[capstones.control] pre-submit snapshot failed:', err.message);
-      return { captured: false };
-    });
-    if (!snap?.captured) {
-      // eslint-disable-next-line no-console
-      console.warn(`[capstones.control] pre-submit snapshot did NOT capture for ${sessionId}; evaluator may see empty filetree`);
-    }
-  }
-
+  // Transition first, then RESPOND immediately. The heavy finalization for a
+  // submit (snapshot the filetree for grading, finalize the recording, tear
+  // down the sandbox, enqueue the evaluator) used to be awaited inline — on a
+  // slow e2b/S3 call that blew the proxy timeout and the learner saw
+  // "Couldn't submit: coding 502: http error". It now runs in the BACKGROUND.
+  //
+  // Order is preserved: the snapshot runs while status='submitted' (the gate
+  // allows it) and the sandbox is still alive (teardown is later in the chain),
+  // and the evaluator is enqueued only after the snapshot. The sandbox-gc
+  // worker re-enqueues any 'submitted' session whose eval didn't get queued, so
+  // a background hiccup can never lose a submission.
   const updated = await stateMachine.transition(sessionId, target);
-
-  if (target === 'aborted' || target === 'submitted') {
-    await recordingService.finalize(sessionId).catch(() => {});
-    await sandboxOrchestrator.teardownForSession(sessionId).catch(() => {});
-  }
-  // Submitted sessions need to be graded — enqueue the evaluator job.
-  // jobId on the queue is keyed by sessionId so a duplicate submit (e.g.
-  // a network-retry that wins the state-machine race against the auto-
-  // expire path) doesn't double-grade.
-  if (target === 'submitted') {
-    await capstoneEvalWorker
-      .enqueueEvaluation(sessionId)
-      .catch((err) => {
-        // Don't fail the submit if Redis is briefly unavailable; the
-        // sandbox-gc worker has a fallback that re-enqueues stuck
-        // submitted sessions next tick.
-        // eslint-disable-next-line no-console
-        console.warn('[capstones.control] enqueue eval failed:', err.message);
-      });
-  }
-
   sessionRoom.publishLifecycle(sessionId, updated.status);
+
+  if (target === 'submitted') {
+    void (async () => {
+      try {
+        const snap = await snapshotService.captureForSession(sessionId);
+        if (!snap?.captured) {
+          // eslint-disable-next-line no-console
+          console.warn(`[capstones.control] submit snapshot did NOT capture for ${sessionId}; evaluator may see empty filetree`);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[capstones.control] submit snapshot failed:', err.message);
+      }
+      await recordingService.finalize(sessionId).catch(() => {});
+      await sandboxOrchestrator.teardownForSession(sessionId).catch(() => {});
+      await capstoneEvalWorker.enqueueEvaluation(sessionId).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[capstones.control] enqueue eval failed (gc will recover):', err.message);
+      });
+    })();
+  } else if (target === 'aborted') {
+    void (async () => {
+      await recordingService.finalize(sessionId).catch(() => {});
+      await sandboxOrchestrator.teardownForSession(sessionId).catch(() => {});
+    })();
+  }
 
   return updated;
 }
