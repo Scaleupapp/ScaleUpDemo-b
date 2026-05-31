@@ -54,18 +54,27 @@ function startCapstoneGenerationWorker() {
     QUEUE_NAME,
     async (job) => {
       const service = require('../services/capstoneGenerationService');
+      const Req = require('../models/capstoneGenerationRequest.model');
+      // Hard ceiling on a single generation. Concurrency is 1, so a job that
+      // never settles (e.g. a hung upstream call) would wedge the ENTIRE queue
+      // and every learner's generation behind it — which is exactly what
+      // happened. Promise.race guarantees the worker always moves on.
+      const GEN_TIMEOUT_MS = 9 * 60 * 1000;
       try {
-        await service.runGeneration(job.data.requestId);
+        await Promise.race([
+          service.runGeneration(job.data.requestId),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('generation exceeded time budget')), GEN_TIMEOUT_MS)),
+        ]);
       } catch (err) {
-        // runGeneration handles its own errors, but belt-and-suspenders: if
-        // anything escapes, ensure the request doesn't linger mid-status.
+        // runGeneration handles its own errors; this covers a timeout or an
+        // escape. Mark the request failed and DO NOT rethrow — we want the
+        // worker to free up for the next job, not stall.
         try {
-          const Req = require('../models/capstoneGenerationRequest.model');
           await Req.findByIdAndUpdate(job.data.requestId, {
-            $set: { status: 'failed', error: `worker error: ${err.message}` },
+            $set: { status: 'failed', error: `generation did not finish in time — please try again (${err.message})` },
           });
         } catch { /* ignore */ }
-        throw err;
+        return { done: false, error: err.message };
       }
       return { done: true };
     },

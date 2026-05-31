@@ -146,6 +146,24 @@ async function tick() {
     }
   }
 
+  // 2c. Fail stuck capstone-GENERATION requests. A request left in a
+  //     non-terminal status too long (worker wedged on a hung upstream call, or
+  //     the process restarted mid-job) would otherwise show "Building…" forever
+  //     on the client. The generation worker now has its own 9-min ceiling; this
+  //     is the backstop and cleans up any that predate it.
+  try {
+    const CapstoneGenerationRequest = require('../models/capstoneGenerationRequest.model');
+    const genCutoff = new Date(Date.now() - 12 * 60 * 1000);
+    const res = await CapstoneGenerationRequest.updateMany(
+      { status: { $in: ['queued', 'generating', 'validating', 'cross_checking'] }, updatedAt: { $lt: genCutoff } },
+      { $set: { status: 'failed', error: 'Generation timed out — please try again.' } }
+    );
+    summary.failedStuckGenerations = res.modifiedCount || 0;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[sandbox-gc] stuck-generation cleanup failed:', err.message);
+  }
+
   // 3. Recover stuck submits — sessions that have been `submitted` for
   //    > 2 min without a worker picking up the eval job (Redis blip during
   //    submit). Idempotent enqueue on sessionId so safe to repeat.

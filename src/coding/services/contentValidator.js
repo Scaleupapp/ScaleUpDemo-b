@@ -67,23 +67,38 @@ function mergeFilesByPath(base = [], overlay = []) {
  *
  * Returns { allPass, results:[{exit_code, stdout, stderr, timed_out}] }.
  */
+// Hard wall-clock guard around an e2b SDK call. The SDK's own timeout governs
+// the command running INSIDE the sandbox, not the network call to e2b — if that
+// hangs, the whole generation worker wedges (one stuck job blocks all others).
+// Promise.race lets us bail; the orphaned promise settles harmlessly later.
+function withTimeout(promise, ms, label) {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} exceeded ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
 async function runTestsOn(files, tests, language) {
   if (!tests || tests.length === 0) return { allPass: true, results: [] };
   const adapter = getSandboxAdapter();
   let sandboxId = null;
   const results = [];
   try {
-    const provisioned = await adapter.provision({
-      image: language || 'python',
-      files,
-      env: {},
-      limits: { wallClockMs: 15 * 60 * 1000 },
-    });
+    const provisioned = await withTimeout(
+      adapter.provision({ image: language || 'python', files, env: {}, limits: { wallClockMs: 15 * 60 * 1000 } }),
+      90000,
+      'sandbox provision'
+    );
     sandboxId = provisioned.sandboxId;
     for (const t of tests) {
       const command = (t.command || '').replace(/\s(?:--silent|--quiet|-s)\b/g, '');
       try {
-        const r = await adapter.runCommand(sandboxId, command, { timeoutMs: 180000 });
+        const r = await withTimeout(
+          adapter.runCommand(sandboxId, command, { timeoutMs: 180000 }),
+          200000,
+          'sandbox test run'
+        );
         results.push({
           exit_code: typeof r.exitCode === 'number' ? r.exitCode : 0,
           stdout: r.stdout || '',
@@ -91,7 +106,7 @@ async function runTestsOn(files, tests, language) {
           timed_out: false,
         });
       } catch (err) {
-        results.push({ exit_code: 1, stdout: '', stderr: `sandbox run error: ${err.message}`, timed_out: false });
+        results.push({ exit_code: 1, stdout: '', stderr: `sandbox run error: ${err.message}`, timed_out: true });
       }
     }
   } catch (err) {
@@ -102,7 +117,8 @@ async function runTestsOn(files, tests, language) {
       results: tests.map(() => ({ exit_code: 1, stdout: '', stderr: `validation sandbox unavailable: ${err.message}`, timed_out: false })),
     };
   } finally {
-    if (sandboxId) await adapter.destroy(sandboxId).catch(() => {});
+    // Teardown is also guarded — a hung destroy must not wedge the worker.
+    if (sandboxId) await withTimeout(adapter.destroy(sandboxId), 30000, 'sandbox destroy').catch(() => {});
   }
   const allPass = results.every((r, i) =>
     r.exit_code === (tests[i].expected_exit_code !== undefined ? tests[i].expected_exit_code : 0)
