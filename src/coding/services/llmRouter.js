@@ -12,11 +12,19 @@ const gemini    = require('../integrations/gemini.client');
 
 // ── Routing table ─────────────────────────────────────────────────────────────
 
+// NOTE: these tasks do NOT declare provider tools. We used to pass
+// `tools: ['code_execution']`, but (a) both the Anthropic and Gemini APIs
+// require tool entries to be objects, not bare strings — a string array is
+// rejected with `tools.0: Input should be an object` (400), which broke EVERY
+// generation/validation call — and (b) the consumers only ever read the final
+// text block and JSON.parse it (see contentGenerator.extractJson), so any
+// tool_use output was discarded anyway. Code is actually proven by the external
+// sandbox proof in contentValidator, not by a model-side execution tool.
 const ROUTING_TABLE = {
-  content_generator_draft:   { provider: 'anthropic', model: 'claude-opus-4-7',              tools: ['code_execution'] },
-  content_validator_cross:   { provider: 'google',    model: 'gemini-2.5-pro',               tools: ['code_execution'] },
+  content_generator_draft:   { provider: 'anthropic', model: 'claude-opus-4-7' },
+  content_validator_cross:   { provider: 'google',    model: 'gemini-2.5-pro' },
   capstone_quality_cross:    { provider: 'google',    model: 'gemini-2.5-pro' },
-  reference_solution_solver: { provider: 'anthropic', model: 'claude-opus-4-7',              tools: ['code_execution'] },
+  reference_solution_solver: { provider: 'anthropic', model: 'claude-opus-4-7' },
   drill_grade_prompt:        { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
   drill_grade_verify:        { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
   drill_grade_decompose:     { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },

@@ -20,7 +20,7 @@ const SYSTEM_PROMPT = `You generate ArtifactBundles for ScaleUp coding practice.
 Hard requirements:
 - type must match what was requested
 - role_track, language, difficulty, drill_subtype must match the target spec
-- reference_solution must be a complete, working solution (you may run it in a code_execution tool first to verify)
+- reference_solution must be a complete, working solution that passes every visible_test and hidden_test (it will be executed in a sandbox to verify, so it must actually run)
 - visible_tests and hidden_tests must be distinct
 - seeded_mistakes (where applicable) must each be a plausible bug Compass might suggest
 - expected_meta_skill_signals must be populated with realistic guidance

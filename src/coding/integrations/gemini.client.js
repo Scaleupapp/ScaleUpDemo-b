@@ -17,7 +17,11 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
  * @returns {Promise<{content: object, usage: object}>}
  */
 async function call({ model, system, prompt, tools }) {
-  const m = genAI.getGenerativeModel({ model, systemInstruction: system, tools });
+  const cfg = { model, systemInstruction: system };
+  // Gemini expects tool entries as objects (functionDeclarations / codeExecution);
+  // only attach when non-empty so a stray string/empty array can't 400 the call.
+  if (Array.isArray(tools) && tools.length > 0) cfg.tools = tools;
+  const m = genAI.getGenerativeModel(cfg);
   const res = await m.generateContent(prompt);
   return {
     content: res.response.candidates[0].content,
