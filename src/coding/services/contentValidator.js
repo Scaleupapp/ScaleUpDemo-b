@@ -39,6 +39,20 @@ async function checkStarterBuilds(bundle) {
 }
 
 /**
+ * Merge two file lists by path — `overlay` wins on collisions. A reference
+ * solution is the COMPLETED project = the starter_repo (package.json, test
+ * files, configs) with the solution's source files layered on top. Running the
+ * solution files alone misses package.json + the tests (npm ENOENT), which is
+ * exactly why every reference solution "failed" validation.
+ */
+function mergeFilesByPath(base = [], overlay = []) {
+  const byPath = new Map();
+  for (const f of base) byPath.set(f.path, f);
+  for (const f of overlay) byPath.set(f.path, f);
+  return Array.from(byPath.values());
+}
+
+/**
  * Runs test specs against the given files in the sandbox.
  * Returns { allPass: boolean, results: Array }.
  */
@@ -73,8 +87,8 @@ async function runTestsOn(files, tests) {
  * Check 2: reference_solution passes all visible_tests + hidden_tests.
  */
 async function checkReferenceSolution(bundle) {
-  const files = bundle.reference_solution && bundle.reference_solution.files;
-  if (!files || files.length === 0) {
+  const solFiles = bundle.reference_solution && bundle.reference_solution.files;
+  if (!solFiles || solFiles.length === 0) {
     return { ok: false, error: 'reference_solution has no files' };
   }
 
@@ -83,6 +97,9 @@ async function checkReferenceSolution(bundle) {
     return { ok: true, skipped: true, note: 'no tests to run' };
   }
 
+  // Materialise the full project: starter_repo (package.json, tests, configs)
+  // with the reference solution layered on top.
+  const files = mergeFilesByPath(bundle.starter_repo?.files, solFiles);
   const { allPass, results } = await runTestsOn(files, allTests);
   if (!allPass) {
     const failed = results
@@ -109,16 +126,17 @@ async function checkReferenceSolution(bundle) {
  * If tests still pass when code is broken, the tests are too weak.
  */
 async function checkNonSolutionFails(bundle) {
-  const files = (bundle.reference_solution && bundle.reference_solution.files) || [];
-  if (files.length === 0) return { ok: true, skipped: true };
-
-  // Corrupt the first file by prepending a syntax error
-  const corrupted = files.map((f, i) =>
-    i === 0 ? { ...f, content: 'THIS_IS_NOT_VALID_CODE_!!!\n' + f.content } : f
-  );
+  const solFiles = (bundle.reference_solution && bundle.reference_solution.files) || [];
+  if (solFiles.length === 0) return { ok: true, skipped: true };
 
   const allTests = [...(bundle.visible_tests || []), ...(bundle.hidden_tests || [])];
   if (allTests.length === 0) return { ok: true, skipped: true };
+
+  // Corrupt the first solution file, then run it as part of the full project.
+  const corruptedSolution = solFiles.map((f, i) =>
+    i === 0 ? { ...f, content: 'THIS_IS_NOT_VALID_CODE_!!!\n' + f.content } : f
+  );
+  const corrupted = mergeFilesByPath(bundle.starter_repo?.files, corruptedSolution);
 
   const { allPass } = await runTestsOn(corrupted, allTests);
   if (allPass) {
