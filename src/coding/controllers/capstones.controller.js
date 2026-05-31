@@ -919,6 +919,14 @@ async function getTrack(req, res) {
   }
   if (!enrollment) return res.json({ enrolled: false, reason: 'not_enough_bundles' });
 
+  // Re-derive each step's preview from the bundle's current title (first line)
+  // on READ. The stored brief_preview was frozen at enrollment time, so older
+  // tracks have the whole brief mashed onto one line — that's the text that was
+  // overflowing the rows. Title-only keeps them clean without a migration.
+  const stepBundleIds = enrollment.steps.map((s) => s.bundle_id);
+  const stepBundles = await ArtifactBundle.find({ _id: { $in: stepBundleIds } }).select('brief').lean();
+  const briefById = new Map(stepBundles.map((b) => [String(b._id), b.brief]));
+
   res.json({
     enrolled: true,
     title: enrollment.title,
@@ -930,7 +938,7 @@ async function getTrack(req, res) {
       index: i,
       bundle_id: String(s.bundle_id),
       difficulty: s.difficulty,
-      brief_preview: s.brief_preview,
+      brief_preview: shortenBriefForHistory(briefById.get(String(s.bundle_id))) || s.brief_preview,
       status: s.status,
       overall_score: s.overall_score,
       completed_at: s.completed_at,
