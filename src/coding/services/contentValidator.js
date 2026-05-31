@@ -20,7 +20,7 @@
 
 const { ArtifactBundle, HumanReviewQueue } = require('../models');
 const { llmCall } = require('./llmRouter');
-const sandbox = require('./sandbox/localSandbox');
+const { getSandboxAdapter } = require('./sandbox/adapterFactory');
 
 // ── Individual check functions ────────────────────────────────────────────────
 
@@ -53,30 +53,57 @@ function mergeFilesByPath(base = [], overlay = []) {
 }
 
 /**
- * Runs test specs against the given files in the sandbox.
- * Returns { allPass: boolean, results: Array }.
+ * Run the test specs against `files` in a REAL sandbox (e2b — the same provider
+ * the live capstone session uses). The API server only had node/npm — no pip,
+ * no Go/Rust — so python (the majority track) and others could never validate,
+ * and running model-generated commands on the API box was a security smell.
+ * e2b has python+pip, node+npm, network, and is isolated.
+ *
+ * One sandbox per call (the caller passes either the reference solution or the
+ * corrupted variant); tests run sequentially in it, then it's torn down.
+ *
+ * `--silent`/`--quiet`/`-s` are stripped so a failing install/test still emits
+ * the real error for the retry critique (validation-only; stored bundle intact).
+ *
+ * Returns { allPass, results:[{exit_code, stdout, stderr, timed_out}] }.
  */
-async function runTestsOn(files, tests) {
+async function runTestsOn(files, tests, language) {
   if (!tests || tests.length === 0) return { allPass: true, results: [] };
-  // Test commands routinely `npm install` / `pip install` first, which takes
-  // far longer than the old 15s cap — every Node/Python reference solution was
-  // SIGTERM-killed mid-install and reported as "did not pass", so validation
-  // (and therefore generation) could never succeed. 120s covers a cold install.
-  //
-  // We also strip `--silent`/`-s`/`--quiet`: generated test commands include
-  // them, which means a FAILING install or test emits nothing — leaving the
-  // retry critique blind, so the model can never learn what to fix. Stripping
-  // them (validation-only; the stored bundle is untouched) surfaces the real
-  // error for the critique loop.
-  const results = await Promise.all(
-    tests.map(t =>
-      sandbox.runInTempDir({
-        files,
-        command: (t.command || '').replace(/\s(?:--silent|--quiet|-s)\b/g, ''),
-        timeout_ms: 120000,
-      })
-    )
-  );
+  const adapter = getSandboxAdapter();
+  let sandboxId = null;
+  const results = [];
+  try {
+    const provisioned = await adapter.provision({
+      image: language || 'python',
+      files,
+      env: {},
+      limits: { wallClockMs: 15 * 60 * 1000 },
+    });
+    sandboxId = provisioned.sandboxId;
+    for (const t of tests) {
+      const command = (t.command || '').replace(/\s(?:--silent|--quiet|-s)\b/g, '');
+      try {
+        const r = await adapter.runCommand(sandboxId, command, { timeoutMs: 180000 });
+        results.push({
+          exit_code: typeof r.exitCode === 'number' ? r.exitCode : 0,
+          stdout: r.stdout || '',
+          stderr: r.stderr || '',
+          timed_out: false,
+        });
+      } catch (err) {
+        results.push({ exit_code: 1, stdout: '', stderr: `sandbox run error: ${err.message}`, timed_out: false });
+      }
+    }
+  } catch (err) {
+    // Couldn't even provision — surface as a non-pass with the reason so the
+    // generation request fails loudly instead of silently looping.
+    return {
+      allPass: false,
+      results: tests.map(() => ({ exit_code: 1, stdout: '', stderr: `validation sandbox unavailable: ${err.message}`, timed_out: false })),
+    };
+  } finally {
+    if (sandboxId) await adapter.destroy(sandboxId).catch(() => {});
+  }
   const allPass = results.every((r, i) =>
     r.exit_code === (tests[i].expected_exit_code !== undefined ? tests[i].expected_exit_code : 0)
   );
@@ -100,7 +127,7 @@ async function checkReferenceSolution(bundle) {
   // Materialise the full project: starter_repo (package.json, tests, configs)
   // with the reference solution layered on top.
   const files = mergeFilesByPath(bundle.starter_repo?.files, solFiles);
-  const { allPass, results } = await runTestsOn(files, allTests);
+  const { allPass, results } = await runTestsOn(files, allTests, bundle.language);
   if (!allPass) {
     const failed = results
       .map((r, i) => ({
@@ -138,7 +165,7 @@ async function checkNonSolutionFails(bundle) {
   );
   const corrupted = mergeFilesByPath(bundle.starter_repo?.files, corruptedSolution);
 
-  const { allPass } = await runTestsOn(corrupted, allTests);
+  const { allPass } = await runTestsOn(corrupted, allTests, bundle.language);
   if (allPass) {
     return { ok: false, error: 'tests passed even with corrupted code — tests are too weak' };
   }
