@@ -20,17 +20,23 @@ const gemini    = require('../integrations/gemini.client');
 // text block and JSON.parse it (see contentGenerator.extractJson), so any
 // tool_use output was discarded anyway. Code is actually proven by the external
 // sandbox proof in contentValidator, not by a model-side execution tool.
+// `max_tokens` matters for tasks that emit a LARGE JSON document. A full
+// ArtifactBundle (brief + starter_repo files + visible/hidden tests + reference
+// solution + seeded mistakes + rubric anchors) far exceeds the 4096-token
+// client default, so without a higher cap the model's JSON is truncated and
+// JSON.parse fails with "Unterminated string in JSON" — which is exactly how
+// capstone generation was failing after the tools fix.
 const ROUTING_TABLE = {
-  content_generator_draft:   { provider: 'anthropic', model: 'claude-opus-4-7' },
+  content_generator_draft:   { provider: 'anthropic', model: 'claude-opus-4-7', max_tokens: 20000 },
   content_validator_cross:   { provider: 'google',    model: 'gemini-2.5-pro' },
   capstone_quality_cross:    { provider: 'google',    model: 'gemini-2.5-pro' },
-  reference_solution_solver: { provider: 'anthropic', model: 'claude-opus-4-7' },
+  reference_solution_solver: { provider: 'anthropic', model: 'claude-opus-4-7', max_tokens: 16000 },
   drill_grade_prompt:        { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
   drill_grade_verify:        { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
   drill_grade_decompose:     { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
   drill_grade_refactor:      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  capstone_evaluator:        { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  seeded_mistake_generator:  { provider: 'anthropic', model: 'claude-opus-4-7' },
+  capstone_evaluator:        { provider: 'anthropic', model: 'claude-sonnet-4-6', max_tokens: 8000 },
+  seeded_mistake_generator:  { provider: 'anthropic', model: 'claude-opus-4-7', max_tokens: 8000 },
   hidden_test_generator:     { provider: 'google',    model: 'gemini-2.5-pro' },
   compass_coder:             { provider: 'anthropic', model: 'claude-sonnet-4-6' },
 };
@@ -73,15 +79,17 @@ function getModelForTask(taskId) {
  * @param {Array}   [opts.tools]     — extra tools to merge with the routing-table defaults
  * @returns {Promise<{content, usage, _meta: {taskId, provider, model, duration_ms}}>}
  */
-async function llmCall({ taskId, system, messages, prompt, tools: extraTools }) {
-  const { provider, model, tools: defaultTools = [] } = getModelForTask(taskId);
+async function llmCall({ taskId, system, messages, prompt, tools: extraTools, max_tokens }) {
+  const { provider, model, tools: defaultTools = [], max_tokens: routedMaxTokens } = getModelForTask(taskId);
   const tools = [...defaultTools, ...(extraTools || [])];
+  // Caller override wins, else the routing-table cap, else the client default.
+  const maxTokens = max_tokens || routedMaxTokens;
 
   const started = Date.now();
   let result;
 
   if (provider === 'anthropic') {
-    result = await anthropic.call({ model, system, messages, tools });
+    result = await anthropic.call({ model, system, messages, tools, ...(maxTokens ? { max_tokens: maxTokens } : {}) });
   } else if (provider === 'google') {
     result = await gemini.call({ model, system, prompt: prompt || messages, tools });
   } else {
