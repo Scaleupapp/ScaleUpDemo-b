@@ -840,6 +840,43 @@ async function getGenerationStatus(req, res) {
 }
 
 /**
+ * GET /api/coding/capstones/generations
+ *
+ * The learner's recent on-demand generation requests, newest first. Lets the
+ * Coding hub surface "Building…" / "Ready — Start" / "Failed — Retry" without
+ * the client holding a long poll, so the learner can submit and walk away.
+ */
+async function listGenerations(req, res) {
+  const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 10));
+  const reqs = await CapstoneGenerationRequest.find({ user_id: req.user.userId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean();
+
+  const readyIds = reqs.filter((r) => r.status === 'ready' && r.bundle_id).map((r) => r.bundle_id);
+  const bundles = readyIds.length
+    ? await ArtifactBundle.find({ _id: { $in: readyIds } }).select('brief difficulty role_track').lean()
+    : [];
+  const byId = new Map(bundles.map((b) => [String(b._id), b]));
+
+  res.json({
+    generations: reqs.map((r) => {
+      const b = r.bundle_id ? byId.get(String(r.bundle_id)) : null;
+      return {
+        request_id: String(r._id),
+        status: r.status, // queued|generating|validating|cross_checking|ready|failed
+        difficulty: r.difficulty,
+        role_track: r.role_track,
+        bundle_id: r.bundle_id ? String(r.bundle_id) : null,
+        brief_preview: b ? shortenBriefForHistory(b.brief) : null,
+        error: r.status === 'failed' ? (r.error || 'generation failed') : null,
+        created_at: r.createdAt,
+      };
+    }),
+  });
+}
+
+/**
  * GET /api/coding/capstones/track
  *
  * Returns the learner's auto-assembled track. If they're eligible and not yet
@@ -895,5 +932,6 @@ module.exports = {
   requestNext,
   generateCapstone,
   getGenerationStatus,
+  listGenerations,
   getTrack,
 };

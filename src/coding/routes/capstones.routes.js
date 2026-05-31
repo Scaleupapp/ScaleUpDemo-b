@@ -39,6 +39,7 @@ router.post('/retry', auth, rl({ endpoint: 'retry', max: 6 }), capstones.retry);
 router.post('/request', auth, rl({ endpoint: 'request', max: 12 }), capstones.requestNext);
 // Generator: open to all eligible learners, 5/hour cap (LLM + sandbox cost).
 router.post('/generate', auth, rl({ endpoint: 'generate', windowMs: 60 * 60 * 1000, max: 5 }), capstones.generateCapstone);
+router.get('/generations', auth, rl({ endpoint: 'generations-list', max: 120 }), capstones.listGenerations);
 router.get('/generations/:request_id', auth, rl({ endpoint: 'generation-status', max: 120 }), capstones.getGenerationStatus);
 router.post(
   '/redeem',

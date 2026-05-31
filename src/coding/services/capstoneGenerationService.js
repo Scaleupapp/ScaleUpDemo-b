@@ -32,6 +32,28 @@ const CapstoneGenerationRequest = require('../models/capstoneGenerationRequest.m
 const ArtifactBundle = require('../models/artifactBundle.model');
 const generationPipeline = require('./generationPipeline');
 const { llmCall } = require('./llmRouter');
+const notificationService = require('../../services/notificationService');
+const { buildPayload, NOTIFICATION_TYPES } = require('./codingNotifications');
+
+const GENERATION_DEEP_LINK = 'scaleup://compass/coding';
+
+/** Best-effort push when generation finishes (never throws into the pipeline). */
+async function notifyOutcome(reqDoc, ok) {
+  try {
+    const type = ok ? NOTIFICATION_TYPES.CODING_CAPSTONE_GENERATED : NOTIFICATION_TYPES.CODING_CAPSTONE_GENERATION_FAILED;
+    await notificationService.sendToUser(
+      reqDoc.user_id,
+      buildPayload(type, {
+        deepLink: GENERATION_DEEP_LINK,
+        request_id: String(reqDoc._id),
+        bundle_id: reqDoc.bundle_id ? String(reqDoc.bundle_id) : null,
+      })
+    );
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[capstoneGeneration] notify failed:', err.message);
+  }
+}
 
 const DEFAULT_TIME_BUDGET = { easy: 60, medium: 75, hard: 90 };
 
@@ -109,6 +131,7 @@ async function runGeneration(requestId) {
           },
         });
         await setStatus(reqDoc, 'ready');
+        await notifyOutcome(reqDoc, true);
         return;
       }
 
@@ -216,6 +239,7 @@ async function fail(reqDoc, reason) {
   reqDoc.status = 'failed';
   reqDoc.error = reason;
   await reqDoc.save();
+  await notifyOutcome(reqDoc, false);
 }
 
 module.exports = { runGeneration, crossCheckCapstone, DEFAULT_TIME_BUDGET };

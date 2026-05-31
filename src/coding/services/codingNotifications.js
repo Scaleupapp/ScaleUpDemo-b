@@ -54,6 +54,12 @@ const NOTIFICATION_TYPES = Object.freeze({
 
   /** Sent after a graded capstone bumps the learner's difficulty up one notch. */
   CODING_LEVEL_UP: 'coding_level_up',
+
+  /** Sent when an on-demand generated capstone finishes building and is ready. */
+  CODING_CAPSTONE_GENERATED: 'coding_capstone_generated',
+
+  /** Sent when an on-demand generation fails its quality gate. */
+  CODING_CAPSTONE_GENERATION_FAILED: 'coding_capstone_generation_failed',
 });
 
 /** @readonly */
@@ -77,6 +83,14 @@ const TEMPLATES = Object.freeze({
   [NOTIFICATION_TYPES.CODING_LEVEL_UP]: {
     title: 'You leveled up!',
     body: 'Your recent capstone bumped you to harder material. Keep going.',
+  },
+  [NOTIFICATION_TYPES.CODING_CAPSTONE_GENERATED]: {
+    title: 'Your capstone is ready 🎉',
+    body: 'We built and proved your custom capstone. Tap to start.',
+  },
+  [NOTIFICATION_TYPES.CODING_CAPSTONE_GENERATION_FAILED]: {
+    title: "Couldn't build that capstone",
+    body: "It didn't pass our quality checks. Tap to try a clearer description.",
   },
 });
 

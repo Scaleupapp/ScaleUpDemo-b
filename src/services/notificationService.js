@@ -166,6 +166,10 @@ class NotificationService {
       // Coding capstone types (Phase B)
       coding_capstone_available: 'coding_capstone_available',
       coding_level_up: 'coding_level_up',
+      // On-demand generated capstone outcomes — reuse existing valid enum
+      // values so the in-app record persists (push carries the custom copy).
+      coding_capstone_generated: 'coding_capstone_available',
+      coding_capstone_generation_failed: 'journey_update',
     };
     return map[dataType] || 'journey_update';
   }
