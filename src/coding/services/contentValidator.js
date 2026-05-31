@@ -48,9 +48,19 @@ async function runTestsOn(files, tests) {
   // far longer than the old 15s cap — every Node/Python reference solution was
   // SIGTERM-killed mid-install and reported as "did not pass", so validation
   // (and therefore generation) could never succeed. 120s covers a cold install.
+  //
+  // We also strip `--silent`/`-s`/`--quiet`: generated test commands include
+  // them, which means a FAILING install or test emits nothing — leaving the
+  // retry critique blind, so the model can never learn what to fix. Stripping
+  // them (validation-only; the stored bundle is untouched) surfaces the real
+  // error for the critique loop.
   const results = await Promise.all(
     tests.map(t =>
-      sandbox.runInTempDir({ files, command: t.command, timeout_ms: 120000 })
+      sandbox.runInTempDir({
+        files,
+        command: (t.command || '').replace(/\s(?:--silent|--quiet|-s)\b/g, ''),
+        timeout_ms: 120000,
+      })
     )
   );
   const allPass = results.every((r, i) =>
@@ -80,13 +90,15 @@ async function checkReferenceSolution(bundle) {
         test: allTests[i].name,
         exit_code: r.exit_code,
         timed_out: !!r.timed_out,
-        stderr: (r.stderr || '').slice(0, 200),
+        // Both streams — npm writes errors to stdout, jest/pytest to stderr.
+        output: `${r.stdout || ''}\n${r.stderr || ''}`.replace(/\s+/g, ' ').trim(),
       }))
       .filter((_, i) => results[i].exit_code !== (allTests[i].expected_exit_code || 0));
-    // Fold the first failure's detail into the error so the generation request's
-    // error message tells us WHY (timeout vs missing toolchain vs real failure).
+    // Fold the first failure's real output into the error. This both tells US
+    // why (timeout vs toolchain vs real failure) AND becomes the retry critique
+    // the generator sees, so it can actually fix the broken solution/tests.
     const f0 = failed[0] || {};
-    const detail = `${f0.test || '?'} exit=${f0.exit_code}${f0.timed_out ? ' TIMEOUT' : ''} ${(f0.stderr || '').replace(/\s+/g, ' ').trim()}`.slice(0, 240);
+    const detail = `${f0.test || '?'} exit=${f0.exit_code}${f0.timed_out ? ' TIMEOUT' : ''} :: ${(f0.output || '(no output)')}`.slice(0, 600);
     return { ok: false, error: `reference_solution did not pass all tests — ${detail}`, failed };
   }
   return { ok: true };
