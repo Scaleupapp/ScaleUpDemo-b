@@ -54,14 +54,28 @@ function poolSize(image) {
   return pool.get(image)?.length || 0;
 }
 
+// e2b auto-kills a sandbox at its `timeoutMs` (we warm at 55 min). A warm entry
+// that has been sitting in the pool near/past that is very likely already dead,
+// and the in-memory pool can't know. Refuse to hand out anything older than this
+// so we don't claim a corpse and then fail the learner's start.
+const WARM_MAX_AGE_MS = 45 * 60 * 1000;
+
 /**
- * Tries to claim an existing warm sandbox for this image. Returns null on
- * miss — caller falls through to a fresh provision.
+ * Tries to claim a LIVE warm sandbox for this image. Skips (and best-effort
+ * destroys) entries old enough that e2b may have already reaped them. Returns
+ * null on miss — caller falls through to a fresh provision.
  */
 function claimWarmSandbox(image) {
   const list = pool.get(image);
   if (!list || list.length === 0) return null;
-  return list.shift();
+  while (list.length > 0) {
+    const candidate = list.shift();
+    const warmedMs = candidate.warmedAt ? new Date(candidate.warmedAt).getTime() : 0;
+    if (Date.now() - warmedMs < WARM_MAX_AGE_MS) return candidate;
+    // Too old — likely dead. Drop it (and try to free it) and keep looking.
+    if (candidate.sandboxId) adapter.destroy(candidate.sandboxId).catch(() => {});
+  }
+  return null;
 }
 
 /**
@@ -129,17 +143,29 @@ async function provisionForSession(sessionId) {
     const starterFiles = bundle.starter_repo?.files ?? [];
     const warm = claimWarmSandbox(bundle.language);
     if (warm) {
-      // Warm sandbox needs the starter repo uploaded (warm pool keeps
-      // them empty). Same network round-trip cost as provisioning, but
-      // we save the container start time.
-      sandboxId = warm.sandboxId;
-      hostUrl = warm.hostUrl;
-      if (starterFiles.length > 0) {
-        await adapter.uploadFiles(sandboxId, starterFiles);
+      // Warm sandbox needs the starter repo uploaded (warm pool keeps them
+      // empty). If the claimed sandbox turns out to be dead (e2b reaped it
+      // after its timeout while it sat in the pool), uploadFiles connects and
+      // throws — DON'T abort the learner over a stale cache entry; fall through
+      // to a fresh provision instead.
+      try {
+        sandboxId = warm.sandboxId;
+        hostUrl = warm.hostUrl;
+        if (starterFiles.length > 0) {
+          await adapter.uploadFiles(sandboxId, starterFiles);
+        }
+      } catch (warmErr) {
+        // eslint-disable-next-line no-console
+        console.warn(`[sandboxOrchestrator] warm sandbox ${warm.sandboxId} unusable (${warmErr.message}); provisioning fresh`);
+        if (warm.sandboxId) await adapter.destroy(warm.sandboxId).catch(() => {});
+        sandboxId = null;
+        hostUrl = null;
       }
-    } else {
-      // e2b caps initial timeout at 1 hour. Longer capstones (75/90 min) get
-      // their timeout extended mid-session via heartbeatExtend below.
+    }
+    if (!sandboxId) {
+      // Cold path (no warm hit, or the warm sandbox was dead). e2b caps initial
+      // timeout at 1 hour; longer capstones (75/90 min) get extended mid-session
+      // via adapter.extendTimeout on the status-poll path.
       const initialMs = Math.min(
         bundle.time_budget_minutes * 60 * 1000 + 5 * 60 * 1000,
         55 * 60 * 1000

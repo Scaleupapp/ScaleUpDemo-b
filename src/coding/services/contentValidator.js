@@ -224,8 +224,10 @@ async function checkContentHashUnique(bundle) {
  * @returns {Promise<{ ok: boolean, results: Array, errors?: string[] }>}
  */
 async function validate({ bundle_id }) {
-  const bundleQuery = await ArtifactBundle.findById(bundle_id);
-  const bundle = await bundleQuery.lean();
+  // `.lean()` must be called on the QUERY, not on an already-awaited document —
+  // `await findById(...)` resolves to a Mongoose doc which has no `.lean()`
+  // (that threw "bundleQuery.lean is not a function" and failed every validation).
+  const bundle = await ArtifactBundle.findById(bundle_id).lean();
   if (!bundle) throw new Error(`Bundle ${bundle_id} not found`);
 
   const checks = [
