@@ -214,8 +214,10 @@ async function getActiveStepBundleId(userId, expectedRoleTrack = null) {
 
 function shorten(brief) {
   if (!brief) return '';
-  const oneLine = brief.replace(/\s+/g, ' ').trim();
-  return oneLine.length > 120 ? oneLine.slice(0, 120) + '…' : oneLine;
+  // Just the title (first non-empty line), NOT the whole brief mashed onto one
+  // line — the latter floods the track rows with body text.
+  const firstLine = (String(brief).split('\n').find((l) => l.trim().length > 0) || '').trim();
+  return firstLine.length > 90 ? firstLine.slice(0, 90).trimEnd() + '…' : firstLine;
 }
 
 module.exports = {

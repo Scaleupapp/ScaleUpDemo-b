@@ -45,11 +45,26 @@ function extractJson(content) {
   if (!Array.isArray(content)) throw new Error('LLM content is not an array');
   const textBlock = content.find(c => c.type === 'text' || c.text);
   if (!textBlock) throw new Error('No text block in LLM response');
-  let text = textBlock.text;
-  // Strip ```json ... ``` fences if present
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) text = fenceMatch[1];
-  return JSON.parse(text.trim());
+  const text = (textBlock.text || '').trim();
+
+  // 1. Happy path: the whole response is the JSON object (what we ask for).
+  try { return JSON.parse(text); } catch (_) { /* fall through */ }
+
+  // 2. A ```json fenced block specifically (NOT just any fence — the brief can
+  //    itself contain ```sql / ```js code blocks that must not be mistaken for
+  //    the wrapper, which is what broke "SQL window functions" generation).
+  const jsonFence = text.match(/```json\s*([\s\S]*?)```/i);
+  if (jsonFence) {
+    try { return JSON.parse(jsonFence[1].trim()); } catch (_) { /* fall through */ }
+  }
+
+  // 3. Last resort: the outermost {...} span.
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first >= 0 && last > first) {
+    return JSON.parse(text.slice(first, last + 1));
+  }
+  throw new Error('No JSON object found in LLM response');
 }
 
 /**

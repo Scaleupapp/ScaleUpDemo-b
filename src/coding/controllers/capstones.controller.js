@@ -21,6 +21,29 @@ const { evaluateCodingEligibility } = require('../services/codingEligibility');
 // an arbitrary language; we map their track to its canonical language).
 const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
 
+/**
+ * Pick the capstone language from what the learner actually typed, falling back
+ * to their track's default. Forcing the track language onto, say, a "SQL window
+ * functions" request produced an incoherent JavaScript-about-SQL brief that the
+ * model couldn't satisfy. Only override on a STRONG, unambiguous signal.
+ * SQL/query topics map to python (runnable in-sandbox via the sqlite3 stdlib —
+ * the learner writes real SQL, we execute it with python).
+ */
+function inferLanguageFromInput(text, fallback) {
+  const t = ` ${String(text || '').toLowerCase()} `;
+  if (/typescript|next\.?js|nest\.?js/.test(t)) return 'typescript';
+  if (/\bgolang\b|\bgo lang\b|\bgoroutine/.test(t)) return 'go';
+  if (/\brust\b|\bcargo\b|\btokio\b/.test(t)) return 'rust';
+  if (/\bkotlin\b/.test(t)) return 'kotlin';
+  if (/\bswift(ui)?\b/.test(t)) return 'swift';
+  if (/\bc\+\+|\bcpp\b/.test(t)) return 'cpp';
+  if (/\bjava\b(?!script)/.test(t)) return 'java';
+  if (/\bsql\b|window function|\bpostgres\b|\bgroup by\b|\bjoins?\b|\bquery optim/.test(t)) return 'python';
+  if (/\bpython\b|pandas|numpy|django|flask|fastapi|scikit|pytorch|tensorflow/.test(t)) return 'python';
+  if (/\bjavascript\b|\bnode(\.?js)?\b|express|react/.test(t)) return 'javascript';
+  return fallback;
+}
+
 async function resolveRoleTrackForUser(userId) {
   let UserObjective;
   try { UserObjective = require('../../models/UserObjective'); } catch { UserObjective = require('../../models/userObjective'); }
@@ -637,8 +660,9 @@ async function getHistory(req, res) {
 
 function shortenBriefForHistory(brief) {
   if (!brief) return '';
-  const oneLine = brief.replace(/\s+/g, ' ').trim();
-  return oneLine.length > 140 ? oneLine.slice(0, 140) + '…' : oneLine;
+  // Title only (first non-empty line).
+  const firstLine = (String(brief).split('\n').find((l) => l.trim().length > 0) || '').trim();
+  return firstLine.length > 100 ? firstLine.slice(0, 100).trimEnd() + '…' : firstLine;
 }
 
 /**
@@ -769,7 +793,7 @@ async function generateCapstone(req, res) {
     diff = ['easy', 'medium', 'hard'].includes(cur) ? cur : 'medium';
   }
 
-  const language = LANG_BY_TRACK[roleTrack] || 'python';
+  const language = inferLanguageFromInput(`${jd} ${hint}`, LANG_BY_TRACK[roleTrack] || 'python');
 
   const reqDoc = await CapstoneGenerationRequest.create({
     user_id: req.user.userId,

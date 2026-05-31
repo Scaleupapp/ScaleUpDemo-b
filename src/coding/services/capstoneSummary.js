@@ -156,8 +156,9 @@ function round1(n) {
 
 function shortenBrief(brief) {
   if (!brief) return '';
-  const oneLine = brief.replace(/\s+/g, ' ').trim();
-  return oneLine.length > 140 ? oneLine.slice(0, 140) + '…' : oneLine;
+  // Title only (first non-empty line) — not the whole brief on one line.
+  const firstLine = (String(brief).split('\n').find((l) => l.trim().length > 0) || '').trim();
+  return firstLine.length > 100 ? firstLine.slice(0, 100).trimEnd() + '…' : firstLine;
 }
 
 const CADENCE_DAYS = 7;
