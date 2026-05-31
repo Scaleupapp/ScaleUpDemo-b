@@ -96,6 +96,23 @@ async function listLibrary(req, res) {
 }
 
 /** POST /api/coding/capstones/start */
+/**
+ * Abort the user's NEVER-STARTED sessions (provisioned but never begun on the
+ * laptop). These otherwise linger as a phantom "in progress" card and 409 the
+ * next start/retry. Only never-started sessions (no started_at, pre-pairing
+ * statuses) are touched — a genuinely in-progress/paused session is left alone.
+ */
+async function abortNeverStartedSessions(userId) {
+  const stale = await CapstoneSession.find({
+    user_id: userId,
+    status: { $in: ['scheduled', 'provisioning', 'ready'] },
+    started_at: null,
+  }).select('_id').lean();
+  for (const s of stale) {
+    await applyControl({ sessionId: s._id, userId, action: 'abort' }).catch(() => {});
+  }
+}
+
 async function start(req, res) {
   const { bundle_id } = req.body || {};
   if (!bundle_id) return res.status(400).json({ error: 'bundle_id required' });
@@ -103,6 +120,10 @@ async function start(req, res) {
   const bundle = await ArtifactBundle.findById(bundle_id).lean();
   if (!bundle) return res.status(404).json({ error: 'bundle_not_found' });
   if (bundle.type !== 'capstone') return res.status(404).json({ error: 'not_a_capstone' });
+
+  // Clear never-started leftovers so they don't pile up as a phantom
+  // "in progress" or block this start.
+  await abortNeverStartedSessions(req.user.userId);
 
   const session = await CapstoneSession.create({
     user_id: req.user.userId,
@@ -686,9 +707,13 @@ async function retry(req, res) {
     return res.status(400).json({ error: 'no_prior_attempt', message: 'Use /start for first attempts.' });
   }
 
+  // Clear any never-started leftovers (a previous Start that provisioned but
+  // was never begun on the laptop). Those used to linger as a phantom "in
+  // progress" and 409 the retry. Only a genuinely-active session blocks now.
+  await abortNeverStartedSessions(req.user.userId);
   const inProgress = await CapstoneSession.exists({
     user_id: req.user.userId,
-    status: { $in: ['provisioning', 'ready', 'in_progress', 'paused', 'submitted', 'evaluating'] },
+    status: { $in: ['in_progress', 'paused', 'submitted', 'evaluating'] },
   });
   if (inProgress) {
     return res.status(409).json({ error: 'session_in_progress', message: 'Finish or abort the current session first.' });
