@@ -32,7 +32,25 @@ async function runInTempDir({ files, command, timeout_ms = 15000 }) {
       execFile(
         'sh',
         ['-c', command],
-        { cwd: dir, timeout: timeout_ms },
+        {
+          cwd: dir,
+          timeout: timeout_ms,
+          // The API server runs with NODE_ENV=production, which makes
+          // `npm install` skip devDependencies (jest, supertest, …) — so test
+          // commands then fail with "missing package: jest". Force a full dev
+          // install inside the sandbox. maxBuffer is bumped because non-silent
+          // npm/jest output can exceed execFile's 1 MB default.
+          env: {
+            ...process.env,
+            NODE_ENV: 'development',
+            npm_config_production: 'false',
+            npm_config_include: 'dev',
+            npm_config_fund: 'false',
+            npm_config_audit: 'false',
+            CI: 'true',
+          },
+          maxBuffer: 10 * 1024 * 1024,
+        },
         (err, stdout, stderr) => {
           resolve({
             exit_code: err ? (err.code || 1) : 0,
