@@ -79,6 +79,17 @@ const RUBRIC_DIMS = ['correctness', 'code_quality', 'ai_pair_effectiveness', 've
  * domain-specific names (e.g. "query_accuracy") — coerce those to the closest
  * valid dimension ('correctness') rather than reject the bundle.
  */
+function coerceRepoFiles(repo) {
+  if (repo && Array.isArray(repo.files)) {
+    repo.files = repo.files
+      .filter((f) => f && typeof f === 'object' && typeof f.path === 'string' && f.path.trim().length > 0)
+      // `content` is required by the model schema; the generator occasionally
+      // emits an intentionally-empty stub file with the field missing — coerce
+      // to an empty string rather than reject the whole bundle.
+      .map((f) => ({ ...f, content: typeof f.content === 'string' ? f.content : '' }));
+  }
+}
+
 function sanitizeDraft(draft) {
   if (!draft || typeof draft !== 'object') return draft;
   if (Array.isArray(draft.rubric_anchors)) {
@@ -88,6 +99,8 @@ function sanitizeDraft(draft) {
         : a
     );
   }
+  coerceRepoFiles(draft.starter_repo);
+  coerceRepoFiles(draft.reference_solution);
   return draft;
 }
 
