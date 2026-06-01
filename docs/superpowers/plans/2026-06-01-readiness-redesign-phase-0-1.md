@@ -18,22 +18,22 @@
 
 ## RESUME STATE (update this as you go)
 
-**Current status:** NOT STARTED — begin at Task 1.
+**Current status:** ✅ **Phase 0 + Phase 1 BACKEND COMPLETE** (2026-06-01). 28 tests green (22 readiness unit + 6 you-router smoke). Committed locally on `master` (commits `fff7b65` Phase 0, `754d86d` Phase 1) — **NOT pushed yet** (push triggers EC2 deploy; safe to push because composite is shadow/flag-off, `FEATURE_COMPOSITE_READINESS` default false). **Next:** push when ready → watch `[readiness-shadow]` logs / ReadinessSnapshot.shadow for a few days → tune weights → flip flag. Then Phase 1b UI (Tasks 12–14, optional).
 
-**Phase 0 — Source of truth + history (BACKEND, target: this morning)**
-- [ ] Task 1: `ReadinessSnapshot` model + test
-- [ ] Task 2: `readinessService.assembleLegacy()` (behavior-identical) + test
-- [ ] Task 3: Wire `/you/overview` through `readinessService` + persist snapshot (no value change)
-- [ ] Task 4: `readinessService.persistSnapshot()` best-effort + test
+**Phase 0 — Source of truth + history (BACKEND) — DONE**
+- [x] Task 1: `ReadinessSnapshot` model
+- [x] Task 2: `readinessService.assembleLegacy()` (behavior-identical) + test
+- [x] Task 3: Wire `/you/overview` through `readinessService`
+- [x] Task 4: `readinessService.persistSnapshot()` best-effort + test
 
-**Phase 1 — Composite engine in shadow mode (BACKEND, target: this afternoon)**
-- [ ] Task 5: `primitiveMap.assessmentTypesToPrimitive()` + test
-- [ ] Task 6: signal aggregators (`buildCodingSignal`, `buildInterviewSignal`, `buildBehavioralSignal`) + test
-- [ ] Task 7: `recencyFactor()` + `confidenceFrom()` helpers + test
-- [ ] Task 8: `competencyMasteryService.computeCompetencyMastery()` + test
-- [ ] Task 9: `readinessService.computeComposite()` (weighted rollup + bounded modifier) + test
-- [ ] Task 10: `FEATURE_COMPOSITE_READINESS` flag
-- [ ] Task 11: Wire composite into `/you/overview` shadow mode (store in `snapshot.shadow`, serve only if flag on)
+**Phase 1 — Composite engine in shadow mode (BACKEND) — DONE**
+- [x] Task 5: `primitiveMap.assessmentTypesToPrimitive()` + test
+- [x] Task 6: signal aggregators (`buildCodingSignal`, `buildInterviewSignal`, `buildBehavioralSignal`) + test
+- [x] Task 7: `recencyFactor()` + `confidenceFrom()` helpers + test
+- [x] Task 8: `competencyMasteryService.computeCompetencyMastery()` + test
+- [x] Task 9: `readinessService.computeComposite()` (weighted rollup + bounded modifier) + test
+- [x] Task 10: `FEATURE_COMPOSITE_READINESS` flag
+- [x] Task 11: Wire composite into `/you/overview` shadow mode (store in `snapshot.shadow`, serve only if flag on)
 
 **Phase 1b — "What's in your number" UI (FRONTEND, iOS + Android, stretch / may slip past EOD)**
 - [ ] Task 12: `/you/overview` returns `readiness.breakdown` when composite served
