@@ -665,6 +665,29 @@ async function finishAttempt(attemptId) {
     console.warn('[diagnosticService] knowledge seed from diagnostic failed:', err.message);
   }
 
+  // Auto-analyze the objective the FIRST time a diagnostic completes. V2
+  // onboarding creates the objective but never calls /analyze (the sole trigger),
+  // which left ~94% of objectives without a competency framework — so composite
+  // readiness and the objective-aware target could never compute for them. Firing
+  // it here means the analysis sees the just-seeded diagnostic signal as context.
+  // Fire-and-forget (never blocks finishing the diagnostic), framework-only (no
+  // per-competency assessment jobs), idempotent (skip if already analyzed, so the
+  // monthly recalibration doesn't re-run it).
+  try {
+    const objectiveId = attempt.objectiveSnapshot?._id;
+    if (objectiveId) {
+      const existing = await UserObjective.findById(objectiveId).select('analysis.competencies').lean();
+      if (!existing?.analysis?.competencies?.length) {
+        const objectiveAnalysisService = require('./objectiveAnalysisService');
+        objectiveAnalysisService
+          .analyzeObjective(objectiveId, attempt.userId, { triggerAssessments: false })
+          .catch((e) => console.warn('[diagnosticService] auto-analyze after diagnostic failed:', e.message));
+      }
+    }
+  } catch (err) {
+    console.warn('[diagnosticService] auto-analyze guard failed:', err.message);
+  }
+
   // Flip the user-level flag so the app routes them to home instead of
   // back into the diagnostic flow on next launch / /me refresh. Best-
   // effort — the diagnostic itself is committed even if this fails.
