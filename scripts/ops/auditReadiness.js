@@ -85,6 +85,8 @@ async function auditOne(objective) {
     userId: String(userId),
     objectiveType: objective.objectiveType,
     analyzed: !!objective?.analysis?.competencies?.length,
+    tmCount: (knowledge?.topicMastery || []).length,
+    compCount: (objective?.analysis?.competencies || []).length,
     legacy: readiness,
     composite: shadow ? shadow.value : null,
     delta: shadow ? shadow.delta : null,
@@ -131,7 +133,11 @@ async function main() {
   console.log(`objectives audited:        ${rows.length}`);
   console.log(`  analyzed (framework exists):  ${analyzed.length}`);
   console.log(`    -> produces a composite:    ${withComp.length}`);
-  console.log(`    -> analyzed but NO signal:  ${analyzedNoSignal.length}  (competency names don't match diagnostic topics, or no assessment yet)`);
+  console.log(`    -> analyzed but NO signal:  ${analyzedNoSignal.length}`);
+  const noSignalNoData = analyzedNoSignal.filter((r) => r.tmCount === 0).length;
+  const noSignalHasData = analyzedNoSignal.filter((r) => r.tmCount > 0).length;
+  console.log(`         of which NO data at all (empty topicMastery): ${noSignalNoData}  -> needs assessments/engagement`);
+  console.log(`         of which HAS data but names don't match:      ${noSignalHasData}  -> needs name reconciliation`);
   console.log(`  un-analyzed (no framework):   ${unanalyzed.length}`);
   console.log('\n--- served source (what users actually get) ---');
   Object.entries(bySource).forEach(([k, v]) => console.log(`  ${k.padEnd(10)} ${v}`));
