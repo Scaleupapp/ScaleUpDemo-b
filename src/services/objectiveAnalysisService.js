@@ -83,7 +83,13 @@ class ObjectiveAnalysisService {
    * @param {String} userId - User ID
    * @returns {Object} Updated UserObjective with analysis
    */
-  async analyzeObjective(objectiveId, userId) {
+  async analyzeObjective(objectiveId, userId, opts = {}) {
+    // triggerAssessments (default true): after storing the framework, auto-trigger
+    // a skill assessment per competency. Bulk backfills pass false — they only need
+    // the competency framework (so composite readiness + objective target can
+    // compute off EXISTING signal); firing ~12 quiz-gen jobs × N objectives would
+    // hammer the queue and push unrequested assessments onto users.
+    const { triggerAssessments = true } = opts;
     const objective = await UserObjective.findOne({ _id: objectiveId, userId });
     if (!objective) throw new Error('Objective not found');
 
@@ -180,8 +186,8 @@ class ObjectiveAnalysisService {
     await objective.save();
     console.log(`[ObjectiveAnalysis] Analysis saved. Coverage: ${covered.length} covered, ${gaps.length} gaps`);
 
-    // Auto-trigger skill assessments for each competency
-    try {
+    // Auto-trigger skill assessments for each competency (skipped by bulk backfills).
+    if (triggerAssessments) try {
       let triggered = 0;
       for (const comp of analysis.competencies) {
         try {

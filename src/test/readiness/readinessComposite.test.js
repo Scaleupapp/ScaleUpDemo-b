@@ -5,6 +5,7 @@ process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'stub';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { computeComposite } = require('../../services/readiness/readinessService');
+const { confidenceFrom } = require('../../services/readiness/competencyMasteryService');
 
 const NOW = new Date('2026-06-01T00:00:00Z');
 
@@ -50,4 +51,38 @@ test('computeComposite excludes unassessed competencies (value tracks measured; 
 test('computeComposite returns null when objective has no analysis', () => {
   const r = computeComposite({ objective: { analysis: null }, ctx: { coding: false }, knowledge: {}, now: NOW });
   assert.strictEqual(r, null);
+});
+
+// ── Confidence recalibration (2026-06-01) ──────────────────────────────────────
+
+test('confidenceFrom: one fresh difficulty-graded assessment is blend-able, not 0.175', () => {
+  // Was volume(0.25) × 1 × diff(0.7) = 0.175 (stuck below the 0.35 gate forever).
+  assert.ok(confidenceFrom({ count: 1, recency: 1, hasDifficulty: true }) >= 0.45);
+  // Curve climbs with volume; 3+ approaches full.
+  assert.ok(confidenceFrom({ count: 3, recency: 1, hasDifficulty: true }) >= 0.8);
+  // Stale evidence still decays.
+  assert.ok(confidenceFrom({ count: 1, recency: 0.5, hasDifficulty: true }) < 0.35);
+  assert.strictEqual(confidenceFrom({ count: 0 }), 0);
+});
+
+test('a single fresh diagnostic over a well-covered objective clears the 0.35 blend gate', () => {
+  const objective = { objectiveType: 'upskilling', specifics: {}, analysis: { competencies: [
+    { name: 'Algebra', weight: 5, assessmentTypes: ['knowledge_recall'] },
+  ] } };
+  const knowledge = { topicMastery: [{ topic: 'algebra', score: 70, lastAssessedAt: NOW, quizzesTaken: 1 }] };
+  const r = computeComposite({ objective, ctx: { coding: false }, knowledge, codingSignal: null, interviewSignal: null, behavioral: { modifier: 0 }, now: NOW });
+  assert.strictEqual(r.value, 70);
+  assert.strictEqual(r.coverage, 1);
+  assert.ok(r.confidence >= 0.35, `expected confidence >= 0.35, got ${r.confidence}`);
+});
+
+test('thin coverage still keeps confidence below the gate (legacy keeps serving)', () => {
+  const objective = { objectiveType: 'upskilling', specifics: {}, analysis: { competencies: [
+    { name: 'Algebra', weight: 1, assessmentTypes: ['knowledge_recall'] },
+    { name: 'Geometry', weight: 9, assessmentTypes: ['knowledge_recall'] }, // heavy + unassessed
+  ] } };
+  const knowledge = { topicMastery: [{ topic: 'algebra', score: 80, lastAssessedAt: NOW, quizzesTaken: 1 }] };
+  const r = computeComposite({ objective, ctx: { coding: false }, knowledge, codingSignal: null, interviewSignal: null, behavioral: { modifier: 0 }, now: NOW });
+  assert.ok(r.coverage <= 0.1);
+  assert.ok(r.confidence < 0.35, `expected confidence < 0.35, got ${r.confidence}`);
 });

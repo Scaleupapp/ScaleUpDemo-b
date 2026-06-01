@@ -71,10 +71,22 @@ function recencyFactor(lastAt, now = new Date()) {
   return Math.max(0.5, 1 - 0.5 * (ageDays / 90));
 }
 
-/** Evidence confidence in [0,1] from count, recency factor, and difficulty. */
+/**
+ * Evidence confidence in [0,1] from count, recency factor, and difficulty.
+ *
+ * Calibration note: a single COMPLETED assessment (e.g. a diagnostic measure of a
+ * competency) is real, difficulty-calibrated evidence — not a quarter of one. The
+ * old `count/4` curve capped one assessment at 0.25, which (× the 0.7 non-difficulty
+ * penalty × coverage) left even a fully-diagnosed user structurally below the 0.35
+ * blend gate, so the composite never served to anyone. The curve below gives one
+ * solid assessment ~0.5 (blend-able when coverage is high), with 3+ approaching
+ * full. Coverage still damps thin objectives in computeComposite, so this does NOT
+ * over-activate partially-measured users.
+ */
 function confidenceFrom({ count = 0, recency = 0.5, hasDifficulty = false }) {
-  const volume = Math.min(1, count / 4);            // 4+ assessments = full volume confidence
-  const diff = hasDifficulty ? 1 : 0.7;             // difficulty-graded evidence is more trustworthy
+  if (count <= 0) return 0;
+  const volume = Math.min(1, 0.5 + 0.17 * (count - 1)); // 1→0.50, 2→0.67, 3→0.84, 4+→1.0
+  const diff = hasDifficulty ? 1 : 0.7;                 // difficulty-graded evidence is more trustworthy
   const c = volume * recency * diff;
   return Math.max(0, Math.min(1, Number(c.toFixed(3))));
 }
@@ -146,7 +158,10 @@ function computeCompetencyMastery({ competency, ctx, knowledge, codingSignal, in
     return {
       primitive: 'quiz',
       score: Math.round(tm.score * rec),
-      confidence: confidenceFrom({ count: tm.quizzesTaken || 1, recency: rec, hasDifficulty: false }),
+      // Quiz/diagnostic topic-mastery is difficulty-calibrated (targetDifficulty +
+      // assessedBand), so it earns the full-trust difficulty factor — not the 0.7
+      // penalty meant for un-graded signal.
+      confidence: confidenceFrom({ count: tm.quizzesTaken || 1, recency: rec, hasDifficulty: true }),
     };
   }
 
