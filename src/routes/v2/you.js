@@ -74,9 +74,46 @@ router.get('/overview', auth, async (req, res) => {
     const legacy = readinessService.assembleLegacy({ plan, journey, knowledge, codingComponent });
     const readiness = legacy.value;
     const codingForResponse = legacy.coding; // {value,weight,attempt_count} | null
+
+    // Phase 1 SHADOW: compute the multi-primitive composite alongside legacy.
+    // Best-effort; on any failure we keep serving `legacy`. Stored on the
+    // snapshot for old-vs-new diffing. Served only behind FEATURE_COMPOSITE_READINESS.
+    let shadow = null;
+    try {
+      if (objective?.analysis?.competencies?.length) {
+        const cms = require('../../services/readiness/competencyMasteryService');
+        const elig = evaluateCodingEligibility(objective);
+        const now = new Date();
+        const CapstoneSession = mongoose.model('CapstoneSession');
+        const DrillAttempt = mongoose.model('DrillAttempt');
+        const MetaSkillMastery = mongoose.model('MetaSkillMastery');
+        const [capstones, drills, mastery, interviews] = await Promise.all([
+          elig.eligible ? CapstoneSession.find({ user_id: userId, status: 'graded' }).select('result.overall_score graded_at').sort({ graded_at: -1 }).limit(10).lean() : [],
+          elig.eligible ? DrillAttempt.find({ user_id: userId, status: 'graded' }).select('grade.overall_score submitted_at').sort({ submitted_at: -1 }).limit(20).lean() : [],
+          elig.eligible ? MetaSkillMastery.findOne({ user_id: userId, role_track: elig.role_track }).lean() : null,
+          InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] } }).select('evaluation.overallScore completedAt').sort({ completedAt: -1 }).limit(10).lean(),
+        ]);
+        const codingSignal = elig.eligible ? cms.buildCodingSignal({ capstones, drills, mastery, now }) : null;
+        const interviewSignal = cms.buildInterviewSignal({ interviews, now });
+        const behavioral = cms.buildBehavioralSignal({ streak: competition?.currentStreak || 0, contentCompleted: 0, activeDays7: 0 });
+        const composite = readinessService.computeComposite({ objective, ctx: { coding: !!elig.eligible }, knowledge, codingSignal, interviewSignal, behavioral, now });
+        if (composite) {
+          shadow = { value: composite.value, confidence: composite.confidence, breakdown: composite.breakdown, delta: composite.value - readiness };
+          console.log(`[readiness-shadow] user=${userId} legacy=${readiness} composite=${composite.value} delta=${shadow.delta} conf=${composite.confidence}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[v2/you/overview] shadow composite skipped:', e.message);
+    }
+
     void readinessService.persistSnapshot({
-      userId, objectiveId: objective?._id, value: readiness, source: legacy.source,
+      userId, objectiveId: objective?._id, value: readiness, source: legacy.source, shadow,
     });
+
+    // Served value: legacy by default; composite only when the flag is on.
+    const servedReadiness = (shadow && require('../../config/featureFlags').compositeReadiness)
+      ? shadow.value
+      : readiness;
 
     // Target date and weeks remaining / overdue
     let targetDateStr = null;
@@ -123,8 +160,8 @@ router.get('/overview', auth, async (req, res) => {
           role: user?.role || 'consumer',
         },
         readiness: {
-          score: readiness,
-          onTrackText: computeOnTrackText({ readiness, targetDateStr, weeksOverdue }),
+          score: servedReadiness,
+          onTrackText: computeOnTrackText({ readiness: servedReadiness, targetDateStr, weeksOverdue }),
           targetDate: targetDateStr,
           weeksRemaining,    // null when overdue
           weeksOverdue,      // set when target date has passed
