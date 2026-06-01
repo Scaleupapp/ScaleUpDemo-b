@@ -56,41 +56,27 @@ router.get('/overview', auth, async (req, res) => {
       CreatorApplication.findOne({ userId }).sort({ createdAt: -1 }).select('status').lean(),
     ]);
 
-    // Readiness — base from the existing waterfall…
-    const baseReadiness =
-      plan?.readinessScore ??
-      journey?.readinessScore ??
-      computeReadinessFromKnowledge(knowledge) ??
-      0;
-
-    // …then blend in coding performance for coding objectives. MetaSkillMastery
-    // is written by BOTH drills and capstones (via applyMasteryDelta), so this
-    // single component reflects all coding practice. The weight ramps 0→0.10 as
-    // combined attempts go 5→10 (backfill-safe: 0 below 5 attempts), so it never
-    // perturbs non-coders or new users, and the blend stays bounded to 0..100.
-    let readiness = baseReadiness;
+    // Readiness — single source of truth (readinessService). Behavior-identical
+    // to the previous inline computation; the bounded coding blend now lives in
+    // the service. MetaSkillMastery is written by BOTH drills and capstones, so
+    // the coding component reflects all coding practice; its weight ramps 0→0.10
+    // as combined attempts go 5→10 (backfill-safe), bounded to 0..100.
+    const readinessService = require('../../services/readiness/readinessService');
     let codingComponent = null;
     try {
       const elig = evaluateCodingEligibility(objective);
-      if (elig.eligible && baseReadiness > 0) {
-        const comp = await readinessUpdater.getMetaSkillComponent({
-          user_id: userId,
-          role_track: elig.role_track,
-        });
-        if (comp.weight > 0) {
-          readiness = Math.max(0, Math.min(100,
-            Math.round(baseReadiness * (1 - comp.weight) + comp.value * comp.weight)));
-          codingComponent = {
-            value: Math.round(comp.value),
-            weight: Number(comp.weight.toFixed(3)),
-            attempt_count: comp.attempt_count,
-          };
-        }
+      if (elig.eligible) {
+        codingComponent = await readinessUpdater.getMetaSkillComponent({ user_id: userId, role_track: elig.role_track });
       }
     } catch (e) {
-      // Coding is one signal among many — never let it break the readiness ring.
-      console.warn('[v2/you/overview] coding readiness blend skipped:', e.message);
+      console.warn('[v2/you/overview] coding component fetch skipped:', e.message);
     }
+    const legacy = readinessService.assembleLegacy({ plan, journey, knowledge, codingComponent });
+    const readiness = legacy.value;
+    const codingForResponse = legacy.coding; // {value,weight,attempt_count} | null
+    void readinessService.persistSnapshot({
+      userId, objectiveId: objective?._id, value: readiness, source: legacy.source,
+    });
 
     // Target date and weeks remaining / overdue
     let targetDateStr = null;
@@ -145,7 +131,7 @@ router.get('/overview', auth, async (req, res) => {
           // Present only for coding objectives once the learner has enough
           // practice for coding to influence readiness (else null). Lets the
           // client explain "coding practice is shaping your readiness".
-          coding: codingComponent,
+          coding: codingForResponse,
         },
         weekProgress: weekTotal > 0
           ? { done: weekDone, total: weekTotal, week: currentWeek }
