@@ -18,7 +18,15 @@
 
 ## RESUME STATE (update this as you go)
 
-**Current status:** ✅ **Phase 0 + Phase 1 BACKEND COMPLETE** (2026-06-01). 28 tests green (22 readiness unit + 6 you-router smoke). Committed locally on `master` (commits `fff7b65` Phase 0, `754d86d` Phase 1) — **NOT pushed yet** (push triggers EC2 deploy; safe to push because composite is shadow/flag-off, `FEATURE_COMPOSITE_READINESS` default false). **Next:** push when ready → watch `[readiness-shadow]` logs / ReadinessSnapshot.shadow for a few days → tune weights → flip flag. Then Phase 1b UI (Tasks 12–14, optional).
+**Current status:** ✅ **Phase 0 + Phase 1 + Phase 2 BACKEND COMPLETE** (2026-06-01). 35 readiness tests green + 8 you-router smoke. Committed locally on `master` (`fff7b65` P0, `754d86d` P1, `d537470` P2) — **NOT pushed yet** (push triggers EC2 deploy; safe because both flags default OFF: `FEATURE_COMPOSITE_READINESS` and `FEATURE_OBJECTIVE_TARGET` → users see the exact same numbers as today). **Next:** push → watch `[readiness-shadow]` logs / ReadinessSnapshot.shadow → tune → flip `FEATURE_COMPOSITE_READINESS`; review computed targets → flip `FEATURE_OBJECTIVE_TARGET`. Then UI tails (Phase 1b breakdown sheet + Phase 2 target bands / "why this target") on iOS+Android.
+
+**Phase 2 — Objective-aware target (BACKEND) — DONE** (Robust Rule A)
+- [x] `targetService.computeTarget` (archetype + ambition + competency-weighted) + `targetBands` + `getEffectiveTarget` (flag gate) + `ensureTarget` (persist + targetHistory) — 7 tests
+- [x] `UserObjective.target` + `targetHistory` (additive fields)
+- [x] `FEATURE_OBJECTIVE_TARGET` flag (default off = flat 80)
+- [x] `forecastTrajectory` takes `targetReadiness` param (default 80); wired in `plan.js`, `insights.js`, `diagnostic.js`, and `/you/plan`
+- [x] `/you/plan` exposes `summary.targetBands`
+- NOTE: pre-existing trajectory test `forecastTrajectory: high baseline still increases` fails on original code too (the flat-80 cap below a high baseline) — unrelated to this work; Phase 3 ("what happens above target") is the real fix.
 
 **Phase 0 — Source of truth + history (BACKEND) — DONE**
 - [x] Task 1: `ReadinessSnapshot` model
