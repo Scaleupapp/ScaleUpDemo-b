@@ -114,6 +114,9 @@ async function main() {
 
   const withComp = rows.filter((r) => r.composite !== null);
   const noComp = rows.filter((r) => r.composite === null);
+  const analyzed = rows.filter((r) => r.analyzed);
+  const analyzedNoSignal = rows.filter((r) => r.analyzed && r.composite === null);
+  const unanalyzed = rows.filter((r) => !r.analyzed);
   const deltas = withComp.map((r) => r.delta);
   const abs = deltas.map((d) => Math.abs(d));
   const sum = (a) => a.reduce((s, v) => s + v, 0);
@@ -126,8 +129,10 @@ async function main() {
 
   console.log('\n===== READINESS FLEET AUDIT =====');
   console.log(`objectives audited:        ${rows.length}`);
-  console.log(`  with composite (analyzed): ${withComp.length}`);
-  console.log(`  no composite (un-analyzed):${noComp.length}  (served legacy by definition)`);
+  console.log(`  analyzed (framework exists):  ${analyzed.length}`);
+  console.log(`    -> produces a composite:    ${withComp.length}`);
+  console.log(`    -> analyzed but NO signal:  ${analyzedNoSignal.length}  (competency names don't match diagnostic topics, or no assessment yet)`);
+  console.log(`  un-analyzed (no framework):   ${unanalyzed.length}`);
   console.log('\n--- served source (what users actually get) ---');
   Object.entries(bySource).forEach(([k, v]) => console.log(`  ${k.padEnd(10)} ${v}`));
   console.log('\n--- composite-vs-legacy delta (analyzed users) ---');
