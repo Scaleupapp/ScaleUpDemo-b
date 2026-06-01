@@ -578,6 +578,45 @@ components:
               minimum: 1
             - type: 'null'
           description: Weeks past the target date; null when on-track or no target date. New in v2.1.
+        target:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            Readiness % goal for this objective (personalized when
+            FEATURE_OBJECTIVE_TARGET is on, else 80). Distinct from targetDate
+            (the calendar deadline). New in v2.2 (readiness redesign).
+        targetBands:
+          type: object
+          description: Readiness bands around the target for the "why this target" UI.
+          properties:
+            competitive: { type: integer }
+            strong:      { type: integer }
+            exceptional: { type: integer }
+        coverage:
+          oneOf:
+            - type: number
+            - type: 'null'
+          description: |
+            Fraction (0..1) of the objective's competency weight actually
+            measured; null when no composite was computed.
+        breakdown:
+          oneOf:
+            - type: array
+              items:
+                type: object
+                required: [name, weight, score, assessed, primitive]
+                properties:
+                  name:      { type: string }
+                  weight:    { type: integer }
+                  score:     { type: integer }
+                  assessed:  { type: boolean }
+                  primitive: { type: string, enum: [quiz, coding, interview] }
+            - type: 'null'
+          description: |
+            Per-competency rollup behind the readiness number ("what's in your
+            number"). Sorted by weight desc; each flagged assessed/unassessed.
+            null when there's no composite yet (e.g. no assessments taken).
 
     CodingMasteryTrack:
       type: object

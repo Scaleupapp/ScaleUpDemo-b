@@ -124,6 +124,21 @@ router.get('/overview', auth, async (req, res) => {
       userId, objectiveId: objective?._id, value: servedReadiness, source: served.source, shadow,
     });
 
+    // Readiness UI payload (P1b breakdown + P2 target bands). targetService is
+    // flag-gated: getEffectiveTarget returns the personalized target when
+    // FEATURE_OBJECTIVE_TARGET is on, else the flat 80. The breakdown is the
+    // composite's per-competency rollup (null when no composite was computable) —
+    // sorted by weight so the most decisive competencies lead, each flagged
+    // assessed/unassessed so the client can show gaps + a "measure this" CTA.
+    const targetService = require('../../services/readiness/targetService');
+    const effectiveTarget = targetService.getEffectiveTarget(objective);
+    const readinessTargetBands = targetService.targetBands(effectiveTarget);
+    const readinessBreakdown = Array.isArray(shadow?.breakdown)
+      ? shadow.breakdown
+          .map((b) => ({ name: b.competency, weight: b.weight, score: b.score, assessed: !!b.assessed, primitive: b.primitive }))
+          .sort((a, b) => b.weight - a.weight)
+      : null;
+
     // Target date and weeks remaining / overdue
     let targetDateStr = null;
     let weeksRemaining = null;
@@ -170,10 +185,22 @@ router.get('/overview', auth, async (req, res) => {
         },
         readiness: {
           score: servedReadiness,
+          // The readiness % goal for this objective (personalized when
+          // FEATURE_OBJECTIVE_TARGET is on, else 80). Distinct from `targetDate`
+          // (the calendar deadline). `targetBands` gives Competitive/Strong/
+          // Exceptional thresholds for the "why this target" UI.
+          target: effectiveTarget,
+          targetBands: readinessTargetBands,
           onTrackText: computeOnTrackText({ readiness: servedReadiness, targetDateStr, weeksOverdue }),
           targetDate: targetDateStr,
           weeksRemaining,    // null when overdue
           weeksOverdue,      // set when target date has passed
+          // Fraction (0..1) of the objective's competency weight actually measured;
+          // null when no composite. Drives "you've measured 60% of what matters".
+          coverage: shadow?.coverage ?? null,
+          // Per-competency rollup behind the number (P1b "what's in your number").
+          // null when there's no composite yet (e.g. no assessments taken).
+          breakdown: readinessBreakdown,
           // Present only for coding objectives once the learner has enough
           // practice for coding to influence readiness (else null). Lets the
           // client explain "coding practice is shaping your readiness".
