@@ -121,10 +121,16 @@ async function main() {
 }
 
 if (require.main === module) {
-  main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  // Force a clean exit. Requiring knowledgeService transitively opens a Redis/
+  // BullMQ handle that keeps the event loop alive after disconnect(), so without
+  // an explicit exit the process hangs until the CI SSH step times out. Writes
+  // are already flushed (awaited + saved) before main() resolves.
+  main()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }
 
 module.exports = { main };
