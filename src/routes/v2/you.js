@@ -106,14 +106,19 @@ router.get('/overview', auth, async (req, res) => {
       console.warn('[v2/you/overview] shadow composite skipped:', e.message);
     }
 
-    void readinessService.persistSnapshot({
-      userId, objectiveId: objective?._id, value: readiness, source: legacy.source, shadow,
+    // Confidence guardrail: thin-evidence users keep their legacy number, well-
+    // evidenced users get the composite, the middle blends — so flipping the flag
+    // can never show anyone a cold-start cliff-drop.
+    const served = readinessService.chooseServed({
+      legacyValue: readiness,
+      shadow,
+      flagOn: require('../../config/featureFlags').compositeReadiness,
     });
+    const servedReadiness = served.value;
 
-    // Served value: legacy by default; composite only when the flag is on.
-    const servedReadiness = (shadow && require('../../config/featureFlags').compositeReadiness)
-      ? shadow.value
-      : readiness;
+    void readinessService.persistSnapshot({
+      userId, objectiveId: objective?._id, value: servedReadiness, source: served.source, shadow,
+    });
 
     // Target date and weeks remaining / overdue
     let targetDateStr = null;
@@ -199,6 +204,21 @@ router.get('/overview', auth, async (req, res) => {
             : null,
         },
         objectiveLabel: buildObjectiveLabel(objective),
+        // Admin-only readiness diagnostics — lets us inspect the shadow composite
+        // vs the served/legacy value over the API (no server-log access needed).
+        _debugReadiness: (user?.role === 'admin') ? {
+          legacy: readiness,
+          composite: shadow?.value ?? null,
+          confidence: shadow?.confidence ?? null,
+          served: servedReadiness,
+          servedSource: served.source,
+          delta: shadow ? shadow.delta : null,
+          breakdown: shadow?.breakdown ?? null,
+          flags: {
+            compositeReadiness: require('../../config/featureFlags').compositeReadiness,
+            objectiveTarget: require('../../config/featureFlags').objectiveTarget,
+          },
+        } : undefined,
       },
     });
   } catch (err) {

@@ -33,6 +33,34 @@ test('computeReadinessFromKnowledge mirrors the overview helper', () => {
   assert.strictEqual(computeReadinessFromKnowledge(null), null);
 });
 
+test('chooseServed: flag off OR no shadow -> legacy', () => {
+  const { chooseServed } = require('../../services/readiness/readinessService');
+  assert.deepStrictEqual(chooseServed({ legacyValue: 60, shadow: { value: 40, confidence: 0.9 }, flagOn: false }), { value: 60, source: 'legacy' });
+  assert.deepStrictEqual(chooseServed({ legacyValue: 50, shadow: null, flagOn: true }), { value: 50, source: 'legacy' });
+});
+
+test('chooseServed: low confidence keeps legacy (no cold-start cliff)', () => {
+  const { chooseServed } = require('../../services/readiness/readinessService');
+  const r = chooseServed({ legacyValue: 65, shadow: { value: 42, confidence: 0.2 }, flagOn: true });
+  assert.strictEqual(r.value, 65);
+  assert.strictEqual(r.source, 'legacy_lowconf');
+});
+
+test('chooseServed: high confidence serves the composite', () => {
+  const { chooseServed } = require('../../services/readiness/readinessService');
+  const r = chooseServed({ legacyValue: 65, shadow: { value: 78, confidence: 0.8 }, flagOn: true });
+  assert.strictEqual(r.value, 78);
+  assert.strictEqual(r.source, 'composite');
+});
+
+test('chooseServed: medium confidence blends legacy and composite', () => {
+  const { chooseServed } = require('../../services/readiness/readinessService');
+  // conf 0.525 -> w=(0.525-0.35)/(0.7-0.35)=0.5 -> 60*0.5 + 80*0.5 = 70
+  const r = chooseServed({ legacyValue: 60, shadow: { value: 80, confidence: 0.525 }, flagOn: true });
+  assert.strictEqual(r.value, 70);
+  assert.strictEqual(r.source, 'blend');
+});
+
 test('persistSnapshot writes a ReadinessSnapshot and never throws', async () => {
   const ReadinessSnapshot = require('../../models/ReadinessSnapshot');
   const created = [];

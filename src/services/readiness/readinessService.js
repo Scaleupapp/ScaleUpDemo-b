@@ -109,4 +109,43 @@ function computeComposite({ objective, ctx, knowledge, codingSignal, interviewSi
   return { value, confidence, behavioralModifier: modifier, breakdown };
 }
 
-module.exports = { assembleLegacy, computeReadinessFromKnowledge, persistSnapshot, computeComposite };
+// Confidence guardrail thresholds. Below MIN we don't trust the composite at
+// all (cold-start / thin evidence) and serve legacy; between MIN and FULL we
+// blend proportionally so the number never jumps off a cliff; above FULL we
+// serve the composite outright.
+const CONFIDENCE_MIN = 0.35;
+const CONFIDENCE_FULL = 0.7;
+
+/**
+ * Decide what to actually SERVE, given the legacy value and the shadow composite.
+ * This is the safety net that makes flipping the flag safe even before we've
+ * tuned weights: thin-evidence users keep their legacy number, well-evidenced
+ * users get the composite, and the middle blends — so nobody sees a sudden drop.
+ *
+ * @param {{ legacyValue:number, shadow:{value:number,confidence:number}|null, flagOn:boolean }} args
+ * @returns {{ value:number, source:'legacy'|'legacy_lowconf'|'blend'|'composite' }}
+ */
+function chooseServed({ legacyValue, shadow, flagOn }) {
+  if (!flagOn || !shadow || typeof shadow.value !== 'number') {
+    return { value: legacyValue, source: 'legacy' };
+  }
+  const conf = typeof shadow.confidence === 'number' ? shadow.confidence : 0;
+  if (conf < CONFIDENCE_MIN) {
+    return { value: legacyValue, source: 'legacy_lowconf' };
+  }
+  if (conf < CONFIDENCE_FULL) {
+    const w = (conf - CONFIDENCE_MIN) / (CONFIDENCE_FULL - CONFIDENCE_MIN); // 0..1
+    return { value: Math.round(legacyValue * (1 - w) + shadow.value * w), source: 'blend' };
+  }
+  return { value: shadow.value, source: 'composite' };
+}
+
+module.exports = {
+  assembleLegacy,
+  computeReadinessFromKnowledge,
+  persistSnapshot,
+  computeComposite,
+  chooseServed,
+  CONFIDENCE_MIN,
+  CONFIDENCE_FULL,
+};
