@@ -43,7 +43,7 @@ router.get('/overview', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [user, objective, plan, journey, knowledge, competition, creatorProfile, latestApplication] = await Promise.all([
+    const [user, objective, plan, journey, knowledge, competition, creatorProfile, latestApplication, latestAttempt] = await Promise.all([
       User.findById(userId).select('firstName lastName profilePicture role').lean(),
       UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
       Plan.findOne({ userId, status: { $in: ['active', 'ready'] } }).lean(),
@@ -54,6 +54,9 @@ router.get('/overview', auth, async (req, res) => {
       CreatorProfile.findOne({ userId }).select('tier').lean(),
       // Newest application — drives the `applicationStatus` flag.
       CreatorApplication.findOne({ userId }).sort({ createdAt: -1 }).select('status').lean(),
+      // Diagnostic baseline — so a freshly-onboarded user's Home ring matches the
+      // Plan screen instead of reading 0 (KnowledgeProfile is empty until quizzes).
+      DiagnosticAttempt.findOne({ userId, status: 'completed' }).sort({ completedAt: -1 }).lean(),
     ]);
 
     // Readiness — single source of truth (readinessService). Behavior-identical
@@ -71,7 +74,8 @@ router.get('/overview', auth, async (req, res) => {
     } catch (e) {
       console.warn('[v2/you/overview] coding component fetch skipped:', e.message);
     }
-    const legacy = readinessService.assembleLegacy({ plan, journey, knowledge, codingComponent });
+    const diagnosticBaseline = diagnosticBaselineReadiness(latestAttempt);
+    const legacy = readinessService.assembleLegacy({ plan, journey, knowledge, diagnosticBaseline, codingComponent });
     const readiness = legacy.value;
     const codingForResponse = legacy.coding; // {value,weight,attempt_count} | null
 

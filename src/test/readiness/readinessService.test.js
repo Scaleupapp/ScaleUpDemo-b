@@ -19,6 +19,17 @@ test('assembleLegacy: falls through to journey then knowledge then floor', () =>
   assert.strictEqual(assembleLegacy({}).value, 0);
 });
 
+test('assembleLegacy: diagnostic baseline fills the gap for fresh onboarded users', () => {
+  // empty knowledge -> use diagnostic baseline (the Home-ring-shows-0 fix)
+  const r = assembleLegacy({ diagnosticBaseline: 36 });
+  assert.strictEqual(r.value, 36);
+  assert.strictEqual(r.source, 'diagnostic');
+  // accumulated knowledge still wins over the (older) diagnostic baseline
+  assert.strictEqual(assembleLegacy({ knowledge: { overallScore: 50 }, diagnosticBaseline: 36 }).value, 50);
+  // nothing at all -> floor 0
+  assert.strictEqual(assembleLegacy({ diagnosticBaseline: null }).value, 0);
+});
+
 test('assembleLegacy: coding blend is bounded and ramps in only after 5 attempts', () => {
   // base 60, coding value 80, weight 0.10 (>=10 attempts) -> 60*0.9 + 80*0.1 = 62
   const blended = assembleLegacy({ knowledge: { overallScore: 60 }, codingComponent: { value: 80, weight: 0.10, attempt_count: 12 } });

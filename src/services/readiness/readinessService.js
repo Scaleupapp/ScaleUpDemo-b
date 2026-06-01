@@ -34,7 +34,7 @@ function computeReadinessFromKnowledge(knowledge) {
  * @param {{ plan?, journey?, knowledge?, codingComponent?: {value:number,weight:number,attempt_count:number} }} inputs
  * @returns {{ value:number, source:string, coding: object|null }}
  */
-function assembleLegacy({ plan, journey, knowledge, codingComponent } = {}) {
+function assembleLegacy({ plan, journey, knowledge, diagnosticBaseline, codingComponent } = {}) {
   let value;
   let source;
   if (plan && typeof plan.readinessScore === 'number') { value = plan.readinessScore; source = 'plan'; }
@@ -42,6 +42,10 @@ function assembleLegacy({ plan, journey, knowledge, codingComponent } = {}) {
   else {
     const k = computeReadinessFromKnowledge(knowledge);
     if (typeof k === 'number') { value = k; source = 'knowledge'; }
+    // Fresh, just-onboarded users have an empty KnowledgeProfile but DO have a
+    // diagnostic baseline. The Plan screen already shows this; the Home ring
+    // showed 0 because it never read it. Fall back to it so Home matches Plan.
+    else if (typeof diagnosticBaseline === 'number') { value = diagnosticBaseline; source = 'diagnostic'; }
     else { value = 0; source = 'floor'; }
   }
 
