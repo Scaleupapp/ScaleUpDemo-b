@@ -670,9 +670,13 @@ async function finishAttempt(attemptId) {
   // which left ~94% of objectives without a competency framework — so composite
   // readiness and the objective-aware target could never compute for them. Firing
   // it here means the analysis sees the just-seeded diagnostic signal as context.
-  // Fire-and-forget (never blocks finishing the diagnostic), framework-only (no
-  // per-competency assessment jobs), idempotent (skip if already analyzed, so the
-  // monthly recalibration doesn't re-run it).
+  // Fire-and-forget (never blocks finishing the diagnostic) and idempotent (skip
+  // if already analyzed, so the monthly recalibration doesn't re-run it — and so
+  // existing users we framework-backfilled don't get a late burst of assessments).
+  // triggerAssessments TRUE: a new user also gets a per-competency skill assessment
+  // generated for each competency (the original onboarding design). This is the
+  // live, one-user-at-a-time path — safe, unlike the bulk backfill which had to
+  // skip it to avoid firing ~12×N jobs across the whole fleet at once.
   try {
     const objectiveId = attempt.objectiveSnapshot?._id;
     if (objectiveId) {
@@ -680,7 +684,7 @@ async function finishAttempt(attemptId) {
       if (!existing?.analysis?.competencies?.length) {
         const objectiveAnalysisService = require('./objectiveAnalysisService');
         objectiveAnalysisService
-          .analyzeObjective(objectiveId, attempt.userId, { triggerAssessments: false })
+          .analyzeObjective(objectiveId, attempt.userId, { triggerAssessments: true })
           .catch((e) => console.warn('[diagnosticService] auto-analyze after diagnostic failed:', e.message));
       }
     }
