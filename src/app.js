@@ -68,8 +68,6 @@ app.use('/api/v1/learning-paths', require('./routes/learningPaths'));
 app.use('/api/v1/youtube', require('./routes/youtube'));
 app.use('/api/v1/recommendations', require('./routes/recommendations'));
 app.use('/api/v1/admin', require('./routes/admin'));
-// TEMPORARY — one-time admin self-reset of learning data. REMOVE after use.
-app.use('/api/_admin-temp', require('./routes/_tempResetLearning'));
 app.use('/admin/diagnostic-questions', require('./routes/diagnosticAdmin'));
 // Admin dashboard static files — served at /admin/{file} so HTML's /admin/dashboard.css
 // and /admin/dashboard.js root-relative hrefs resolve correctly.
