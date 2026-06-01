@@ -635,6 +635,29 @@ async function finishAttempt(attemptId) {
   attempt.planGenerationStatus = 'pending';
   await attempt.save();
 
+  // Seed the living KnowledgeProfile from the diagnostic so the Home ring, the
+  // composite readiness, and analytics all reflect the baseline — not just the
+  // Plan screen. V1 did this via journeyGenerationService; V2 plan-gen dropped
+  // it, so a freshly-onboarded user's KnowledgeProfile stayed empty (readiness 0).
+  // Reuses the canonical updateMastery path (handles new vs existing topics,
+  // recomputes overallScore). Best-effort — the diagnostic is committed even if
+  // this fails.
+  try {
+    const knowledgeService = require('./knowledgeService');
+    const topicBreakdown = [];
+    for (const [canonical, r] of attempt.results.entries()) {
+      if (r && !r.notTested && typeof r.score === 'number') {
+        topicBreakdown.push({ topic: canonical, percentage: r.score });
+      }
+    }
+    if (topicBreakdown.length > 0) {
+      await knowledgeService.updateMastery(attempt.userId, topicBreakdown, { source: 'diagnostic', weight: 1.0 });
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[diagnosticService] knowledge seed from diagnostic failed:', err.message);
+  }
+
   // Flip the user-level flag so the app routes them to home instead of
   // back into the diagnostic flow on next launch / /me refresh. Best-
   // effort — the diagnostic itself is committed even if this fails.

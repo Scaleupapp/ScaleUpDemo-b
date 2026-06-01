@@ -96,6 +96,30 @@ test('computeCompetencyMastery: per-competency quiz score WINS over coding/inter
   assert.ok(Math.abs(out.score - 35) <= 1);
 });
 
+test('matchTopicMastery normalizes kebab/spaces/filler (diagnostic topic -> competency name)', () => {
+  const tm = [
+    { topic: 'data-structures-algorithms', score: 33, lastAssessedAt: NOW, quizzesTaken: 3 },
+    { topic: 'machine-learning-basics', score: 25, lastAssessedAt: NOW, quizzesTaken: 2 },
+    { topic: 'google-interview-process', score: 25, lastAssessedAt: NOW, quizzesTaken: 4 },
+  ];
+  assert.strictEqual(svc.matchTopicMastery('Data Structures and Algorithms', tm).score, 33);
+  assert.strictEqual(svc.matchTopicMastery('Machine Learning Fundamentals', tm).score, 25);
+  assert.strictEqual(svc.matchTopicMastery('Google Interview Process Navigation', tm).score, 25);
+  assert.strictEqual(svc.matchTopicMastery('Completely Unrelated Topic', tm), null);
+});
+
+test('computeCompetencyMastery: diagnostic-seeded topic flows into a coding competency (quiz-first)', () => {
+  // DSA is a coding competency in an SDE objective, but its diagnostic baseline
+  // (seeded into topicMastery) must be used, not 0.
+  const knowledge = { topicMastery: [{ topic: 'data-structures-algorithms', score: 33, lastAssessedAt: NOW, quizzesTaken: 3 }] };
+  const out = svc.computeCompetencyMastery({
+    competency: { name: 'Data Structures and Algorithms', assessmentTypes: ['applied_scenario'] },
+    ctx: { coding: true }, knowledge, codingSignal: { score: 0, count: 0 }, interviewSignal: null, now: NOW,
+  });
+  assert.strictEqual(out.primitive, 'quiz');
+  assert.ok(Math.abs(out.score - 33) <= 1);
+});
+
 test('computeCompetencyMastery: no evidence -> score 0, confidence 0', () => {
   const out = svc.computeCompetencyMastery({
     competency: { name: 'Nothing', assessmentTypes: ['knowledge_recall'] },

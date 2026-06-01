@@ -81,14 +81,48 @@ function confidenceFrom({ count = 0, recency = 0.5, hasDifficulty = false }) {
 
 // ── Per-competency mastery ───────────────────────────────────────────────────
 
-/** Fuzzy topic match (same spirit as objectiveAnalysisService): name-overlap. */
+/**
+ * Normalize a competency/topic name for matching: lowercase, kebab/underscore →
+ * spaces, strip punctuation + common filler words ("and", "basics", …). So the
+ * diagnostic's kebab topic "data-structures-algorithms" and the analysis
+ * competency "Data Structures and Algorithms" both become "data structures
+ * algorithms" and match.
+ */
+function _normName(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[-_/]+/g, ' ')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\b(and|the|of|for|to|in|on|a|an|with|basics|fundamentals)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Match a competency name to the best topicMastery entry. Uses normalized
+ * substring containment, else ≥60% token overlap (so different-but-equivalent
+ * names still match). Returns the best-matching entry or null.
+ */
 function matchTopicMastery(name, topicMastery = []) {
-  const key = String(name || '').toLowerCase();
+  const key = _normName(name);
+  if (!key) return null;
+  const keyTokens = new Set(key.split(' ').filter(Boolean));
   let best = null;
+  let bestOverlap = 0;
   for (const t of topicMastery) {
-    const topic = String(t.topic || '').toLowerCase();
-    if (topic === key || topic.includes(key) || key.includes(topic)) {
-      if (!best || (t.score || 0) > (best.score || 0)) best = t;
+    const tn = _normName(t.topic);
+    if (!tn) continue;
+    let overlap;
+    if (tn === key || tn.includes(key) || key.includes(tn)) {
+      overlap = 1;
+    } else {
+      const tt = new Set(tn.split(' ').filter(Boolean));
+      const inter = [...keyTokens].filter((x) => tt.has(x)).length;
+      overlap = inter / Math.max(1, Math.min(keyTokens.size, tt.size));
+    }
+    if (overlap >= 0.6 && (overlap > bestOverlap || (overlap === bestOverlap && (t.score || 0) > (best?.score || 0)))) {
+      best = t;
+      bestOverlap = overlap;
     }
   }
   return best;
