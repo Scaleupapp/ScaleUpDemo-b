@@ -82,6 +82,20 @@ test('computeCompetencyMastery: applied competency in coding objective uses codi
   assert.ok(out.score >= 80);
 });
 
+test('computeCompetencyMastery: per-competency quiz score WINS over coding/interview aggregate (PM-objective bug)', () => {
+  // A Product-Management competency wrongly routed to coding (ctx.coding=true via
+  // a soft-keyword eligibility false-positive) must still use its real quiz score,
+  // not the smeared coding aggregate.
+  const knowledge = { topicMastery: [{ topic: 'product metrics & analytics', score: 35, lastAssessedAt: NOW, quizzesTaken: 2 }] };
+  const out = svc.computeCompetencyMastery({
+    competency: { name: 'Product Metrics & Analytics', assessmentTypes: ['framework_application'] },
+    ctx: { coding: true }, knowledge,
+    codingSignal: { score: 15, count: 3, lastAt: NOW, hasDifficulty: true }, interviewSignal: null, now: NOW,
+  });
+  assert.strictEqual(out.primitive, 'quiz'); // NOT coding
+  assert.ok(Math.abs(out.score - 35) <= 1);
+});
+
 test('computeCompetencyMastery: no evidence -> score 0, confidence 0', () => {
   const out = svc.computeCompetencyMastery({
     competency: { name: 'Nothing', assessmentTypes: ['knowledge_recall'] },

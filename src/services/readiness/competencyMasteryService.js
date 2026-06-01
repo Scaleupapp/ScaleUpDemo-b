@@ -101,23 +101,11 @@ function matchTopicMastery(name, topicMastery = []) {
 function computeCompetencyMastery({ competency, ctx, knowledge, codingSignal, interviewSignal, now = new Date() }) {
   const primitive = assessmentTypesToPrimitive(competency.assessmentTypes, ctx);
 
-  if (primitive === 'coding' && codingSignal && codingSignal.count > 0) {
-    const rec = recencyFactor(codingSignal.lastAt, now);
-    return {
-      primitive,
-      score: Math.round(codingSignal.score * rec),
-      confidence: confidenceFrom({ count: codingSignal.count, recency: rec, hasDifficulty: codingSignal.hasDifficulty }),
-    };
-  }
-  if (primitive === 'interview' && interviewSignal && interviewSignal.count > 0) {
-    const rec = recencyFactor(interviewSignal.lastAt, now);
-    return {
-      primitive,
-      score: Math.round(interviewSignal.score * rec),
-      confidence: confidenceFrom({ count: interviewSignal.count, recency: rec, hasDifficulty: false }),
-    };
-  }
-  // quiz (default) OR a non-quiz primitive with no evidence yet -> fall back to topicMastery
+  // PRIMARY: per-competency quiz topic-mastery. The app generates a skill
+  // assessment PER competency, so topicMastery is keyed by competency name and is
+  // the most granular, accurate signal. Always prefer it when present — a generic
+  // coding/interview AGGREGATE (one number smeared across many competencies) must
+  // never override a real per-competency score.
   const tm = matchTopicMastery(competency.name, knowledge?.topicMastery);
   if (tm && typeof tm.score === 'number') {
     const rec = recencyFactor(tm.lastAssessedAt, now);
@@ -125,6 +113,25 @@ function computeCompetencyMastery({ competency, ctx, knowledge, codingSignal, in
       primitive: 'quiz',
       score: Math.round(tm.score * rec),
       confidence: confidenceFrom({ count: tm.quizzesTaken || 1, recency: rec, hasDifficulty: false }),
+    };
+  }
+
+  // FALLBACK (no per-competency quiz yet): use the mapped primitive's aggregate.
+  // Coding only for genuinely coding-eligible objectives (ctx.coding).
+  if (primitive === 'coding' && ctx && ctx.coding && codingSignal && codingSignal.count > 0) {
+    const rec = recencyFactor(codingSignal.lastAt, now);
+    return {
+      primitive: 'coding',
+      score: Math.round(codingSignal.score * rec),
+      confidence: confidenceFrom({ count: codingSignal.count, recency: rec, hasDifficulty: codingSignal.hasDifficulty }),
+    };
+  }
+  if (primitive === 'interview' && interviewSignal && interviewSignal.count > 0) {
+    const rec = recencyFactor(interviewSignal.lastAt, now);
+    return {
+      primitive: 'interview',
+      score: Math.round(interviewSignal.score * rec),
+      confidence: confidenceFrom({ count: interviewSignal.count, recency: rec, hasDifficulty: false }),
     };
   }
   return { primitive, score: 0, confidence: 0 };
