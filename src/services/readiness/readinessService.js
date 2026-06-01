@@ -95,22 +95,39 @@ function computeComposite({ objective, ctx, knowledge, codingSignal, interviewSi
   // Lazy-required so readinessService loads even before competencyMasteryService exists.
   const competencyMastery = require('./competencyMasteryService');
 
-  let wSum = 0, sSum = 0, cSum = 0;
+  let wSum = 0, sSum = 0, cSum = 0;       // over ASSESSED competencies only
+  let totalWeight = 0, assessedWeight = 0;
   const breakdown = [];
   for (const comp of comps) {
     const w = typeof comp.weight === 'number' && comp.weight > 0 ? comp.weight : 5;
+    totalWeight += w;
     const m = competencyMastery.computeCompetencyMastery({
       competency: comp, ctx: ctx || { coding: false }, knowledge, codingSignal, interviewSignal, now,
     });
-    wSum += w; sSum += m.score * w; cSum += m.confidence * w;
-    breakdown.push({ competency: comp.name, weight: w, primitive: m.primitive, score: m.score, confidence: m.confidence });
+    breakdown.push({
+      competency: comp.name, weight: w, primitive: m.primitive,
+      score: m.score, confidence: m.confidence, assessed: m.confidence > 0,
+    });
+    // Only competencies with ACTUAL evidence contribute to the score. An
+    // unassessed competency must NOT count as a 0 (that punishes coverage gaps
+    // and makes the composite understate a real user); instead it lowers
+    // `coverage`, which lowers overall confidence so the guardrail keeps serving
+    // legacy until enough of the objective is genuinely measured.
+    if (m.confidence > 0) {
+      wSum += w; sSum += m.score * w; cSum += m.confidence * w;
+      assessedWeight += w;
+    }
   }
-  if (wSum === 0) return null;
+  if (wSum === 0) return null; // nothing assessed yet — legacy serves
   const weighted = sSum / wSum;
+  const coverage = totalWeight > 0 ? assessedWeight / totalWeight : 0;
   const modifier = behavioral?.modifier || 0;
   const value = Math.max(0, Math.min(100, Math.round(weighted + modifier)));
-  const confidence = Number((cSum / wSum).toFixed(3));
-  return { value, confidence, behavioralModifier: modifier, breakdown };
+  // Blend evidence depth with coverage so a partially-assessed objective stays
+  // low-confidence (and thus keeps serving legacy) even when the measured slice
+  // scores high.
+  const confidence = Number(((cSum / wSum) * coverage).toFixed(3));
+  return { value, confidence, coverage: Number(coverage.toFixed(3)), behavioralModifier: modifier, breakdown };
 }
 
 // Confidence guardrail thresholds. Below MIN we don't trust the composite at

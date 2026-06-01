@@ -102,8 +102,8 @@ router.get('/overview', auth, async (req, res) => {
         const behavioral = cms.buildBehavioralSignal({ streak: competition?.currentStreak || 0, contentCompleted: 0, activeDays7: 0 });
         const composite = readinessService.computeComposite({ objective, ctx: { coding: !!elig.eligible }, knowledge, codingSignal, interviewSignal, behavioral, now });
         if (composite) {
-          shadow = { value: composite.value, confidence: composite.confidence, breakdown: composite.breakdown, delta: composite.value - readiness };
-          console.log(`[readiness-shadow] user=${userId} legacy=${readiness} composite=${composite.value} delta=${shadow.delta} conf=${composite.confidence}`);
+          shadow = { value: composite.value, confidence: composite.confidence, coverage: composite.coverage, breakdown: composite.breakdown, delta: composite.value - readiness };
+          console.log(`[readiness-shadow] user=${userId} legacy=${readiness} composite=${composite.value} delta=${shadow.delta} conf=${composite.confidence} coverage=${composite.coverage}`);
         }
       }
     } catch (e) {
@@ -214,6 +214,7 @@ router.get('/overview', auth, async (req, res) => {
           legacy: readiness,
           composite: shadow?.value ?? null,
           confidence: shadow?.confidence ?? null,
+          coverage: shadow?.coverage ?? null,
           served: servedReadiness,
           servedSource: served.source,
           delta: shadow ? shadow.delta : null,

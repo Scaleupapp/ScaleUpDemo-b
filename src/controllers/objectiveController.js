@@ -26,11 +26,20 @@ const deleteObjective = async (req, res, next) => {
 
 // --- Objective Intelligence Engine ---
 
-const analyzeObjective = async (req, res, next) => {
-  try {
-    const result = await objectiveAnalysisService.analyzeObjective(req.params.id, req.user.userId);
-    res.json(apiResponse.success(result.analysis, 'Objective analyzed successfully'));
-  } catch (err) { next(err); }
+const analyzeObjective = async (req, res) => {
+  // Fire-and-forget. The LLM competency analysis runs longer than nginx's 30s
+  // proxy timeout, which returned a 502 to the client even though the work
+  // completed server-side (the client then showed "Analysis failed"). Kick it
+  // off in the background and return 202 immediately; the client already polls
+  // getObjectiveBrief for the result (ObjectiveBriefView does exponential-backoff
+  // polling). Errors are logged, not surfaced (the poll simply won't find data).
+  const { id } = req.params;
+  const userId = req.user.userId;
+  objectiveAnalysisService.analyzeObjective(id, userId).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('[objectiveController.analyzeObjective] background analysis failed:', err.message);
+  });
+  return res.status(202).json(apiResponse.success({ status: 'generating' }, 'Analysis started — building your competency map.'));
 };
 
 const getObjectiveBrief = async (req, res, next) => {

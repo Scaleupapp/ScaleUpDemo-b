@@ -399,28 +399,27 @@ async function _ensureAttemptPool(attempt) {
     }
   }
 
-  // Build topicsWithRatings from the attempt's stored canonical selfRatings.
   const ratingsMap = attempt.selfRatings instanceof Map
     ? attempt.selfRatings
     : new Map(Object.entries(attempt.selfRatings || {}));
-  const topicsWithRatings = Array.from(ratingsMap.entries()).map(([canonicalName, rating]) => ({
-    canonicalName,
-    rating,
-  }));
 
-  const { assemblePool } = diagnosticPoolService;
-  const { questions } = await assemblePool({
-    objectiveType: meta.objectiveType,
-    targetKey: meta.targetKey,
-    topicsWithRatings,
-    userId: attempt.userId,
+  // Use the SAME robust (LLM-fallback) assembly that submitSelfRating uses, so a
+  // user who skipped submitSelfRating — because self-ratings were pre-provided
+  // during onboarding — still gets a pool assembled on the first next-question,
+  // instead of a 500 from the strict taxonomy-only path that throws for
+  // not-yet-generated long-tail targets (e.g. interview_preparation::sde::google).
+  const competencies = Array.from(ratingsMap.entries())
+    .map(([name, selfRating]) => ({ name, selfRating }));
+  const allocation = diagnosticPoolService._internal.calculatePoolAllocation(competencies);
+  const questions = await diagnosticPoolService.assemblePool(allocation, {
+    objective: attempt.objectiveSnapshot?.label || null,
   });
 
   // Persist refs so other surfaces (abandon %, schema clients) keep working.
-  attempt.poolQuestionIds = questions.map(q => q._id).filter(Boolean);
+  attempt.poolQuestionIds = (questions || []).map(q => q._id).filter(Boolean);
   await attempt.save();
 
-  const entry = { _meta: meta, questions };
+  const entry = { _meta: meta, questions: questions || [] };
   _attemptPoolCache.set(key, entry);
   return entry;
 }

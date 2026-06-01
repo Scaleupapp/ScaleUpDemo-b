@@ -31,6 +31,22 @@ test('computeComposite applies the bounded behavioral modifier and clamps 0..100
   assert.strictEqual(r.value, 100); // 98 + 5 -> clamp 100
 });
 
+test('computeComposite excludes unassessed competencies (value tracks measured; coverage lowers confidence)', () => {
+  const objective = { objectiveType: 'upskilling', specifics: {}, analysis: { competencies: [
+    { name: 'Algebra', weight: 5, assessmentTypes: ['knowledge_recall'] },
+    { name: 'Geometry', weight: 5, assessmentTypes: ['knowledge_recall'] }, // no evidence
+  ] } };
+  const knowledge = { topicMastery: [{ topic: 'algebra', score: 60, lastAssessedAt: NOW, quizzesTaken: 4 }] };
+  const r = computeComposite({ objective, ctx: { coding: false }, knowledge, codingSignal: null, interviewSignal: null, behavioral: { modifier: 0 }, now: NOW });
+  // value = 60 (only Algebra counts), NOT (60+0)/2 = 30
+  assert.strictEqual(r.value, 60);
+  assert.strictEqual(r.coverage, 0.5); // 1 of 2 by weight
+  assert.ok(r.confidence > 0 && r.confidence < 1);
+  // breakdown still lists both, flagged assessed/unassessed
+  assert.strictEqual(r.breakdown.length, 2);
+  assert.strictEqual(r.breakdown.find(b => b.competency === 'Geometry').assessed, false);
+});
+
 test('computeComposite returns null when objective has no analysis', () => {
   const r = computeComposite({ objective: { analysis: null }, ctx: { coding: false }, knowledge: {}, now: NOW });
   assert.strictEqual(r, null);

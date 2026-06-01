@@ -21,6 +21,7 @@ const ReadinessSnapshotSchema = new mongoose.Schema(
     shadow: {
       value: { type: Number },
       confidence: { type: Number },
+      coverage: { type: Number }, // fraction of objective weight actually assessed
       breakdown: { type: mongoose.Schema.Types.Mixed },
       delta: { type: Number }, // shadow.value - value, for quick scans
     },
