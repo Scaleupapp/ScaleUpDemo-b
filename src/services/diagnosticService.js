@@ -651,7 +651,10 @@ async function finishAttempt(attemptId) {
       }
     }
     if (topicBreakdown.length > 0) {
-      await knowledgeService.updateMastery(attempt.userId, topicBreakdown, { source: 'diagnostic', weight: 1.0 });
+      // updateMastery mutates + returns the profile but does NOT persist it —
+      // the caller saves (same contract updateFromQuizAttempt follows).
+      const { profile } = await knowledgeService.updateMastery(attempt.userId, topicBreakdown, { source: 'diagnostic', weight: 1.0 });
+      if (profile && typeof profile.save === 'function') await profile.save();
     }
   } catch (err) {
     // eslint-disable-next-line no-console
