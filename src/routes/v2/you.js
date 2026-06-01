@@ -604,7 +604,10 @@ router.get('/plan/detail', auth, async (req, res) => {
     const baseline = diagnosticBaselineReadiness(latestAttempt)
       ?? computeReadinessFromKnowledge(knowledge)
       ?? 30;
-    const targetReadiness = 80;
+    // Phase 2: objective-aware target (flag-gated; FEATURE_OBJECTIVE_TARGET off => 80).
+    // Persist it best-effort so the value + history are available to other surfaces.
+    const targetService = require('../../services/readiness/targetService');
+    const targetReadiness = await targetService.ensureTarget(objective, 'plan_view');
 
     // Earliest week with non-complete tasks = the current week.
     const firstIncomplete = plan.weeklySchedule.find(w =>
@@ -619,6 +622,8 @@ router.get('/plan/detail', auth, async (req, res) => {
     const weeks = planService.buildWeeksDetail({ plan, baseline, targetReadiness, currentWeek });
     const topicCoverage = planService.buildTopicCoverage({ plan, knowledge });
     const summary = planService.buildPlanSummary({ plan, baseline, targetReadiness, objective });
+    // Readiness zones around the target (Competitive / Strong / Exceptional) for the UI.
+    summary.targetBands = targetService.targetBands(targetReadiness);
     const completedHistory = await planService.buildCompletedHistory({ plan, userId });
     const writeUp = planService.buildPlanWriteUp({ plan, objective, knowledge });
 

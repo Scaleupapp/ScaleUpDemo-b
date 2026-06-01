@@ -193,6 +193,7 @@ router.get('/today', auth, async (req, res) => {
       currentLevel: objective.currentLevel,
       userId,   // enables velocity measurement
       plan,     // in-memory doc — no extra DB hit
+      targetReadiness: require('../../services/readiness/targetService').getEffectiveTarget(objective),
     });
 
     const topGap = diagnosticTopGap(latestAttempt);

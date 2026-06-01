@@ -37,6 +37,12 @@ const userObjectiveSchema = new mongoose.Schema({
   },
   targetDate: { type: Date },
 
+  // --- Readiness target (Phase 2) ---
+  // Personalized, ambition-anchored readiness target. Absent/0 => the legacy
+  // flat 80 is used (gated by FEATURE_OBJECTIVE_TARGET via targetService).
+  target: { type: Number, min: 0, max: 100 },
+  targetHistory: [{ value: Number, reason: String, at: { type: Date, default: Date.now } }],
+
   // --- Current State ---
   currentLevel: {
     type: String,

@@ -46,7 +46,7 @@ function projectReadiness({ currentReadiness, hoursPerWeek, hoursTotalNeeded, we
  * @returns {Object} { today, in30Days, in60Days, in90Days, atTargetDate, weeklyDelta,
  *                     onTrack, velocitySource, realTasksPerWeek, points, headline }
  */
-function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeline, currentLevel = 'beginner', userId, plan }) {
+function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeline, currentLevel = 'beginner', userId, plan, targetReadiness = TARGET_READINESS }) {
   const required = computeRequiredTime({ objectiveType, specifics, timeline, currentLevel });
 
   const baseline = Math.max(0, Math.min(100, currentReadiness ?? 0));
@@ -55,7 +55,7 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
   // Static fallback delta — how many readiness % points per week if we have
   // no measured pace yet. Derived from the hours-based model:
   // gap / timelineWeeks, floored at 1.
-  const staticDelta = Math.max(1, Math.round((TARGET_READINESS - baseline) / Math.max(1, timelineWeeks)));
+  const staticDelta = Math.max(1, Math.round((targetReadiness - baseline) / Math.max(1, timelineWeeks)));
 
   // ── Velocity measurement ─────────────────────────────────────────────────
   // Walk the in-memory plan doc (no extra DB hit) and count tasks completed
@@ -95,7 +95,7 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
     'on_track';
 
   const weeksToTarget = effectiveDelta > 0
-    ? Math.min(999, Math.ceil((TARGET_READINESS - baseline) / effectiveDelta))
+    ? Math.min(999, Math.ceil((targetReadiness - baseline) / effectiveDelta))
     : 999;
 
   const projectedTargetDate = weeksToTarget < 999
@@ -106,7 +106,7 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
     ? Math.max(0, timelineWeeks - weeksToTarget)
     : null;
 
-  const targetHit = baseline >= TARGET_READINESS;
+  const targetHit = baseline >= targetReadiness;
 
   // Deadline-relative ETA. If the projected weeksToTarget exceeds the user's
   // chosen timeline, surface that gap so the UI can say "X weeks past your
@@ -120,7 +120,7 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
   // Build readiness at each horizon from the effective weekly delta,
   // capped at TARGET_READINESS so we never promise more than the goal.
   const project = (weeks) =>
-    Math.min(TARGET_READINESS, Math.round(baseline + effectiveDelta * weeks));
+    Math.min(targetReadiness, Math.round(baseline + effectiveDelta * weeks));
 
   const today        = baseline;
   const in30Days     = project(4);
@@ -168,7 +168,7 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
     in60Days,
     in90Days,
     atTargetDate,
-    targetReadiness: TARGET_READINESS,
+    targetReadiness,
     timelineWeeks,
     weeklyDelta,
     onTrack,
@@ -177,7 +177,7 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
     points,
     headline: onTrack
       ? `You can reach ~${atTargetDate}% readiness by your target. On track.`
-      : `At current pace you'd reach ~${atTargetDate}% by target. Below the ${TARGET_READINESS}% line.`,
+      : `At current pace you'd reach ~${atTargetDate}% by target. Below the ${targetReadiness}% line.`,
     // ── Adaptive ETA fields (v2) ──────────────────────────────────────────
     paceCategory,
     weeksToTarget,

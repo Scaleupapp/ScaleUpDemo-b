@@ -180,6 +180,7 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
         specifics: objective.specifics || {},
         timeline: objective.timeline,
         currentLevel: objective.currentLevel,
+        targetReadiness: require('../../services/readiness/targetService').getEffectiveTarget(objective),
       });
     }
 

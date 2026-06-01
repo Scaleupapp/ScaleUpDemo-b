@@ -9,6 +9,9 @@ const FLAGS = {
   // Readiness redesign: when off (default) the composite runs in SHADOW (logged +
   // persisted) but the legacy value is served. Flip to 'true' to serve composite.
   FEATURE_COMPOSITE_READINESS: process.env.FEATURE_COMPOSITE_READINESS === 'true',
+  // Readiness redesign Phase 2: when off (default) the target stays a flat 80
+  // everywhere (today's behavior). Flip to 'true' to serve objective-aware targets.
+  FEATURE_OBJECTIVE_TARGET: process.env.FEATURE_OBJECTIVE_TARGET === 'true',
 };
 
 function isEnabled(flag) {
@@ -19,6 +22,7 @@ module.exports = {
   // Legacy flat export — used by diagnosticController.js. Do not remove.
   day1Diagnostic: FLAGS.FEATURE_DAY1_DIAGNOSTIC,
   compositeReadiness: FLAGS.FEATURE_COMPOSITE_READINESS,
+  objectiveTarget: FLAGS.FEATURE_OBJECTIVE_TARGET,
   FLAGS,
   isEnabled,
 };
