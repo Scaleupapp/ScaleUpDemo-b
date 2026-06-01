@@ -652,7 +652,12 @@ async function finishAttempt(attemptId) {
     if (topicBreakdown.length > 0) {
       // updateMastery mutates + returns the profile but does NOT persist it —
       // the caller saves (same contract updateFromQuizAttempt follows).
-      const { profile } = await knowledgeService.updateMastery(attempt.userId, topicBreakdown, { source: 'diagnostic', weight: 1.0 });
+      // Recalibrations (the monthly re-measure) flow through this same path —
+      // tag them distinctly so the score history can tell a baseline from a
+      // re-measure. Either way the fresh scores blend into topicMastery, which
+      // is exactly what a recalibration should do (keep the model current).
+      const seedSource = attempt.attemptType === 'recalibration' ? 'recalibration' : 'diagnostic';
+      const { profile } = await knowledgeService.updateMastery(attempt.userId, topicBreakdown, { source: seedSource, weight: 1.0 });
       if (profile && typeof profile.save === 'function') await profile.save();
     }
   } catch (err) {
