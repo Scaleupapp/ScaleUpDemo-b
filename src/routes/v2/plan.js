@@ -197,7 +197,7 @@ router.get('/today', auth, async (req, res) => {
     if (objective?.outcomePrompt?.due) {
       const outcomeService = require('../../services/readiness/outcomeService');
       outcomePrompt = { due: true, objectiveId: String(objective._id),
-        objectiveLabel: (objective.specifics?.targetRole || objective.objectiveType),
+        objectiveLabel: buildObjectiveLabel(objective), // rich label, consistent with /you/overview
         options: outcomeService.optionsFor(objective.objectiveType) };
     }
 
