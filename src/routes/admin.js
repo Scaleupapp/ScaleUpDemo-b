@@ -32,4 +32,44 @@ router.get('/notes/pending', ctrl.getPendingNotes);
 // Platform stats
 router.get('/stats', ctrl.getStats);
 
+// Phase 4B — calibration status + outcome volume per archetype (the "when to flip the flag" dashboard).
+// READ-ONLY. Auth already enforced by router.use(auth, rbac('admin')) above.
+router.get('/calibration', async (req, res) => {
+  try {
+    const counts = await require('../services/readiness/calibrationDataService').countsByArchetype();
+    const models = await require('../models/CalibrationModel').find({}).lean();
+    const byArch = models.reduce((m, d) => { m[d.archetype] = d; return m; }, {});
+    const calib = require('../services/readiness/calibrationService');
+    const { outcomeCalibratedTarget } = require('../config/featureFlags');
+
+    const archetypes = ['interview', 'exam', 'skill', 'generic'];
+    // Union: every archetype that has outcomes OR a persisted model appears.
+    const allArchetypes = [...new Set([...archetypes, ...Object.keys(counts), ...Object.keys(byArch)])];
+    allArchetypes.sort();
+
+    const archetypeRows = allArchetypes.map((a) => ({
+      archetype: a,
+      resolvedOutcomes: counts[a] || 0,
+      calibrated: !!byArch[a],
+      target: byArch[a]?.target ?? null,
+      reliabilityN: byArch[a]?.reliabilityN ?? null,
+      sampleCount: byArch[a]?.sampleCount ?? null,
+      computedAt: byArch[a]?.computedAt ?? null,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        flagOn: outcomeCalibratedTarget,
+        minOutcomes: calib.MIN_OUTCOMES_PER_ARCHETYPE,
+        threshold: calib.DEFAULT_THRESHOLD,
+        archetypes: archetypeRows,
+      },
+    });
+  } catch (err) {
+    console.error('[admin/calibration]', err.message);
+    res.status(500).json({ success: false, message: 'Could not load calibration status.' });
+  }
+});
+
 module.exports = router;
