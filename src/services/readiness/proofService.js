@@ -58,7 +58,9 @@ async function buildSnapshot(userId) {
 const crypto = require('crypto');
 const ReadinessProof = require('../../models/ReadinessProof');
 
-const WEB_BASE = process.env.PUBLIC_WEB_BASE || 'https://scaleupapp.club';
+// scaleup-web (the verify page host) lives here — same base the existing coding
+// public-profile share uses (PUBLIC_WEB_URL). scaleupapp.club is the landing site.
+const WEB_BASE = process.env.PUBLIC_WEB_URL || 'https://scaleup-web-seven.vercel.app';
 function mintToken() { return crypto.randomBytes(12).toString('base64url'); } // ~16 chars, infeasible to guess
 
 async function publish(userId) {
