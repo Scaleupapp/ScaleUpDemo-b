@@ -1,5 +1,7 @@
 'use strict';
 
+const { setKeyFor } = require('./archetypeKey');
+
 // Objective-aware outcome options. Each {key,label,maps} → a normalized label.
 const SETS = {
   interview: [
@@ -26,16 +28,6 @@ const SETS = {
     { key: 'not_yet', label: 'Not yet', maps: 'PENDING' },
   ],
 };
-function setKeyFor(objectiveType) {
-  switch (objectiveType) {
-    case 'interview_preparation':
-    case 'career_switch': return 'interview';
-    case 'exam_preparation': return 'exam';
-    case 'upskilling':
-    case 'academic_excellence': return 'skill';
-    default: return 'generic';
-  }
-}
 function optionsFor(objectiveType) {
   return SETS[setKeyFor(objectiveType)].map(({ key, label }) => ({ key, label }));
 }

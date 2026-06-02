@@ -2,7 +2,8 @@
 // Process-level cache of CalibrationModels keyed by archetype, so the sync
 // getEffectiveTarget can read calibration without an await. Refreshed lazily
 // (TTL) and after the recompute job.
-const TTL_MS = parseInt(process.env.CALIB_CACHE_TTL_MS || String(10 * 60 * 1000), 10);
+const _ttlRaw = parseInt(process.env.CALIB_CACHE_TTL_MS || '600000', 10);
+const TTL_MS = Number.isFinite(_ttlRaw) && _ttlRaw > 0 ? _ttlRaw : 600000;
 let _byArchetype = {};
 let _loadedAt = 0;
 

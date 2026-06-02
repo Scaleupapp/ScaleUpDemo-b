@@ -13,19 +13,22 @@ test('getEffectiveTarget: flag OFF -> heuristic unchanged; flag ON + cached mode
   const origObjFlag = flags.objectiveTarget, origCalFlag = flags.outcomeCalibratedTarget;
   Object.defineProperty(flags, 'objectiveTarget', { value: true, configurable: true });
 
-  // flag OFF -> persisted heuristic target (82)
-  Object.defineProperty(flags, 'outcomeCalibratedTarget', { value: false, configurable: true });
-  assert.equal(targetService.getEffectiveTarget(obj), 82);
+  try {
+    // flag OFF -> persisted heuristic target (82)
+    Object.defineProperty(flags, 'outcomeCalibratedTarget', { value: false, configurable: true });
+    assert.equal(targetService.getEffectiveTarget(obj), 82);
 
-  // flag ON + cached calibrated model (target 78, sufficient) -> 78
-  Object.defineProperty(flags, 'outcomeCalibratedTarget', { value: true, configurable: true });
-  cache._seed({ interview: { target: 78, sampleCount: 150 } });
-  assert.equal(targetService.getEffectiveTarget(obj), 78);
+    // flag ON + cached calibrated model (target 78, sufficient sampleCount) -> 78
+    Object.defineProperty(flags, 'outcomeCalibratedTarget', { value: true, configurable: true });
+    const { MIN_OUTCOMES_PER_ARCHETYPE } = require('../../services/readiness/calibrationService');
+    cache._seed({ interview: { target: 78, sampleCount: MIN_OUTCOMES_PER_ARCHETYPE } });
+    assert.equal(targetService.getEffectiveTarget(obj), 78);
 
-  // flag ON + no model for this archetype -> heuristic (82)
-  cache._seed({});
-  assert.equal(targetService.getEffectiveTarget(obj), 82);
-
-  Object.defineProperty(flags, 'objectiveTarget', { value: origObjFlag, configurable: true });
-  Object.defineProperty(flags, 'outcomeCalibratedTarget', { value: origCalFlag, configurable: true });
+    // flag ON + no model for this archetype -> heuristic (82)
+    cache._seed({});
+    assert.equal(targetService.getEffectiveTarget(obj), 82);
+  } finally {
+    Object.defineProperty(flags, 'objectiveTarget', { value: origObjFlag, configurable: true });
+    Object.defineProperty(flags, 'outcomeCalibratedTarget', { value: origCalFlag, configurable: true });
+  }
 });

@@ -16,6 +16,7 @@
  */
 
 const featureFlags = require('../../config/featureFlags');
+const { MIN_OUTCOMES_PER_ARCHETYPE } = require('./calibrationService');
 
 const FLOOR = 55;
 const CEILING = 95;
@@ -93,9 +94,9 @@ function getEffectiveTarget(objective) {
   // a sufficient model. Read via a sync process cache. No-op when flag off / no model.
   if (featureFlags.outcomeCalibratedTarget && objective) {
     try {
-      const { setKeyFor } = require('./outcomeService');
+      const { setKeyFor } = require('./archetypeKey');
       const m = require('./calibrationCache').get(setKeyFor(objective.objectiveType));
-      if (m && typeof m.target === 'number' && (m.sampleCount || 0) > 0) return m.target;
+      if (m && typeof m.target === 'number' && (m.sampleCount || 0) >= MIN_OUTCOMES_PER_ARCHETYPE) return m.target;
     } catch (e) { /* fall through to heuristic */ }
   }
   if (objective && typeof objective.target === 'number' && objective.target > 0) return objective.target;

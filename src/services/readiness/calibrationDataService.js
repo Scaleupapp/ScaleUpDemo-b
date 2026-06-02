@@ -1,6 +1,6 @@
 'use strict';
 const ObjectiveOutcome = require('../../models/ObjectiveOutcome');
-const { setKeyFor } = require('./outcomeService');
+const { setKeyFor } = require('./archetypeKey');
 
 const Y = { SUCCESS: 1, PARTIAL: 0.5, NOT_SUCCESS: 0 };
 
