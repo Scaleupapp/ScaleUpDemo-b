@@ -181,6 +181,24 @@ router.get('/overview', auth, async (req, res) => {
       console.warn('[v2/you/overview] ready detection skipped:', e.message);
     }
 
+    // Phase 4A — outcome prompt (lazy "target date passed" check).
+    let outcomePrompt = null;
+    try {
+      if (objective) {
+        const outcomeService = require('../../services/readiness/outcomeService');
+        const ObjectiveOutcome = require('../../models/ObjectiveOutcome');
+        const resolved = await ObjectiveOutcome.exists({ userId, objectiveId: objective._id, resolved: true });
+        if (outcomeService.isDue(objective, !!resolved)) {
+          outcomePrompt = {
+            due: true, objectiveId: String(objective._id), objectiveLabel: buildObjectiveLabel(objective),
+            readiness: servedReadiness, options: outcomeService.optionsFor(objective.objectiveType),
+          };
+          // best-effort: mark due + bump prompt count so cadence/cap apply
+          UserObjective.updateOne({ _id: objective._id }, { $set: { 'outcomePrompt.due': true, 'outcomePrompt.lastAskedAt': new Date() }, $inc: { 'outcomePrompt.promptCount': 1 } }).catch(() => {});
+        }
+      }
+    } catch (e) { console.warn('[v2/you/overview] outcome prompt skipped:', e.message); }
+
     // Target date and weeks remaining / overdue
     let targetDateStr = null;
     let weeksRemaining = null;
@@ -278,6 +296,7 @@ router.get('/overview', auth, async (req, res) => {
             : null,
         },
         objectiveLabel: buildObjectiveLabel(objective),
+        outcomePrompt,
         // Admin-only readiness diagnostics — lets us inspect the shadow composite
         // vs the served/legacy value over the API (no server-log access needed).
         _debugReadiness: (user?.role === 'admin') ? {
@@ -1354,6 +1373,28 @@ router.get('/proof', auth, async (req, res) => {
     const out = await require('../../services/readiness/proofService').getActive(req.user.userId);
     res.json({ success: true, data: out });
   } catch (err) { res.status(500).json({ success: false, message: 'Could not load proof.' }); }
+});
+
+router.post('/outcome', auth, async (req, res) => {
+  try {
+    const out = await require('../../services/readiness/outcomeService').recordOutcome(req.user.userId, req.body || {});
+    require('../../services/diagnosticTelemetryService').logEvent('outcome.recorded', { userId: String(req.user.userId), label: out.label });
+    res.json({ success: true, data: out });
+  } catch (err) {
+    const code = ['OBJECTIVE_NOT_FOUND', 'BAD_CHOICE'].includes(err.message) ? 400 : 500;
+    if (code === 500) console.error('[v2/you/outcome]', err.message);
+    res.status(code).json({ success: false, message: code === 400 ? err.message : 'Could not record outcome.' });
+  }
+});
+router.post('/outcome/snooze', auth, async (req, res) => {
+  try {
+    const UserObjective = require('../../models/UserObjective');
+    await UserObjective.updateOne(
+      { userId: req.user.userId, status: 'active', isPrimary: true },
+      { $set: { 'outcomePrompt.snoozedUntil': new Date(Date.now() + 14 * 864e5), 'outcomePrompt.due': false }, $inc: { 'outcomePrompt.promptCount': 1 } }
+    );
+    res.json({ success: true, data: { ok: true } });
+  } catch (err) { res.status(500).json({ success: false, message: 'Could not snooze.' }); }
 });
 
 /**

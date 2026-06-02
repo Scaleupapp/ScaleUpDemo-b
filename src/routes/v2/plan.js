@@ -192,6 +192,15 @@ router.get('/today', auth, async (req, res) => {
       };
     }
 
+    // Phase 4A — read-only outcomePrompt mirror (detection + cadence owned by /you/overview).
+    let outcomePrompt = null;
+    if (objective?.outcomePrompt?.due) {
+      const outcomeService = require('../../services/readiness/outcomeService');
+      outcomePrompt = { due: true, objectiveId: String(objective._id),
+        objectiveLabel: (objective.specifics?.targetRole || objective.objectiveType),
+        options: outcomeService.optionsFor(objective.objectiveType) };
+    }
+
     // Current readiness — keep this consistent with the Calibration screen
     // (/diagnostic/:id/insights). Prefer the diagnostic baseline (average of
     // measured competency scores), then the knowledge profile, then a floor.
@@ -232,6 +241,7 @@ router.get('/today', auth, async (req, res) => {
           planSchedule: [],
           bonusTasks: [],
           ready,
+          outcomePrompt,
         },
       });
     }
@@ -395,6 +405,7 @@ router.get('/today', auth, async (req, res) => {
             bonusTasks: bonusShaped,
             weeklyInsight: weeklyInsightBonus,
             ready,
+            outcomePrompt,
           },
         });
       }
@@ -446,6 +457,7 @@ router.get('/today', auth, async (req, res) => {
           message: weekDoneMessage,
           capstoneMilestone: dayDoneCapstone,
           ready,
+          outcomePrompt,
         },
       });
     }
@@ -598,6 +610,7 @@ router.get('/today', auth, async (req, res) => {
         drillCandidate,
         capstoneMilestone,
         ready,
+        outcomePrompt,
       },
     });
   } catch (err) {
