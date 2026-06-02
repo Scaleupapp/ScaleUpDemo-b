@@ -1370,7 +1370,9 @@ router.post('/proof/publish', auth, async (req, res) => {
     require('../../services/diagnosticTelemetryService').logEvent('proof.published', { userId: String(req.user.userId) });
     res.json({ success: true, data: out });
   } catch (err) {
-    if (err.message === 'NOT_READY') return res.status(400).json({ success: false, message: 'Not ready yet.', code: 'NOT_READY' });
+    if (err.message === 'NOT_READY')    return res.status(400).json({ success: false, message: 'Not ready yet.', code: 'NOT_READY' });
+    if (err.message === 'NO_OBJECTIVE') return res.status(400).json({ success: false, message: 'Set up a goal first, then you can publish your proof.', code: 'NO_OBJECTIVE' });
+    if (err.message === 'NO_SNAPSHOT')  return res.status(400).json({ success: false, message: "We don't have a readiness reading yet — take an assessment first.", code: 'NO_SNAPSHOT' });
     console.error('[v2/you/proof/publish]', err.message);
     res.status(500).json({ success: false, message: 'Could not publish proof.' });
   }

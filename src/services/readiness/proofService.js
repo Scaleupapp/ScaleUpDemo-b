@@ -16,12 +16,18 @@ async function _countEvidence(userId) {
   const QuizAttempt = require('../../models/QuizAttempt');
   const InterviewSession = require('../../models/InterviewSession');
   const CapstoneSession = require('../../coding/models/capstoneSession.model');
-  const [quizzes, interviews, capstones] = await Promise.all([
+  const Plan = require('../../models/Plan');
+  const [quizzes, interviews, capstones, plan] = await Promise.all([
     QuizAttempt.countDocuments({ userId }).catch(() => 0),
     InterviewSession.countDocuments({ userId, status: { $in: ['completed', 'evaluated'] } }).catch(() => 0),
     CapstoneSession.countDocuments({ user_id: userId, status: 'graded' }).catch(() => 0),
+    Plan.findOne({ userId, status: { $in: ['active', 'ready'] } }).select('tasks').lean().catch(() => null),
   ]);
-  return { assessments: quizzes + interviews + capstones, capstonesGraded: capstones, hoursInvested: 0 };
+  const hoursInvested = Math.round((plan?.tasks || []).reduce((sum, t) => {
+    if (!t.completedAt) return sum;
+    return sum + (t.actualDurationMin || t.durationMin || t.estimatedMinutes || 0);
+  }, 0) / 60);
+  return { assessments: quizzes + interviews + capstones, capstonesGraded: capstones, hoursInvested };
 }
 
 async function buildSnapshot(userId) {

@@ -36,3 +36,74 @@ test('publish throws NOT_READY when not ready', async () => {
     await assert.rejects(() => proofService.publish('x'), /NOT_READY/);
   } finally { UserObjective.findOne = orig; }
 });
+
+test('_countEvidence: hoursInvested counts only completed tasks using actual/durationMin/estimatedMinutes', async () => {
+  const Plan = require('../../models/Plan');
+  const proofService = require('../../services/readiness/proofService');
+
+  // Stub Plan.findOne to return a plan with 3 tasks:
+  //   task 1: completed, actualDurationMin=30
+  //   task 2: completed, durationMin=90 (no actual)
+  //   task 3: NOT completed, durationMin=60 — must be excluded
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({
+    select: function () { return this; },
+    lean: async () => ({
+      tasks: [
+        { completedAt: new Date(), actualDurationMin: 30 },
+        { completedAt: new Date(), durationMin: 90 },
+        { durationMin: 60 }, // no completedAt — excluded
+      ],
+    }),
+  });
+
+  // Also stub the other model queries so no DB connection is needed
+  const QuizAttempt = require('../../models/QuizAttempt');
+  const InterviewSession = require('../../models/InterviewSession');
+  const CapstoneSession = require('../../coding/models/capstoneSession.model');
+  const origQA = QuizAttempt.countDocuments;
+  const origIS = InterviewSession.countDocuments;
+  const origCS = CapstoneSession.countDocuments;
+  QuizAttempt.countDocuments = async () => 0;
+  InterviewSession.countDocuments = async () => 0;
+  CapstoneSession.countDocuments = async () => 0;
+
+  try {
+    const ev = await proofService._countEvidence('fake-user-id');
+    // 30 + 90 = 120 min = 2 hours; uncompleted 60 excluded
+    assert.equal(ev.hoursInvested, 2, `Expected 2h, got ${ev.hoursInvested}`);
+  } finally {
+    Plan.findOne = origFindOne;
+    QuizAttempt.countDocuments = origQA;
+    InterviewSession.countDocuments = origIS;
+    CapstoneSession.countDocuments = origCS;
+  }
+});
+
+test('_countEvidence: hoursInvested is 0 when plan is missing', async () => {
+  const Plan = require('../../models/Plan');
+  const proofService = require('../../services/readiness/proofService');
+
+  const origFindOne = Plan.findOne;
+  Plan.findOne = () => ({ select: function () { return this; }, lean: async () => null });
+
+  const QuizAttempt = require('../../models/QuizAttempt');
+  const InterviewSession = require('../../models/InterviewSession');
+  const CapstoneSession = require('../../coding/models/capstoneSession.model');
+  const origQA = QuizAttempt.countDocuments;
+  const origIS = InterviewSession.countDocuments;
+  const origCS = CapstoneSession.countDocuments;
+  QuizAttempt.countDocuments = async () => 0;
+  InterviewSession.countDocuments = async () => 0;
+  CapstoneSession.countDocuments = async () => 0;
+
+  try {
+    const ev = await proofService._countEvidence('fake-user-id');
+    assert.equal(ev.hoursInvested, 0, `Expected 0h, got ${ev.hoursInvested}`);
+  } finally {
+    Plan.findOne = origFindOne;
+    QuizAttempt.countDocuments = origQA;
+    InterviewSession.countDocuments = origIS;
+    CapstoneSession.countDocuments = origCS;
+  }
+});
