@@ -89,6 +89,15 @@ function computeTarget(objective) {
  */
 function getEffectiveTarget(objective) {
   if (!featureFlags.objectiveTarget) return LEGACY_TARGET;
+  // Phase 4B — evidence-based target when calibration is on AND the archetype has
+  // a sufficient model. Read via a sync process cache. No-op when flag off / no model.
+  if (featureFlags.outcomeCalibratedTarget && objective) {
+    try {
+      const { setKeyFor } = require('./outcomeService');
+      const m = require('./calibrationCache').get(setKeyFor(objective.objectiveType));
+      if (m && typeof m.target === 'number' && (m.sampleCount || 0) > 0) return m.target;
+    } catch (e) { /* fall through to heuristic */ }
+  }
   if (objective && typeof objective.target === 'number' && objective.target > 0) return objective.target;
   return computeTarget(objective);
 }
