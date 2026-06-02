@@ -12,6 +12,9 @@ const FLAGS = {
   // Readiness redesign Phase 2: when off (default) the target stays a flat 80
   // everywhere (today's behavior). Flip to 'true' to serve objective-aware targets.
   FEATURE_OBJECTIVE_TARGET: process.env.FEATURE_OBJECTIVE_TARGET === 'true',
+  // Readiness redesign Phase 4B: when off (default) the heuristic target is served.
+  // Flip to 'true' to serve the evidence-based calibrated target when sufficient data.
+  FEATURE_OUTCOME_CALIBRATED_TARGET: process.env.FEATURE_OUTCOME_CALIBRATED_TARGET === 'true',
 };
 
 function isEnabled(flag) {
@@ -23,6 +26,7 @@ module.exports = {
   day1Diagnostic: FLAGS.FEATURE_DAY1_DIAGNOSTIC,
   compositeReadiness: FLAGS.FEATURE_COMPOSITE_READINESS,
   objectiveTarget: FLAGS.FEATURE_OBJECTIVE_TARGET,
+  outcomeCalibratedTarget: FLAGS.FEATURE_OUTCOME_CALIBRATED_TARGET,
   FLAGS,
   isEnabled,
 };
