@@ -1,0 +1,33 @@
+name: Recompute Calibration
+
+# Phase 4B: recompute per-archetype CalibrationModels from accumulated ObjectiveOutcomes.
+# Weekly is plenty — outcomes accumulate slowly and the served target only changes when
+# an archetype crosses MIN_OUTCOMES_PER_ARCHETYPE (default 100). With no data this is a
+# harmless no-op that logs "0 outcomes, nothing to calibrate".
+on:
+  schedule:
+    # 19:30 UTC Monday = ~01:00 IST Tuesday (low traffic).
+    - cron: '30 19 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Compute + log only, write nothing'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  recompute:
+    name: Recompute calibration on EC2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            cd /home/${{ secrets.EC2_USER }}/scaleup-backend && git pull origin master
+            node scripts/jobs/recomputeCalibration.js ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
