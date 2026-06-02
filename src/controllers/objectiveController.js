@@ -56,4 +56,14 @@ const activateObjective = async (req, res, next) => {
   try { res.json(apiResponse.success(await objectiveService.activateObjective(req.user.userId, req.params.id))); } catch (err) { next(err); }
 };
 
-module.exports = { getObjectives, createObjective, updateObjective, pauseObjective, resumeObjective, setPrimary, deleteObjective, analyzeObjective, getObjectiveBrief, activateObjective };
+const deepenObjective = async (req, res) => {
+  try {
+    const out = await objectiveService.deepenObjective(req.user.userId, req.params.id);
+    require('../services/diagnosticTelemetryService').logEvent('ready.deepen', { userId: String(req.user.userId), objectiveId: req.params.id, newTarget: out.target });
+    res.json(apiResponse.success(out, 'Bar raised — new plan on the way.'));
+  } catch (err) {
+    res.status(400).json(apiResponse.error(err.message));
+  }
+};
+
+module.exports = { getObjectives, createObjective, updateObjective, pauseObjective, resumeObjective, setPrimary, deleteObjective, analyzeObjective, getObjectiveBrief, activateObjective, deepenObjective };

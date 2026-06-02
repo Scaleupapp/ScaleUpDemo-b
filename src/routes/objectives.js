@@ -13,5 +13,6 @@ router.delete('/:id', ctrl.deleteObjective);
 router.put('/:id/activate', ctrl.activateObjective);
 router.post('/:id/analyze', ctrl.analyzeObjective);
 router.get('/:id/brief', ctrl.getObjectiveBrief);
+router.post('/:id/deepen', ctrl.deepenObjective);
 
 module.exports = router;

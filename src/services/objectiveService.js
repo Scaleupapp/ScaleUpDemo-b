@@ -155,6 +155,36 @@ class ObjectiveService {
     }
   }
 
+  async deepenObjective(userId, objectiveId) {
+    const UserObjective = require('../models/UserObjective');
+    const { targetBands } = require('./readiness/targetService');
+    const objective = await UserObjective.findOne({ _id: objectiveId, userId });
+    if (!objective) throw new Error('Objective not found');
+
+    const current = typeof objective.target === 'number' && objective.target > 0 ? objective.target : 80;
+    const next = targetBands(current).exceptional; // min(98, strong + 8)
+    objective.target = next;
+    objective.targetHistory = objective.targetHistory || [];
+    objective.targetHistory.push({ value: next, reason: 'deepen', at: new Date() });
+    // Raising the bar = a fresh climb: clear ready so the moment can re-fire.
+    objective.readyState = { isReady: false, momentSeen: false };
+    await objective.save();
+
+    // Best-effort replan toward the new target (plan-gen reads live objective.target).
+    try {
+      const DiagnosticAttempt = require('../models/DiagnosticAttempt');
+      const attempt = await DiagnosticAttempt.findOne({ userId, status: 'completed' }).sort({ completedAt: -1 }).lean();
+      if (attempt) {
+        const { planGenerationQueue } = require('../config/queue');
+        await planGenerationQueue.add('generate', { attemptId: String(attempt._id) },
+          { attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: 50 });
+      }
+    } catch (e) {
+      console.warn('[objectiveService.deepenObjective] replan enqueue skipped:', e.message);
+    }
+    return { id: String(objective._id), target: next };
+  }
+
   async rebalanceWeights(userId) {
     const actives = await UserObjective.find({ userId, status: 'active' }).sort({ isPrimary: -1 });
     if (actives.length === 0) return;
