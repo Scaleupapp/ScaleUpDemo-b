@@ -161,10 +161,6 @@ router.get('/today', auth, async (req, res) => {
       computeWeekActivity(userId),
     ]);
 
-    const objectiveForReady = await require('../../models/UserObjective')
-      .findOne({ userId: req.user.userId, status: 'active', isPrimary: true })
-      .select('readyState objectiveType analysis.competencies createdAt specifics specificsCanonical target').lean();
-
     const greeting = user?.firstName ? `Hi, ${user.firstName}.` : 'Hi.';
     const objectiveLabel = buildObjectiveLabel(objective);
     const objectiveName = buildObjectiveName(objective);
@@ -179,6 +175,20 @@ router.get('/today', auth, async (req, res) => {
           cta: { label: 'Start diagnostic', deeplink: 'scaleup://onboarding' },
         },
       });
+    }
+
+    // Phase 3A — read-only ready block (detection only happens in /you/overview).
+    // Computed early so ALL return paths (plan_brewing, day_done, happy-path)
+    // include it and a Ready user never loses the field on Home.
+    let ready = { isReady: false };
+    if (objective?.readyState?.isReady) {
+      const proveItService = require('../../services/readiness/proveItService');
+      ready = {
+        isReady: true,
+        readyAt: objective.readyState.readyAt,
+        momentSeen: !!objective.readyState.momentSeen,
+        proveIt: proveItService.proveItFor(objective.objectiveType),
+      };
     }
 
     // Current readiness — keep this consistent with the Calibration screen
@@ -220,6 +230,7 @@ router.get('/today', auth, async (req, res) => {
           weekProgress: null,
           planSchedule: [],
           bonusTasks: [],
+          ready,
         },
       });
     }
@@ -382,6 +393,7 @@ router.get('/today', auth, async (req, res) => {
             getAheadWeek: nextWeekEntry?.week,
             bonusTasks: bonusShaped,
             weeklyInsight: weeklyInsightBonus,
+            ready,
           },
         });
       }
@@ -432,6 +444,7 @@ router.get('/today', auth, async (req, res) => {
           weeklyInsight: weeklyInsightDayDone,
           message: weekDoneMessage,
           capstoneMilestone: dayDoneCapstone,
+          ready,
         },
       });
     }
@@ -522,18 +535,6 @@ router.get('/today', auth, async (req, res) => {
       .map(t => shapeTask(t, topicMasteryFor));
 
     const weeklyInsight = buildWeeklyInsight({ topGap, todaysTasks, weekProgress: { done: doneThisWeek, total: tasksThisWeek.length, week: currentWeek, totalWeeks }, trajectory });
-
-    // Phase 3A — read-only ready block (detection only happens in /you/overview).
-    let ready = { isReady: false };
-    if (objectiveForReady?.readyState?.isReady) {
-      const proveItService = require('../../services/readiness/proveItService');
-      ready = {
-        isReady: true,
-        readyAt: objectiveForReady.readyState.readyAt,
-        momentSeen: !!objectiveForReady.readyState.momentSeen,
-        proveIt: proveItService.proveItFor(objectiveForReady.objectiveType),
-      };
-    }
 
     // Coach mode (formerly "Weekly Compass review") is no longer surfaced
     // as a synthetic plan task. It's a top-level entry point on V2HomeView
