@@ -91,6 +91,10 @@ app.use('/api/v1/interviews', require('./routes/interviews'));
 app.use('/api/coding/public', require('./coding/routes/publicProfiles.routes'));
 app.use('/api/coding', require('./coding').routes);
 
+// Public, unauthenticated proof-of-readiness route. IP-rate-limited.
+// Mounted before auth-gated routers — no token required.
+app.use('/api/public/proof', require('./routes/publicProof'));
+
 // --- v2 API namespace (parallel rollout) ---
 // v2 lives alongside v1. v1 routes above are never touched.
 //
