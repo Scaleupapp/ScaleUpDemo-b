@@ -161,12 +161,26 @@ function chooseServed({ legacyValue, shadow, flagOn }) {
   return { value: shadow.value, source: 'composite' };
 }
 
+/**
+ * Has the learner reached "Ready"? True only when the SERVED readiness is
+ * composite- or blend-backed (trustworthy past the guardrail) AND meets the
+ * effective target. Legacy/thin-evidence users never qualify — keeps the moment
+ * (and 3B's proof) credible.
+ */
+function evaluateReady({ servedSource, servedValue, target } = {}) {
+  if (servedSource !== 'composite' && servedSource !== 'blend') return false;
+  if (typeof target !== 'number' || target <= 0) return false;
+  if (typeof servedValue !== 'number') return false;
+  return servedValue >= target;
+}
+
 module.exports = {
   assembleLegacy,
   computeReadinessFromKnowledge,
   persistSnapshot,
   computeComposite,
   chooseServed,
+  evaluateReady,
   CONFIDENCE_MIN,
   CONFIDENCE_FULL,
 };
