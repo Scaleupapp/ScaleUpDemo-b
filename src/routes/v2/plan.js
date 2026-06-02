@@ -201,10 +201,14 @@ router.get('/today', auth, async (req, res) => {
         options: outcomeService.optionsFor(objective.objectiveType) };
     }
 
-    // Current readiness — keep this consistent with the Calibration screen
-    // (/diagnostic/:id/insights). Prefer the diagnostic baseline (average of
-    // measured competency scores), then the knowledge profile, then a floor.
+    // Current readiness — SINGLE SOURCE OF TRUTH. Use the SERVED value the You
+    // tab computes + persists on every overview load (ReadinessSnapshot.value:
+    // composite/blend/legacy per the guardrail), so Home never diverges from the
+    // You tab. Fall back to the diagnostic baseline only if no snapshot exists yet.
+    const latestSnap = await require('../../models/ReadinessSnapshot')
+      .findOne({ userId, objectiveId: objective._id }).sort({ createdAt: -1 }).select('value').lean();
     const currentReadiness =
+      (latestSnap && typeof latestSnap.value === 'number' ? latestSnap.value : null) ??
       diagnosticBaselineReadiness(latestAttempt) ??
       computeReadinessFromKnowledge(knowledge) ??
       30;
