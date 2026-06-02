@@ -139,6 +139,41 @@ router.get('/overview', auth, async (req, res) => {
           .sort((a, b) => b.weight - a.weight)
       : null;
 
+    // Phase 3A — Ready detection (read-time, authoritative). Sticky once set.
+    const proveItService = require('../../services/readiness/proveItService');
+    const diagTelemetry = require('../../services/diagnosticTelemetryService');
+    let readyBlock = { isReady: false };
+    if (objective) {
+      const alreadyReady = !!objective.readyState?.isReady;
+      const justCrossed = readinessService.evaluateReady({
+        servedSource: served.source, servedValue: servedReadiness, target: effectiveTarget,
+      });
+      if (justCrossed && !alreadyReady) {
+        const rs = { isReady: true, readyAt: new Date(), readinessAtReady: servedReadiness, targetAtReady: effectiveTarget, momentSeen: false };
+        UserObjective.updateOne({ _id: objective._id }, { $set: { readyState: rs } }).catch(() => {});
+        objective.readyState = rs; // reflect in this response
+        diagTelemetry.logEvent('ready.fired', { userId: String(userId), objectiveId: String(objective._id), readiness: servedReadiness, target: effectiveTarget });
+      }
+      if (objective.readyState?.isReady) {
+        const assessedStrong = (readinessBreakdown || []).filter((b) => b.assessed && b.score >= (readinessTargetBands?.strong ?? 80)).length;
+        readyBlock = {
+          isReady: true,
+          readyAt: objective.readyState.readyAt,
+          momentSeen: !!objective.readyState.momentSeen,
+          readinessAtReady: objective.readyState.readinessAtReady ?? servedReadiness,
+          summary: {
+            objectiveLabel: buildObjectiveLabel(objective),
+            score: servedReadiness,
+            competenciesStrong: assessedStrong,
+            competenciesTotal: objective?.analysis?.competencies?.length || (readinessBreakdown || []).length,
+            assessmentsCount: (readinessBreakdown || []).filter((b) => b.assessed).length,
+            weeksClimbed: objective.createdAt ? Math.max(1, Math.round((Date.now() - new Date(objective.createdAt)) / (7 * 24 * 3600 * 1000))) : null,
+          },
+          proveIt: proveItService.proveItFor(objective.objectiveType),
+        };
+      }
+    }
+
     // Target date and weeks remaining / overdue
     let targetDateStr = null;
     let weeksRemaining = null;
@@ -201,6 +236,7 @@ router.get('/overview', auth, async (req, res) => {
           // Per-competency rollup behind the number (P1b "what's in your number").
           // null when there's no composite yet (e.g. no assessments taken).
           breakdown: readinessBreakdown,
+          ready: readyBlock,
           // Present only for coding objectives once the learner has enough
           // practice for coding to influence readiness (else null). Lets the
           // client explain "coding practice is shaping your readiness".
