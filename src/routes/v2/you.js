@@ -1332,6 +1332,30 @@ router.post('/ready/seen', auth, async (req, res) => {
   }
 });
 
+router.post('/proof/publish', auth, async (req, res) => {
+  try {
+    const out = await require('../../services/readiness/proofService').publish(req.user.userId);
+    require('../../services/diagnosticTelemetryService').logEvent('proof.published', { userId: String(req.user.userId) });
+    res.json({ success: true, data: out });
+  } catch (err) {
+    if (err.message === 'NOT_READY') return res.status(400).json({ success: false, message: 'Not ready yet.', code: 'NOT_READY' });
+    console.error('[v2/you/proof/publish]', err.message);
+    res.status(500).json({ success: false, message: 'Could not publish proof.' });
+  }
+});
+router.post('/proof/revoke', auth, async (req, res) => {
+  try {
+    await require('../../services/readiness/proofService').revoke(req.user.userId, req.body?.token);
+    res.json({ success: true, data: { ok: true } });
+  } catch (err) { res.status(500).json({ success: false, message: 'Could not revoke.' }); }
+});
+router.get('/proof', auth, async (req, res) => {
+  try {
+    const out = await require('../../services/readiness/proofService').getActive(req.user.userId);
+    res.json({ success: true, data: out });
+  } catch (err) { res.status(500).json({ success: false, message: 'Could not load proof.' }); }
+});
+
 /**
  * Diagnostic baseline readiness (mirrors /plan/today). The average of
  * measured competency scores from the most-recent completed diagnostic.
