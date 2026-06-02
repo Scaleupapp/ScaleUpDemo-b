@@ -1307,6 +1307,24 @@ router.get('/coding-mastery', auth, async (req, res) => {
   }
 });
 
+async function markMomentSeen(userId) {
+  return UserObjective.updateOne(
+    { userId, status: 'active', isPrimary: true, 'readyState.isReady': true },
+    { $set: { 'readyState.momentSeen': true, 'readyState.momentSeenAt': new Date() } }
+  );
+}
+
+router.post('/ready/seen', auth, async (req, res) => {
+  try {
+    await markMomentSeen(req.user.userId);
+    require('../../services/diagnosticTelemetryService').logEvent('ready.moment_seen', { userId: String(req.user.userId) });
+    res.json({ success: true, data: { ok: true } });
+  } catch (err) {
+    console.error('[v2/you/ready/seen]', err.message);
+    res.status(500).json({ success: false, message: 'Could not mark moment seen' });
+  }
+});
+
 /**
  * Diagnostic baseline readiness (mirrors /plan/today). The average of
  * measured competency scores from the most-recent completed diagnostic.
@@ -1325,3 +1343,4 @@ function diagnosticBaselineReadiness(attempt) {
 }
 
 module.exports = router;
+module.exports.markMomentSeen = markMomentSeen;
