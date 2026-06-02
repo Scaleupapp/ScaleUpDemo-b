@@ -161,6 +161,7 @@ router.get('/overview', auth, async (req, res) => {
           const assessedStrong = (readinessBreakdown || []).filter((b) => b.assessed && b.score >= (readinessTargetBands?.strong ?? 80)).length;
           readyBlock = {
             isReady: true,
+            objectiveId: String(objective._id), // so clients can call /objectives/:id/deepen
             readyAt: objective.readyState.readyAt,
             momentSeen: !!objective.readyState.momentSeen,
             readinessAtReady: objective.readyState.readinessAtReady ?? servedReadiness,

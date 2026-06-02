@@ -185,6 +185,7 @@ router.get('/today', auth, async (req, res) => {
       const proveItService = require('../../services/readiness/proveItService');
       ready = {
         isReady: true,
+        objectiveId: String(objective._id), // so Home can call /objectives/:id/deepen
         readyAt: objective.readyState.readyAt,
         momentSeen: !!objective.readyState.momentSeen,
         proveIt: proveItService.proveItFor(objective.objectiveType),
