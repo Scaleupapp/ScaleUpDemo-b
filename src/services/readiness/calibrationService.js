@@ -35,3 +35,38 @@ function buildCurve(rows, { binSize = 10 } = {}) {
 }
 
 module.exports = { isotonic, buildCurve };
+
+const MIN_OUTCOMES_PER_ARCHETYPE = parseInt(process.env.CALIB_MIN_OUTCOMES || '100', 10);
+const DEFAULT_THRESHOLD = parseFloat(process.env.CALIB_THRESHOLD || '0.7');
+const clampBand = (n) => Math.max(55, Math.min(95, Math.round(n)));
+
+/** Lowest readiness where the smoothed success-rate crosses `threshold`, linearly
+ *  interpolated between bin midpoints, clamped to the 55-95 band. null if never reached. */
+function calibratedTarget(curve, { threshold = DEFAULT_THRESHOLD } = {}) {
+  if (!Array.isArray(curve) || curve.length === 0) return null;
+  const pts = curve.map((b) => ({ x: (b.binLo + b.binHi) / 2, y: b.rate }));
+  if (Math.max(...pts.map((p) => p.y)) < threshold) return null;
+  if (pts[0].y >= threshold) return { target: clampBand(pts[0].x), threshold };
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].y >= threshold) {
+      const a = pts[i - 1], b = pts[i];
+      const frac = (threshold - a.y) / (b.y - a.y || 1);
+      return { target: clampBand(a.x + frac * (b.x - a.x)), threshold };
+    }
+  }
+  return null;
+}
+
+/** rows for ONE archetype → a CalibrationModel-shaped object, or null if insufficient/unreachable. */
+function computeForArchetype(rows, { min = MIN_OUTCOMES_PER_ARCHETYPE, threshold = DEFAULT_THRESHOLD, binSize = 10 } = {}) {
+  if (!Array.isArray(rows) || rows.length < min) return null;
+  const curve = module.exports.buildCurve(rows, { binSize });
+  const ct = module.exports.calibratedTarget(curve, { threshold });
+  if (!ct) return null;
+  return { target: ct.target, reliabilityN: rows.length, threshold, curve, sampleCount: rows.length };
+}
+
+module.exports.calibratedTarget = calibratedTarget;
+module.exports.computeForArchetype = computeForArchetype;
+module.exports.MIN_OUTCOMES_PER_ARCHETYPE = MIN_OUTCOMES_PER_ARCHETYPE;
+module.exports.DEFAULT_THRESHOLD = DEFAULT_THRESHOLD;
