@@ -36,7 +36,7 @@ function buildCurve(rows, { binSize = 10 } = {}) {
 
 module.exports = { isotonic, buildCurve };
 
-const MIN_OUTCOMES_PER_ARCHETYPE = parseInt(process.env.CALIB_MIN_OUTCOMES || '100', 10);
+const MIN_OUTCOMES_PER_ARCHETYPE = parseInt(process.env.CALIB_MIN_OUTCOMES || '25', 10);
 const DEFAULT_THRESHOLD = parseFloat(process.env.CALIB_THRESHOLD || '0.7');
 const clampBand = (n) => Math.max(55, Math.min(95, Math.round(n)));
 
@@ -70,3 +70,40 @@ module.exports.calibratedTarget = calibratedTarget;
 module.exports.computeForArchetype = computeForArchetype;
 module.exports.MIN_OUTCOMES_PER_ARCHETYPE = MIN_OUTCOMES_PER_ARCHETYPE;
 module.exports.DEFAULT_THRESHOLD = DEFAULT_THRESHOLD;
+
+const ARCHETYPE_LABELS = {
+  interview: 'interview goals',
+  exam: 'exam goals',
+  skill: 'skill-building goals',
+  generic: 'goals',
+};
+
+/**
+ * Returns the calibration evidence object for a given objective, or null.
+ * Reads CalibrationModel from DB (async). Caller is responsible for try/catch.
+ *
+ * @param {object|null} objective  UserObjective (lean)
+ * @returns {Promise<{basedOnOutcomes,archetype,archetypeLabel,successRate,target,computedAt}|null>}
+ */
+async function evidenceFor(objective) {
+  const featureFlags = require('../../config/featureFlags');
+  if (!featureFlags.outcomeCalibratedTarget || !objective) return null;
+  const { setKeyFor } = require('./archetypeKey');
+  const CalibrationModel = require('../../models/CalibrationModel');
+  const archetype = setKeyFor(objective.objectiveType);
+  const model = await CalibrationModel.findOne({ archetype }).lean();
+  if (!model) return null;
+  if (typeof model.target !== 'number') return null;
+  if ((model.sampleCount || 0) < MIN_OUTCOMES_PER_ARCHETYPE) return null;
+  return {
+    basedOnOutcomes: model.sampleCount,
+    archetype,
+    archetypeLabel: ARCHETYPE_LABELS[archetype] || 'goals',
+    successRate: model.threshold,
+    target: model.target,
+    computedAt: model.computedAt || null,
+  };
+}
+
+module.exports.evidenceFor = evidenceFor;
+module.exports.ARCHETYPE_LABELS = ARCHETYPE_LABELS;

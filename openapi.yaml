@@ -617,6 +617,51 @@ components:
             Per-competency rollup behind the readiness number ("what's in your
             number"). Sorted by weight desc; each flagged assessed/unassessed.
             null when there's no composite yet (e.g. no assessments taken).
+        calibration:
+          oneOf:
+            - type: object
+              description: |
+                Evidence behind the calibrated target (Phase 4B). Present once
+                >= 25 real objective outcomes exist for this archetype; null
+                until then. Clients may surface this as e.g. "Based on N real
+                outcomes from learners like you".
+              required: [basedOnOutcomes, archetype, archetypeLabel, successRate, target]
+              properties:
+                basedOnOutcomes:
+                  type: integer
+                  description: Number of real objective outcomes (sampleCount) the target is derived from.
+                archetype:
+                  type: string
+                  enum: [interview, exam, skill, generic]
+                  description: Outcome-set archetype key for this objective.
+                archetypeLabel:
+                  type: string
+                  description: |
+                    Human-readable archetype label. One of:
+                    "interview goals" | "exam goals" | "skill-building goals" | "goals"
+                successRate:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                  description: |
+                    Success-probability threshold the target is anchored to (e.g.
+                    0.7 = "7 in 10 people at this readiness achieved their goal").
+                target:
+                  type: integer
+                  minimum: 55
+                  maximum: 95
+                  description: The calibrated readiness target derived from the outcome curve.
+                computedAt:
+                  oneOf:
+                    - type: string
+                      format: date-time
+                    - type: 'null'
+                  description: When this calibration model was last computed.
+            - type: 'null'
+          description: |
+            Calibration evidence for the readiness target. null when
+            FEATURE_OUTCOME_CALIBRATED_TARGET is off or fewer than 25 outcomes
+            exist for this objective's archetype. Added in Phase 4B.
 
     CodingMasteryTrack:
       type: object

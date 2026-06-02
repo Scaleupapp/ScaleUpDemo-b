@@ -181,6 +181,16 @@ router.get('/overview', auth, async (req, res) => {
       console.warn('[v2/you/overview] ready detection skipped:', e.message);
     }
 
+    // Phase 4B — calibration evidence ("your target is based on N real outcomes").
+    // Best-effort: always degrades to null, never 500s the overview.
+    let calibrationEvidence = null;
+    try {
+      if (objective) {
+        const { evidenceFor } = require('../../services/readiness/calibrationService');
+        calibrationEvidence = await evidenceFor(objective);
+      }
+    } catch (e) { console.warn('[v2/you/overview] calibration evidence skipped:', e.message); }
+
     // Phase 4A — outcome prompt (lazy "target date passed" check).
     let outcomePrompt = null;
     try {
@@ -261,6 +271,9 @@ router.get('/overview', auth, async (req, res) => {
           // Per-competency rollup behind the number (P1b "what's in your number").
           // null when there's no composite yet (e.g. no assessments taken).
           breakdown: readinessBreakdown,
+          // Phase 4B calibration evidence — present once >=25 real outcomes exist
+          // for this archetype; null until then (safe to ignore client-side).
+          calibration: calibrationEvidence,
           ready: readyBlock,
           // Present only for coding objectives once the learner has enough
           // practice for coding to influence readiness (else null). Lets the
