@@ -22,7 +22,7 @@ function isotonic(points) {
 function buildCurve(rows, { binSize = 10 } = {}) {
   const bins = new Map(); // binLo -> {n, sum}
   for (const r of rows) {
-    if (typeof r.readiness !== 'number') continue;
+    if (typeof r.readiness !== 'number' || Number.isNaN(r.readiness)) continue; // NaN is typeof 'number'
     const lo = Math.min(90, Math.floor(Math.max(0, Math.min(100, r.readiness)) / binSize) * binSize);
     const b = bins.get(lo) || { n: 0, sum: 0 };
     b.n += 1; b.sum += r.y;
