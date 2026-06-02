@@ -86,3 +86,58 @@ async function buildContext(objective) {
 }
 
 module.exports.buildContext = buildContext;
+
+// --- Task 5: recordOutcome + isDue ---
+const UserObjective = require('../../models/UserObjective');
+const ObjectiveOutcome = require('../../models/ObjectiveOutcome');
+const ReadinessProof = require('../../models/ReadinessProof');
+
+const REPROMPT_DAYS = 21;
+const MAX_PROMPTS = 3;
+
+/** Should we ask for the outcome? True iff targetDate passed, not already resolved,
+ *  not snoozed, and under the prompt cap. */
+function isDue(objective, hasResolvedOutcome) {
+  if (!objective || hasResolvedOutcome) return false;
+  if (!objective.targetDate || new Date(objective.targetDate) > new Date()) return false;
+  const p = objective.outcomePrompt || {};
+  if (p.snoozedUntil && new Date(p.snoozedUntil) > new Date()) return false;
+  if ((p.promptCount || 0) >= MAX_PROMPTS) return false;
+  return true;
+}
+
+async function recordOutcome(userId, { objectiveId, rawChoice, detail, testimonial, allowTestimonialUse, source }) {
+  const objective = await UserObjective.findById(objectiveId);
+  if (!objective || String(objective.userId) !== String(userId)) throw new Error('OBJECTIVE_NOT_FOUND');
+  const label = module.exports.labelFor(objective.objectiveType, rawChoice);
+  if (!label) throw new Error('BAD_CHOICE');
+  const context = await module.exports.buildContext(objective);
+
+  await ObjectiveOutcome.create({
+    userId, objectiveId, objectiveType: objective.objectiveType, label, rawChoice, detail,
+    source: source || 'i_got_it', context, testimonial, allowTestimonialUse: !!allowTestimonialUse,
+    resolved: label !== 'PENDING', respondedAt: new Date(),
+  });
+
+  // Clear the prompt; record the ask.
+  objective.outcomePrompt = objective.outcomePrompt || {};
+  objective.outcomePrompt.due = false;
+  objective.outcomePrompt.lastAskedAt = new Date();
+  if (label === 'SUCCESS') { objective.status = 'completed'; objective.completedAt = new Date(); }
+  else if (label === 'ABANDONED') { objective.status = 'abandoned'; }
+  await objective.save();
+
+  if (label === 'SUCCESS') {
+    const stamp = `✓ ACHIEVED · ${new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`;
+    await ReadinessProof.updateMany(
+      { userId, objectiveId, active: true },
+      { $set: { achieved: true, achievedAt: new Date(), 'snapshot.achievedLabel': stamp } }
+    ).catch(() => {});
+  }
+  return { ok: true, label, celebrate: label === 'SUCCESS' };
+}
+
+module.exports.isDue = isDue;
+module.exports.recordOutcome = recordOutcome;
+module.exports.REPROMPT_DAYS = REPROMPT_DAYS;
+module.exports.MAX_PROMPTS = MAX_PROMPTS;
