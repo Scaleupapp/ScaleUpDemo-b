@@ -55,6 +55,14 @@ const userObjectiveSchema = new mongoose.Schema({
     momentSeenAt:     { type: Date },
   },
 
+  // --- Outcome prompt (Phase 4A) ---
+  outcomePrompt: {
+    due: { type: Boolean, default: false },
+    lastAskedAt: { type: Date },
+    snoozedUntil: { type: Date },
+    promptCount: { type: Number, default: 0 },
+  },
+
   // --- Current State ---
   currentLevel: {
     type: String,

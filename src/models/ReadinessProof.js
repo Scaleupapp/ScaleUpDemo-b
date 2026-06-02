@@ -14,6 +14,8 @@ const ReadinessProofSchema = new mongoose.Schema(
     active: { type: Boolean, default: true, index: true },
     issuedAt: { type: Date, default: Date.now },
     viewCount: { type: Number, default: 0 },
+    achieved: { type: Boolean, default: false },
+    achievedAt: { type: Date },
     snapshot: {
       displayName: String,
       avatarURL: String,
@@ -28,6 +30,7 @@ const ReadinessProofSchema = new mongoose.Schema(
         coveragePct: Number,
         hoursInvested: Number,
       },
+      achievedLabel: String, // e.g. "✓ ACHIEVED · Jun 2026" for the verify page
     },
   },
   { timestamps: true }
