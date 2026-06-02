@@ -43,6 +43,18 @@ const userObjectiveSchema = new mongoose.Schema({
   target: { type: Number, min: 0, max: 100 },
   targetHistory: [{ value: Number, reason: String, at: { type: Date, default: Date.now } }],
 
+  // --- Ready state (Phase 3A) ---
+  // Set once by the read-time detector when readiness crosses target with
+  // trustworthy (composite/blend) evidence. Sticky once earned. Absent = never ready.
+  readyState: {
+    isReady:          { type: Boolean, default: false },
+    readyAt:          { type: Date },
+    readinessAtReady: { type: Number, min: 0, max: 100 },
+    targetAtReady:    { type: Number, min: 0, max: 100 },
+    momentSeen:       { type: Boolean, default: false },
+    momentSeenAt:     { type: Date },
+  },
+
   // --- Current State ---
   currentLevel: {
     type: String,
