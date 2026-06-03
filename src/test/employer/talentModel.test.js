@@ -27,5 +27,10 @@ ok('status enum rejects junk', () => {
   const err = t.validateSync();
   assert.ok(err && err.errors.status);
 });
-console.log(`# tests 3\n# pass ${pass}\n# fail ${fail}`);
+// Fix 3: contactPolicy defaults to 'candidate-approved'
+ok('contactPolicy defaults to candidate-approved', () => {
+  const t = new TalentProfile({ userId: new mongoose.Types.ObjectId(), objectiveId: new mongoose.Types.ObjectId() });
+  assert.strictEqual(t.contactPolicy, 'candidate-approved');
+});
+console.log(`# tests 4\n# pass ${pass}\n# fail ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -3,6 +3,13 @@
 const router = require('express').Router();
 const auth = require('../../middleware/auth');
 const svc = require('../../services/employer/talentProfileService');
+const featureFlags = require('../../config/featureFlags');
+
+// Fix 4: feature-flag guard — routes are inert until FEATURE_EMPLOYER_MARKETPLACE is on
+function flagGuard(req, res, next) {
+  if (!featureFlags.employerMarketplace) return res.status(404).json({ success: false, message: 'Not found' });
+  return next();
+}
 
 // exported for unit tests; routes call these
 async function optInHandler(req, res) {
@@ -12,6 +19,8 @@ async function optInHandler(req, res) {
   } catch (err) {
     if (err.message === 'NO_OBJECTIVE') return res.status(400).json({ success: false, code: 'NO_OBJECTIVE', message: 'Set up a goal first.' });
     if (err.message === 'NOT_ELIGIBLE') return res.status(400).json({ success: false, code: 'NOT_ELIGIBLE', message: "You're not eligible for the talent pool yet — keep building evidence on a career goal." });
+    // Fix 2: surface NO_SNAPSHOT as 400 instead of falling to 500
+    if (err.message === 'NO_SNAPSHOT') return res.status(400).json({ success: false, code: 'NO_SNAPSHOT', message: 'Complete at least one assessment before joining the talent pool.' });
     console.error('[talent/opt-in]', err.message);
     return res.status(500).json({ success: false, message: 'Could not opt in.' });
   }
@@ -31,6 +40,7 @@ async function getHandler(req, res) {
 }
 async function patchHandler(req, res) {
   try {
+    const TalentProfile = require('../../models/TalentProfile');
     const UserObjective = require('../../models/UserObjective');
     const obj = await UserObjective.findOne({ userId: req.user.userId, status: 'active', isPrimary: true }).select('_id').lean();
     if (!obj) return res.status(400).json({ success: false, code: 'NO_OBJECTIVE', message: 'No active goal.' });
@@ -39,21 +49,24 @@ async function patchHandler(req, res) {
     if (city != null) set.city = city;
     if (noticePeriod != null) set.noticePeriod = noticePeriod;
     if (workPref != null) set.workPref = workPref;
-    await svc._upsertProfile(req.user.userId, obj._id, set);
+    // Fix 6: update-only, no upsert — prevent ghost profiles for users who never opted in
+    const r = await TalentProfile.updateOne({ userId: req.user.userId, objectiveId: obj._id, optedIn: true }, { $set: set });
+    if (!r.matchedCount) return res.status(400).json({ success: false, code: 'NO_PROFILE', message: 'Join the talent pool first.' });
     return res.status(200).json({ success: true, data: { ok: true } });
   } catch (err) { console.error('[talent/patch]', err.message); return res.status(500).json({ success: false, message: 'Could not update.' }); }
 }
 
-router.get('/', auth, getHandler);
-router.post('/opt-in', auth, optInHandler);
-router.post('/opt-out', auth, optOutHandler);
-router.patch('/', auth, patchHandler);
+// Fix 4: flagGuard is the FIRST middleware on all four routes
+router.get('/', flagGuard, auth, getHandler);
+router.post('/opt-in', flagGuard, auth, optInHandler);
+router.post('/opt-out', flagGuard, auth, optOutHandler);
+router.patch('/', flagGuard, auth, patchHandler);
 
-// test seam
-router._svc = svc;
+// Fix 5: keep only module.exports._svc (module.exports === router, so router._svc was redundant)
 module.exports = router;
 module.exports.optInHandler = optInHandler;
 module.exports.optOutHandler = optOutHandler;
 module.exports.getHandler = getHandler;
 module.exports.patchHandler = patchHandler;
 module.exports._svc = svc;
+module.exports.flagGuard = flagGuard;

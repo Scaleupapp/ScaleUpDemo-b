@@ -14,6 +14,7 @@ const TalentProfileSchema = new mongoose.Schema(
     optedIn: { type: Boolean, default: false },
     optedInAt: { type: Date },
     status: { type: String, enum: ['active', 'paused'], default: 'active' },
+    contactPolicy: { type: String, enum: ['candidate-approved'], default: 'candidate-approved' },
 
     // recruiter-facing preferences (candidate-supplied)
     city: { type: String },

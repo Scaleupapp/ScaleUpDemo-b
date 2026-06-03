@@ -19,6 +19,7 @@ router.use('/diagnostic', require('./diagnostic'));
 router.use('/plan', require('./plan'));
 router.use('/compass', require('./compass'));
 router.use('/insights', require('./insights'));
+router.use('/you/talent', require('./talent'));
 router.use('/you', require('./you'));
 router.use('/opt-in', require('./optIn'));
 router.use('/me', require('./me'));
