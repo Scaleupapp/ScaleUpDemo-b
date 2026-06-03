@@ -19,6 +19,10 @@ const QA       = path.resolve(__dirname, '../../models/QuizAttempt.js');
 const IS       = path.resolve(__dirname, '../../models/InterviewSession.js');
 const CP       = path.resolve(__dirname, '../../models/ContentProgress.js');
 const COMPPROF = path.resolve(__dirname, '../../models/CompetitionProfile.js');
+const CAPSTONE = path.resolve(__dirname, '../../coding/models/capstoneSession.model.js');
+const DRILL    = path.resolve(__dirname, '../../coding/models/drillAttempt.model.js');
+const MASTERY  = path.resolve(__dirname, '../../coding/models/metaSkillMastery.model.js');
+const CONTENT  = path.resolve(__dirname, '../../models/Content.js');
 
 function stubAll() {
   stub(READINESS, { getServedReadiness: async () => ({ value: 70, target: 80, source: 'knowledge', trend: 'stable', breakdown: null, draggers: [{ name: 'recursion', score: 40 }] }) });
@@ -32,6 +36,10 @@ function stubAll() {
   stub(IS, { find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }) });
   stub(CP, { countDocuments: async () => 4, find: () => ({ lean: async () => [{ totalTimeSpent: 600 }] }) });
   stub(COMPPROF, { findOne: () => ({ lean: async () => ({ currentChallengeStreak: 3, totalChallengesCompleted: 5 }) }) });
+  stub(CAPSTONE, { find: () => ({ lean: async () => [{ result: { overall_score: 85 } }] }) });
+  stub(DRILL, { find: () => ({ lean: async () => [{ grade: { overall_score: 70 } }] }) });
+  stub(MASTERY, { findOne: () => ({ lean: async () => ({ axes: { prompting: 60, verification: 55, decomposition: 70, refactoring: 50 } }) }) });
+  stub(CONTENT, { countDocuments: async () => 3 });
 }
 
 test('getSnapshot: composes readiness, mastery, pulse and signals', async () => {
@@ -45,6 +53,8 @@ test('getSnapshot: composes readiness, mastery, pulse and signals', async () => 
   assert.equal(snap.pulse.quizzes.count, 2);
   assert.equal(snap.pulse.quizzes.avgPercent, 70);
   assert.equal(snap.signals.plan.week, 2);
+  assert.ok(snap.pulse.coding.gradedCount >= 1);
+  assert.ok(typeof snap.pulse.notes.count === 'number');
 });
 
 test('getSnapshot: never throws when a source fails — omits that slice', async () => {

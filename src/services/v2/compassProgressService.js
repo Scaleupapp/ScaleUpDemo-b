@@ -20,6 +20,10 @@ const QuizAttempt = require('../../models/QuizAttempt');
 const InterviewSession = require('../../models/InterviewSession');
 const ContentProgress = require('../../models/ContentProgress');
 const CompetitionProfile = require('../../models/CompetitionProfile');
+const CapstoneSession = require('../../coding/models/capstoneSession.model');
+const DrillAttempt = require('../../coding/models/drillAttempt.model');
+const MetaSkillMastery = require('../../coding/models/metaSkillMastery.model');
+const Content = require('../../models/Content');
 
 const SNAPSHOT_TTL_MS = 90 * 1000;
 const _cache = new Map(); // userId -> { at, snap }
@@ -86,12 +90,16 @@ function emptyPulse() {
 
 async function buildPulseSlice(userId) {
   const p = emptyPulse();
-  const [quizzes, interviews, comp, contentCount, contentDocs] = await Promise.all([
+  const [quizzes, interviews, comp, contentCount, contentDocs, capstones, drills, mastery, notesCount] = await Promise.all([
     safe(() => QuizAttempt.find({ userId, status: 'completed' }).sort({ completedAt: -1 }).limit(20).lean(), []),
     safe(() => InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] } }).sort({ completedAt: -1 }).limit(20).lean(), []),
     safe(() => CompetitionProfile.findOne({ userId }).lean(), null),
     safe(() => ContentProgress.countDocuments({ userId, isCompleted: true }), 0),
     safe(() => ContentProgress.find({ userId, isCompleted: true }).lean(), []),
+    safe(() => CapstoneSession.find({ user_id: userId, status: 'graded' }).lean(), []),
+    safe(() => DrillAttempt.find({ user_id: userId, status: 'graded' }).lean(), []),
+    safe(() => MetaSkillMastery.findOne({ user_id: userId }).lean(), null),
+    safe(() => Content.countDocuments({ creatorId: userId, contentType: 'notes' }), 0),
   ]);
   p.quizzes = { count: quizzes.length, avgPercent: avg(quizzes.map((q) => q.score?.percentage)) };
   const dims = ['communication', 'content', 'structure', 'confidence'];
@@ -100,6 +108,15 @@ async function buildPulseSlice(userId) {
   p.interviews = { count: interviews.length, avgScore: avg(interviews.map((i) => i.evaluation?.overallScore)), weakestDimension: dimAvgs[0]?.d || null };
   p.competitions = { count: comp?.totalChallengesCompleted || 0, bestScore: null, streak: comp?.currentChallengeStreak || 0 };
   p.content = { completedCount: contentCount, minutesSpent: Math.round(contentDocs.reduce((a, c) => a + (c.totalTimeSpent || 0), 0) / 60) };
+  const allCodingScores = [
+    ...capstones.map((s) => s.result?.overall_score),
+    ...drills.map((d) => d.grade?.overall_score),
+  ];
+  const masteryAxes = mastery?.axes
+    ? { prompting: mastery.axes.prompting, verification: mastery.axes.verification, decomposition: mastery.axes.decomposition, refactoring: mastery.axes.refactoring }
+    : null;
+  p.coding = { gradedCount: capstones.length + drills.length, avgScore: avg(allCodingScores), axes: masteryAxes };
+  p.notes = { count: notesCount };
   return p;
 }
 
