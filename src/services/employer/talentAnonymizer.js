@@ -4,8 +4,8 @@ const ranking = require('./talentRankingService');
 
 // Stable pseudonymous handle from the profile id. Deterministic, non-reversible to PII.
 function anonHandle(id) {
-  const hex = String(id || '').replace(/[^0-9a-f]/gi, '').slice(-6) || '0';
-  const n = (parseInt(hex, 16) % 9000) + 1000; // 1000..9999
+  const hex = String(id || '').replace(/[^0-9a-f]/gi, '').slice(-8) || '0';
+  const n = (parseInt(hex, 16) % 900000) + 100000; // 100000..999999
   return `Candidate #${n}`;
 }
 
@@ -19,6 +19,7 @@ function _whySummary(profile) {
 function toBrowseCard(profile) {
   const s = profile.snapshot || {};
   return {
+    profileId: String(profile._id),
     handle: anonHandle(profile._id),
     roleLabel: s.roleLabel || null,
     band: s.readinessBand || null,
@@ -39,6 +40,7 @@ function toBrowseCard(profile) {
 function toAnonymizedProfile(profile) {
   const s = profile.snapshot || {};
   return {
+    profileId: String(profile._id),
     handle: anonHandle(profile._id),
     roleLabel: s.roleLabel || null,
     objectiveType: s.objectiveType || null,

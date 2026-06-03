@@ -14,16 +14,17 @@ const profile = {
     achieved: true, verified: true, proofToken: 'SECRETTOKEN', lastActiveAt: new Date() },
 };
 
-ok('anonHandle is stable + 4-digit', () => {
+ok('anonHandle is stable + 6-digit', () => {
   const h1 = anonHandle('0123456789abcdef01234567'); const h2 = anonHandle('0123456789abcdef01234567');
   assert.strictEqual(h1, h2);
-  assert.ok(/^Candidate #\d{4}$/.test(h1));
+  assert.ok(/^Candidate #\d{6}$/.test(h1));
 });
-ok('browse card has no PII', () => {
+ok('browse card has no PII, includes profileId', () => {
   const c = toBrowseCard(profile);
   const json = JSON.stringify(c);
   assert.ok(!json.includes('USERSECRET'));
   assert.ok(!json.includes('SECRETTOKEN'));
+  assert.strictEqual(c.profileId, String(profile._id));
   assert.strictEqual(c.handle, anonHandle(profile._id));
   assert.strictEqual(c.band, 'Exceptional');
   assert.strictEqual(c.score, 88);
@@ -33,11 +34,12 @@ ok('browse card has no PII', () => {
   assert.ok(Array.isArray(c.skills) && c.skills.includes('System Design'));
   assert.ok(typeof c.whySummary === 'string' && c.whySummary.length > 0);
 });
-ok('anonymized profile has competencies + why, no PII/token', () => {
+ok('anonymized profile has competencies + why, no PII/token, includes profileId', () => {
   const p = toAnonymizedProfile(profile);
   const json = JSON.stringify(p);
   assert.ok(!json.includes('USERSECRET'));
   assert.ok(!json.includes('SECRETTOKEN'));
+  assert.strictEqual(p.profileId, String(profile._id));
   assert.strictEqual(p.competencies.length, 2);
   assert.strictEqual(p.evidence.assessments, 14);
   assert.ok(Array.isArray(p.why) && p.why[0].key === 'achieved');

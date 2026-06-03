@@ -38,5 +38,12 @@ ok('ignores unknown/empty filters', () => {
   assert.ok(!('snapshot.readinessBand' in q));
   assert.ok(!('city' in q));
 });
-console.log(`# tests 8\n# pass ${pass}\n# fail ${fail}`);
+ok('workPref hybrid -> no duplicates in $in, includes any', () => {
+  const q = buildQuery({ workPref: 'hybrid' });
+  const arr = q.workPref.$in;
+  assert.strictEqual(arr.length, new Set(arr).size, 'no duplicates');
+  assert.ok(arr.includes('any'));
+  assert.ok(arr.includes('hybrid'));
+});
+console.log(`# tests 9\n# pass ${pass}\n# fail ${fail}`);
 process.exit(fail ? 1 : 0);

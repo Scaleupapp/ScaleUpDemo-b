@@ -27,9 +27,18 @@ ok('band ordering map', () => {
   assert.ok(BAND_RANK.Exceptional > BAND_RANK.Strong && BAND_RANK.Strong > BAND_RANK.Competitive && BAND_RANK.Competitive > BAND_RANK.Developing);
 });
 ok('rank sorts descending + is deterministic', () => {
-  const a = withSnap({ achieved: true }); const b = withSnap({ verified: true }); const c = withSnap({});
+  const a = { _id: 'id_achieved', snapshot: { ...base.snapshot, achieved: true } };
+  const b = { _id: 'id_verified', snapshot: { ...base.snapshot, verified: true } };
+  const c = { _id: 'id_base',     snapshot: { ...base.snapshot } };
   const out = rank([c, a, b]);
-  assert.deepStrictEqual(out.map((x) => x === a ? 'a' : x === b ? 'b' : 'c'), ['a', 'b', 'c']);
+  assert.deepStrictEqual(out.map((x) => x._id), ['id_achieved', 'id_verified', 'id_base']);
 });
-console.log(`# tests 6\n# pass ${pass}\n# fail ${fail}`);
+ok('equal-score profiles sort deterministically (stable tie-break by id)', () => {
+  const p1 = { _id: 'id_aaa', snapshot: { ...base.snapshot } };
+  const p2 = { _id: 'id_bbb', snapshot: { ...base.snapshot } };
+  const r1 = rank([p1, p2]).map(x => x._id);
+  const r2 = rank([p2, p1]).map(x => x._id);
+  assert.deepStrictEqual(r1, r2);
+});
+console.log(`# tests 7\n# pass ${pass}\n# fail ${fail}`);
 process.exit(fail ? 1 : 0);

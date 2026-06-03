@@ -26,12 +26,16 @@ const mk = (id, p) => ({ _id: id, city: 'Bangalore', snapshot: { roleLabel: 'Bac
     assert.strictEqual(out.total, 60);
   });
 
-  await ok('getCandidate returns anonymized profile', async () => {
-    svc._findOne = async () => mk('cccc000000000000cccc0003', { verified: true });
+  await ok('getCandidate returns anonymized profile, no PII', async () => {
+    // proofToken inside snapshot; userId at top level — both must be scrubbed by anonymizer
+    const rawRow = { ...mk('cccc000000000000cccc0003', { verified: true, proofToken: 'SECRETTOKEN' }), userId: 'USERSECRET' };
+    svc._findOne = async () => rawRow;
     const p = await svc.getCandidate('cccc000000000000cccc0003');
     assert.strictEqual(p.verified, true);
     assert.ok(Array.isArray(p.why));
     assert.ok(p.handle.startsWith('Candidate #'));
+    assert.ok(!JSON.stringify(p).includes('USERSECRET'));
+    assert.ok(!JSON.stringify(p).includes('SECRETTOKEN'));
   });
 
   await ok('getCandidate null when not found / not in pool', async () => {
