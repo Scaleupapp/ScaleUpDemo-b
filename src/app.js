@@ -85,6 +85,7 @@ app.use('/api/v1/mindmaps', require('./routes/mindmaps'));
 app.use('/api/v1/audio-summaries', require('./routes/audioSummaries'));
 app.use('/api/v1/note-requests', require('./routes/noteRequests'));
 app.use('/api/v1/interviews', require('./routes/interviews'));
+app.use('/api/employer/auth', require('./routes/employer/auth'));
 // Public, unauthenticated coding routes (opt-in shared profiles). Mounted
 // BEFORE the auth-gated /api/coding router so the public profile read needs
 // no token.
