@@ -87,6 +87,7 @@ app.use('/api/v1/note-requests', require('./routes/noteRequests'));
 app.use('/api/v1/interviews', require('./routes/interviews'));
 app.use('/api/employer/auth', require('./routes/employer/auth'));
 app.use('/api/employer', require('./routes/employer/search'));
+app.use('/api/employer', require('./routes/employer/connections'));
 // Public, unauthenticated coding routes (opt-in shared profiles). Mounted
 // BEFORE the auth-gated /api/coding router so the public profile read needs
 // no token.
