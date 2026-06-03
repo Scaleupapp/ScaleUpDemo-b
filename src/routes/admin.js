@@ -72,4 +72,19 @@ router.get('/calibration', async (req, res) => {
   }
 });
 
+// Employer marketplace — contact-tier approval queue (Hire from ScaleUp, Phase 1)
+const employerApproval = require('../services/employer/employerApprovalService');
+router.get('/employers/pending', async (req, res) => {
+  try { return res.json({ success: true, data: await employerApproval.listPending() }); }
+  catch (e) { console.error('[admin/employers/pending]', e.message); return res.status(500).json({ success: false }); }
+});
+router.post('/employers/:id/approve', async (req, res) => {
+  try { await employerApproval.approve(req.params.id, req.user.userId); return res.json({ success: true }); }
+  catch (e) { console.error('[admin/employers/approve]', e.message); return res.status(500).json({ success: false }); }
+});
+router.post('/employers/:id/reject', async (req, res) => {
+  try { await employerApproval.reject(req.params.id, req.user.userId); return res.json({ success: true }); }
+  catch (e) { console.error('[admin/employers/reject]', e.message); return res.status(500).json({ success: false }); }
+});
+
 module.exports = router;
