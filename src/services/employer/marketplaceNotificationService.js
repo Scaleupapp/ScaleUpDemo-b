@@ -11,8 +11,9 @@ async function _loadEmployerEmail(employerId) {
   return acc ? acc.email : null;
 }
 async function _sendEmail(to, subject, body) {
-  // PILOT: log. Replace with a real mailer alongside the employer magic-link mailer.
-  console.log(`[marketplace-email] to=${to} subject="${subject}"`);
+  // Real send via the shared emailService. The caller (notifyEmployerOfApproval) wraps this
+  // in try/catch, so a send failure stays best-effort and never breaks the connection flow.
+  await require('../emailService').sendBasic(to, subject, body);
   return true;
 }
 

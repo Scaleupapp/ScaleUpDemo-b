@@ -34,9 +34,16 @@ async function _findByToken(tokenHash) {
 }
 async function _save(account) { return account.save(); }
 async function _sendEmail(email, token, kind) {
-  // PILOT: send a magic link. Replace with a real mailer when scaling.
-  // NOTE: token is intentionally NOT logged — log access must not grant auth.
-  console.log(`[employer-auth] ${kind} link issued for ${email}`);
+  // Real send via the shared emailService (nodemailer/SMTP). EMPLOYER_WEB_URL points at
+  // wherever the /hire app is served (default: the current Vercel deployment).
+  const base = process.env.EMPLOYER_WEB_URL || 'https://scaleup-web-seven.vercel.app/hire';
+  const url = `${base}/auth/callback?token=${token}`;
+  try {
+    await require('../emailService').sendEmployerSignInLink(email, url, kind);
+  } catch (e) {
+    // Don't block signup/login on an SMTP hiccup. Token is intentionally NOT logged.
+    console.warn(`[employer-auth] sign-in email failed for ${email} (${e.message})`);
+  }
   return true;
 }
 

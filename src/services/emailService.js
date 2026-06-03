@@ -119,6 +119,29 @@ class EmailService {
       `,
     });
   }
+
+  // ---- Hire from ScaleUp (employer side) ----
+
+  // Magic-link sign-in / verify for an employer (no learner account; identified by email).
+  async sendEmployerSignInLink(email, url, kind = 'sign-in') {
+    const verifying = kind === 'verify';
+    await this.transporter.sendMail({
+      from: this.from,
+      to: email,
+      subject: verifying ? 'Verify your ScaleUp Hire account' : 'Your ScaleUp Hire sign-in link',
+      html: `
+        <h2>${verifying ? 'Verify your account' : 'Sign in to ScaleUp Hire'}</h2>
+        <p>Click below to ${verifying ? 'verify your account and start browsing candidates' : 'sign in'}. This link expires in <strong>30 minutes</strong>.</p>
+        <p style="margin:24px 0;"><a href="${url}" style="display:inline-block;padding:12px 24px;background:#0C5C68;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">${verifying ? 'Verify & continue' : 'Sign in'}</a></p>
+        <p style="font-size:0.875rem;color:#888;">If you didn't request this, you can safely ignore this email.</p>
+      `,
+    });
+  }
+
+  // Generic transactional send (subject + HTML/text body). Used by marketplace notifications.
+  async sendBasic(to, subject, body) {
+    await this.transporter.sendMail({ from: this.from, to, subject, html: body });
+  }
 }
 
 module.exports = new EmailService();
