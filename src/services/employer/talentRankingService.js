@@ -43,3 +43,25 @@ function rank(profiles) {
 }
 
 module.exports = { BAND_RANK, scoreOne, rank };
+
+// Evidence-backed "why this rank" — only signals that are actually present, in priority order.
+function explain(profile) {
+  const s = (profile && profile.snapshot) || {};
+  const e = s.evidence || {};
+  const out = [];
+  if (s.achieved) out.push({ key: 'achieved', kind: 'good', label: 'Achieved their goal', detail: 'Reported a confirmed outcome after reaching readiness — the strongest signal there is.' });
+  if (s.verified) out.push({ key: 'verified', kind: 'good', label: 'Independently verifiable', detail: 'Published a point-in-time proof badge anyone can check.' });
+  if (s.readinessBand && s.readinessBand !== 'Developing') {
+    const vs = typeof s.target === 'number' ? ` (${s.readinessScore} vs ${s.target} target)` : '';
+    out.push({ key: 'band', kind: 'band', label: `${s.readinessBand} band${vs}`, detail: `Cleared the ${s.readinessBand} bar this role requires${vs}.` });
+  }
+  const count = (e.assessments || 0) + (e.capstonesGraded || 0) + (e.interviews || 0);
+  if (count > 0) {
+    const cov = typeof e.coveragePct === 'number' ? `, ${e.coveragePct}% of the role measured` : '';
+    out.push({ key: 'evidence', kind: 'evidence', label: 'Backed by real evidence', detail: `${count} assessment${count === 1 ? '' : 's'}${cov}.` });
+  }
+  if (_recencyPoints(s.lastActiveAt) >= 15) out.push({ key: 'recency', kind: 'recency', label: 'Recently active', detail: 'A fresh signal — readiness reflects current ability, not a stale snapshot.' });
+  return out;
+}
+
+module.exports.explain = explain;
