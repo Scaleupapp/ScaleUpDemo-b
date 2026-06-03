@@ -25,7 +25,10 @@ const DrillAttempt = require('../../coding/models/drillAttempt.model');
 const MetaSkillMastery = require('../../coding/models/metaSkillMastery.model');
 const Content = require('../../models/Content');
 
+const mongoose = require('mongoose');
+
 const SNAPSHOT_TTL_MS = 90 * 1000;
+// In-process cache — per Node process; invalidate() clears only this process's copy.
 const _cache = new Map(); // userId -> { at, snap }
 
 async function safe(fn, fallback) {
@@ -90,12 +93,17 @@ function emptyPulse() {
 
 async function buildPulseSlice(userId) {
   const p = emptyPulse();
-  const [quizzes, interviews, comp, contentCount, contentDocs, capstones, drills, mastery, notesCount] = await Promise.all([
+  const [quizzes, interviews, comp, contentAgg, capstones, drills, mastery, notesCount] = await Promise.all([
     safe(() => QuizAttempt.find({ userId, status: 'completed' }).sort({ completedAt: -1 }).limit(20).lean(), []),
     safe(() => InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] } }).sort({ completedAt: -1 }).limit(20).lean(), []),
     safe(() => CompetitionProfile.findOne({ userId }).lean(), null),
-    safe(() => ContentProgress.countDocuments({ userId, isCompleted: true }), 0),
-    safe(() => ContentProgress.find({ userId, isCompleted: true }).lean(), []),
+    safe(() => {
+      const userOid = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(String(userId)) : userId;
+      return ContentProgress.aggregate([
+        { $match: { userId: userOid, isCompleted: true } },
+        { $group: { _id: null, count: { $sum: 1 }, totalTime: { $sum: '$totalTimeSpent' } } },
+      ]);
+    }, []),
     safe(() => CapstoneSession.find({ user_id: userId, status: 'graded' }).lean(), []),
     safe(() => DrillAttempt.find({ user_id: userId, status: 'graded' }).lean(), []),
     safe(() => MetaSkillMastery.findOne({ user_id: userId }).lean(), null),
@@ -107,7 +115,8 @@ async function buildPulseSlice(userId) {
   dimAvgs.sort((a, b) => a.v - b.v);
   p.interviews = { count: interviews.length, avgScore: avg(interviews.map((i) => i.evaluation?.overallScore)), weakestDimension: dimAvgs[0]?.d || null };
   p.competitions = { count: comp?.totalChallengesCompleted || 0, bestScore: null, streak: comp?.currentChallengeStreak || 0 };
-  p.content = { completedCount: contentCount, minutesSpent: Math.round(contentDocs.reduce((a, c) => a + (c.totalTimeSpent || 0), 0) / 60) };
+  const cInfo = contentAgg[0] || { count: 0, totalTime: 0 };
+  p.content = { completedCount: cInfo.count, minutesSpent: Math.round((cInfo.totalTime || 0) / 60) };
   const allCodingScores = [
     ...capstones.map((s) => s.result?.overall_score),
     ...drills.map((d) => d.grade?.overall_score),
@@ -127,7 +136,7 @@ function emptySignals() {
 async function buildSignalsSlice(userId) {
   const [deep, plan, comp] = await Promise.all([
     safe(() => userContextService.getUserContext(userId), null),
-    safe(() => Plan.findOne({ userId, status: { $in: ['active', 'ready'] } }).lean(), null),
+    safe(() => Plan.findOne({ userId, isActive: true }).lean(), null),
     safe(() => CompetitionProfile.findOne({ userId }).lean(), null),
   ]);
   const due = (deep?.dueForReview || []).map((d) => d.concept).filter(Boolean);
@@ -135,11 +144,20 @@ async function buildSignalsSlice(userId) {
     dueForReviewCount: due.length,
     dueConcepts: due.slice(0, 5),
     misconceptions: (deep?.misconceptions || []).slice(0, 3).map((m) => ({ tag: m.tag, explanation: m.explanation })),
-    plan: plan ? {
-      week: plan.currentWeek, totalWeeks: plan.totalWeeks,
-      tasksDone: (plan.tasks || []).filter((t) => t.weekNumber === plan.currentWeek && t.completedAt).length,
-      tasksTotal: (plan.tasks || []).filter((t) => t.weekNumber === plan.currentWeek).length,
-    } : null,
+    plan: (() => {
+      if (!plan) return null;
+      const totalWeeks = (plan.weeklySchedule || []).length;
+      const weeksElapsed = plan.createdAt ? Math.floor((Date.now() - new Date(plan.createdAt)) / (7 * 24 * 3600 * 1000)) + 1 : 1;
+      const currentWeek = Math.min(Math.max(weeksElapsed, 1), Math.max(totalWeeks, 1));
+      const wk = (plan.weeklySchedule || []).find((w) => w.week === currentWeek);
+      const tasks = wk?.tasks || [];
+      return {
+        week: currentWeek,
+        totalWeeks,
+        tasksDone: tasks.filter((t) => t.progress?.status === 'complete' || t.progress?.completedAt).length,
+        tasksTotal: tasks.length,
+      };
+    })(),
     streak: comp?.currentChallengeStreak || 0,
   };
 }

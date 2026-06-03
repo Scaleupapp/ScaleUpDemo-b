@@ -31,10 +31,10 @@ function stubAll() {
     { topic: 'arrays', score: 82, trend: 'improving', quizzesTaken: 3 },
     { topic: 'recursion', score: 40, trend: 'declining', quizzesTaken: 2 },
   ] }) }) });
-  stub(PLAN, { findOne: () => ({ lean: async () => ({ currentWeek: 2, totalWeeks: 6, tasks: [] }) }) });
+  stub(PLAN, { findOne: () => ({ lean: async () => ({ isActive: true, createdAt: new Date(), weeklySchedule: [{ week: 1, tasks: [{ progress: { status: 'complete', completedAt: new Date() } }, { progress: { status: 'pending' } }] }] }) }) });
   stub(QA, { find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [{ score: { percentage: 80 } }, { score: { percentage: 60 } }] }) }) }) });
   stub(IS, { find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }) });
-  stub(CP, { countDocuments: async () => 4, find: () => ({ lean: async () => [{ totalTimeSpent: 600 }] }) });
+  stub(CP, { aggregate: async () => [{ _id: null, count: 4, totalTime: 600 }] });
   stub(COMPPROF, { findOne: () => ({ lean: async () => ({ currentChallengeStreak: 3, totalChallengesCompleted: 5 }) }) });
   stub(CAPSTONE, { find: () => ({ lean: async () => [{ result: { overall_score: 85 } }] }) });
   stub(DRILL, { find: () => ({ lean: async () => [{ grade: { overall_score: 70 } }] }) });
@@ -52,7 +52,10 @@ test('getSnapshot: composes readiness, mastery, pulse and signals', async () => 
   assert.equal(snap.mastery.weak[0].topic, 'recursion');
   assert.equal(snap.pulse.quizzes.count, 2);
   assert.equal(snap.pulse.quizzes.avgPercent, 70);
-  assert.equal(snap.signals.plan.week, 2);
+  assert.equal(snap.signals.plan.week, 1);
+  assert.equal(snap.signals.plan.tasksTotal, 2);
+  assert.equal(snap.signals.plan.tasksDone, 1);
+  assert.equal(snap.pulse.content.completedCount, 4);
   assert.ok(snap.pulse.coding.gradedCount >= 1);
   assert.ok(typeof snap.pulse.notes.count === 'number');
 });
@@ -73,4 +76,7 @@ test('renderSnapshot: produces non-empty prompt text from a snapshot', async () 
   const text = svc.renderSnapshot(snap);
   assert.match(text, /readiness/i);
   assert.match(text, /recursion/);
+  assert.match(text, /Strong:/);
+  assert.match(text, /Weak:/);
+  assert.match(text, /Activity:/);
 });
