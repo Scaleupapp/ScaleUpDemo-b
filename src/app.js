@@ -105,6 +105,7 @@ app.use('/api/public/proof', require('./routes/publicProof'));
 const V2_API_ENABLED = process.env.V2_API_ENABLED !== 'false';
 if (V2_API_ENABLED) {
   app.use('/api/v2', require('./routes/v2'));
+  app.use('/api/v2/you/talent', require('./routes/v2/talent'));
 } else {
   // Even when disabled, answer the config probe so clients know to use v1.
   app.get('/api/v2/config', (_req, res) =>
