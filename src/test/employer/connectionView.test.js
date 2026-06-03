@@ -13,6 +13,7 @@ ok('employerView pending: NO candidate PII', () => {
   const v = employerView({ _id: 'c1', status: 'requested', message: 'hi', createdAt: new Date() }, profile, candidate);
   const json = JSON.stringify(v);
   assert.ok(!json.includes('Priya') && !json.includes('priya@x.com') && !json.includes('+91999'));
+  assert.ok(!json.includes('PTOKEN'));
   assert.ok(v.handle.startsWith('Candidate #'));
   assert.strictEqual(v.status, 'requested');
   assert.strictEqual(v.reveal, undefined);

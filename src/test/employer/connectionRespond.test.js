@@ -38,7 +38,7 @@ function ok(d, fn){ return Promise.resolve().then(fn).then(()=>{pass++;}).catch(
       { _id: 'c1', status: 'requested', talentProfileId: 'p1', candidateUserId: 'u1' },
       { _id: 'c2', status: 'approved', talentProfileId: 'p2', candidateUserId: 'u2' },
     ];
-    svc._loadProfile = async (id) => ({ _id: id, snapshot: { roleLabel: 'BE', proofToken: 'T' } });
+    svc._loadProfileForDisplay = async (id) => ({ _id: id, snapshot: { roleLabel: 'BE', proofToken: 'T' } });
     svc._loadCandidate = async (id) => ({ firstName: 'Priya', lastName: 'S', email: 'p@x.com', phone: '+91' });
     const list = await svc.listForEmployer('e1');
     assert.strictEqual(list[0].reveal, undefined);          // pending: masked
