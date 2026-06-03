@@ -15,6 +15,9 @@ const FLAGS = {
   // Readiness redesign Phase 4B: when off (default) the heuristic target is served.
   // Flip to 'true' to serve the evidence-based calibrated target when sufficient data.
   FEATURE_OUTCOME_CALIBRATED_TARGET: process.env.FEATURE_OUTCOME_CALIBRATED_TARGET === 'true',
+  // Hire from ScaleUp employer marketplace. Off by default — Phase 1 ships the
+  // data + consent + employer-auth foundation inert until later phases add UI.
+  FEATURE_EMPLOYER_MARKETPLACE: process.env.FEATURE_EMPLOYER_MARKETPLACE === 'true',
 };
 
 function isEnabled(flag) {
@@ -27,6 +30,7 @@ module.exports = {
   compositeReadiness: FLAGS.FEATURE_COMPOSITE_READINESS,
   objectiveTarget: FLAGS.FEATURE_OBJECTIVE_TARGET,
   outcomeCalibratedTarget: FLAGS.FEATURE_OUTCOME_CALIBRATED_TARGET,
+  employerMarketplace: FLAGS.FEATURE_EMPLOYER_MARKETPLACE,
   FLAGS,
   isEnabled,
 };
