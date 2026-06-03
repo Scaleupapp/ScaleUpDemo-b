@@ -1,6 +1,11 @@
 // src/services/employer/connectionService.js
 'use strict';
 
+// Best-effort marketplace hooks: a failed audit/notify/analytics call must NEVER break
+// the user-facing express-interest/respond flow. Fire-and-forget + swallow all errors.
+function _hook(fn) { Promise.resolve().then(fn).catch((e) => console.warn('[marketplace-hook]', e.message)); }
+function _event(evt, props) { try { require('../diagnosticTelemetryService').logEvent(evt, props); } catch (_) {} }
+
 async function _loadProfile(talentProfileId) {
   const TalentProfile = require('../../models/TalentProfile');
   return TalentProfile.findOne({ _id: talentProfileId, optedIn: true, status: 'active' }).lean();
@@ -23,7 +28,12 @@ async function expressInterest(employerId, talentProfileId, { message, roleConte
   if (!profile || !profile.optedIn || profile.status !== 'active') throw new Error('PROFILE_UNAVAILABLE');
   const key = { employerId, candidateUserId: profile.userId, objectiveId: profile.objectiveId };
   const patch = { $setOnInsert: { talentProfileId: profile._id, message: message || '', roleContext: roleContext || '', status: 'requested' } };
-  return module.exports._upsertConnection(key, patch);
+  const conn = await module.exports._upsertConnection(key, patch);
+  // Best-effort: durable audit, candidate push (employer identity masked), analytics.
+  _hook(() => require('./marketplaceAuditService').logInterest({ employerId, candidateUserId: profile.userId, talentProfileId: profile._id, connectionId: conn._id }));
+  _hook(() => require('./marketplaceNotificationService').notifyCandidateOfInterest(profile.userId, { roleContext }));
+  _event('marketplace.interest_sent', { employerId: String(employerId), candidateUserId: String(profile.userId) });
+  return conn;
 }
 
 module.exports = { expressInterest, _loadProfile, _loadProfileForDisplay, _upsertConnection };
@@ -63,6 +73,12 @@ async function respond(connectionId, candidateUserId, decision) {
   await conn.save();
   if (decision === 'approved') {
     console.info(`[audit] connection.approved connectionId=${conn._id} employerId=${conn.employerId} candidateUserId=${conn.candidateUserId} at=${conn.respondedAt.toISOString()}`);
+    // Best-effort: durable reveal log + employer email + analytics (additive to the console line above).
+    _hook(() => require('./marketplaceAuditService').logReveal({ employerId: conn.employerId, candidateUserId: conn.candidateUserId, connectionId: conn._id }));
+    _hook(() => require('./marketplaceNotificationService').notifyEmployerOfApproval(conn.employerId, { connectionId: conn._id }));
+    _event('marketplace.connection_approved', { connectionId: String(conn._id), employerId: String(conn.employerId) });
+  } else {
+    _event('marketplace.connection_declined', { connectionId: String(conn._id) });
   }
   return conn;
 }
