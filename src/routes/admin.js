@@ -2,6 +2,7 @@ const router = require('express').Router();
 const ctrl = require('../controllers/adminController');
 const auth = require('../middleware/auth');
 const rbac = require('../middleware/rbac');
+const featureFlags = require('../config/featureFlags');
 
 router.use(auth, rbac('admin'));
 
@@ -75,15 +76,28 @@ router.get('/calibration', async (req, res) => {
 // Employer marketplace — contact-tier approval queue (Hire from ScaleUp, Phase 1)
 const employerApproval = require('../services/employer/employerApprovalService');
 router.get('/employers/pending', async (req, res) => {
-  try { return res.json({ success: true, data: await employerApproval.listPending() }); }
+  try {
+    if (!featureFlags.employerMarketplace) return res.status(404).json({ success: false, message: 'Not found' });
+    return res.json({ success: true, data: await employerApproval.listPending() });
+  }
   catch (e) { console.error('[admin/employers/pending]', e.message); return res.status(500).json({ success: false }); }
 });
 router.post('/employers/:id/approve', async (req, res) => {
-  try { await employerApproval.approve(req.params.id, req.user.userId); return res.json({ success: true }); }
+  try {
+    if (!featureFlags.employerMarketplace) return res.status(404).json({ success: false, message: 'Not found' });
+    const updated = await employerApproval.approve(req.params.id, req.user.userId);
+    if (!updated) return res.status(404).json({ success: false, message: 'Employer not found' });
+    return res.json({ success: true });
+  }
   catch (e) { console.error('[admin/employers/approve]', e.message); return res.status(500).json({ success: false }); }
 });
 router.post('/employers/:id/reject', async (req, res) => {
-  try { await employerApproval.reject(req.params.id, req.user.userId); return res.json({ success: true }); }
+  try {
+    if (!featureFlags.employerMarketplace) return res.status(404).json({ success: false, message: 'Not found' });
+    const updated = await employerApproval.reject(req.params.id, req.user.userId);
+    if (!updated) return res.status(404).json({ success: false, message: 'Employer not found' });
+    return res.json({ success: true });
+  }
   catch (e) { console.error('[admin/employers/reject]', e.message); return res.status(500).json({ success: false }); }
 });
 

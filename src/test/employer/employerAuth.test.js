@@ -13,15 +13,20 @@ function ok(d, fn){ return Promise.resolve().then(fn).then(()=>{pass++;}).catch(
     assert.strictEqual(svc.isWorkEmail('hr@techco.com'), true);
   });
 
+  await ok('rejects free-email subdomain bypass (hr@sub.gmail.com)', async () => {
+    assert.strictEqual(svc.isWorkEmail('hr@sub.gmail.com'), false);
+    assert.strictEqual(svc.isWorkEmail('hr@techco.com'), true);
+  });
+
   let saved = null, sentToken = null;
-  svc._upsertByEmail = async (email, patch) => { saved = { email, patch }; return { _id: 'e1', email, ...patch }; };
+  svc._upsertByEmail = async (email, patch) => { saved = { email, patch }; return { _id: 'e1', email, ...patch.set, ...patch.setOnInsert }; };
   svc._sendEmail = async (email, token, kind) => { sentToken = token; return true; };
 
   await ok('signup stores hashed token + sends', async () => {
     const r = await svc.signup({ email: 'hr@techco.com', companyName: 'TechCo', name: 'Aarti' });
     assert.strictEqual(r.ok, true);
-    assert.ok(saved.patch.authTokenHash);
-    assert.notStrictEqual(saved.patch.authTokenHash, sentToken); // stored hashed, not raw
+    assert.ok(saved.patch.set.authTokenHash);
+    assert.notStrictEqual(saved.patch.set.authTokenHash, sentToken); // stored hashed, not raw
   });
 
   await ok('signup rejects gmail', async () => {
@@ -47,6 +52,6 @@ function ok(d, fn){ return Promise.resolve().then(fn).then(()=>{pass++;}).catch(
     await assert.rejects(() => svc.verifyEmail('t'), /TOKEN_INVALID/);
   });
 
-  console.log(`# tests 5\n# pass ${pass}\n# fail ${fail}`);
+  console.log(`# tests 6\n# pass ${pass}\n# fail ${fail}`);
   process.exit(fail ? 1 : 0);
 })();

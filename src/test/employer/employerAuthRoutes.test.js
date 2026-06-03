@@ -1,6 +1,7 @@
 // src/test/employer/employerAuthRoutes.test.js
 'use strict';
 const assert = require('assert');
+const featureFlags = require('../../config/featureFlags');
 const h = require('../../routes/employer/auth');
 let pass = 0, fail = 0;
 function ok(d, fn){ return Promise.resolve().then(fn).then(()=>{pass++;}).catch(e=>{fail++;console.error(d, e.message);}); }
@@ -25,6 +26,22 @@ function res(){ return { code:200, body:null, status(c){this.code=c;return this;
     await h.verifyHandler({ body: { token: 't' } }, r);
     assert.strictEqual(r.body.data.jwt, 'jwt123');
   });
-  console.log(`# tests 3\n# pass ${pass}\n# fail ${fail}`);
+
+  await ok('flagGuard returns 404 when employerMarketplace off', async () => {
+    const original = featureFlags.employerMarketplace;
+    featureFlags.employerMarketplace = false;
+    try {
+      const r = res();
+      let nextCalled = false;
+      h.flagGuard({ }, r, () => { nextCalled = true; });
+      assert.strictEqual(r.code, 404);
+      assert.strictEqual(r.body.success, false);
+      assert.strictEqual(nextCalled, false);
+    } finally {
+      featureFlags.employerMarketplace = original;
+    }
+  });
+
+  console.log(`# tests 4\n# pass ${pass}\n# fail ${fail}`);
   process.exit(fail ? 1 : 0);
 })();

@@ -9,7 +9,9 @@ const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 min
 function isWorkEmail(email) {
   const m = String(email || '').toLowerCase().match(/^[^@\s]+@([^@\s]+\.[^@\s]+)$/);
   if (!m) return false;
-  return !FREE_DOMAINS.has(m[1]);
+  const d = m[1];
+  const tld1 = d.split('.').slice(-2).join('.');
+  return !FREE_DOMAINS.has(d) && !FREE_DOMAINS.has(tld1);
 }
 function _hash(raw) { return crypto.createHash('sha256').update(String(raw)).digest('hex'); }
 function _mintToken() { return crypto.randomBytes(24).toString('base64url'); }
@@ -18,9 +20,13 @@ function _issueJWT(account) {
 }
 
 // --- DB / IO seams (stubbable) ---
-async function _upsertByEmail(email, patch) {
+async function _upsertByEmail(email, { setOnInsert = {}, set = {} }) {
   const EmployerAccount = require('../../models/EmployerAccount');
-  return EmployerAccount.findOneAndUpdate({ email }, { $set: patch }, { upsert: true, new: true, setDefaultsOnInsert: true });
+  return EmployerAccount.findOneAndUpdate(
+    { email },
+    { $setOnInsert: setOnInsert, $set: set },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 }
 async function _findByToken(tokenHash) {
   const EmployerAccount = require('../../models/EmployerAccount');
@@ -28,9 +34,9 @@ async function _findByToken(tokenHash) {
 }
 async function _save(account) { return account.save(); }
 async function _sendEmail(email, token, kind) {
-  // PILOT: log a magic link. Replace with a real mailer when scaling.
-  const base = process.env.EMPLOYER_WEB_URL || 'https://hire.scaleupapp.club';
-  console.log(`[employer-auth] ${kind} link for ${email}: ${base}/auth/callback?token=${token}`);
+  // PILOT: send a magic link. Replace with a real mailer when scaling.
+  // NOTE: token is intentionally NOT logged — log access must not grant auth.
+  console.log(`[employer-auth] ${kind} link issued for ${email}`);
   return true;
 }
 
@@ -39,8 +45,8 @@ async function signup({ email, companyName, name, title, linkedIn }) {
   if (!isWorkEmail(email)) throw new Error('WORK_EMAIL_REQUIRED');
   const token = _mintToken();
   await module.exports._upsertByEmail(email, {
-    companyName, name, title, linkedIn,
-    authTokenHash: _hash(token), authTokenExpires: new Date(Date.now() + TOKEN_TTL_MS),
+    setOnInsert: { companyName, name, title, linkedIn },
+    set: { authTokenHash: _hash(token), authTokenExpires: new Date(Date.now() + TOKEN_TTL_MS) },
   });
   await module.exports._sendEmail(email, token, 'verify');
   return { ok: true };
