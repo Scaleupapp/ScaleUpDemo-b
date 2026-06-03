@@ -84,6 +84,7 @@ async function optIn(userId, prefs = {}) {
     ...(prefs.workPref != null ? { workPref: prefs.workPref } : {}),
   };
   await module.exports._upsertProfile(userId, objective._id, patch);
+  try { require('../diagnosticTelemetryService').logEvent('marketplace.opt_in', { userId: String(userId) }); } catch (_) {}
   return { ok: true };
 }
 
@@ -92,6 +93,7 @@ async function optOut(userId) {
   const objective = await module.exports._getPrimaryObjective(userId);
   if (!objective) return { ok: true };
   await module.exports._upsertProfile(userId, objective._id, { optedIn: false, status: 'paused' });
+  try { require('../diagnosticTelemetryService').logEvent('marketplace.opt_out', { userId: String(userId) }); } catch (_) {}
   return { ok: true };
 }
 

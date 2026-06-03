@@ -24,6 +24,10 @@ module.exports = { buildQuery };
 
 const DEFAULT_LIMIT = 25;
 
+// Best-effort marketplace hooks: audit/analytics must NEVER break search/getCandidate.
+function _event(evt, props) { try { require('../diagnosticTelemetryService').logEvent(evt, props); } catch (_) {} }
+function _hook(fn) { Promise.resolve().then(fn).catch(() => {}); }
+
 async function _find(query) {
   const TalentProfile = require('../../models/TalentProfile');
   return TalentProfile.find(query).lean();
@@ -38,13 +42,19 @@ async function search(filters = {}, opts = {}) {
   const limit = Math.max(1, Math.min(100, opts.limit || DEFAULT_LIMIT));
   const rows = await module.exports._find(buildQuery(filters));
   const ranked = ranking.rank(rows);
+  _event('marketplace.search', { employerId: opts.employerId ? String(opts.employerId) : null, total: ranked.length });
   return { total: ranked.length, results: ranked.slice(0, limit).map(anonymizer.toBrowseCard) };
 }
 
 // One candidate's anonymized profile (only if still in the pool).
-async function getCandidate(id) {
+async function getCandidate(id, ctx = {}) {
   const row = await module.exports._findOne(id);
   if (!row) return null;
+  // Best-effort: durable view audit + analytics (only when we know the viewing employer).
+  if (ctx.employerId) {
+    _hook(() => require('./marketplaceAuditService').logView({ employerId: ctx.employerId, talentProfileId: id }));
+    _event('marketplace.candidate_view', { employerId: String(ctx.employerId), talentProfileId: String(id) });
+  }
   return anonymizer.toAnonymizedProfile(row);
 }
 

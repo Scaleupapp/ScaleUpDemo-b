@@ -21,13 +21,13 @@ async function searchHandler(req, res) {
       workPref: q.workPref || undefined, proof: q.proof || undefined,
     };
     const limit = q.limit ? parseInt(q.limit, 10) : undefined;
-    return res.status(200).json({ success: true, data: await module.exports._svc.search(filters, { limit }) });
+    return res.status(200).json({ success: true, data: await module.exports._svc.search(filters, { limit, employerId: req.employer && req.employer.employerId }) });
   } catch (err) { console.error('[employer/search]', err.message); return res.status(500).json({ success: false, message: 'Search failed.' }); }
 }
 
 async function candidateHandler(req, res) {
   try {
-    const p = await module.exports._svc.getCandidate(req.params.id);
+    const p = await module.exports._svc.getCandidate(req.params.id, { employerId: req.employer && req.employer.employerId });
     if (!p) return res.status(404).json({ success: false, message: 'Candidate not found or no longer available.' });
     return res.status(200).json({ success: true, data: p });
   } catch (err) {
