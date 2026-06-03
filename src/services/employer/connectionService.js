@@ -94,3 +94,17 @@ module.exports._findForCandidate = _findForCandidate;
 module.exports._findForEmployer = _findForEmployer;
 module.exports._loadEmployer = _loadEmployer;
 module.exports._loadCandidate = _loadCandidate;
+
+async function _adminFind() {
+  const ConnectionRequest = require('../../models/ConnectionRequest');
+  return ConnectionRequest.find({}).sort({ createdAt: -1 }).limit(200)
+    .select('employerId candidateUserId status createdAt respondedAt roleContext').lean();
+}
+// Read-only abuse-monitoring rollup for admins.
+async function adminList() {
+  const rows = await module.exports._adminFind();
+  const byStatus = rows.reduce((m, r) => { m[r.status] = (m[r.status] || 0) + 1; return m; }, {});
+  return { total: rows.length, byStatus, rows };
+}
+module.exports.adminList = adminList;
+module.exports._adminFind = _adminFind;

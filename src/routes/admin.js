@@ -101,4 +101,12 @@ router.post('/employers/:id/reject', async (req, res) => {
   catch (e) { console.error('[admin/employers/reject]', e.message); return res.status(500).json({ success: false }); }
 });
 
+// Phase 3 — connection monitoring (abuse oversight, read-only)
+router.get('/connections', async (req, res) => {
+  try {
+    if (!featureFlags.employerMarketplace) return res.status(404).json({ success: false, message: 'Not found' });
+    return res.json({ success: true, data: await require('../services/employer/connectionService').adminList() });
+  } catch (e) { console.error('[admin/connections]', e.message); return res.status(500).json({ success: false }); }
+});
+
 module.exports = router;
