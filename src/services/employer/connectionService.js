@@ -21,3 +21,66 @@ async function expressInterest(employerId, talentProfileId, { message, roleConte
 }
 
 module.exports = { expressInterest, _loadProfile, _upsertConnection };
+
+const views = require('./connectionViewService');
+
+async function _loadConnectionById(id) {
+  const ConnectionRequest = require('../../models/ConnectionRequest');
+  return ConnectionRequest.findById(id);
+}
+async function _findForCandidate(candidateUserId) {
+  const ConnectionRequest = require('../../models/ConnectionRequest');
+  return ConnectionRequest.find({ candidateUserId }).sort({ createdAt: -1 }).lean();
+}
+async function _findForEmployer(employerId) {
+  const ConnectionRequest = require('../../models/ConnectionRequest');
+  return ConnectionRequest.find({ employerId }).sort({ createdAt: -1 }).lean();
+}
+async function _loadEmployer(id) {
+  const EmployerAccount = require('../../models/EmployerAccount');
+  return EmployerAccount.findById(id).select('companyName name email').lean();
+}
+async function _loadCandidate(id) {
+  const User = require('../../models/User');
+  return User.findById(id).select('firstName lastName email phone').lean();
+}
+
+// Candidate approves/declines an incoming request they own.
+async function respond(connectionId, candidateUserId, decision) {
+  if (decision !== 'approved' && decision !== 'declined') throw new Error('BAD_DECISION');
+  const conn = await module.exports._loadConnectionById(connectionId);
+  if (!conn || String(conn.candidateUserId) !== String(candidateUserId)) throw new Error('NOT_FOUND');
+  if (conn.status !== 'requested') throw new Error('ALREADY_RESPONDED');
+  conn.status = decision;
+  conn.respondedAt = new Date();
+  await conn.save();
+  return conn;
+}
+
+// Candidate inbox — employer masked unless approved.
+async function listForCandidate(candidateUserId) {
+  const rows = await module.exports._findForCandidate(candidateUserId);
+  return Promise.all(rows.map(async (c) => {
+    const employer = c.status === 'approved' ? await module.exports._loadEmployer(c.employerId) : null;
+    return views.candidateView(c, employer);
+  }));
+}
+
+// Employer's sent list — candidate revealed only on approval.
+async function listForEmployer(employerId) {
+  const rows = await module.exports._findForEmployer(employerId);
+  return Promise.all(rows.map(async (c) => {
+    const profile = await module.exports._loadProfile(c.talentProfileId);
+    const candidate = c.status === 'approved' ? await module.exports._loadCandidate(c.candidateUserId) : null;
+    return views.employerView(c, profile, candidate);
+  }));
+}
+
+module.exports.respond = respond;
+module.exports.listForCandidate = listForCandidate;
+module.exports.listForEmployer = listForEmployer;
+module.exports._loadConnectionById = _loadConnectionById;
+module.exports._findForCandidate = _findForCandidate;
+module.exports._findForEmployer = _findForEmployer;
+module.exports._loadEmployer = _loadEmployer;
+module.exports._loadCandidate = _loadCandidate;
