@@ -1194,6 +1194,7 @@ async function getActiveThread(userId) {
       content: m.content,
       mode: m.mode,
       followups: m.followups || [],
+      cards: m.cards || [],
       createdAt: m.createdAt,
     })),
   };

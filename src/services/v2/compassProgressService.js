@@ -250,7 +250,7 @@ async function competitionResult(userId) {
   return {
     activityType: 'competition',
     title: topic ? `Challenge: ${topic}` : 'Daily challenge',
-    date: module.exports._fmt.fmtDate(a.completedAt),
+    date: fmtDate(a.completedAt),
     overallScore: a.handicappedScore ?? a.rawScore ?? null,
     scoreLabel: raw != null ? `${raw}% (raw)` : '—',
     dimensions: [],
@@ -338,17 +338,25 @@ async function getTopicDetail(userId, topic) {
 }
 
 async function listRecentActivity(userId, limit = 8, type = null) {
-  // Reuse the merged timeline the /you/activities route builds. If a shared
-  // builder isn't yet extracted, assemble a lightweight merge here.
+  // Assemble a lightweight merged timeline across all six activity types.
+  const ChallengeAttempt = require('../../models/ChallengeAttempt');
   const items = [];
-  const [quizzes, interviews] = await Promise.all([
+  const [quizzes, interviews, capstones, drills, challenges, content] = await Promise.all([
     safe(() => QuizAttempt.find({ userId, status: 'completed' }).sort({ completedAt: -1 }).limit(limit).lean(), []),
     safe(() => InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] } }).sort({ completedAt: -1 }).limit(limit).lean(), []),
+    safe(() => CapstoneSession.find({ user_id: userId, status: 'graded' }).sort({ graded_at: -1 }).limit(limit).lean(), []),
+    safe(() => DrillAttempt.find({ user_id: userId, status: 'graded' }).sort({ submitted_at: -1 }).limit(limit).lean(), []),
+    safe(() => ChallengeAttempt.find({ userId, completedAt: { $ne: null } }).sort({ completedAt: -1 }).limit(limit).lean(), []),
+    safe(() => ContentProgress.find({ userId, isCompleted: true }).sort({ completedAt: -1 }).limit(limit).lean(), []),
   ]);
-  for (const q of quizzes) items.push({ type: 'quiz', title: 'Quiz', score: q.score?.percentage ?? null, date: module.exports._fmt.fmtDate(q.completedAt) });
-  for (const i of interviews) items.push({ type: 'interview', title: (i.interviewType || 'interview').replace(/_/g, ' '), score: i.evaluation?.overallScore ?? null, date: module.exports._fmt.fmtDate(i.completedAt) });
+  for (const q of quizzes) items.push({ type: 'quiz', title: 'Quiz', score: q.score?.percentage ?? null, date: fmtDate(q.completedAt) });
+  for (const i of interviews) items.push({ type: 'interview', title: (i.interviewType || 'interview').replace(/_/g, ' '), score: i.evaluation?.overallScore ?? null, date: fmtDate(i.completedAt) });
+  for (const c of capstones) items.push({ type: 'coding', title: 'Coding capstone', score: c.result?.overall_score ?? null, date: fmtDate(c.graded_at) });
+  for (const d of drills) items.push({ type: 'coding', title: 'Coding drill', score: d.grade?.overall_score ?? null, date: fmtDate(d.submitted_at) });
+  for (const ch of challenges) items.push({ type: 'competition', title: 'Daily challenge', score: ch.rawScore ?? null, date: fmtDate(ch.completedAt) });
+  for (const cp of content) items.push({ type: 'content', title: 'Content', score: cp.percentageCompleted ?? null, date: fmtDate(cp.completedAt) });
   const filtered = type ? items.filter((x) => x.type === type) : items;
-  return filtered.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, limit);
+  return filtered.filter((x) => x.date).sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, limit);
 }
 
 module.exports = { getSnapshot, renderSnapshot, invalidate, explainReadiness, getLatestResult, findActivity, listWeakTopics, getTopicDetail, listRecentActivity };
