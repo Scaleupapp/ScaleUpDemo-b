@@ -137,6 +137,20 @@ components:
                 - type: string
                 - type: 'null'
 
+    CompassCard:
+      type: object
+      description: >
+        A rich answer card projected from an invoked Compass Progress tool.
+        Clients render the payload by `type`; unknown types must be ignored.
+      properties:
+        type:
+          type: string
+          enum: [readiness_explanation, activity_result, topic_detail, weak_topics, recent_activity]
+        payload:
+          type: object
+          additionalProperties: true
+      required: [type, payload]
+
     # =====================================================================
     # Envelopes + primitives
     # =====================================================================
