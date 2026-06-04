@@ -240,17 +240,22 @@ async function codingResult(c) {
 }
 
 async function competitionResult(userId) {
-  try {
-    const competitionService = require('../competitionService');
-    const history = await competitionService.getCompetitionHistory(userId, 1);
-    const h = Array.isArray(history) ? history[0] : (history?.items || history?.history || [])[0];
-    if (!h) return null;
-    return {
-      activityType: 'competition', title: h.topic ? `Challenge: ${h.topic}` : 'Daily challenge', date: fmtDate(h.completedAt),
-      overallScore: h.handicappedScore ?? h.rawScore ?? null, scoreLabel: h.rawScore != null ? `${h.rawScore}% (raw)` : '—',
-      dimensions: [], highlights: { strengths: h.isPersonalBest ? ['personal best'] : [], improvements: [] },
-    };
-  } catch (_) { return null; }
+  const ChallengeAttempt = require('../../models/ChallengeAttempt');
+  const DailyChallenge = require('../../models/DailyChallenge');
+  const a = await ChallengeAttempt.findOne({ userId, completedAt: { $ne: null } }).sort({ completedAt: -1 }).lean();
+  if (!a) return null;
+  let topic = null;
+  try { const ch = await DailyChallenge.findById(a.challengeId).lean(); topic = ch?.topic || ch?.displayTitle || null; } catch (_) {}
+  const raw = a.rawScore ?? null;
+  return {
+    activityType: 'competition',
+    title: topic ? `Challenge: ${topic}` : 'Daily challenge',
+    date: module.exports._fmt.fmtDate(a.completedAt),
+    overallScore: a.handicappedScore ?? a.rawScore ?? null,
+    scoreLabel: raw != null ? `${raw}% (raw)` : '—',
+    dimensions: [],
+    highlights: { strengths: a.isPersonalBest ? ['personal best'] : [], improvements: [] },
+  };
 }
 
 function contentResult(c) {

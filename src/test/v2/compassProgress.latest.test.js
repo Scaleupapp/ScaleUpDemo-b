@@ -9,6 +9,8 @@ const SVC = path.resolve(__dirname, '../../services/v2/compassProgressService.js
 const IS = path.resolve(__dirname, '../../models/InterviewSession.js');
 const CAP = path.resolve(__dirname, '../../coding/models/capstoneSession.model.js');
 const BUNDLE = path.resolve(__dirname, '../../coding/models/artifactBundle.model.js');
+const CA = path.resolve(__dirname, '../../models/ChallengeAttempt.js');
+const DC = path.resolve(__dirname, '../../models/DailyChallenge.js');
 function stub(p, e) { delete require.cache[p]; require.cache[p] = { id: p, filename: p, loaded: true, exports: e }; }
 function load() { delete require.cache[SVC]; return require(SVC); }
 
@@ -46,4 +48,15 @@ test('getLatestResult: returns null when nothing found', async () => {
   stub(IS, { findOne: () => ({ sort: () => ({ lean: async () => null }) }) });
   const svc = load();
   assert.equal(await svc.getLatestResult('u1', 'interview'), null);
+});
+
+test('getLatestResult(competition): maps the latest challenge attempt', async () => {
+  stub(CA, { findOne: () => ({ sort: () => ({ lean: async () => ({ challengeId: 'c1', rawScore: 80, handicappedScore: 85, isPersonalBest: true, completedAt: new Date('2026-05-03') }) }) }) });
+  stub(DC, { findById: () => ({ lean: async () => ({ topic: 'product management' }) }) });
+  const svc = load();
+  const out = await svc.getLatestResult('u1', 'competition');
+  assert.equal(out.activityType, 'competition');
+  assert.equal(out.overallScore, 85);
+  assert.match(out.title, /product management/);
+  assert.deepEqual(out.highlights.strengths, ['personal best']);
 });
