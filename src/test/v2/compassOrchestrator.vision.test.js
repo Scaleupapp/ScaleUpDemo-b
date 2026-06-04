@@ -28,8 +28,31 @@ function ctxStubs() {
   stub(READINESS, { getServedReadiness: async () => null });
 }
 
+/**
+ * A capturing CompassConversation stub that records every message pushed via
+ * appendToThread, enabling assertions on what gets persisted.
+ * appendToThread calls: CompassConversation.findOne({...}).sort({...}) — returns null
+ * to force the create() path — then CompassConversation.create({ userId }).
+ */
+function makeCapturingConvStub() {
+  const thread = {
+    messages: [],
+    messageCount: 0,
+    lastMessageAt: null,
+    title: 'New conversation',
+    save: async function () {},
+  };
+  const model = {
+    findOne: () => ({ sort: () => Promise.resolve(null) }), // force create() path
+    create: async () => thread,
+    _thread: thread,
+  };
+  return model;
+}
+
 test('vision: passes the image to the LLM and returns the reply', async () => {
-  stub(REDIS, fakeRedis()); stub(CONV, {}); ctxStubs();
+  const conv = makeCapturingConvStub();
+  stub(REDIS, fakeRedis()); stub(CONV, conv); ctxStubs();
   let captured;
   stub(ANTHROPIC, { messages: { create: async (req) => { captured = req; return { stop_reason: 'end_turn', usage: {}, content: [{ type: 'text', text: 'This is a binary tree.' }] }; } } });
   const orch = load();
@@ -39,10 +62,15 @@ test('vision: passes the image to the LLM and returns the reply', async () => {
   assert.equal(lastMsg.content[0].source.data, 'IMG');
   assert.equal(lastMsg.content[1].text, 'what is this?');
   assert.match(res.output.reply, /binary tree/);
+  // Ephemerality guarantee: the user turn must persist a text stub, never the image bytes.
+  const userTurn = conv._thread.messages.find((m) => m.role === 'user');
+  assert.ok(userTurn, 'a user turn should be persisted');
+  assert.match(userTurn.content, /\[shared a photo\]/);
+  assert.ok(!userTurn.content.includes('IMG'), 'the image base64 must NOT be persisted to the thread');
 });
 
 test('vision: no image → prompts to attach, no LLM call', async () => {
-  stub(REDIS, fakeRedis()); stub(CONV, {}); ctxStubs();
+  stub(REDIS, fakeRedis()); stub(CONV, makeCapturingConvStub()); ctxStubs();
   stub(ANTHROPIC, { messages: { create: async () => { throw new Error('should not call LLM'); } } });
   const orch = load();
   const res = await orch.handle({ userId: 'u1', mode: 'vision', payload: { message: 'explain' } });
@@ -50,7 +78,7 @@ test('vision: no image → prompts to attach, no LLM call', async () => {
 });
 
 test('vision: empty message defaults the prompt to "Explain this."', async () => {
-  stub(REDIS, fakeRedis()); stub(CONV, {}); ctxStubs();
+  stub(REDIS, fakeRedis()); stub(CONV, makeCapturingConvStub()); ctxStubs();
   let captured;
   stub(ANTHROPIC, { messages: { create: async (req) => { captured = req; return { stop_reason: 'end_turn', usage: {}, content: [{ type: 'text', text: 'ok' }] }; } } });
   const orch = load();
