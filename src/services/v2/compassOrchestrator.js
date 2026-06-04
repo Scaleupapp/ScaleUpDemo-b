@@ -378,6 +378,14 @@ async function handle({ userId, mode, payload = {} }) {
       break;
     }
 
+    case 'tutor_topic':
+      response = await tutorTopic({ systemPrompt, userId, topic: payload.topic });
+      break;
+
+    case 'tutor_result':
+      response = await tutorResult({ systemPrompt, userId, topic: payload.topic, attemptId: payload.attemptId, beforeScore: payload.beforeScore });
+      break;
+
     default:
       return { mode: 'unknown', error: `Unknown mode: ${mode}` };
   }
@@ -1210,6 +1218,58 @@ async function getActiveThread(userId) {
       createdAt: m.createdAt,
     })),
   };
+}
+
+async function tutorResult({ systemPrompt, userId, topic, attemptId, beforeScore }) {
+  const QuizAttempt = require('../../models/QuizAttempt');
+  let checkScore = null;
+  try {
+    const attempt = await QuizAttempt.findOne({ _id: attemptId, userId }).lean();
+    checkScore = attempt?.score?.percentage ?? null;
+  } catch (_) {}
+  const detail = await compassProgress.getTopicDetail(userId, topic).catch(() => null);
+  const afterScore = detail?.score ?? null;
+  const before = typeof beforeScore === 'number' ? beforeScore : null;
+  const delta = (typeof afterScore === 'number' && before != null) ? Math.round(afterScore - before) : null;
+
+  let nextTopic = null;
+  try {
+    const weak = await compassProgress.listWeakTopics(userId, 5);
+    nextTopic = (weak.find((w) => w.topic !== topic) || weak[0])?.topic || null;
+  } catch (_) {}
+
+  const resultPrompt = systemPrompt +
+    `\n\n[Mode: tutor_result] The learner just took a ${checkScore ?? '—'}% check on "${topic}". Their mastery is now ${afterScore ?? '—'}% (was ${before ?? '—'}%). In 2-3 warm sentences, reflect on how they did and what to revisit. Ground every number in the data above; DO NOT invent stats. No JSON block.`;
+  const llmResult = await callLLM({ userId, systemPrompt: resultPrompt, userPrompt: `How did I do on the ${topic} check?`, maxTokens: 300 });
+  const reply = llmResult.text || `You scored ${checkScore ?? '—'}% on the ${topic} check.`;
+  const card = { type: 'tutoring_result', payload: { topic, checkScore, beforeScore: before, afterScore, delta } };
+  await appendToThread(userId, 'assistant', reply, { mode: 'tutor_result', cards: [card], tokensIn: llmResult.tokensIn, tokensOut: llmResult.tokensOut });
+  const output = { reply, followups: [], cards: [card] };
+  if (nextTopic) output.suggested_action = { type: 'start_tutoring', topic: nextTopic, score: null };
+  return { mode: 'tutor_result', output };
+}
+
+async function tutorTopic({ systemPrompt, userId, topic }) {
+  if (!topic || typeof topic !== 'string') {
+    return { mode: 'tutor_topic', output: { reply: 'Which topic would you like help with?', followups: [], cards: [] } };
+  }
+  const detail = await compassProgress.getTopicDetail(userId, topic).catch(() => null);
+  const misc = (detail?.misconceptions || []).map((m) => `${m.tag}: ${m.explanation}`).join('; ');
+  const tutorPrompt = systemPrompt +
+    `\n\n[Mode: tutor_topic] You are tutoring the learner on "${topic}". They are ${detail?.level || 'an unknown level'} (${detail?.score ?? '—'}%).` +
+    (misc ? ` Their recurring misconceptions: ${misc}.` : '') +
+    ` Teach concisely (4-8 sentences) with 1-2 short worked examples that DIRECTLY fix those misconceptions. Don't dump everything about the topic. End by inviting a quick check. Do not include any JSON block.`;
+  const llmResult = await callLLM({ userId, systemPrompt: tutorPrompt, userPrompt: `Help me understand ${topic}.`, maxTokens: COMPASS_MAX_TOKENS });
+  if (llmResult.capped) {
+    const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
+    await appendToThread(userId, 'assistant', reply, { mode: 'tutor_topic' });
+    return { mode: 'tutor_topic', output: { reply, followups: [], cards: [] } };
+  }
+  const reply = llmResult.text || `Let's work on ${topic}. Ready for a quick check?`;
+  const cards = detail ? [{ type: 'topic_detail', payload: detail }] : [];
+  const suggested_action = { type: 'start_check_quiz', topic, question_count: 4, before_score: detail?.score ?? null };
+  await appendToThread(userId, 'assistant', reply, { mode: 'tutor_topic', cards, tokensIn: llmResult.tokensIn, tokensOut: llmResult.tokensOut });
+  return { mode: 'tutor_topic', output: { reply, followups: [], cards, suggested_action } };
 }
 
 /**
