@@ -26,6 +26,7 @@ const DrillAttempt = require('../../coding/models/drillAttempt.model');
 const MetaSkillMastery = require('../../coding/models/metaSkillMastery.model');
 const Content = require('../../models/Content');
 const Quiz = require('../../models/Quiz');
+const { canonicalize } = require('../diagnostic/topicTaxonomyService');
 
 const mongoose = require('mongoose');
 
@@ -261,6 +262,34 @@ function contentResult(c) {
   };
 }
 
+function fuzzyContains(haystack, needle) {
+  if (!haystack || !needle) return false;
+  const a = canonicalize(haystack), b = canonicalize(needle);
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  const at = new Set(a.split('-')), bt = b.split('-');
+  const overlap = bt.filter((t) => at.has(t)).length / Math.max(1, bt.length);
+  return overlap >= 0.6;
+}
+
+async function findActivity(userId, type, query) {
+  if (!query) return getLatestResult(userId, type);
+  if (type === 'quiz') {
+    const quizzes = await Quiz.find({ userId }).sort({ createdAt: -1 }).limit(50).lean();
+    const match = quizzes.find((q) => fuzzyContains(q.topic, query));
+    if (!match) return null;
+    const attempt = await QuizAttempt.findOne({ userId, quizId: match._id, status: 'completed' }).sort({ completedAt: -1 }).lean();
+    return attempt ? { ...module.exports._fmt.quizResult(attempt), title: `Quiz: ${match.topic}` } : null;
+  }
+  if (type === 'interview') {
+    const sessions = await InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] } }).sort({ completedAt: -1 }).limit(25).lean();
+    const match = sessions.find((s) => fuzzyContains(s.targetRole || s.interviewType, query)) || sessions[0];
+    return match ? module.exports._fmt.interviewResult(match) : null;
+  }
+  // coding has no topic taxonomy; fall back to latest graded
+  if (type === 'coding') return getLatestResult(userId, 'coding');
+  return getLatestResult(userId, type);
+}
+
 async function explainReadiness(userId) {
   const r = await readinessService.getServedReadiness(userId);
   if (!r) return { value: null, target: null, source: null, distanceToTarget: null, contributors: [], topDraggers: [], note: 'No readiness data yet — complete a quiz or assessment to start measuring.' };
@@ -275,6 +304,6 @@ async function explainReadiness(userId) {
   return { value: r.value, target: r.target, source: r.source, distanceToTarget, contributors, topDraggers, note };
 }
 
-module.exports = { getSnapshot, renderSnapshot, invalidate, explainReadiness, getLatestResult };
+module.exports = { getSnapshot, renderSnapshot, invalidate, explainReadiness, getLatestResult, findActivity };
 // export the formatters too (reused by findActivity in Task 4)
 module.exports._fmt = { quizResult, interviewResult, codingResult, contentResult, fmtDate };
