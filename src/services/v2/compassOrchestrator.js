@@ -1074,7 +1074,7 @@ async function coachOpener({ ctx, systemPrompt, userId, scope = 'week', topic = 
       totalWeeks: ctx.plan.totalWeeks,
       tasksDoneThisWeek: ctx.plan.tasksDoneThisWeek,
       tasksTotalThisWeek: ctx.plan.tasksTotalThisWeek,
-      readiness: ctx.plan.readiness,
+      readiness: ctx.readiness?.value ?? null,
     } : null,
     recentlyAskedTutorAbout: ctx.deep?.recentTutor || [],
     overdueForReview: (ctx.deep?.dueForReview || []).slice(0, 3),
