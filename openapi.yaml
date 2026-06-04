@@ -8195,6 +8195,7 @@ paths:
                     - greeting
                     - tutor_topic
                     - tutor_result
+                    - vision
                 payload:
                   type: object
                   properties:

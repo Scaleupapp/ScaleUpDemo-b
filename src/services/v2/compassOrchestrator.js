@@ -387,6 +387,10 @@ async function handle({ userId, mode, payload = {} }) {
       response = await tutorResult({ systemPrompt, userId, topic: payload.topic, attemptId: payload.attemptId, beforeScore: payload.beforeScore });
       break;
 
+    case 'vision':
+      response = await vision({ userId, imageBase64: payload.imageBase64, mimeType: payload.mimeType, message: payload.message });
+      break;
+
     default:
       return { mode: 'unknown', error: `Unknown mode: ${mode}` };
   }
@@ -609,6 +613,30 @@ async function greeting({ ctx, systemPrompt, userId, contextHint }) {
       ],
     },
   };
+}
+
+const MAX_IMAGE_B64 = 8 * 1024 * 1024; // ~8 MB of base64 — guard before the LLM
+
+async function vision({ userId, imageBase64, mimeType, message }) {
+  if (!imageBase64 || typeof imageBase64 !== 'string') {
+    return { mode: 'vision', output: { reply: "Attach a photo and I'll take a look.", followups: [], cards: [] } };
+  }
+  if (imageBase64.length > MAX_IMAGE_B64) {
+    return { mode: 'vision', output: { reply: 'That image is a bit large — try a smaller or clearer photo.', followups: [], cards: [] } };
+  }
+  const systemPrompt = `You are Compass, ScaleUp's AI companion. Be concise, warm, honest. The learner shared a photo (a problem, notes, or a whiteboard). If their message asks to be quizzed or tested, write 2-3 short self-check questions WITH their answers. Otherwise explain what's shown and help them understand it. Ground everything in what's visible; if you can't read it clearly, say so plainly. Keep it concise. Do not include any JSON block.`;
+  const userPrompt = (typeof message === 'string' && message.trim()) ? message.trim() : 'Explain this.';
+  // Persist a TEXT STUB only — never the image bytes.
+  await appendToThread(userId, 'user', `[shared a photo]${message && message.trim() ? ' ' + message.trim() : ''}`, { mode: 'vision' });
+  const llmResult = await callLLM({ userId, systemPrompt, userPrompt, image: { base64: imageBase64, mimeType: mimeType || 'image/jpeg' }, maxTokens: COMPASS_MAX_TOKENS });
+  if (llmResult.capped) {
+    const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
+    await appendToThread(userId, 'assistant', reply, { mode: 'vision' });
+    return { mode: 'vision', output: { reply, followups: [], cards: [] } };
+  }
+  const reply = llmResult.text || 'I had trouble reading that — try a sharper photo?';
+  await appendToThread(userId, 'assistant', reply, { mode: 'vision', tokensIn: llmResult.tokensIn, tokensOut: llmResult.tokensOut });
+  return { mode: 'vision', output: { reply, followups: [], cards: [] } };
 }
 
 async function conversation({ ctx, systemPrompt, userId, message, history = [] }) {
