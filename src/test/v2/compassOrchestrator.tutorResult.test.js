@@ -46,6 +46,6 @@ test('tutorResult: returns check score, mastery delta, and a next-topic offer', 
   assert.equal(card.payload.beforeScore, 35);
   assert.equal(card.payload.afterScore, 52);
   assert.equal(card.payload.delta, 17);
-  assert.equal(res.output.suggested_action.type, 'start_tutoring');
-  assert.equal(res.output.suggested_action.topic, 'graphs'); // next weak topic (not the one just done)
+  assert.equal(res.output.suggestedAction.type, 'start_tutoring');
+  assert.equal(res.output.suggestedAction.topic, 'graphs'); // next weak topic (not the one just done)
 });

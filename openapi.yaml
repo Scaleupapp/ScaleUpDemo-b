@@ -8169,7 +8169,7 @@ paths:
         - note: reply + action (type + endpoints)
         - tutor: reply + followups + contentTitle
 
-        All modes MAY include `suggested_action` appended by intent detection.
+        All modes MAY include `suggestedAction` appended by intent detection.
       security:
         - BearerAuth: []
       requestBody:

@@ -15,16 +15,16 @@ test('attachProactiveTutoringOffer: offers start_tutoring from a weak_topics car
     { type: 'weak_topics', payload: { topics: [{ topic: 'recursion', score: 35 }, { topic: 'graphs', score: 50 }] } },
   ] } };
   orch.attachProactiveTutoringOffer(response);
-  assert.equal(response.output.suggested_action.type, 'start_tutoring');
-  assert.equal(response.output.suggested_action.topic, 'recursion');
-  assert.equal(response.output.suggested_action.score, 35);
+  assert.equal(response.output.suggestedAction.type, 'start_tutoring');
+  assert.equal(response.output.suggestedAction.topic, 'recursion');
+  assert.equal(response.output.suggestedAction.score, 35);
 });
 
 test('attachProactiveTutoringOffer: no-op when an action already exists', () => {
   const orch = load();
-  const response = { mode: 'conversation', output: { reply: 'x', suggested_action: { type: 'request_drill' }, cards: [
+  const response = { mode: 'conversation', output: { reply: 'x', suggestedAction: { type: 'request_drill' }, cards: [
     { type: 'weak_topics', payload: { topics: [{ topic: 'recursion', score: 35 }] } },
   ] } };
   orch.attachProactiveTutoringOffer(response);
-  assert.equal(response.output.suggested_action.type, 'request_drill');
+  assert.equal(response.output.suggestedAction.type, 'request_drill');
 });

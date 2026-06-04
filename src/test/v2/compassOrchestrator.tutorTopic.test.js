@@ -42,7 +42,7 @@ test('tutorTopic: explains the topic grounded in misconceptions + offers a check
   const res = await orch.handle({ userId: 'u1', mode: 'tutor_topic', payload: { topic: 'recursion' } });
   assert.match(res.output.reply, /base case/i);
   assert.equal(res.output.cards[0].type, 'topic_detail');
-  assert.equal(res.output.suggested_action.type, 'start_check_quiz');
-  assert.equal(res.output.suggested_action.topic, 'recursion');
-  assert.equal(res.output.suggested_action.before_score, 35);
+  assert.equal(res.output.suggestedAction.type, 'start_check_quiz');
+  assert.equal(res.output.suggestedAction.topic, 'recursion');
+  assert.equal(res.output.suggestedAction.before_score, 35);
 });

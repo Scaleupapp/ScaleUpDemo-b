@@ -392,7 +392,7 @@ async function handle({ userId, mode, payload = {} }) {
 
   // ---------------------------------------------------------------------------
   // Intent detection — run on user messages in conversational modes.
-  // Appends suggested_action when a drill request is detected. Best-effort:
+  // Appends suggestedAction when a drill request is detected. Best-effort:
   // never throws, never delays the response on failure.
   // Only fires for modes where the user is typing a free-form message.
   // ---------------------------------------------------------------------------
@@ -400,15 +400,15 @@ async function handle({ userId, mode, payload = {} }) {
   const userMessage = payload && payload.message;
   if (
     INTENT_ELIGIBLE_MODES.includes(mode) && userMessage &&
-    response && response.output && !response.output.suggested_action
+    response && response.output && !response.output.suggestedAction
   ) {
     try {
       const tutoring = await detectTutoringRequest(userMessage);
       if (tutoring) {
-        response.output.suggested_action = tutoring;
+        response.output.suggestedAction = tutoring;
       } else {
         const action = await detectDrillRequest(userMessage);
-        if (action) response.output.suggested_action = action;
+        if (action) response.output.suggestedAction = action;
       }
     } catch (e) {
       console.error('[compass intent detection]', e.message);
@@ -1247,7 +1247,7 @@ async function tutorResult({ systemPrompt, userId, topic, attemptId, beforeScore
   const card = { type: 'tutoring_result', payload: { topic, checkScore, beforeScore: before, afterScore, delta } };
   await appendToThread(userId, 'assistant', reply, { mode: 'tutor_result', cards: [card], tokensIn: llmResult.tokensIn, tokensOut: llmResult.tokensOut });
   const output = { reply, followups: [], cards: [card] };
-  if (nextTopic) output.suggested_action = { type: 'start_tutoring', topic: nextTopic, score: null };
+  if (nextTopic) output.suggestedAction = { type: 'start_tutoring', topic: nextTopic, score: null };
   return { mode: 'tutor_result', output };
 }
 
@@ -1269,30 +1269,30 @@ async function tutorTopic({ systemPrompt, userId, topic }) {
   }
   const reply = llmResult.text || `Let's work on ${topic}. Ready for a quick check?`;
   const cards = detail ? [{ type: 'topic_detail', payload: detail }] : [];
-  const suggested_action = { type: 'start_check_quiz', topic, question_count: 4, before_score: detail?.score ?? null };
+  const suggestedAction = { type: 'start_check_quiz', topic, question_count: 4, before_score: detail?.score ?? null };
   await appendToThread(userId, 'assistant', reply, { mode: 'tutor_topic', cards, tokensIn: llmResult.tokensIn, tokensOut: llmResult.tokensOut });
-  return { mode: 'tutor_topic', output: { reply, followups: [], cards, suggested_action } };
+  return { mode: 'tutor_topic', output: { reply, followups: [], cards, suggestedAction } };
 }
 
 /**
  * If the response carries a weak_topics or readiness_explanation card and no
- * suggested_action is set, attach a start_tutoring offer for the top weak topic.
+ * suggestedAction is set, attach a start_tutoring offer for the top weak topic.
  * Best-effort, pure, never throws.
  */
 function attachProactiveTutoringOffer(response) {
   try {
-    if (!response || !response.output || response.output.suggested_action) return;
+    if (!response || !response.output || response.output.suggestedAction) return;
     const cards = response.output.cards || [];
     const weak = cards.find((c) => c.type === 'weak_topics');
     if (weak && Array.isArray(weak.payload?.topics) && weak.payload.topics.length) {
       const t = weak.payload.topics[0];
-      response.output.suggested_action = { type: 'start_tutoring', topic: t.topic, score: t.score ?? null };
+      response.output.suggestedAction = { type: 'start_tutoring', topic: t.topic, score: t.score ?? null };
       return;
     }
     const readiness = cards.find((c) => c.type === 'readiness_explanation');
     if (readiness && Array.isArray(readiness.payload?.topDraggers) && readiness.payload.topDraggers.length) {
       const d = readiness.payload.topDraggers[0];
-      response.output.suggested_action = { type: 'start_tutoring', topic: d.name, score: d.score ?? null };
+      response.output.suggestedAction = { type: 'start_tutoring', topic: d.name, score: d.score ?? null };
     }
   } catch (_) {}
 }
