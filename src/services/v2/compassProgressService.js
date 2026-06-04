@@ -21,9 +21,11 @@ const InterviewSession = require('../../models/InterviewSession');
 const ContentProgress = require('../../models/ContentProgress');
 const CompetitionProfile = require('../../models/CompetitionProfile');
 const CapstoneSession = require('../../coding/models/capstoneSession.model');
+const ArtifactBundle = require('../../coding/models/artifactBundle.model');
 const DrillAttempt = require('../../coding/models/drillAttempt.model');
 const MetaSkillMastery = require('../../coding/models/metaSkillMastery.model');
 const Content = require('../../models/Content');
+const Quiz = require('../../models/Quiz');
 
 const mongoose = require('mongoose');
 
@@ -184,6 +186,81 @@ function renderSnapshot(snap) {
   return L.join('\n');
 }
 
+function fmtDate(d) { return d ? new Date(d).toISOString().slice(0, 10) : null; }
+
+async function getLatestResult(userId, type) {
+  switch (type) {
+    case 'quiz':        return quizResult(await QuizAttempt.findOne({ userId, status: 'completed' }).sort({ completedAt: -1 }).lean());
+    case 'interview':   return interviewResult(await InterviewSession.findOne({ userId, status: { $in: ['completed', 'evaluated'] } }).sort({ completedAt: -1 }).lean());
+    case 'coding':      return await codingResult(await CapstoneSession.findOne({ user_id: userId, status: 'graded' }).sort({ graded_at: -1 }).lean());
+    case 'competition': return await competitionResult(userId);
+    case 'content':     return contentResult(await ContentProgress.findOne({ userId, isCompleted: true }).sort({ completedAt: -1 }).lean());
+    default:            return null;
+  }
+}
+
+function quizResult(a) {
+  if (!a) return null;
+  const pct = a.score?.percentage ?? null;
+  return {
+    activityType: 'quiz', title: 'Quiz', date: fmtDate(a.completedAt),
+    overallScore: pct, scoreLabel: pct != null ? `${pct}%` : '—',
+    dimensions: (a.topicBreakdown || []).slice(0, 6).map((t) => ({ name: t.topic, score: t.percentage, feedback: null })),
+    highlights: { strengths: (a.analysis?.strengths || []).slice(0, 3), improvements: (a.analysis?.weaknesses || []).slice(0, 3) },
+  };
+}
+
+function interviewResult(s) {
+  if (!s) return null;
+  const e = s.evaluation || {};
+  const dims = ['communication', 'content', 'structure', 'confidence']
+    .filter((d) => e[d]).map((d) => ({ name: d, score: e[d].score, feedback: e[d].feedback || null }));
+  return {
+    activityType: 'interview', title: (s.interviewType || 'interview').replace(/_/g, ' '), date: fmtDate(s.completedAt),
+    overallScore: e.overallScore ?? null, scoreLabel: e.overallScore != null ? `${e.overallScore}/100` : '—',
+    dimensions: dims,
+    highlights: { strengths: (e.overallStrengths || []).slice(0, 3), improvements: (e.overallImprovements || []).slice(0, 3) },
+  };
+}
+
+async function codingResult(c) {
+  if (!c) return null;
+  const r = c.result || {};
+  const ds = r.dimension_scores || {};
+  const dims = Object.keys(ds).map((k) => ({ name: k.replace(/_/g, ' '), score: ds[k], feedback: r.dimension_feedback?.[k]?.to_improve || null }));
+  let title = 'Capstone';
+  try { const b = await ArtifactBundle.findById(c.bundle_id).lean(); if (b?.brief) title = String(b.brief).split('\n')[0].trim(); } catch (_) {}
+  return {
+    activityType: 'coding', title, date: fmtDate(c.graded_at),
+    overallScore: r.overall_score ?? null, scoreLabel: r.overall_score != null ? `${r.overall_score}/100` : '—',
+    dimensions: dims,
+    highlights: { strengths: (r.strengths || []).slice(0, 3), improvements: (r.gaps || []).slice(0, 3) },
+  };
+}
+
+async function competitionResult(userId) {
+  try {
+    const competitionService = require('../competitionService');
+    const history = await competitionService.getCompetitionHistory(userId, 1);
+    const h = Array.isArray(history) ? history[0] : (history?.items || history?.history || [])[0];
+    if (!h) return null;
+    return {
+      activityType: 'competition', title: h.topic ? `Challenge: ${h.topic}` : 'Daily challenge', date: fmtDate(h.completedAt),
+      overallScore: h.handicappedScore ?? h.rawScore ?? null, scoreLabel: h.rawScore != null ? `${h.rawScore}% (raw)` : '—',
+      dimensions: [], highlights: { strengths: h.isPersonalBest ? ['personal best'] : [], improvements: [] },
+    };
+  } catch (_) { return null; }
+}
+
+function contentResult(c) {
+  if (!c) return null;
+  return {
+    activityType: 'content', title: 'Recently completed content', date: fmtDate(c.completedAt),
+    overallScore: c.percentageCompleted ?? null, scoreLabel: c.percentageCompleted != null ? `${c.percentageCompleted}% watched` : '—',
+    dimensions: [], highlights: { strengths: [], improvements: [] },
+  };
+}
+
 async function explainReadiness(userId) {
   const r = await readinessService.getServedReadiness(userId);
   if (!r) return { value: null, target: null, source: null, distanceToTarget: null, contributors: [], topDraggers: [], note: 'No readiness data yet — complete a quiz or assessment to start measuring.' };
@@ -198,4 +275,6 @@ async function explainReadiness(userId) {
   return { value: r.value, target: r.target, source: r.source, distanceToTarget, contributors, topDraggers, note };
 }
 
-module.exports = { getSnapshot, renderSnapshot, invalidate, explainReadiness };
+module.exports = { getSnapshot, renderSnapshot, invalidate, explainReadiness, getLatestResult };
+// export the formatters too (reused by findActivity in Task 4)
+module.exports._fmt = { quizResult, interviewResult, codingResult, contentResult, fmtDate };
