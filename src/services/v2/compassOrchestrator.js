@@ -112,6 +112,7 @@ async function appendToThread(userId, role, content, opts = {}) {
 const COMPASS_MODEL = 'claude-sonnet-4-20250514';
 const COMPASS_MAX_TOKENS = 800;       // conversational replies stay tight
 const COMPASS_TEMPERATURE = 0.6;
+const IMAGE_TOKEN_ESTIMATE = 1500;   // flat allowance so the daily budget accounts for a vision image
 
 /**
  * Per-user daily token budget. Hard cap to protect AI cost per active user.
@@ -425,9 +426,9 @@ async function handle({ userId, mode, payload = {} }) {
 /**
  * Single-shot LLM call. Returns text on success, null on failure or budget exhausted.
  */
-async function callLLM({ userId, systemPrompt, userPrompt, history = [], maxTokens = COMPASS_MAX_TOKENS }) {
+async function callLLM({ userId, systemPrompt, userPrompt, history = [], maxTokens = COMPASS_MAX_TOKENS, image = null }) {
   // Estimate first — Anthropic charges by total tokens; we approximate at 4 chars/token.
-  const estimatedTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4) + maxTokens;
+  const estimatedTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4) + maxTokens + (image ? IMAGE_TOKEN_ESTIMATE : 0);
   const allowed = await checkAndIncrementBudget(userId, estimatedTokens);
   if (!allowed) {
     console.warn(`[compass] user ${userId} hit daily token cap`);
@@ -442,7 +443,14 @@ async function callLLM({ userId, systemPrompt, userPrompt, history = [], maxToke
         messages.push({ role, content: h.content });
       }
     }
-    messages.push({ role: 'user', content: userPrompt });
+    if (image && image.base64 && image.mimeType) {
+      messages.push({ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.base64 } },
+        { type: 'text', text: userPrompt },
+      ] });
+    } else {
+      messages.push({ role: 'user', content: userPrompt });
+    }
 
     const response = await anthropic.messages.create({
       model: COMPASS_MODEL,
@@ -1312,6 +1320,7 @@ module.exports = {
   handle,
   buildUserContext,
   buildSystemContext,
+  callLLM,
   callLLMWithTools,
   conversation,
   getActiveThread,
