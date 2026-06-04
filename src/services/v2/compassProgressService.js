@@ -304,6 +304,48 @@ async function explainReadiness(userId) {
   return { value: r.value, target: r.target, source: r.source, distanceToTarget, contributors, topDraggers, note };
 }
 
-module.exports = { getSnapshot, renderSnapshot, invalidate, explainReadiness, getLatestResult, findActivity };
+async function listWeakTopics(userId, limit = 5) {
+  const kp = await KnowledgeProfile.findOne({ userId }).lean();
+  return (kp?.topicMastery || [])
+    .filter((t) => typeof t.score === 'number' && t.score < 60 && (t.quizzesTaken || 0) >= 1)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, limit)
+    .map((t) => ({ topic: t.topic, score: t.score, trend: t.trend || 'stable', assessedBy: ['quiz'] }));
+}
+
+async function getTopicDetail(userId, topic) {
+  const [kp, deep] = await Promise.all([
+    KnowledgeProfile.findOne({ userId }).lean(),
+    safe(() => userContextService.getUserContext(userId), null),
+  ]);
+  const tm = (kp?.topicMastery || []).find((t) => fuzzyContains(t.topic, topic));
+  const misc = (deep?.misconceptions || []).filter((m) => (m.topics || []).some((tp) => fuzzyContains(tp, topic)) || fuzzyContains(m.recentTopic || '', topic))
+    .map((m) => ({ tag: m.tag, explanation: m.explanation }));
+  const due = (deep?.dueForReview || []).filter((d) => fuzzyContains(d.topic || d.concept || '', topic)).map((d) => d.concept).filter(Boolean);
+  return {
+    topic: tm?.topic || topic,
+    score: tm?.score ?? null, level: tm?.level || null, trend: tm?.trend || null,
+    history: (tm?.scoreHistory || []).slice(-5).map((h) => ({ score: h.score, date: module.exports._fmt.fmtDate(h.date) })),
+    relatedActivities: [],
+    misconceptions: misc.slice(0, 3),
+    dueConcepts: due.slice(0, 5),
+  };
+}
+
+async function listRecentActivity(userId, limit = 8, type = null) {
+  // Reuse the merged timeline the /you/activities route builds. If a shared
+  // builder isn't yet extracted, assemble a lightweight merge here.
+  const items = [];
+  const [quizzes, interviews] = await Promise.all([
+    safe(() => QuizAttempt.find({ userId, status: 'completed' }).sort({ completedAt: -1 }).limit(limit).lean(), []),
+    safe(() => InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] } }).sort({ completedAt: -1 }).limit(limit).lean(), []),
+  ]);
+  for (const q of quizzes) items.push({ type: 'quiz', title: 'Quiz', score: q.score?.percentage ?? null, date: module.exports._fmt.fmtDate(q.completedAt) });
+  for (const i of interviews) items.push({ type: 'interview', title: (i.interviewType || 'interview').replace(/_/g, ' '), score: i.evaluation?.overallScore ?? null, date: module.exports._fmt.fmtDate(i.completedAt) });
+  const filtered = type ? items.filter((x) => x.type === type) : items;
+  return filtered.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, limit);
+}
+
+module.exports = { getSnapshot, renderSnapshot, invalidate, explainReadiness, getLatestResult, findActivity, listWeakTopics, getTopicDetail, listRecentActivity };
 // export the formatters too (reused by findActivity in Task 4)
 module.exports._fmt = { quizResult, interviewResult, codingResult, contentResult, fmtDate };
