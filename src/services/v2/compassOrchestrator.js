@@ -49,6 +49,7 @@ const CompassConversation = require('../../models/CompassConversation');
 const anthropic = require('../../config/anthropic');
 const redis = require('../../config/redis');
 const userContextService = require('../userContextService');
+const readinessService = require('../readiness/readinessService');
 const { detectDrillRequest } = require('./compassIntent');
 
 // Persistence: max age of the "active" thread before a new one starts.
@@ -173,48 +174,51 @@ async function getBudgetUsage(userId) {
  * Cached for the duration of a single request — fetched fresh per request.
  */
 async function buildUserContext(userId) {
-  const [user, objective, plan, knowledge, deepContext] = await Promise.all([
+  const [user, objective, plan, knowledge, deepContext, readiness] = await Promise.all([
     User.findById(userId).select('firstName education workExperience').lean(),
     UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
-    Plan.findOne({ userId, status: { $in: ['active', 'ready'] } }).lean(),
+    Plan.findOne({ userId, isActive: true }).lean(),
     KnowledgeProfile.findOne({ userId }).lean(),
     userContextService.getUserContext(userId).catch(() => null),
+    readinessService.getServedReadiness(userId).catch(() => null),
   ]);
 
-  const topicMastery = knowledge?.topicProfiles
-    ? Object.entries(knowledge.topicProfiles)
-        .map(([topic, t]) => ({ topic, mastery: t.masteryLevel || 0, trend: t.trend || 'flat' }))
+  const topicMastery = Array.isArray(knowledge?.topicMastery)
+    ? knowledge.topicMastery
+        .filter((t) => typeof t.score === 'number')
+        .map((t) => ({ topic: t.topic, mastery: t.score, trend: t.trend || 'stable' }))
         .sort((a, b) => b.mastery - a.mastery)
     : [];
 
+  let planCtx = null;
+  if (plan) {
+    const totalWeeks = (plan.weeklySchedule || []).length;
+    const weeksElapsed = plan.createdAt ? Math.floor((Date.now() - new Date(plan.createdAt)) / (7 * 24 * 3600 * 1000)) + 1 : 1;
+    const currentWeek = Math.min(Math.max(weeksElapsed, 1), Math.max(totalWeeks, 1));
+    const wk = (plan.weeklySchedule || []).find((w) => w.week === currentWeek);
+    const tasks = wk?.tasks || [];
+    planCtx = {
+      currentWeek, totalWeeks,
+      tasksDoneThisWeek: tasks.filter((t) => t.progress?.status === 'complete' || t.progress?.completedAt).length,
+      tasksTotalThisWeek: tasks.length,
+    };
+  }
+
   return {
-    user: {
-      name: user?.firstName || 'there',
-    },
+    user: { name: user?.firstName || 'there' },
     objective: objective ? {
-      type: objective.objectiveType,
-      specifics: objective.specifics,
-      timeline: objective.timeline,
-      targetDate: objective.targetDate,
-      currentLevel: objective.currentLevel,
+      type: objective.objectiveType, specifics: objective.specifics,
+      timeline: objective.timeline, targetDate: objective.targetDate, currentLevel: objective.currentLevel,
     } : null,
-    plan: plan ? {
-      currentWeek: plan.currentWeek,
-      totalWeeks: plan.totalWeeks,
-      readiness: plan.readinessScore,
-      tasksDoneThisWeek: (plan.tasks || []).filter(t => t.weekNumber === plan.currentWeek && t.completedAt).length,
-      tasksTotalThisWeek: (plan.tasks || []).filter(t => t.weekNumber === plan.currentWeek).length,
-    } : null,
-    knowledge: {
-      strongTopics: topicMastery.slice(0, 3),
-      weakTopics:   topicMastery.slice(-3).reverse(),
-    },
+    plan: planCtx,
+    readiness: readiness ? { value: readiness.value, target: readiness.target, source: readiness.source } : null,
+    knowledge: { strongTopics: topicMastery.slice(0, 3), weakTopics: topicMastery.slice(-3).reverse() },
     deep: deepContext ? {
       misconceptions: (deepContext.misconceptions || []).slice(0, 3),
-      dueForReview:   (deepContext.dueForReview || []).slice(0, 3),
-      recentTopics:   (deepContext.recentTopicsTouched || []).slice(0, 5),
-      recentTutor:    (deepContext.recentAITutor?.topicsCovered || []).slice(0, 3),
-      lastTutorQs:    (deepContext.recentAITutor?.openQuestions || []).slice(0, 2),
+      dueForReview: (deepContext.dueForReview || []).slice(0, 3),
+      recentTopics: (deepContext.recentTopicsTouched || []).slice(0, 5),
+      recentTutor: (deepContext.recentAITutor?.topicsCovered || []).slice(0, 3),
+      lastTutorQs: (deepContext.recentAITutor?.openQuestions || []).slice(0, 2),
     } : null,
   };
 }
@@ -232,7 +236,10 @@ function buildSystemContext(ctx) {
     lines.push(`Their active objective: ${ctx.objective.type} — ${JSON.stringify(ctx.objective.specifics)}, timeline ${ctx.objective.timeline}, currently ${ctx.objective.currentLevel}.`);
   }
   if (ctx.plan) {
-    lines.push(`Plan progress: week ${ctx.plan.currentWeek}/${ctx.plan.totalWeeks}, readiness ${ctx.plan.readiness}%, ${ctx.plan.tasksDoneThisWeek}/${ctx.plan.tasksTotalThisWeek} tasks done this week.`);
+    lines.push(`Plan progress: week ${ctx.plan.currentWeek}/${ctx.plan.totalWeeks}, ${ctx.plan.tasksDoneThisWeek}/${ctx.plan.tasksTotalThisWeek} tasks done this week.`);
+  }
+  if (ctx.readiness) {
+    lines.push(`Current readiness: ${ctx.readiness.value}% (target ${ctx.readiness.target}%).`);
   }
   if (ctx.knowledge.strongTopics.length) {
     lines.push(`Strong topics: ${ctx.knowledge.strongTopics.map(t => `${t.topic} (${t.mastery}%)`).join(', ')}`);
@@ -1144,3 +1151,4 @@ module.exports = {
   resetActiveThread,
   getBudgetUsage,
 };
+
