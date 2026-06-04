@@ -15,6 +15,13 @@ const compassMessageSchema = new mongoose.Schema({
   content: { type: String, required: true, maxlength: 8000 },
   mode: { type: String },         // greeting | conversation | quiz_config | insight | mentor | coach | tutor | note
   followups: [String],            // suggested follow-ups for the last assistant turn
+  // Rich answer cards projected from invoked Compass tools (Progress Intelligence).
+  // Optional + additive — old messages decode unchanged. Mixed payload per type.
+  cards: [{
+    _id: false,
+    type: { type: String },                                  // readiness_explanation | activity_result | topic_detail | weak_topics | recent_activity
+    payload: { type: mongoose.Schema.Types.Mixed },
+  }],
   // tutor mode — the content piece this turn is scoped to (so history shows
   // "Tutor · <video>" and analytics can attribute tutor usage to content).
   contentRef: { type: mongoose.Schema.Types.ObjectId, ref: 'Content' },

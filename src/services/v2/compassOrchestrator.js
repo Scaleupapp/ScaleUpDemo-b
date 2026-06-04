@@ -87,6 +87,7 @@ async function appendToThread(userId, role, content, opts = {}) {
       content: typeof content === 'string' ? content.slice(0, 8000) : '',
       mode: opts.mode,
       followups: opts.followups || [],
+      cards: opts.cards || [],
       contentRef: opts.contentRef,
       contentTitle: opts.contentTitle,
       tokensIn: opts.tokensIn,

@@ -811,6 +811,8 @@ router.get('/compass/history', auth, async (req, res) => {
         // Defensive truncation — historical messages may exceed our new cap.
         content: typeof m.content === 'string' ? m.content.slice(0, 4000) : '',
         mode: m.mode || null,
+        followups: m.followups || [],
+        cards: m.cards || [],          // NEW — so history can re-render cards
         contentRef: m.contentRef ? String(m.contentRef) : null,
         contentTitle: m.contentTitle || null,
         createdAt: m.createdAt,
