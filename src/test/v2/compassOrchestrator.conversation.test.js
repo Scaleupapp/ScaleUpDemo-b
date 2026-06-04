@@ -15,6 +15,22 @@ function stub(p, e) { delete require.cache[p]; require.cache[p] = { id: p, filen
 function load() { delete require.cache[ORCH]; return require(ORCH); }
 function fakeRedis() { const m = new Map(); return { incrby: async (k, n) => { const v = (m.get(k) || 0) + n; m.set(k, v); return v; }, decrby: async (k, n) => { const v = (m.get(k) || 0) - n; m.set(k, v); return v; }, expire: async () => 1, get: async () => '0' }; }
 
+test('conversation: retries without tools when tool-loop fails, returns retry text and empty cards', async () => {
+  stub(REDIS, fakeRedis());
+  stub(CONV, {}); // appendToThread is best-effort; stubbed model makes it no-op via its try/catch
+  stub(PROGRESS, { getSnapshot: async () => ({}), renderSnapshot: () => '' });
+  stub(TOOLS, { TOOLS: [], dispatch: async () => ({ ok: true, output: '{}' }) });
+  stub(ANTHROPIC, { messages: { create: async (req) => {
+    if ('tools' in req) { throw new Error('tool call failed'); }
+    return { stop_reason: 'end_turn', usage: {}, content: [{ type: 'text', text: 'Snapshot-only answer.' }] };
+  } } });
+
+  const orch = load();
+  const res = await orch.conversation({ ctx: {}, systemPrompt: 'You are Compass.', userId: 'u2', message: 'what is my readiness?', history: [] });
+  assert.strictEqual(res.output.reply, 'Snapshot-only answer.');
+  assert.deepStrictEqual(res.output.cards, []);
+});
+
 test('conversation: returns reply + cards from a tool round, injecting the snapshot', async () => {
   stub(REDIS, fakeRedis());
   stub(CONV, {}); // appendToThread is best-effort; stubbed model makes it no-op via its try/catch

@@ -620,7 +620,15 @@ async function conversation({ ctx, systemPrompt, userId, message, history = [] }
     `\n\nReply rules:\n- Be conversational and concise (3-5 sentences max unless the question genuinely requires more).\n- Ground answers in the learner's objective and recent context.\n- End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\` — these will be parsed and shown as chips.\n- Refuse off-topic / harmful / professional-advice requests politely; redirect to learning.`;
 
   const llmResult = await callLLMWithTools({ userId, systemPrompt: extended, userPrompt: message, history: effectiveHistory, maxTokens: COMPASS_MAX_TOKENS });
-  const { text, cards = [], capped, tokensIn, tokensOut } = llmResult;
+  let { text, cards = [], capped, tokensIn, tokensOut } = llmResult;
+
+  // Retry once WITHOUT tools (snapshot-only answer) on a tool-loop failure
+  // (not on a budget cap — capped is a hard stop).
+  if (!capped && !text) {
+    const retry = await callLLM({ userId, systemPrompt: extended, userPrompt: message, history: effectiveHistory, maxTokens: COMPASS_MAX_TOKENS });
+    if (retry.text) { text = retry.text; cards = []; tokensIn = retry.tokensIn; tokensOut = retry.tokensOut; }
+    else if (retry.capped) { capped = true; }
+  }
 
   if (capped) {
     const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
