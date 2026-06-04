@@ -50,7 +50,11 @@ const anthropic = require('../../config/anthropic');
 const redis = require('../../config/redis');
 const userContextService = require('../userContextService');
 const readinessService = require('../readiness/readinessService');
+const compassTools = require('./compassTools');
+const compassProgress = require('./compassProgressService');
 const { detectDrillRequest } = require('./compassIntent');
+
+const COMPASS_MAX_TOOL_ITERATIONS = 5;
 
 // Persistence: max age of the "active" thread before a new one starts.
 const ACTIVE_THREAD_MAX_AGE_MIN = 60 * 12;  // 12 hours
@@ -476,6 +480,74 @@ async function adjustBudget(userId, delta) {
     await redis.incrby(key, delta);
   } catch (err) {
     console.warn('[compass] Redis budget adjust failed:', err.message);
+  }
+}
+
+/**
+ * Tool-enabled LLM call. Mirrors compassCoder.turn(): loop calling the model
+ * with read-only Compass tools; on stop_reason='tool_use', dispatch each tool,
+ * feed results back, repeat (capped at COMPASS_MAX_TOOL_ITERATIONS). Collects
+ * the cards emitted by invoked tools (deduped by type, capped at 2).
+ */
+async function callLLMWithTools({ userId, systemPrompt, userPrompt, history = [], maxTokens = COMPASS_MAX_TOKENS }) {
+  // Tool loops burn more than a single chat turn — reserve 2x maxTokens headroom.
+  const estimatedTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4) + maxTokens * 2;
+  const allowed = await checkAndIncrementBudget(userId, estimatedTokens);
+  if (!allowed) {
+    console.warn(`[compass] user ${userId} hit daily token cap (tools)`);
+    return { text: null, cards: [], capped: true };
+  }
+
+  const messages = [];
+  for (const h of history.slice(-8)) {
+    const role = h.role === 'assistant' ? 'assistant' : 'user';
+    if (typeof h.content === 'string' && h.content.trim()) messages.push({ role, content: h.content });
+  }
+  messages.push({ role: 'user', content: userPrompt });
+
+  const cards = [];
+  let totalIn = 0;
+  let totalOut = 0;
+  let finalText = '';
+  try {
+    for (let iter = 0; iter < COMPASS_MAX_TOOL_ITERATIONS; iter++) {
+      const response = await anthropic.messages.create({
+        model: COMPASS_MODEL, max_tokens: maxTokens, temperature: COMPASS_TEMPERATURE,
+        system: systemPrompt, messages, tools: compassTools.TOOLS,
+      });
+      totalIn += response.usage?.input_tokens || 0;
+      totalOut += response.usage?.output_tokens || 0;
+      messages.push({ role: 'assistant', content: response.content });
+
+      const text = (response.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+      if (text) finalText = text;
+      if (response.stop_reason !== 'tool_use') break;
+
+      const toolUses = (response.content || []).filter((b) => b.type === 'tool_use');
+      const toolResults = [];
+      for (const block of toolUses) {
+        const r = await compassTools.dispatch({ userId, name: block.name, input: block.input });
+        if (r.card) cards.push(r.card);
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: r.output, is_error: !r.ok });
+      }
+      messages.push({ role: 'user', content: toolResults });
+    }
+
+    const actual = totalIn + totalOut;
+    await adjustBudget(userId, actual - estimatedTokens);
+
+    const seen = new Set();
+    const deduped = [];
+    for (const c of cards) {
+      if (seen.has(c.type)) continue;
+      seen.add(c.type); deduped.push(c);
+      if (deduped.length >= 2) break;
+    }
+    return { text: finalText || null, cards: deduped, capped: false, tokensIn: totalIn, tokensOut: totalOut };
+  } catch (err) {
+    await adjustBudget(userId, -estimatedTokens);
+    console.error('[compass] tool-loop LLM error', err.message);
+    return { text: null, cards: [], capped: false, error: err.message };
   }
 }
 
@@ -1147,6 +1219,7 @@ module.exports = {
   handle,
   buildUserContext,
   buildSystemContext,
+  callLLMWithTools,
   getActiveThread,
   resetActiveThread,
   getBudgetUsage,
