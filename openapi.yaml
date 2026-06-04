@@ -8145,3 +8145,211 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorEnvelope'
+
+  # =====================================================================
+  # Compass conversational API (v2)
+  # =====================================================================
+  /api/v2/compass:
+    post:
+      operationId: compassConverse
+      tags: [Compass]
+      summary: Main Compass conversational endpoint
+      description: |
+        Unified entry point for all Compass modes (conversation, tutor, quiz_config,
+        interview_config, note, insight, mentor, coach, greeting). Dispatches to
+        mode-specific logic; all calls carry full user context (objective, plan,
+        readiness, mastery). Daily token budget applies for LLM-backed modes.
+
+        The `output` shape is mode-dependent:
+        - conversation / mentor / coach: reply + followups + cards (+ optional suggestedAction)
+        - greeting: message + suggestedActions
+        - quiz_config: headline + config + estimateMin + startEndpoint
+        - interview_config: headline + config + startEndpoint
+        - insight: headline + items[]
+        - note: reply + action (type + endpoints)
+        - tutor: reply + followups + contentTitle
+
+        All modes MAY include `suggested_action` appended by intent detection.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum:
+                    - conversation
+                    - tutor
+                    - quiz_config
+                    - interview_config
+                    - note
+                    - insight
+                    - mentor
+                    - coach
+                    - review_week
+                    - greeting
+                payload:
+                  type: object
+                  properties:
+                    message:
+                      type: string
+                      description: User message text (conversation / tutor / mentor / coach turns)
+                    history:
+                      type: array
+                      description: Recent turn history supplied by the client (optional — server falls back to stored thread)
+                      items:
+                        type: object
+                        required: [role, content]
+                        properties:
+                          role: { type: string, enum: [user, assistant] }
+                          content: { type: string }
+                    contentId:
+                      type: string
+                      description: MongoDB ObjectId of the content item (tutor mode)
+                    weekNumber:
+                      type: integer
+                      description: Plan week override (coach mode)
+                    scope:
+                      type: string
+                      description: Retrospective window (coach mode)
+                      enum: [week, month, all_time, topic]
+                    topic:
+                      type: string
+                      description: Topic name for topic-scoped coach sessions
+      responses:
+        '200':
+          description: Compass response (shape varies by mode — see output schema)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [mode, output]
+                    properties:
+                      mode:
+                        type: string
+                      output:
+                        type: object
+                        description: Mode-dependent output. Always present for successful calls.
+                        properties:
+                          reply:
+                            type: string
+                            description: Primary text reply (conversation / tutor / mentor / coach / note modes)
+                          followups:
+                            type: array
+                            description: Short follow-up suggestion chips (conversation / tutor / coach modes)
+                            items: { type: string }
+                          cards:
+                            type: array
+                            description: Rich answer cards projected from Compass Progress tools
+                            items:
+                              $ref: '#/components/schemas/CompassCard'
+                          message:
+                            type: string
+                            description: Greeting text (greeting mode)
+                          suggestedActions:
+                            type: array
+                            description: Action chips shown below a greeting (greeting mode)
+                            items:
+                              type: object
+                              properties:
+                                id:   { type: string }
+                                label: { type: string }
+                                mode:  { type: string }
+                          headline:
+                            type: string
+                            description: Section headline (quiz_config / interview_config / insight modes)
+                          config:
+                            type: object
+                            description: Pre-filled quiz or interview configuration (quiz_config / interview_config modes)
+                            additionalProperties: true
+                          startEndpoint:
+                            type: string
+                            description: API endpoint the client should call to start the quiz or interview
+                          items:
+                            type: array
+                            description: Insight items (insight mode)
+                            items:
+                              type: object
+                              properties:
+                                severity: { type: string, enum: [good, info, warn] }
+                                text: { type: string }
+                          suggestedAction:
+                            type: object
+                            description: Intent-detected suggested drill action (all conversational modes, optional)
+                            additionalProperties: true
+                        additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v2/compass/thread:
+    get:
+      operationId: compassGetThread
+      tags: [Compass]
+      summary: Fetch the active Compass conversation thread
+      description: |
+        Returns the user's active conversation thread (or creates one). The iOS
+        Compass tab calls this on cold-start to restore prior messages. Threads
+        auto-roll-over after 12 hours of inactivity so the context window stays
+        bounded.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Active thread with message history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [threadId, title, messageCount, lastMessageAt, messages]
+                    properties:
+                      threadId:
+                        type: string
+                        description: MongoDB ObjectId of the active thread
+                      title:
+                        type: string
+                        description: Auto-generated title from the first user message
+                      messageCount:
+                        type: integer
+                      lastMessageAt:
+                        type: string
+                        format: date-time
+                      messages:
+                        type: array
+                        items:
+                          type: object
+                          required: [role, content]
+                          properties:
+                            role:
+                              type: string
+                              enum: [user, assistant]
+                            content:
+                              type: string
+                            mode:
+                              type: string
+                              description: Compass mode this message was produced under
+                            followups:
+                              type: array
+                              items: { type: string }
+                            cards:
+                              type: array
+                              items:
+                                $ref: '#/components/schemas/CompassCard'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
