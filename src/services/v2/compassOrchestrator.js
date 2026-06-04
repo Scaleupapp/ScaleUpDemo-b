@@ -53,6 +53,7 @@ const readinessService = require('../readiness/readinessService');
 const compassTools = require('./compassTools');
 const compassProgress = require('./compassProgressService');
 const { detectDrillRequest } = require('./compassIntent');
+const { detectTutoringRequest } = require('./tutoringIntent');
 
 const COMPASS_MAX_TOOL_ITERATIONS = 5;
 
@@ -390,22 +391,25 @@ async function handle({ userId, mode, payload = {} }) {
   const INTENT_ELIGIBLE_MODES = ['conversation', 'tutor', 'mentor', 'coach', 'review_week'];
   const userMessage = payload && payload.message;
   if (
-    INTENT_ELIGIBLE_MODES.includes(mode) &&
-    userMessage &&
-    response &&
-    response.output &&
-    !response.output.suggested_action
+    INTENT_ELIGIBLE_MODES.includes(mode) && userMessage &&
+    response && response.output && !response.output.suggested_action
   ) {
     try {
-      const action = await detectDrillRequest(userMessage);
-      if (action) {
-        response.output.suggested_action = action;
+      const tutoring = await detectTutoringRequest(userMessage);
+      if (tutoring) {
+        response.output.suggested_action = tutoring;
+      } else {
+        const action = await detectDrillRequest(userMessage);
+        if (action) response.output.suggested_action = action;
       }
     } catch (e) {
       console.error('[compass intent detection]', e.message);
-      // never throw — intent detection is best-effort
     }
   }
+
+  // Proactive tutoring offer: if a turn surfaced weak topics and nothing else
+  // claimed the action slot, offer to tutor the top weak topic.
+  attachProactiveTutoringOffer(response);
 
   return response;
 }
@@ -1209,6 +1213,29 @@ async function getActiveThread(userId) {
 }
 
 /**
+ * If the response carries a weak_topics or readiness_explanation card and no
+ * suggested_action is set, attach a start_tutoring offer for the top weak topic.
+ * Best-effort, pure, never throws.
+ */
+function attachProactiveTutoringOffer(response) {
+  try {
+    if (!response || !response.output || response.output.suggested_action) return;
+    const cards = response.output.cards || [];
+    const weak = cards.find((c) => c.type === 'weak_topics');
+    if (weak && Array.isArray(weak.payload?.topics) && weak.payload.topics.length) {
+      const t = weak.payload.topics[0];
+      response.output.suggested_action = { type: 'start_tutoring', topic: t.topic, score: t.score ?? null };
+      return;
+    }
+    const readiness = cards.find((c) => c.type === 'readiness_explanation');
+    if (readiness && Array.isArray(readiness.payload?.topDraggers) && readiness.payload.topDraggers.length) {
+      const d = readiness.payload.topDraggers[0];
+      response.output.suggested_action = { type: 'start_tutoring', topic: d.name, score: d.score ?? null };
+    }
+  } catch (_) {}
+}
+
+/**
  * Archive the current active thread so the next interaction starts fresh.
  */
 async function resetActiveThread(userId) {
@@ -1228,5 +1255,6 @@ module.exports = {
   getActiveThread,
   resetActiveThread,
   getBudgetUsage,
+  attachProactiveTutoringOffer,
 };
 
