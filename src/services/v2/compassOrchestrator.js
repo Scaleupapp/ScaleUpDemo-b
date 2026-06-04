@@ -592,63 +592,57 @@ async function greeting({ ctx, systemPrompt, userId, contextHint }) {
 
 async function conversation({ ctx, systemPrompt, userId, message, history = [] }) {
   if (!message || typeof message !== 'string') {
-    return { mode: 'conversation', output: { reply: 'Tell me what you need.', followups: [] } };
+    return { mode: 'conversation', output: { reply: 'Tell me what you need.', followups: [], cards: [] } };
   }
 
-  // Persist user turn before LLM call so it's recorded even if the model fails.
   await appendToThread(userId, 'user', message, { mode: 'conversation' });
 
-  // If the client didn't pass history, pull it from the persisted thread so
-  // Compass remembers prior turns even across iOS app cold-starts.
   let effectiveHistory = history;
   if (!history || history.length === 0) {
     try {
       const thread = await getOrCreateActiveThread(userId);
-      effectiveHistory = (thread?.messages || []).slice(-8, -1).map(m => ({ role: m.role, content: m.content }));
+      effectiveHistory = (thread?.messages || []).slice(-8, -1).map((m) => ({ role: m.role, content: m.content }));
     } catch (_) {}
   }
 
-  // Append a directive to keep replies tight + offer follow-ups inline
-  const extended = systemPrompt + `\n\nReply rules:\n- Be conversational and concise (3-5 sentences max unless the question genuinely requires more).\n- Ground answers in the learner's objective and recent context.\n- End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\` — these will be parsed and shown as chips.\n- Refuse off-topic / harmful / professional-advice requests politely; redirect to learning.`;
+  // Live progress snapshot + the hard never-invent rule + tool guidance.
+  let snapshotBlock = '';
+  try {
+    const snap = await compassProgress.getSnapshot(userId);
+    const rendered = compassProgress.renderSnapshot(snap);
+    if (rendered) snapshotBlock = `\n\n--- CURRENT PROGRESS SNAPSHOT (live data) ---\n${rendered}\n--- END SNAPSHOT ---`;
+  } catch (_) {}
 
-  const llmResult = await callLLM({
-    userId, systemPrompt: extended, userPrompt: message, history: effectiveHistory,
-    maxTokens: COMPASS_MAX_TOKENS,
-  });
-  const { text, capped, tokensIn, tokensOut } = llmResult;
+  const extended = systemPrompt + snapshotBlock +
+    `\n\nYou can call read-only tools to look up specifics (a latest result, a named activity, a topic, weak topics, the readiness breakdown, recent activity). Use them for ANY question about the learner's performance or progress.` +
+    `\nNEVER state a number, score, or result you did not get from the snapshot above or from a tool. If you don't have it, call a tool — or say you'll check.` +
+    `\n\nReply rules:\n- Be conversational and concise (3-5 sentences max unless the question genuinely requires more).\n- Ground answers in the learner's objective and recent context.\n- End with up to 3 short follow-up suggestions as a JSON code block: \`\`\`json\n{"followups":["…","…","…"]}\n\`\`\` — these will be parsed and shown as chips.\n- Refuse off-topic / harmful / professional-advice requests politely; redirect to learning.`;
+
+  const llmResult = await callLLMWithTools({ userId, systemPrompt: extended, userPrompt: message, history: effectiveHistory, maxTokens: COMPASS_MAX_TOKENS });
+  const { text, cards = [], capped, tokensIn, tokensOut } = llmResult;
 
   if (capped) {
     const reply = "You've hit today's free Compass usage. Try again tomorrow or upgrade for higher limits.";
     await appendToThread(userId, 'assistant', reply, { mode: 'conversation' });
-    return { mode: 'conversation', output: { reply, followups: [] } };
+    return { mode: 'conversation', output: { reply, followups: [], cards: [] } };
   }
 
   if (!text) {
-    const reply = "I had trouble thinking that through just now. Try again in a moment?";
+    const reply = 'I had trouble thinking that through just now. Try again in a moment?';
     await appendToThread(userId, 'assistant', reply, { mode: 'conversation', followups: ['Retry', 'Try something else'] });
-    return {
-      mode: 'conversation',
-      output: { reply, followups: ['Retry', 'Try something else'] },
-    };
+    return { mode: 'conversation', output: { reply, followups: ['Retry', 'Try something else'], cards: [] } };
   }
 
-  // Strip the JSON followups block out of the visible reply and parse it.
   let reply = text;
   let followups = [];
   const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
   if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[1]);
-      if (Array.isArray(parsed.followups)) followups = parsed.followups.slice(0, 3);
-    } catch (_) {}
+    try { const parsed = JSON.parse(jsonMatch[1]); if (Array.isArray(parsed.followups)) followups = parsed.followups.slice(0, 3); } catch (_) {}
     reply = text.replace(jsonMatch[0], '').trim();
   }
 
-  await appendToThread(userId, 'assistant', reply, {
-    mode: 'conversation', followups, tokensIn, tokensOut,
-  });
-
-  return { mode: 'conversation', output: { reply, followups } };
+  await appendToThread(userId, 'assistant', reply, { mode: 'conversation', followups, cards, tokensIn, tokensOut });
+  return { mode: 'conversation', output: { reply, followups, cards } };
 }
 
 /**
@@ -1220,6 +1214,7 @@ module.exports = {
   buildUserContext,
   buildSystemContext,
   callLLMWithTools,
+  conversation,
   getActiveThread,
   resetActiveThread,
   getBudgetUsage,
