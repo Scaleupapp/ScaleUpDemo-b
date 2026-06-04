@@ -184,4 +184,18 @@ function renderSnapshot(snap) {
   return L.join('\n');
 }
 
-module.exports = { getSnapshot, renderSnapshot, invalidate };
+async function explainReadiness(userId) {
+  const r = await readinessService.getServedReadiness(userId);
+  if (!r) return { value: null, target: null, source: null, distanceToTarget: null, contributors: [], topDraggers: [], note: 'No readiness data yet — complete a quiz or assessment to start measuring.' };
+  const contributors = Array.isArray(r.breakdown)
+    ? r.breakdown.map((b) => ({ name: b.name, score: b.score, weight: b.weight ?? null, assessed: !!b.assessed }))
+    : [];
+  const topDraggers = (r.draggers || []).map((d) => ({ name: d.name, score: d.score, weight: d.weight ?? null }));
+  const distanceToTarget = (typeof r.value === 'number' && typeof r.target === 'number') ? Math.max(0, r.target - r.value) : null;
+  const note = contributors.length
+    ? `Your readiness is ${r.value}% against a ${r.target}% target. It's a weighted blend of your competencies; the lowest-scoring assessed ones pull it down most.`
+    : `Your readiness is ${r.value}% against a ${r.target}% target — currently the average of your assessed topic scores. The lowest are dragging it down.`;
+  return { value: r.value, target: r.target, source: r.source, distanceToTarget, contributors, topDraggers, note };
+}
+
+module.exports = { getSnapshot, renderSnapshot, invalidate, explainReadiness };

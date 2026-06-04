@@ -7,6 +7,7 @@
  * (you.js overview, Compass coach context) should route through here.
  */
 
+const mongoose = require('mongoose');
 const ReadinessSnapshot = require('../../models/ReadinessSnapshot');
 
 /** Mirror of the overview's knowledge fallback (do not change semantics). */
@@ -174,6 +175,106 @@ function evaluateReady({ servedSource, servedValue, target } = {}) {
   return servedValue >= target;
 }
 
+/**
+ * Inline of the diagnosticBaselineReadiness helper from routes/v2/you.js.
+ * Kept here so getServedReadiness can use it without a circular dep.
+ */
+function _diagnosticBaselineReadiness(attempt) {
+  if (!attempt) return null;
+  const resultsMap = attempt.results instanceof Map
+    ? Object.fromEntries(attempt.results)
+    : (attempt.results || {});
+  const scores = Object.values(resultsMap)
+    .map((r) => (r && typeof r.score === 'number' ? r.score : null))
+    .filter((s) => s !== null);
+  if (scores.length === 0) return null;
+  return Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
+}
+
+/**
+ * The single served-readiness composition used by BOTH /you/overview and Compass.
+ * Mirrors the inline logic in routes/v2/you.js so the number never drifts.
+ * Returns { value, source, target, targetBands, breakdown|null, coverage|null, coding|null, draggers[] }.
+ */
+async function getServedReadiness(userId) {
+  const UserObjective = mongoose.model('UserObjective');
+  const Plan = mongoose.model('Plan');
+  const Journey = mongoose.model('Journey');
+  const KnowledgeProfile = mongoose.model('KnowledgeProfile');
+  const CompetitionProfile = mongoose.model('CompetitionProfile');
+  const InterviewSession = mongoose.model('InterviewSession');
+  const DiagnosticAttempt = mongoose.model('DiagnosticAttempt');
+  const targetService = require('./targetService');
+  const featureFlags = require('../../config/featureFlags');
+  const { evaluateCodingEligibility } = require('../../coding/services/codingEligibility');
+  const readinessUpdater = require('../../coding/services/readinessUpdater');
+
+  const [objective, plan, journey, knowledge, competition, latestAttempt] = await Promise.all([
+    UserObjective.findOne({ userId, status: 'active', isPrimary: true }).lean(),
+    Plan.findOne({ userId, isActive: true }).lean(),
+    Journey.findOne({ userId, status: 'active' }).lean(),
+    KnowledgeProfile.findOne({ userId }).lean(),
+    CompetitionProfile.findOne({ userId }).lean(),
+    DiagnosticAttempt.findOne({ userId, status: 'completed' }).sort({ completedAt: -1 }).lean(),
+  ]);
+
+  let codingComponent = null;
+  try {
+    const elig = evaluateCodingEligibility(objective);
+    if (elig.eligible) {
+      codingComponent = await readinessUpdater.getMetaSkillComponent({ user_id: userId, role_track: elig.role_track });
+    }
+  } catch (_) {}
+
+  const diagnosticBaseline = _diagnosticBaselineReadiness(latestAttempt);
+  const legacy = assembleLegacy({ plan, journey, knowledge, diagnosticBaseline, codingComponent });
+  const legacyValue = legacy.value;
+
+  let shadow = null;
+  try {
+    if (objective?.analysis?.competencies?.length) {
+      const cms = require('./competencyMasteryService');
+      const elig = evaluateCodingEligibility(objective);
+      const now = new Date();
+      const CapstoneSession = mongoose.model('CapstoneSession');
+      const DrillAttempt = mongoose.model('DrillAttempt');
+      const MetaSkillMastery = mongoose.model('MetaSkillMastery');
+      const [capstones, drills, mastery, interviews] = await Promise.all([
+        elig.eligible ? CapstoneSession.find({ user_id: userId, status: 'graded' }).select('result.overall_score graded_at').sort({ graded_at: -1 }).limit(10).lean() : [],
+        elig.eligible ? DrillAttempt.find({ user_id: userId, status: 'graded' }).select('grade.overall_score submitted_at').sort({ submitted_at: -1 }).limit(20).lean() : [],
+        elig.eligible ? MetaSkillMastery.findOne({ user_id: userId, role_track: elig.role_track }).lean() : null,
+        InterviewSession.find({ userId, status: { $in: ['completed', 'evaluated'] } }).select('evaluation.overallScore completedAt').sort({ completedAt: -1 }).limit(10).lean(),
+      ]);
+      const codingSignal = elig.eligible ? cms.buildCodingSignal({ capstones, drills, mastery, now }) : null;
+      const interviewSignal = cms.buildInterviewSignal({ interviews, now });
+      const behavioral = cms.buildBehavioralSignal({ streak: competition?.currentStreak || 0, contentCompleted: 0, activeDays7: 0 });
+      const composite = computeComposite({ objective, ctx: { coding: !!elig.eligible }, knowledge, codingSignal, interviewSignal, behavioral, now });
+      if (composite) {
+        shadow = { value: composite.value, confidence: composite.confidence, coverage: composite.coverage, breakdown: composite.breakdown, delta: composite.value - legacyValue };
+      }
+    }
+  } catch (_) {}
+
+  const served = chooseServed({ legacyValue, shadow, flagOn: featureFlags.compositeReadiness });
+  const effectiveTarget = targetService.getEffectiveTarget(objective);
+  const targetBands = targetService.targetBands(effectiveTarget);
+
+  const breakdown = Array.isArray(shadow?.breakdown)
+    ? shadow.breakdown
+        .map((b) => ({ name: b.competency, weight: b.weight, score: b.score, assessed: !!b.assessed, primitive: b.primitive }))
+        .sort((a, b) => b.weight - a.weight)
+    : null;
+
+  let draggers;
+  if (breakdown && (served.source === 'composite' || served.source === 'blend')) {
+    draggers = breakdown.filter((b) => b.assessed).sort((a, b) => a.score - b.score).slice(0, 3).map((b) => ({ name: b.name, score: b.score }));
+  } else {
+    draggers = (knowledge?.topicMastery || []).filter((t) => typeof t.score === 'number').sort((a, b) => a.score - b.score).slice(0, 3).map((t) => ({ name: t.topic, score: t.score }));
+  }
+
+  return { value: served.value, source: served.source, target: effectiveTarget, targetBands, breakdown, coverage: shadow?.coverage ?? null, coding: legacy.coding || null, draggers };
+}
+
 module.exports = {
   assembleLegacy,
   computeReadinessFromKnowledge,
@@ -181,6 +282,7 @@ module.exports = {
   computeComposite,
   chooseServed,
   evaluateReady,
+  getServedReadiness,
   CONFIDENCE_MIN,
   CONFIDENCE_FULL,
 };
