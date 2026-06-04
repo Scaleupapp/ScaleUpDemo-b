@@ -1235,7 +1235,9 @@ async function tutorResult({ systemPrompt, userId, topic, attemptId, beforeScore
   let nextTopic = null;
   try {
     const weak = await compassProgress.listWeakTopics(userId, 5);
-    nextTopic = (weak.find((w) => w.topic !== topic) || weak[0])?.topic || null;
+    // Offer a DIFFERENT weak topic to chain into; if the only weak topic is the
+    // one just tutored, offer nothing (don't loop them back into the same topic).
+    nextTopic = weak.find((w) => w.topic !== topic)?.topic || null;
   } catch (_) {}
 
   const resultPrompt = systemPrompt +
