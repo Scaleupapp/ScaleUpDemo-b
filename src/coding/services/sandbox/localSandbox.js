@@ -48,6 +48,11 @@ async function runInTempDir({ files, command, timeout_ms = 15000 }) {
             npm_config_fund: 'false',
             npm_config_audit: 'false',
             CI: 'true',
+            // Project root on the Python path so `python tests/foo.py` can import
+            // top-level modules (e.g. `from guard import scan`) — mirrors the e2b
+            // sandbox fix. Without it, a script under tests/ only sees tests/ on
+            // sys.path and a correct submission fails with ModuleNotFoundError.
+            PYTHONPATH: dir,
           },
           maxBuffer: 10 * 1024 * 1024,
         },

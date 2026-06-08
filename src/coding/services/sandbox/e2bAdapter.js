@@ -130,7 +130,15 @@ async function runCommand(sandboxId, cmd, { timeoutMs = 30_000 } = {}) {
   // the result so callers can inspect exit codes (test runs commonly exit
   // non-zero, that's not an SDK error).
   try {
-    const r = await sbx.commands.run(cmd, { timeoutMs });
+    // Put the project root on the Python path so a test invoked as
+    // `python tests/foo.py` can still import top-level modules (e.g.
+    // `from guard import scan`). Running a script under tests/ otherwise puts
+    // only tests/ on sys.path → ModuleNotFoundError, which would fail EVERY
+    // correct submission, not just incorrect ones. Harmless for non-Python langs.
+    const r = await sbx.commands.run(cmd, {
+      timeoutMs,
+      envs: { PYTHONPATH: '/home/user' },
+    });
     return {
       stdout: r.stdout || '',
       stderr: r.stderr || '',
