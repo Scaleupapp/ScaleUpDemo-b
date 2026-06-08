@@ -48,6 +48,7 @@ router.post(
 );
 
 router.get('/:session_id/status', auth, rl({ endpoint: 'status', max: 120 }), capstones.getStatus);
+router.post('/:session_id/rejoin', auth, rl({ endpoint: 'rejoin', max: 10 }), capstones.rejoin);
 router.post('/:session_id/control', auth, rl({ endpoint: 'control', max: 30 }), capstones.control);
 router.post('/:session_id/events', auth, rl({ endpoint: 'events', max: 60 }), capstones.appendEvents);
 router.post('/:session_id/run', auth, rl({ endpoint: 'run', max: 40 }), capstones.runInSandbox);

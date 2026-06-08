@@ -974,6 +974,58 @@ async function getTrack(req, res) {
   });
 }
 
+/**
+ * POST /api/coding/capstones/:session_id/rejoin
+ *
+ * A learner who closed their laptop browser (letting the 10-min pairing code
+ * expire) can call this to get a FRESH code for the SAME already-in-progress
+ * session, without creating a new session or disturbing the running sandbox.
+ *
+ * Rules:
+ *   - Auth: same candidate JWT as every other capstone endpoint.
+ *   - Ownership: the session must belong to req.user.userId.
+ *   - Resumable statuses: `in_progress` or `paused` only.
+ *     graded / aborted / expired / submitted / evaluating → 409 NOT_RESUMABLE.
+ *   - Does NOT pause, reset, or touch the session record in any way —
+ *     just mints a new PairingCode bound to the existing session_id.
+ *   - Response mirrors the start/retry pairing block so the apps can reuse
+ *     their existing pairing UI without changes.
+ */
+async function rejoin(req, res) {
+  const { session_id } = req.params;
+
+  const session = await CapstoneSession.findOne({
+    _id: session_id,
+    user_id: req.user.userId,
+  })
+    .select('_id status')
+    .lean();
+
+  if (!session) {
+    return res.status(404).json({ error: 'session_not_found' });
+  }
+
+  const RESUMABLE = new Set(['in_progress', 'paused']);
+  if (!RESUMABLE.has(session.status)) {
+    return res.status(409).json({
+      error: 'NOT_RESUMABLE',
+      current_status: session.status,
+      message: 'Session is not in_progress or paused — cannot issue a new pairing code.',
+    });
+  }
+
+  const { code, expiresAt } = await pairingService.mintCode({
+    userId: req.user.userId,
+    sessionId: session._id,
+  });
+
+  return res.json({
+    session_id: String(session._id),
+    pairing_code: code,
+    expires_at: expiresAt,
+  });
+}
+
 module.exports = {
   listLibrary,
   start,
@@ -994,4 +1046,5 @@ module.exports = {
   getGenerationStatus,
   listGenerations,
   getTrack,
+  rejoin,
 };
