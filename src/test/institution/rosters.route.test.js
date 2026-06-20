@@ -72,7 +72,7 @@ test('funnel is forbidden for an unauthenticated caller', async () => {
 // ── Happy-path upload test with model stubs ─────────────────────────────────
 // We inject deps through the rosters router's exported _deps seam.
 
-test('upload returns 200 with rosterUploadId and preview for tpo_coordinator (stubbed models)', async () => {
+test('upload returns 201 with rosterUploadId and preview for tpo_coordinator (stubbed models)', async () => {
   // Build a fake institution with seats
   let savedRosterUpload = null;
   const fakeInstitution = { name: 'Test College', seatsLicensed: 100, seatsUsed: 0 };
@@ -106,7 +106,7 @@ test('upload returns 200 with rosterUploadId and preview for tpo_coordinator (st
     .set('Authorization', `Bearer ${tok('tpo_coordinator')}`)
     .send({ departmentId: 'd1', cohortId: 'c1', rows });
 
-  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.status, 201);
   assert.ok(res.body.success);
   assert.ok(res.body.data.rosterUploadId, 'should return rosterUploadId');
   assert.strictEqual(res.body.data.preview.length, 2);
@@ -114,5 +114,76 @@ test('upload returns 200 with rosterUploadId and preview for tpo_coordinator (st
   assert.strictEqual(res.body.data.errors.length, 0);
 
   // Clean up dep injection
+  rosters._deps = null;
+});
+
+// ── Idempotency: double-approve returns 409 on second call ──────────────────
+
+test('approve: first call succeeds; second call returns 409 (commitRoster called only once)', async () => {
+  // Stateful upload object — its status persists across calls just like a real document.
+  const upload = {
+    _id: 'ru-idem',
+    institutionId: 'i1',
+    departmentId: 'd1',
+    cohortId: 'c1',
+    status: 'validated',
+    validData: [{ name: 'Alice', rollNumber: 'R001', email: 'alice@college.edu', phone: '9876543210' }],
+    save: async function () { /* mutations to `this` already applied by the route */ },
+  };
+
+  let commitRosterCallCount = 0;
+
+  rosters._deps = {
+    Institution: { findOne: async () => ({ name: 'Test College' }) },
+    // findOne returns the same stateful object; .select('+validData') chain is a no-op wrapper
+    RosterUpload: {
+      findOne: () => ({
+        select: () => Promise.resolve(upload),
+      }),
+    },
+    PendingStudent: { countDocuments: async () => 0 },
+    InstitutionEnrollment: { countDocuments: async () => 0 },
+  };
+
+  // Stub commitRoster and sendInvites on the module objects (route calls via rosterService.commitRoster)
+  const rosterService = require('../../services/institution/rosterService');
+  const inviteService = require('../../services/institution/inviteService');
+  const origCommit = rosterService.commitRoster;
+  const origSend = inviteService.sendInvites;
+
+  rosterService.commitRoster = async ({ rosterUpload }) => {
+    commitRosterCallCount += 1;
+    // Mimic what the real commitRoster does: transition status and save
+    rosterUpload.status = 'committed';
+    await rosterUpload.save();
+    return { created: 1, pending: [] };
+  };
+  inviteService.sendInvites = async () => ({ invited: 1 });
+
+  stubLoadUser('tpo_head');
+  const a = express();
+  a.use(express.json());
+  a.use('/api/institution', rosters);
+
+  // First approve — must succeed
+  const res1 = await request(a)
+    .post('/api/institution/rosters/ru-idem/approve')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({});
+  assert.strictEqual(res1.status, 200, `first approve should be 200 (got ${res1.status}: ${JSON.stringify(res1.body)})`);
+
+  // Second approve — status is now 'committed' (not 'validated'), must return 409
+  const res2 = await request(a)
+    .post('/api/institution/rosters/ru-idem/approve')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({});
+  assert.strictEqual(res2.status, 409, `second approve should be 409 (got ${res2.status}: ${JSON.stringify(res2.body)})`);
+
+  // commitRoster must have been called exactly once
+  assert.strictEqual(commitRosterCallCount, 1, 'commitRoster should be called exactly once');
+
+  // Restore originals and clean up
+  rosterService.commitRoster = origCommit;
+  inviteService.sendInvites = origSend;
   rosters._deps = null;
 });

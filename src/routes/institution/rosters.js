@@ -3,8 +3,8 @@ const express = require('express');
 const institutionAuth = require('../../middleware/institutionAuth');
 const { institutionScope, requireInstitutionRole } = require('../../middleware/institutionScope');
 const { validateRoster } = require('../../services/institution/rosterValidationService');
-const { commitRoster } = require('../../services/institution/rosterService');
-const { sendInvites } = require('../../services/institution/inviteService');
+const rosterService = require('../../services/institution/rosterService');
+const inviteService = require('../../services/institution/inviteService');
 
 const router = express.Router();
 
@@ -65,7 +65,7 @@ router.post(
       });
       await rosterUpload.save();
 
-      return res.status(200).json({
+      return res.status(201).json({
         success: true,
         data: {
           rosterUploadId: rosterUpload._id,
@@ -109,7 +109,7 @@ router.post(
       }
 
       // Commit — creates PendingStudent records
-      const { created, pending } = await commitRoster({
+      const { created, pending } = await rosterService.commitRoster({
         rosterUpload,
         validRows: rosterUpload.validData || [],
       });
@@ -120,9 +120,10 @@ router.post(
       const baseLink = process.env.STUDENT_APP_JOIN_URL || 'https://scaleupapp.club/join';
 
       // Send invites (email + SMS)
-      const { invited } = await sendInvites(pending, { institutionName, baseLink });
+      const { invited } = await inviteService.sendInvites(pending, { institutionName, baseLink });
 
-      // Mark upload approved
+      // Mark upload approved (status transitions away from 'validated' so a second approve returns 409)
+      rosterUpload.status = 'approved';
       rosterUpload.approvedBy = req.institution.institutionUserId;
       rosterUpload.approvedAt = new Date();
       await rosterUpload.save();
@@ -150,24 +151,22 @@ router.get(
       const cohortId = req.params.cohortId;
       const baseScope = institutionScope(req, { cohortId });
 
-      // invited = PendingStudents with status 'invited' + InstitutionEnrollments
-      // (PendingStudents that haven't registered yet count as invited)
+      // Funnel: each stage is non-overlapping.
+      // invited   = PendingStudents in 'invited'|'claimed' (invite was sent; claimed ones haven't enrolled yet)
+      // registered/diagnosticDone/active = InstitutionEnrollment records at each status (student fully registered)
       const [
-        pendingInvitedCount,
-        enrollmentTotal,
+        invitedCount,
         registeredCount,
         diagnosticDoneCount,
         activeCount,
       ] = await Promise.all([
-        PendingStudent.countDocuments({ ...institutionScope(req), cohortId, status: 'invited' }),
-        InstitutionEnrollment.countDocuments(baseScope),
+        PendingStudent.countDocuments({ ...institutionScope(req), cohortId, status: { $in: ['invited', 'claimed'] } }),
         InstitutionEnrollment.countDocuments({ ...baseScope, status: 'registered' }),
         InstitutionEnrollment.countDocuments({ ...baseScope, status: 'diagnostic_done' }),
         InstitutionEnrollment.countDocuments({ ...baseScope, status: 'active' }),
       ]);
 
-      // Total invited = those still pending/invited + those who registered (in enrollment)
-      const invited = pendingInvitedCount + enrollmentTotal;
+      const invited = invitedCount;
 
       return res.status(200).json({
         success: true,
