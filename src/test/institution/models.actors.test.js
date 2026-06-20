@@ -4,8 +4,10 @@ const assert = require('node:assert');
 const mongoose = require('mongoose');
 delete require.cache[require.resolve('../../models/InstitutionUser')];
 delete require.cache[require.resolve('../../models/InstitutionEnrollment')];
+delete require.cache[require.resolve('../../models/InstitutionAuditLog')];
 const InstitutionUser = require('../../models/InstitutionUser');
 const InstitutionEnrollment = require('../../models/InstitutionEnrollment');
+const InstitutionAuditLog = require('../../models/InstitutionAuditLog');
 
 test('InstitutionUser requires institutionId, email, role; rejects bad role; defaults tokenVersion 0', () => {
   const bad = new InstitutionUser({ email: 'a@b.edu', role: 'superuser' }).validateSync();
@@ -20,4 +22,12 @@ test('InstitutionEnrollment defaults status to pending', () => {
   const en = new InstitutionEnrollment({ institutionId: new mongoose.Types.ObjectId(), departmentId: new mongoose.Types.ObjectId(), cohortId: new mongoose.Types.ObjectId(), rollNumber: '4127' });
   assert.strictEqual(en.validateSync(), undefined);
   assert.strictEqual(en.status, 'pending');
+});
+
+test('InstitutionAuditLog requires institutionId and action', () => {
+  const bad = new InstitutionAuditLog({}).validateSync();
+  assert.ok(bad.errors.institutionId, 'institutionId required');
+  assert.ok(bad.errors.action, 'action required');
+  const ok = new InstitutionAuditLog({ institutionId: new mongoose.Types.ObjectId(), action: 'roster.approve' });
+  assert.strictEqual(ok.validateSync(), undefined);
 });

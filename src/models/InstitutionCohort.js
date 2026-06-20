@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const InstitutionCohortSchema = new mongoose.Schema({
-  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution', required: true, index: true },
+  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution', required: true },
   departmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Department', required: true },
   year: { type: String, enum: ['final', 'pre_final'], required: true },
   label: { type: String, required: true },

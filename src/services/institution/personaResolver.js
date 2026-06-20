@@ -11,7 +11,7 @@ async function resolvePersona(userId, deps = {}) {
     placement: {
       institution: { id: String(inst._id), name: inst.name, logoUrl: inst.logoUrl, brandColor: inst.brandColor },
       cohort: { id: String(cohort._id), year: cohort.year, label: cohort.label },
-      placementSeason: { deadline: cohort.placementSeason && cohort.placementSeason.endDate },
+      placementSeason: { deadline: cohort.placementSeason?.endDate ?? null },
       objective: { locked: true },
     },
   };

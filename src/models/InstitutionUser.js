@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const InstitutionUserSchema = new mongoose.Schema({
-  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution', required: true, index: true },
+  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution', required: true },
   name: String,
   email: { type: String, required: true, lowercase: true, trim: true },
   phone: String,

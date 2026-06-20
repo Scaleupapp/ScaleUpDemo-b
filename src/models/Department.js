@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const DepartmentSchema = new mongoose.Schema({
-  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution', required: true, index: true },
+  institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution', required: true },
   name: { type: String, required: true },
   code: { type: String, required: true },
   capabilityTracks: [{ type: String, enum: ['fullstack_ai', 'software', 'database'] }],

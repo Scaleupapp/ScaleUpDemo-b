@@ -1,4 +1,5 @@
 'use strict';
+// Scoping is institution-level for now; department-level scoping (req.institution.scope.departmentIds) is deferred to Plan 1B.
 function institutionScope(req, extra = {}) {
   if (!req.institution || !req.institution.institutionId) throw new Error('no_institution_context');
   return { ...extra, institutionId: req.institution.institutionId };
