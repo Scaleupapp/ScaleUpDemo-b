@@ -40,6 +40,15 @@ class EmailService {
     });
   }
 
+  async sendStudentInvite(email, { studentName, institutionName, link }) {
+    await this.transporter.sendMail({
+      from: this.from,
+      to: email,
+      subject: `${institutionName} invites you to ScaleUp Placements`,
+      html: `<p>Hi ${studentName || 'there'},</p><p>${institutionName} has set up your placement-readiness programme on ScaleUp. Tap to join:</p><p><a href="${link}">${link}</a></p>`,
+    });
+  }
+
   async sendDeletionReminder(email, firstName, daysRemaining) {
     const urgency = daysRemaining <= 1 ? 'FINAL NOTICE' : 'Reminder';
     await this.transporter.sendMail({
