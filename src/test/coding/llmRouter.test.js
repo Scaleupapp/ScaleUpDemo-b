@@ -49,7 +49,7 @@ test('getModelForTask: unknown task ID throws', () => {
 
 // ── getRoutingTable ───────────────────────────────────────────────────────────
 
-test('getRoutingTable: returns object with all 11 task IDs', () => {
+test('getRoutingTable: returns object with all 12 task IDs', () => {
   const table = getRoutingTable();
   assert.strictEqual(typeof table, 'object');
   assert.ok(table !== null);
@@ -57,6 +57,7 @@ test('getRoutingTable: returns object with all 11 task IDs', () => {
   const EXPECTED_TASK_IDS = [
     'content_generator_draft',
     'content_validator_cross',
+    'capstone_quality_cross',
     'reference_solution_solver',
     'drill_grade_prompt',
     'drill_grade_verify',
@@ -76,5 +77,5 @@ test('getRoutingTable: returns object with all 11 task IDs', () => {
   }
 
   assert.strictEqual(Object.keys(table).length, EXPECTED_TASK_IDS.length,
-    'Routing table should contain exactly 11 entries');
+    'Routing table should contain exactly 12 entries');
 });
