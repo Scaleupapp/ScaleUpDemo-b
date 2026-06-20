@@ -95,4 +95,17 @@ router.post('/prompt-dismissed', auth, async (req, res) => {
   }
 });
 
+const { resolvePersona } = require('../../services/institution/personaResolver');
+
+// Persona resolver — placement vs general. Additive; /status is unchanged.
+router.get('/context', auth, async (req, res) => {
+  try {
+    const data = await resolvePersona(req.user.userId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[v2/me/context] error', err);
+    return res.status(500).json({ success: false, message: 'Failed to resolve context' });
+  }
+});
+
 module.exports = router;
