@@ -1,0 +1,187 @@
+'use strict';
+const express = require('express');
+const institutionAuth = require('../../middleware/institutionAuth');
+const { institutionScope, requireInstitutionRole } = require('../../middleware/institutionScope');
+const { validateRoster } = require('../../services/institution/rosterValidationService');
+const { commitRoster } = require('../../services/institution/rosterService');
+const { sendInvites } = require('../../services/institution/inviteService');
+
+const router = express.Router();
+
+// ── Dependency injection seam (used in tests to stub models) ────────────────
+// Production: null → real models are required inline.
+// Tests: set `rosters._deps = { Institution, RosterUpload }` before the call.
+router._deps = null;
+
+function getModels() {
+  if (router._deps) return router._deps;
+  return {
+    Institution: require('../../models/Institution'),
+    RosterUpload: require('../../models/RosterUpload'),
+    PendingStudent: require('../../models/PendingStudent'),
+    InstitutionEnrollment: require('../../models/InstitutionEnrollment'),
+  };
+}
+
+// ── POST /rosters/upload ─────────────────────────────────────────────────────
+// Gate: tpo_head, tpo_coordinator
+// Validates rows, persists a RosterUpload (status: validated), returns preview.
+// Does NOT create PendingStudents — that happens at approve time.
+router.post(
+  '/rosters/upload',
+  institutionAuth,
+  requireInstitutionRole('tpo_head', 'tpo_coordinator'),
+  async (req, res) => {
+    try {
+      const { Institution, RosterUpload } = getModels();
+      const { departmentId, cohortId, rows = [] } = req.body;
+
+      if (!departmentId || !cohortId) {
+        return res.status(400).json({ success: false, message: 'departmentId and cohortId are required' });
+      }
+
+      // Compute available seats — always scoped to the institution from the token
+      const scopeFilter = institutionScope(req);
+      const institution = await Institution.findOne(scopeFilter);
+      if (!institution) {
+        return res.status(404).json({ success: false, message: 'Institution not found' });
+      }
+      const seatsAvailable = (institution.seatsLicensed || 0) - (institution.seatsUsed || 0);
+
+      // Validate the incoming rows
+      const { validRows, errors, counts } = validateRoster(rows, { seatsAvailable });
+
+      // Persist the upload record (validData stored with select:false for approve step)
+      const rosterUpload = new RosterUpload({
+        ...institutionScope(req),
+        departmentId,
+        cohortId,
+        uploadedBy: req.institution.institutionUserId,
+        rowCount: rows.length,
+        validRows: validRows.length,
+        errors,
+        validData: validRows,
+        status: 'validated',
+      });
+      await rosterUpload.save();
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          rosterUploadId: rosterUpload._id,
+          counts,
+          errors,
+          preview: validRows,
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// ── POST /rosters/:id/approve ────────────────────────────────────────────────
+// Gate: tpo_head, institution_admin  (maker-checker: different roles than upload)
+// Loads the scoped RosterUpload (with validData), commits via commitRoster,
+// then sends invites via sendInvites, marks the upload approved.
+router.post(
+  '/rosters/:id/approve',
+  institutionAuth,
+  requireInstitutionRole('tpo_head', 'institution_admin'),
+  async (req, res) => {
+    try {
+      const { RosterUpload, Institution } = getModels();
+      const uploadId = req.params.id;
+
+      // Load the upload scoped to this institution
+      const rosterUpload = await RosterUpload
+        .findOne(institutionScope(req, { _id: uploadId }))
+        .select('+validData');
+
+      if (!rosterUpload) {
+        return res.status(404).json({ success: false, message: 'Roster upload not found' });
+      }
+      if (rosterUpload.status !== 'validated') {
+        return res.status(409).json({
+          success: false,
+          message: `Cannot approve an upload with status '${rosterUpload.status}'`,
+        });
+      }
+
+      // Commit — creates PendingStudent records
+      const { created, pending } = await commitRoster({
+        rosterUpload,
+        validRows: rosterUpload.validData || [],
+      });
+
+      // Get institution name for invite messaging
+      const institution = await Institution.findOne(institutionScope(req));
+      const institutionName = institution ? institution.name : 'Your Institution';
+      const baseLink = process.env.STUDENT_APP_JOIN_URL || 'https://scaleupapp.club/join';
+
+      // Send invites (email + SMS)
+      const { invited } = await sendInvites(pending, { institutionName, baseLink });
+
+      // Mark upload approved
+      rosterUpload.approvedBy = req.institution.institutionUserId;
+      rosterUpload.approvedAt = new Date();
+      await rosterUpload.save();
+
+      return res.status(200).json({
+        success: true,
+        data: { created, invited },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// ── GET /cohorts/:cohortId/funnel ────────────────────────────────────────────
+// Gate: institution_admin, tpo_head, tpo_coordinator, faculty, viewer
+// Returns funnel counts for the cohort, all scoped to the institution.
+router.get(
+  '/cohorts/:cohortId/funnel',
+  institutionAuth,
+  requireInstitutionRole('institution_admin', 'tpo_head', 'tpo_coordinator', 'faculty', 'viewer'),
+  async (req, res) => {
+    try {
+      const { PendingStudent, InstitutionEnrollment } = getModels();
+      const cohortId = req.params.cohortId;
+      const baseScope = institutionScope(req, { cohortId });
+
+      // invited = PendingStudents with status 'invited' + InstitutionEnrollments
+      // (PendingStudents that haven't registered yet count as invited)
+      const [
+        pendingInvitedCount,
+        enrollmentTotal,
+        registeredCount,
+        diagnosticDoneCount,
+        activeCount,
+      ] = await Promise.all([
+        PendingStudent.countDocuments({ ...institutionScope(req), cohortId, status: 'invited' }),
+        InstitutionEnrollment.countDocuments(baseScope),
+        InstitutionEnrollment.countDocuments({ ...baseScope, status: 'registered' }),
+        InstitutionEnrollment.countDocuments({ ...baseScope, status: 'diagnostic_done' }),
+        InstitutionEnrollment.countDocuments({ ...baseScope, status: 'active' }),
+      ]);
+
+      // Total invited = those still pending/invited + those who registered (in enrollment)
+      const invited = pendingInvitedCount + enrollmentTotal;
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          invited,
+          registered: registeredCount,
+          diagnosticDone: diagnosticDoneCount,
+          active: activeCount,
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+module.exports = router;

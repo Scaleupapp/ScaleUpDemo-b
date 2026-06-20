@@ -7,6 +7,7 @@ const RosterUploadSchema = new mongoose.Schema({
   rowCount: { type: Number, default: 0 },
   validRows: { type: Number, default: 0 },
   errors: [{ row: Number, field: String, reason: String }],
+  validData: { type: [{ name: String, rollNumber: String, email: String, phone: String }], select: false },
   status: { type: String, enum: ['validated', 'approved', 'committed'], default: 'validated' },
   approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionUser' },
   approvedAt: Date,
