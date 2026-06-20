@@ -56,7 +56,7 @@ let capturedUpdate = null;
 let stubFindOne    = null;
 let capturedCreate = null;
 
-ArtifactBundle.findById = async (id) => ({
+ArtifactBundle.findById = (id) => ({
   lean: () => Promise.resolve(stubBundle),
 });
 
