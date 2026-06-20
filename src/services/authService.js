@@ -52,6 +52,7 @@ class AuthService {
     if (existing) throw new ApiError(409, 'An account with this email already exists');
 
     const user = await User.create({ email, password, firstName, lastName, authProvider: 'local' });
+    try { await require('./institution/rosterClaimService').claimForUser(user); } catch (e) { console.error('[rosterClaim] non-fatal', e.message); }
     const tokens = this._tokenPair(user);
 
     emailService.sendWelcome(email, firstName).catch(() => {});
@@ -230,6 +231,7 @@ class AuthService {
       user.isPhoneVerified = true;
       user.lastLoginAt = new Date();
       await user.save();
+      try { await require('./institution/rosterClaimService').claimForUser(user); } catch (e) { console.error('[rosterClaim] non-fatal', e.message); }
     } else {
       // Phone not registered — tell the client to go through full registration
       return { needsRegistration: true, phone: normalized };
