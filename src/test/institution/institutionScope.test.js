@@ -10,6 +10,12 @@ test('institutionScope ignores a spoofed body institutionId', () => {
   assert.strictEqual(institutionScope({ institution: { institutionId: 'i1' }, body: { institutionId: 'i2' } }).institutionId, 'i1');
 });
 
+test('institutionScope: extra cannot override the authoritative institutionId', () => {
+  const out = institutionScope({ institution: { institutionId: 'i1' } }, { institutionId: 'attacker', cohortId: 'c1' });
+  assert.strictEqual(out.institutionId, 'i1');
+  assert.strictEqual(out.cohortId, 'c1');
+});
+
 test('institutionScope throws without institution context', () => {
   assert.throws(() => institutionScope({}));
 });

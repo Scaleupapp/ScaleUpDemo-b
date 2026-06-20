@@ -1,7 +1,7 @@
 'use strict';
 function institutionScope(req, extra = {}) {
   if (!req.institution || !req.institution.institutionId) throw new Error('no_institution_context');
-  return { institutionId: req.institution.institutionId, ...extra };
+  return { ...extra, institutionId: req.institution.institutionId };
 }
 
 const PERMISSIONS = {
