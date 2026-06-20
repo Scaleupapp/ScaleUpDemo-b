@@ -13,7 +13,7 @@ async function institutionAuth(req, res, next) {
     const decoded = verifyInstitutionToken(header.split(' ')[1]);
     const user = await module.exports._loadUser(decoded.institutionUserId);
     if (!user || user.status === 'disabled') return res.status(401).json({ success: false, message: 'Account inactive' });
-    if ((user.tokenVersion || 0) !== (decoded.tokenVersion || 0)) return res.status(401).json({ success: false, message: 'Session expired' });
+    if (user.tokenVersion !== decoded.tokenVersion) return res.status(401).json({ success: false, message: 'Session expired' });
     req.institution = { institutionUserId: String(user._id), institutionId: String(user.institutionId), role: user.role, scope: user.scope || { departmentIds: [] } };
     return next();
   } catch (e) {
