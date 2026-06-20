@@ -46,6 +46,9 @@ router.post(
       if (!institution) {
         return res.status(404).json({ success: false, message: 'Institution not found' });
       }
+      // NOTE: seat accounting (seatsUsed increment on commit) is deferred to Plan 2b.
+      // This overflow check is therefore per-upload only (seatsUsed is not yet incremented
+      // at approve time, so seatsAvailable here reflects the licence ceiling only).
       const seatsAvailable = (institution.seatsLicensed || 0) - (institution.seatsUsed || 0);
 
       // Validate the incoming rows
@@ -151,9 +154,13 @@ router.get(
       const cohortId = req.params.cohortId;
       const baseScope = institutionScope(req, { cohortId });
 
-      // Funnel: each stage is non-overlapping.
-      // invited   = PendingStudents in 'invited'|'claimed' (invite was sent; claimed ones haven't enrolled yet)
-      // registered/diagnosticDone/active = InstitutionEnrollment records at each status (student fully registered)
+      // Funnel: CUMULATIVE stages — each stage is a superset of the next (invited ≥ registered ≥ diagnosticDone ≥ active).
+      // invited        = everyone an invite was sent to (PendingStudents in 'invited'|'claimed').
+      // registered     = ALL enrollment records regardless of status (a registered student stays registered+ as they progress).
+      // diagnosticDone = enrollments at 'diagnostic_done' OR 'active' (superset of active).
+      // active         = enrollments at 'active' only.
+      // NOTE: diagnosticDone and active will remain 0 until those enrollment status transitions
+      // are wired in Plan 2a. The cumulative shape is correct once those transitions land.
       const [
         invitedCount,
         registeredCount,
@@ -161,8 +168,8 @@ router.get(
         activeCount,
       ] = await Promise.all([
         PendingStudent.countDocuments({ ...institutionScope(req), cohortId, status: { $in: ['invited', 'claimed'] } }),
-        InstitutionEnrollment.countDocuments({ ...baseScope, status: 'registered' }),
-        InstitutionEnrollment.countDocuments({ ...baseScope, status: 'diagnostic_done' }),
+        InstitutionEnrollment.countDocuments({ ...baseScope }),
+        InstitutionEnrollment.countDocuments({ ...baseScope, status: { $in: ['diagnostic_done', 'active'] } }),
         InstitutionEnrollment.countDocuments({ ...baseScope, status: 'active' }),
       ]);
 

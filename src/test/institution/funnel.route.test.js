@@ -54,10 +54,10 @@ test('funnel returns 200 with correct shape and counts for tpo_head', async () =
     InstitutionEnrollment: {
       countDocuments: async function(filter) {
         recordedFilters.enrollmentFilters.push(filter);
-        // Simulate different counts for different calls
-        if (filter.status === 'registered') return 8;
-        if (filter.status === 'diagnostic_done') return 5;
-        if (filter.status === 'active') return 3;
+        // Cumulative funnel: registered = all enrollments (no status filter), diagnosticDone = $in [diagnostic_done,active], active = 'active'
+        if (!filter.status) return 8;                                               // registered: all enrollments
+        if (filter.status && filter.status.$in) return 5;                          // diagnosticDone: $in ['diagnostic_done','active']
+        if (filter.status === 'active') return 3;                                  // active
         return 0;
       },
     },
@@ -82,6 +82,21 @@ test('funnel returns 200 with correct shape and counts for tpo_head', async () =
     assert.strictEqual(res.body.data.registered, 8, 'registered count should be 8');
     assert.strictEqual(res.body.data.diagnosticDone, 5, 'diagnosticDone count should be 5');
     assert.strictEqual(res.body.data.active, 3, 'active count should be 3');
+
+    // Verify cumulative semantics: registered filter has no status field,
+    // diagnosticDone filter uses $in, active filter uses a plain string
+    const [registeredFilter, diagnosticFilter, activeFilter] = recordedFilters.enrollmentFilters;
+    assert.ok(!registeredFilter.status, 'registered query should have NO status filter (all enrollments)');
+    assert.ok(
+      diagnosticFilter.status && Array.isArray(diagnosticFilter.status.$in),
+      'diagnosticDone query should use status.$in array'
+    );
+    assert.deepStrictEqual(
+      diagnosticFilter.status.$in.sort(),
+      ['active', 'diagnostic_done'],
+      'diagnosticDone $in should contain [diagnostic_done, active]'
+    );
+    assert.strictEqual(activeFilter.status, 'active', 'active query should filter status=active');
 
     // Verify the counts were called with correct institutionId from token
     assert.ok(
@@ -140,9 +155,10 @@ test('funnel isolation guard: token institutionId is used, not path/body institu
     InstitutionEnrollment: {
       countDocuments: async function(filter) {
         recordedFilters.enrollmentFilters.push(filter);
-        if (filter.status === 'registered') return 3;
-        if (filter.status === 'diagnostic_done') return 2;
-        if (filter.status === 'active') return 1;
+        // Cumulative funnel stubs matching new semantics
+        if (!filter.status) return 3;                    // registered: all enrollments
+        if (filter.status && filter.status.$in) return 2; // diagnosticDone: $in ['diagnostic_done','active']
+        if (filter.status === 'active') return 1;         // active
         return 0;
       },
     },
