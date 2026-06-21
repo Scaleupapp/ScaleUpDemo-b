@@ -120,7 +120,7 @@ function forecastTrajectory({ currentReadiness, objectiveType, specifics, timeli
   // Build readiness at each horizon from the effective weekly delta,
   // capped at TARGET_READINESS so we never promise more than the goal.
   const project = (weeks) =>
-    Math.min(targetReadiness, Math.round(baseline + effectiveDelta * weeks));
+    Math.min(Math.max(targetReadiness, baseline), Math.round(baseline + effectiveDelta * weeks));
 
   const today        = baseline;
   const in30Days     = project(4);

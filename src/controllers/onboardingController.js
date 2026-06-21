@@ -158,9 +158,12 @@ const suggestTopics = async function suggestTopics(req, res) {
       entry = await generateTaxonomyForTargetKey(targetKey);
     } catch (err) {
       console.warn('[onboarding.suggestTopics] LLM generation failed for', targetKey, ':', err.message);
-      return res.status(503).json({
-        code: 'TAXONOMY_GENERATION_FAILED',
-        message: 'We could not prepare topics for this objective right now. Please try again in a moment.',
+      entry = null;
+    }
+    if (!entry) {
+      return res.status(404).json({
+        code: 'TAXONOMY_MISSING',
+        message: 'No topic taxonomy found for this objective. Please try a different selection.',
         targetKey,
       });
     }
