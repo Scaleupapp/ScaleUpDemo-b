@@ -9,6 +9,7 @@ router.get('/ping', institutionAuth, (req, res) => {
   res.json({ success: true, data: { ok: true, institutionId: scope.institutionId, role: req.institution.role } });
 });
 
+router.use('/auth', require('./auth'));
 router.use('/', require('./rosters'));
 
 module.exports = router;
