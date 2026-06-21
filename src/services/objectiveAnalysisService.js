@@ -180,7 +180,7 @@ class ObjectiveAnalysisService {
       contentCoverage: { covered, gaps, gapStrategies },
       assessmentStrategy: analysis.assessmentStrategy,
       analyzedAt: new Date(),
-      aiModel: 'claude-sonnet-4-20250514',
+      aiModel: 'claude-sonnet-4-6',
     };
 
     await objective.save();

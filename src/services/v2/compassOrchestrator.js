@@ -108,8 +108,9 @@ async function appendToThread(userId, role, content, opts = {}) {
   }
 }
 
-// LLM config — Compass uses Claude Sonnet 4 to match aiProvider.js
-const COMPASS_MODEL = 'claude-sonnet-4-20250514';
+// LLM config — Compass uses Claude Sonnet 4.6 to match aiProvider.js
+// (claude-sonnet-4-20250514 retired 2026-06-15; claude-sonnet-4-6 is the drop-in replacement)
+const COMPASS_MODEL = 'claude-sonnet-4-6';
 const COMPASS_MAX_TOKENS = 800;       // conversational replies stay tight
 const COMPASS_TEMPERATURE = 0.6;
 const IMAGE_TOKEN_ESTIMATE = 1500;   // flat allowance so the daily budget accounts for a vision image
