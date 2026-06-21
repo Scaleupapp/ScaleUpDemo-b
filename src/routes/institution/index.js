@@ -10,6 +10,7 @@ router.get('/ping', institutionAuth, (req, res) => {
 });
 
 router.use('/auth', require('./auth'));
+router.use('/me', require('./me'));
 router.use('/', require('./rosters'));
 
 module.exports = router;
