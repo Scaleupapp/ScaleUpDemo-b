@@ -147,6 +147,17 @@ class EmailService {
     });
   }
 
+  // Magic-link sign-in / verify for an institution organiser.
+  async sendInstitutionSignInLink(email, url, kind = 'sign-in') {
+    const verifying = kind === 'verify';
+    await this.transporter.sendMail({
+      from: process.env.EMAIL_FROM || this.from,
+      to: email,
+      subject: verifying ? 'Verify your ScaleUp Placements account' : 'Your ScaleUp Placements sign-in link',
+      html: `<p>Tap to ${verifying ? 'verify your account' : 'sign in'}:</p><p><a href="${url}">${url}</a></p><p>This link expires in 30 minutes.</p>`,
+    });
+  }
+
   // Generic transactional send (subject + HTML/text body). Used by marketplace notifications.
   async sendBasic(to, subject, body) {
     await this.transporter.sendMail({ from: this.from, to, subject, html: body });
