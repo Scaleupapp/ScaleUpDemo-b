@@ -20,3 +20,54 @@ test('inviteUser rejects a tpo_head creating an institution_admin', async () => 
     () => svc.inviteUser({ institutionId: 'i1', email: 'x@ngit.edu', role: 'institution_admin', invitedByRole: 'tpo_head' }, {}),
     /FORBIDDEN_ROLE/);
 });
+
+// ── Registration validation ──────────────────────────────────────────────────
+
+test('registerInstitution rejects a free-domain email with WORK_EMAIL_REQUIRED', async () => {
+  await assert.rejects(
+    () => svc.registerInstitution({ institutionName: 'Northgate IT', adminName: 'Priya', adminEmail: 'priya@gmail.com' }, {}),
+    /WORK_EMAIL_REQUIRED/);
+});
+
+test('registerInstitution rejects a missing institution name with VALIDATION', async () => {
+  await assert.rejects(
+    () => svc.registerInstitution({ institutionName: '', adminEmail: 'priya@ngit.edu' }, {}),
+    /VALIDATION/);
+});
+
+test('registerInstitution rejects a malformed admin email (caught by work-email gate)', async () => {
+  await assert.rejects(
+    () => svc.registerInstitution({ institutionName: 'Northgate IT', adminEmail: 'not-an-email' }, {}),
+    /WORK_EMAIL_REQUIRED/);
+});
+
+// ── inviteUser role allowlist + rank + email validation ───────────────────────
+
+test('inviteUser rejects an unknown role with INVALID_ROLE', async () => {
+  await assert.rejects(
+    () => svc.inviteUser({ institutionId: 'i1', email: 'x@ngit.edu', role: 'superuser', invitedByRole: 'institution_admin' }, {}),
+    /INVALID_ROLE/);
+});
+
+test('inviteUser rejects a tpo_coordinator creating a tpo_head (rank check)', async () => {
+  await assert.rejects(
+    () => svc.inviteUser({ institutionId: 'i1', email: 'x@ngit.edu', role: 'tpo_head', invitedByRole: 'tpo_coordinator' }, {}),
+    /FORBIDDEN_ROLE/);
+});
+
+test('inviteUser rejects a malformed email with VALIDATION', async () => {
+  await assert.rejects(
+    () => svc.inviteUser({ institutionId: 'i1', email: 'nope', role: 'faculty', invitedByRole: 'tpo_head' }, {}),
+    /VALIDATION/);
+});
+
+test('inviteUser allows a tpo_head creating a tpo_coordinator (lateral/below rank)', async () => {
+  const created = [];
+  const InstitutionUser = { create: async (d) => { const o = { _id: 'u9', email: d.email, role: d.role, status: d.status }; created.push(o); return o; } };
+  svc._sendLink = async () => true;
+  const out = await svc.inviteUser(
+    { institutionId: 'i1', email: 'coord@ngit.edu', role: 'tpo_coordinator', invitedByRole: 'tpo_head' },
+    { InstitutionUser });
+  assert.strictEqual(out.role, 'tpo_coordinator');
+  assert.strictEqual(created.length, 1);
+});

@@ -62,7 +62,8 @@ router.get('/', institutionAuth, async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    console.error('[institution/me]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not load profile.' });
   }
 });
 

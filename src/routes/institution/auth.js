@@ -11,6 +11,9 @@ const requestLinkLimiter = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyP
 async function registerHandler(req, res) {
   try { return res.status(200).json({ success: true, data: await svc.registerInstitution(req.body || {}) }); }
   catch (err) {
+    if (err.message === 'WORK_EMAIL_REQUIRED') return res.status(400).json({ success: false, code: 'WORK_EMAIL_REQUIRED', message: 'Please register with your institutional (work) email.' });
+    if (err.message === 'VALIDATION') return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Institution name and a valid admin email are required.' });
+    if (err.code === 11000) return res.status(409).json({ success: false, code: 'ALREADY_EXISTS', message: 'An account with this email already exists.' });
     console.error('[institution/register]', err.message);
     return res.status(500).json({ success: false, message: 'Could not register institution.' });
   }

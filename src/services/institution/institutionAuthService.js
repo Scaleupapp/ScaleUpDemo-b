@@ -23,6 +23,19 @@ const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 min
 function _hash(raw) { return crypto.createHash('sha256').update(String(raw)).digest('hex'); }
 function _mintToken() { return crypto.randomBytes(24).toString('base64url'); }
 
+// --- Input validation helpers (mirror employerAuthService) ---
+const FREE_DOMAINS = new Set(['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'proton.me', 'protonmail.com', 'rediffmail.com']);
+function _isEmail(email) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || '').toLowerCase()); }
+function isWorkEmail(email) {
+  const m = String(email || '').toLowerCase().match(/^[^@\s]+@([^@\s]+\.[^@\s]+)$/);
+  if (!m) return false;
+  const d = m[1];
+  const tld1 = d.split('.').slice(-2).join('.');
+  return !FREE_DOMAINS.has(d) && !FREE_DOMAINS.has(tld1);
+}
+// Privilege ranks — an inviter can never create a role above their own rank.
+const ROLE_RANK = { institution_admin: 4, tpo_head: 3, tpo_coordinator: 2, faculty: 1, viewer: 1 };
+
 async function _findByEmail(email) {
   const InstitutionUser = require('../../models/InstitutionUser');
   return InstitutionUser.findOne({ email: String(email).toLowerCase().trim(), status: { $in: ['invited', 'active'] } }).select('+authTokenHash +authTokenExpires');
@@ -76,7 +89,9 @@ Object.assign(module.exports, { _hash, _mintToken, _findByEmail, _findByToken, _
 async function registerInstitution({ institutionName, type, adminName, adminEmail, location, affiliatingUniversity }, deps = {}) {
   const Institution = deps.Institution || require('../../models/Institution');
   const InstitutionUser = deps.InstitutionUser || require('../../models/InstitutionUser');
-  const email = String(adminEmail).toLowerCase().trim();
+  const email = String(adminEmail || '').toLowerCase().trim();
+  if (!institutionName || !String(institutionName).trim()) throw new Error('VALIDATION');
+  if (!isWorkEmail(email)) throw new Error('WORK_EMAIL_REQUIRED');
   const institution = await Institution.create({ name: institutionName, type, location, affiliatingUniversity, tpoContact: { name: adminName, email } });
   const token = module.exports._mintToken();
   const admin = await InstitutionUser.create({ institutionId: institution._id, name: adminName, email, role: 'institution_admin', status: 'invited',
@@ -86,13 +101,17 @@ async function registerInstitution({ institutionName, type, adminName, adminEmai
 }
 
 async function inviteUser({ institutionId, email, role, scope = {}, invitedBy, invitedByRole }, deps = {}) {
-  if (invitedByRole === 'tpo_head' && role === 'institution_admin') throw new Error('FORBIDDEN_ROLE');
+  // Role allowlist + privilege-rank check (defense-in-depth beyond the route gate).
+  if (!ROLE_RANK[role]) throw new Error('INVALID_ROLE');
+  if (ROLE_RANK[role] > (ROLE_RANK[invitedByRole] || 0)) throw new Error('FORBIDDEN_ROLE');
+  const cleanEmail = String(email || '').toLowerCase().trim();
+  if (!_isEmail(cleanEmail)) throw new Error('VALIDATION');
   const InstitutionUser = deps.InstitutionUser || require('../../models/InstitutionUser');
   const token = module.exports._mintToken();
-  const user = await InstitutionUser.create({ institutionId, email: String(email).toLowerCase().trim(), role, scope, status: 'invited', invitedBy,
+  const user = await InstitutionUser.create({ institutionId, email: cleanEmail, role, scope, status: 'invited', invitedBy,
     authTokenHash: module.exports._hash(token), authTokenExpires: new Date(Date.now() + module.exports.TOKEN_TTL_MS) });
   await module.exports._sendLink(user.email, token, 'invite');
   return user;
 }
 
-Object.assign(module.exports, { registerInstitution, inviteUser });
+Object.assign(module.exports, { registerInstitution, inviteUser, isWorkEmail, _isEmail });

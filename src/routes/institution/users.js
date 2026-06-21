@@ -40,7 +40,7 @@ router.post(
         invitedByRole: req.institution.role,
       });
       // Return only safe fields — NEVER authTokenHash / passwordHash / tokenVersion
-      return res.status(200).json({
+      return res.status(201).json({
         success: true,
         data: {
           id: String(user._id),
@@ -57,7 +57,17 @@ router.post(
           message: 'TPO Heads cannot create Admins.',
         });
       }
-      return res.status(500).json({ success: false, message: err.message });
+      if (err.message === 'INVALID_ROLE') {
+        return res.status(400).json({ success: false, code: 'INVALID_ROLE', message: 'Invalid role.' });
+      }
+      if (err.message === 'VALIDATION') {
+        return res.status(400).json({ success: false, code: 'VALIDATION', message: 'A valid email is required.' });
+      }
+      if (err.code === 11000) {
+        return res.status(409).json({ success: false, code: 'ALREADY_EXISTS', message: 'A user with this email already exists.' });
+      }
+      console.error('[institution/users:invite]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not invite user.' });
     }
   }
 );
@@ -81,12 +91,14 @@ router.get(
         const InstitutionUser = require('../../models/InstitutionUser');
         users = await InstitutionUser
           .find({ institutionId: scope.institutionId })
-          .select('name email role status');
+          .select('name email role status')
+          .limit(1000);
       }
 
       return res.status(200).json({ success: true, data: users });
     } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
+      console.error('[institution/users:list]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not list users.' });
     }
   }
 );

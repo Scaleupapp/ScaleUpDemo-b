@@ -25,11 +25,18 @@ router.post(
     try {
       const orgService = getService(router._deps);
       const scope = institutionScope(req);
-      const { name, code, capabilityTracks } = req.body;
+      const { name, code, capabilityTracks } = req.body || {};
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Department name is required.' });
+      }
       const dept = await orgService.createDepartment(scope, { name, code, capabilityTracks });
       return res.status(201).json({ success: true, data: dept });
     } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
+      if (err.name === 'ValidationError') {
+        return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid department data.' });
+      }
+      console.error('[institution/departments:create]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not create department.' });
     }
   }
 );
@@ -46,7 +53,8 @@ router.get(
       const departments = await orgService.listDepartments(scope);
       return res.status(200).json({ success: true, data: departments });
     } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
+      console.error('[institution/departments:list]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not list departments.' });
     }
   }
 );
@@ -61,14 +69,21 @@ router.post(
     try {
       const orgService = getService(router._deps);
       const scope = institutionScope(req);
-      const { departmentId, year, label, placementSeason } = req.body;
+      const { departmentId, year, label, placementSeason } = req.body || {};
+      if (!departmentId) {
+        return res.status(400).json({ success: false, code: 'VALIDATION', message: 'departmentId is required.' });
+      }
       const cohort = await orgService.createCohort(scope, { departmentId, year, label, placementSeason });
       return res.status(201).json({ success: true, data: cohort });
     } catch (err) {
       if (err.message === 'DEPARTMENT_NOT_FOUND') {
         return res.status(404).json({ success: false, message: 'Department not found in this institution' });
       }
-      return res.status(500).json({ success: false, message: err.message });
+      if (err.name === 'ValidationError' || err.name === 'CastError') {
+        return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid cohort data.' });
+      }
+      console.error('[institution/cohorts:create]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not create cohort.' });
     }
   }
 );
@@ -87,7 +102,8 @@ router.get(
       const cohorts = await orgService.listCohorts(scope, { departmentId });
       return res.status(200).json({ success: true, data: cohorts });
     } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
+      console.error('[institution/cohorts:list]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not list cohorts.' });
     }
   }
 );

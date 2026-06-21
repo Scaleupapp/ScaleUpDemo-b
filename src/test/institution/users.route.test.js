@@ -36,7 +36,7 @@ function appAs(institutionId, role) {
 
 // ── (a) institution_admin invites tpo_head → 200, no token/hash fields ────────
 
-test('institution_admin POST /users invites tpo_head → 200, no token/hash fields', async () => {
+test('institution_admin POST /users invites tpo_head → 201, no token/hash fields', async () => {
   const INST = 'inst-A';
   const fakeUser = { _id: 'invited-1', email: 'tpo@test.com', role: 'tpo_head', status: 'invited' };
 
@@ -54,7 +54,7 @@ test('institution_admin POST /users invites tpo_head → 200, no token/hash fiel
     .set('Authorization', `Bearer ${tok(INST, 'institution_admin')}`)
     .send({ email: 'tpo@test.com', role: 'tpo_head', scope: {} });
 
-  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.status, 201);
   assert.ok(res.body.success);
   assert.ok(res.body.data);
   // id, email, role, status must be present
@@ -96,6 +96,49 @@ test('tpo_head POST /users inviting institution_admin → 403 FORBIDDEN_ROLE', a
   assert.strictEqual(res.body.success, false);
   assert.strictEqual(res.body.code, 'FORBIDDEN_ROLE');
 
+  users._svc = null;
+});
+
+// ── (b2) invalid role → 400 INVALID_ROLE ─────────────────────────────────────
+
+test('POST /users with unknown role → 400 INVALID_ROLE', async () => {
+  const INST = 'inst-B2';
+  users._svc = { inviteUser: async () => { throw new Error('INVALID_ROLE'); } };
+  stubLoadUser(INST, 'institution_admin');
+  const a = express();
+  a.use(express.json());
+  a.use('/api/institution', users);
+
+  const res = await request(a)
+    .post('/api/institution/users')
+    .set('Authorization', `Bearer ${tok(INST, 'institution_admin')}`)
+    .send({ email: 'x@test.com', role: 'superuser', scope: {} });
+
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.success, false);
+  assert.strictEqual(res.body.code, 'INVALID_ROLE');
+  users._svc = null;
+});
+
+// ── (b3) duplicate email (Mongo 11000) → 409 ALREADY_EXISTS ───────────────────
+
+test('POST /users with duplicate email → 409 ALREADY_EXISTS', async () => {
+  const INST = 'inst-B3';
+  users._svc = { inviteUser: async () => { const e = new Error('E11000 dup'); e.code = 11000; throw e; } };
+  stubLoadUser(INST, 'institution_admin');
+  const a = express();
+  a.use(express.json());
+  a.use('/api/institution', users);
+
+  const res = await request(a)
+    .post('/api/institution/users')
+    .set('Authorization', `Bearer ${tok(INST, 'institution_admin')}`)
+    .send({ email: 'dupe@test.com', role: 'faculty', scope: {} });
+
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'ALREADY_EXISTS');
+  // raw mongo error must NOT leak
+  assert.ok(!String(res.body.message || '').includes('E11000'));
   users._svc = null;
 });
 

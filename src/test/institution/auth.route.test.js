@@ -29,6 +29,25 @@ test('POST /register returns institutionId', async () => {
   assert.strictEqual(res.body.data.institutionId, 'i1');
 });
 
+test('POST /register rejects a free-domain email → 400 WORK_EMAIL_REQUIRED', async () => {
+  const prev = authRouter._svc.registerInstitution;
+  authRouter._svc.registerInstitution = async () => { throw new Error('WORK_EMAIL_REQUIRED'); };
+  const res = await request(app()).post('/api/institution/auth/register').send({ institutionName: 'X', adminEmail: 'a@gmail.com' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.code, 'WORK_EMAIL_REQUIRED');
+  authRouter._svc.registerInstitution = prev;
+});
+
+test('POST /register maps a duplicate-email Mongo error → 409 without leaking', async () => {
+  const prev = authRouter._svc.registerInstitution;
+  authRouter._svc.registerInstitution = async () => { const e = new Error('E11000 dup'); e.code = 11000; throw e; };
+  const res = await request(app()).post('/api/institution/auth/register').send({ institutionName: 'X', adminEmail: 'a@x.edu' });
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'ALREADY_EXISTS');
+  assert.ok(!String(res.body.message || '').includes('E11000'));
+  authRouter._svc.registerInstitution = prev;
+});
+
 test('POST /verify returns a token for a good link, 400 for a bad one', async () => {
   const ok = await request(app()).post('/api/institution/auth/verify').send({ token: 'good' });
   assert.strictEqual(ok.body.data.token, 'JWT');

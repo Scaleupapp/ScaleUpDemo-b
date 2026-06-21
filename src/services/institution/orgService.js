@@ -30,7 +30,7 @@ async function createDepartment(scope, { name, code, capabilityTracks } = {}, de
  */
 async function listDepartments(scope, deps) {
   const { Department } = getModels(deps);
-  return Department.find(scope);
+  return Department.find(scope).limit(1000);
 }
 
 /**
@@ -60,7 +60,7 @@ async function createCohort(scope, { departmentId, year, label, placementSeason 
  */
 async function listCohorts(scope, { departmentId } = {}, deps) {
   const { InstitutionCohort } = getModels(deps);
-  return InstitutionCohort.find({ ...scope, ...(departmentId ? { departmentId } : {}) });
+  return InstitutionCohort.find({ ...scope, ...(departmentId ? { departmentId } : {}) }).limit(1000);
 }
 
 module.exports = { createDepartment, listDepartments, createCohort, listCohorts };
