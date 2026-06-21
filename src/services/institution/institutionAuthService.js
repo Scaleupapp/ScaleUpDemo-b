@@ -71,3 +71,28 @@ async function verify(rawToken) {
 }
 
 Object.assign(module.exports, { _hash, _mintToken, _findByEmail, _findByToken, _sendLink, requestLink, verify, TOKEN_TTL_MS });
+
+// --- Registration + invite (Task 2) ---
+async function registerInstitution({ institutionName, type, adminName, adminEmail, location, affiliatingUniversity }, deps = {}) {
+  const Institution = deps.Institution || require('../../models/Institution');
+  const InstitutionUser = deps.InstitutionUser || require('../../models/InstitutionUser');
+  const email = String(adminEmail).toLowerCase().trim();
+  const institution = await Institution.create({ name: institutionName, type, location, affiliatingUniversity, tpoContact: { name: adminName, email } });
+  const token = module.exports._mintToken();
+  const admin = await InstitutionUser.create({ institutionId: institution._id, name: adminName, email, role: 'institution_admin', status: 'invited',
+    authTokenHash: module.exports._hash(token), authTokenExpires: new Date(Date.now() + module.exports.TOKEN_TTL_MS) });
+  await module.exports._sendLink(email, token, 'verify');
+  return { ok: true, institutionId: String(institution._id) };
+}
+
+async function inviteUser({ institutionId, email, role, scope = {}, invitedBy, invitedByRole }, deps = {}) {
+  if (invitedByRole === 'tpo_head' && role === 'institution_admin') throw new Error('FORBIDDEN_ROLE');
+  const InstitutionUser = deps.InstitutionUser || require('../../models/InstitutionUser');
+  const token = module.exports._mintToken();
+  const user = await InstitutionUser.create({ institutionId, email: String(email).toLowerCase().trim(), role, scope, status: 'invited', invitedBy,
+    authTokenHash: module.exports._hash(token), authTokenExpires: new Date(Date.now() + module.exports.TOKEN_TTL_MS) });
+  await module.exports._sendLink(user.email, token, 'invite');
+  return user;
+}
+
+Object.assign(module.exports, { registerInstitution, inviteUser });
