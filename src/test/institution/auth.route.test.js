@@ -4,6 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert');
 const express = require('express');
 const request = require('supertest');
+
+// Stub the rate limiter before importing the router
+const _rlPath = require.resolve('../../middleware/rateLimiter');
+require.cache[_rlPath] = { id: _rlPath, filename: _rlPath, loaded: true, exports: () => (req, res, next) => next() };
+
 const authRouter = require('../../routes/institution/auth');
 
 authRouter._svc.registerInstitution = async () => ({ ok: true, institutionId: 'i1' });
