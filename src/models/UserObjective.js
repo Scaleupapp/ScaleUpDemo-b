@@ -146,6 +146,17 @@ const userObjectiveSchema = new mongoose.Schema({
   canonicalTopic: { type: String, lowercase: true, index: true },
   canonicalTopic_needsReview: { type: Boolean, default: false },
   canonicalTopic_lastResolvedAt: { type: Date },
+
+  // --- Institutional binding (additive; null/absent for all D2C objectives) ---
+  // Present only when an institution seeds this objective from an ObjectiveTemplate
+  // at cohort-bind time. When present, the objective is institution-owned and locked.
+  institutionContext: {
+    institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution' },
+    cohortId: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionCohort' },
+    templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'ObjectiveTemplate' },
+    assignedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionUser' },
+    locked: { type: Boolean, default: false },
+  },
 }, { timestamps: true });
 
 userObjectiveSchema.index({ userId: 1, status: 1 });
@@ -191,7 +202,7 @@ userObjectiveSchema.pre('save', async function preResolveCanonicalTopic(next) {
 
     // Directory bookkeeping — only when the canonical topic actually changes
     // and only for primary+active objectives (they're the cohort-eligible ones).
-    if (this.status === 'active' && this.isPrimary && this.canonicalTopic !== oldCanonical) {
+    if (this.status === 'active' && this.isPrimary && this.canonicalTopic !== oldCanonical && !this.$locals?.skipInstitutionalDirectory) {
       if (oldCanonical) {
         await cohortDirectoryService.recordMemberLeave(oldCanonical).catch(() => null);
       }
