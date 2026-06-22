@@ -187,3 +187,55 @@ test('approve: first call succeeds; second call returns 409 (commitRoster called
   inviteService.sendInvites = origSend;
   rosters._deps = null;
 });
+
+// ── GET /rosters/pending (approvers list validated uploads) ──────────────────
+
+test('GET /rosters/pending returns validated uploads scoped to the token institution', async () => {
+  let capturedFilter = null;
+  const fakeUploads = [
+    { _id: 'ru1', departmentId: 'd1', cohortId: 'c1', rowCount: 3, validRows: 2, errors: [{ row: 3, field: 'email', reason: 'missing email' }] },
+  ];
+  rosters._deps = {
+    RosterUpload: {
+      find: (filter) => {
+        capturedFilter = filter;
+        return { select: () => ({ sort: () => ({ limit: () => Promise.resolve(fakeUploads) }) }) };
+      },
+    },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .get('/api/institution/rosters/pending')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.success);
+  assert.strictEqual(res.body.data.length, 1);
+  assert.strictEqual(res.body.data[0]._id, 'ru1');
+  // scoped to the token institution + only validated status
+  assert.strictEqual(String(capturedFilter.institutionId), 'i1');
+  assert.strictEqual(capturedFilter.status, 'validated');
+
+  rosters._deps = null;
+});
+
+test('GET /rosters/pending is allowed for institution_admin', async () => {
+  rosters._deps = {
+    RosterUpload: { find: () => ({ select: () => ({ sort: () => ({ limit: () => Promise.resolve([]) }) }) }) },
+  };
+  const res = await request(appAs('institution_admin'))
+    .get('/api/institution/rosters/pending')
+    .set('Authorization', `Bearer ${tok('institution_admin')}`);
+  assert.strictEqual(res.status, 200);
+  assert.ok(Array.isArray(res.body.data));
+  rosters._deps = null;
+});
+
+test('GET /rosters/pending is forbidden for tpo_coordinator / faculty / viewer', async () => {
+  for (const role of ['tpo_coordinator', 'faculty', 'viewer']) {
+    const res = await request(appAs(role))
+      .get('/api/institution/rosters/pending')
+      .set('Authorization', `Bearer ${tok(role)}`);
+    assert.strictEqual(res.status, 403, `expected 403 for ${role}, got ${res.status}`);
+  }
+});

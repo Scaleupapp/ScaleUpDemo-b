@@ -83,6 +83,32 @@ router.post(
   }
 );
 
+// ── GET /rosters/pending ─────────────────────────────────────────────────────
+// Gate: institution_admin, tpo_head (the approvers — maker-checker).
+// Lists validated-but-not-yet-approved roster uploads for the institution so an
+// approver can act on an upload made in a different session or by a different
+// user (e.g. a coordinator uploaded; a head/admin approves later). Excludes the
+// heavy validData blob (select:false); returns enough to decide and approve.
+router.get(
+  '/rosters/pending',
+  institutionAuth,
+  requireInstitutionRole('institution_admin', 'tpo_head'),
+  async (req, res) => {
+    try {
+      const { RosterUpload } = getModels();
+      const uploads = await RosterUpload
+        .find(institutionScope(req, { status: 'validated' }))
+        .select('departmentId cohortId rowCount validRows errors uploadedBy createdAt')
+        .sort({ createdAt: -1 })
+        .limit(200);
+      return res.status(200).json({ success: true, data: uploads });
+    } catch (err) {
+      console.error('[institution/rosters:pending]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not list pending uploads.' });
+    }
+  }
+);
+
 // ── POST /rosters/:id/approve ────────────────────────────────────────────────
 // Gate: tpo_head, institution_admin  (maker-checker: different roles than upload)
 // Loads the scoped RosterUpload (with validData), commits via commitRoster,
