@@ -14,5 +14,6 @@ router.use('/me', require('./me'));
 router.use('/', require('./org'));
 router.use('/', require('./users'));
 router.use('/', require('./rosters'));
+router.use('/', require('./objectiveTemplates'));
 
 module.exports = router;
