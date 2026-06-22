@@ -32,6 +32,9 @@ router.post(
       const dept = await orgService.createDepartment(scope, { name, code, capabilityTracks });
       return res.status(201).json({ success: true, data: dept });
     } catch (err) {
+      if (err.code === 11000) {
+        return res.status(409).json({ success: false, code: 'ALREADY_EXISTS', message: 'A department with that code already exists.' });
+      }
       if (err.name === 'ValidationError') {
         return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid department data.' });
       }

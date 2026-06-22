@@ -80,6 +80,33 @@ test('tpo_head POST /departments → 201 with institutionId from token (not body
   org._deps = null;
 });
 
+// ── (b2) createDepartment with duplicate code → 409 ALREADY_EXISTS ───────────
+
+test('POST /departments with a duplicate code → 409 ALREADY_EXISTS', async () => {
+  org._deps = {
+    orgService: {
+      createDepartment: async () => { const e = new Error('E11000 dup key'); e.code = 11000; throw e; },
+    },
+  };
+
+  stubLoadUser('inst-dup', 'tpo_head');
+  const a = express();
+  a.use(express.json());
+  a.use('/api/institution', org);
+
+  const res = await request(a)
+    .post('/api/institution/departments')
+    .set('Authorization', `Bearer ${tok('inst-dup', 'tpo_head')}`)
+    .send({ name: 'CS', code: 'CS01' });
+
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'ALREADY_EXISTS');
+  // raw mongo error must NOT leak to the client
+  assert.ok(!String(res.body.message || '').includes('E11000'));
+
+  org._deps = null;
+});
+
 // ── (c) createCohort with departmentId not in institution → 400/404 ─────────
 
 test('createCohort with unknown departmentId returns 4xx (DEPARTMENT_NOT_FOUND)', async () => {
