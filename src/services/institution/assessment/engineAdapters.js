@@ -74,6 +74,7 @@ const interview = {
       interviewType: cfg.interviewType,
       targetRole: cfg.targetRole,
       difficulty: cfg.difficulty || 'moderate',
+      abandonExisting: false,
     });
     const sid = out && out.session ? out.session._id : (out && out._id);
     return { engine: { type: 'interview', sessionId: sid } };

@@ -23,13 +23,13 @@ async function markDiagnosticDone(userId, deps = {}) {
 
 // advance to 'active' on first graded proctored assessment. Idempotent: only moves
 // registered/diagnostic_done forward (never regresses active/withdrawn).
-async function markActive(userId, deps = {}) {
+// cohortId is required so a grade in cohort A never accidentally activates the
+// student's enrollment in a different cohort B.
+async function markActive(userId, cohortId, deps = {}) {
   if (!userId) return null;
   const InstitutionEnrollment = deps.InstitutionEnrollment || require('../../models/InstitutionEnrollment');
-  return InstitutionEnrollment.updateMany(
-    { userId, status: { $in: ['registered', 'diagnostic_done'] } },
-    { $set: { status: 'active' } }
-  );
+  const filter = { userId, cohortId, status: { $in: ['registered', 'diagnostic_done'] } };
+  return InstitutionEnrollment.updateMany(filter, { $set: { status: 'active' } });
 }
 
 module.exports = { markDiagnosticDone, markActive };

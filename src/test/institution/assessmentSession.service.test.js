@@ -60,12 +60,22 @@ function mcqAdapterDeps() {
 test('startSession happy path: released in-window enrolled → creates session in_progress', async () => {
   const assessment = makeAssessment();
   let created = null;
+  let deleteCalled = false;
+
+  // New reserve-first flow: create is called with status='scheduled', then
+  // the adapter runs, then the row is updated to in_progress via session.save().
+  const mockSession = {
+    _id: 'newSess',
+    engine: { type: 'mcq' },
+    status: 'scheduled',
+    save: async function () { this.status = this.status; return this; },
+  };
 
   const deps = {
     Assessment: { findById: async () => assessment },
     AssessmentSession: {
-      findOne: async () => null,
-      create: async (d) => { created = d; return { ...d, _id: 'newSess' }; },
+      create: async (d) => { created = d; return { ...mockSession, ...d, save: mockSession.save }; },
+      deleteOne: async () => { deleteCalled = true; },
     },
     InstitutionEnrollment: { findOne: async () => makeEnrollment() },
     adapterDeps: mcqAdapterDeps(),
@@ -74,10 +84,13 @@ test('startSession happy path: released in-window enrolled → creates session i
 
   const result = await startSession('user1', 'assess1', deps);
   assert.ok(created, 'session was created');
-  assert.strictEqual(created.status, 'in_progress');
   assert.strictEqual(created.userId, 'user1');
   assert.strictEqual(created.assessmentId, 'assess1');
+  // The reserved row is created with engine.type set; adapter fills sessionId.
   assert.strictEqual(created.engine.type, 'mcq');
+  // After adapter.start succeeds, status is flipped to in_progress.
+  assert.strictEqual(result.status, 'in_progress');
+  assert.strictEqual(deleteCalled, false, 'row was NOT deleted (adapter succeeded)');
 });
 
 test('startSession throws NOT_RELEASED when assessment status is draft', async () => {
@@ -130,7 +143,7 @@ test('startSession throws NOT_ENROLLED when no enrollment found', async () => {
   await assert.rejects(() => startSession('user1', 'assess1', deps), /NOT_ENROLLED/);
 });
 
-test('startSession returns existing session without calling adapter again (single-attempt)', async () => {
+test('startSession returns existing session without calling adapter again (single-attempt / dup-key path)', async () => {
   const assessment = makeAssessment();
   const existing = makeSession();
   let adapterStartCalled = false;
@@ -141,8 +154,10 @@ test('startSession returns existing session without calling adapter again (singl
   const deps = {
     Assessment: { findById: async () => assessment },
     AssessmentSession: {
-      findOne: async () => existing, // existing session found → single attempt
-      create: async () => { assert.fail('create should not be called'); },
+      // Simulate the loser: create throws a duplicate-key error.
+      create: async () => { const e = new Error('dup'); e.code = 11000; throw e; },
+      // findOne is called ONLY on the dup-key path — returns the winner's row.
+      findOne: async () => existing,
     },
     InstitutionEnrollment: { findOne: async () => makeEnrollment() },
     adapterDeps,
@@ -150,7 +165,34 @@ test('startSession returns existing session without calling adapter again (singl
   };
   const result = await startSession('user1', 'assess1', deps);
   assert.strictEqual(result._id, 'sess1', 'returned the existing session');
-  assert.strictEqual(adapterStartCalled, false, 'adapter.start was NOT called again');
+  assert.strictEqual(adapterStartCalled, false, 'adapter.start was NOT called for the loser');
+});
+
+test('startSession: adapter.start failure rolls back reserved row and rethrows', async () => {
+  const assessment = makeAssessment();
+  let deleteOneCalled = false;
+  const mockSession = {
+    _id: 'newSess2',
+    engine: { type: 'mcq' },
+    status: 'scheduled',
+    save: async function () { return this; },
+  };
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    AssessmentSession: {
+      create: async (d) => ({ ...mockSession, ...d, save: mockSession.save }),
+      deleteOne: async (filter) => { deleteOneCalled = true; },
+    },
+    InstitutionEnrollment: { findOne: async () => makeEnrollment() },
+    // Inject a broken adapter via adapterDeps — override Quiz.create to throw.
+    adapterDeps: {
+      Quiz: { create: async () => { throw new Error('ADAPTER_FAIL'); } },
+      QuizAttempt: { create: async () => ({ _id: 'att1' }) },
+    },
+    now: () => new Date(),
+  };
+  await assert.rejects(() => startSession('user1', 'assess1', deps), /ADAPTER_FAIL/);
+  assert.strictEqual(deleteOneCalled, true, 'reserved row was deleted on adapter failure');
 });
 
 // ---------------------------------------------------------------------------
@@ -179,8 +221,8 @@ test('syncSession: pending engine (done=false) → session stays in_progress, ma
   assert.strictEqual(rollupCalled, false, 'rollup recompute should NOT be called while pending');
 });
 
-test('syncSession: graded engine (done=true) → status=graded, markActive called, rollup called', async () => {
-  let markActiveCalled = false;
+test('syncSession: graded engine (done=true) → status=graded, markActive called with cohortId, rollup called', async () => {
+  let markActiveArgs = null;
   let rollupCalled = false;
 
   const session = makeSession({ status: 'in_progress' });
@@ -195,7 +237,7 @@ test('syncSession: graded engine (done=true) → status=graded, markActive calle
         }),
       },
     },
-    enrollmentProgressService: { markActive: async () => { markActiveCalled = true; } },
+    enrollmentProgressService: { markActive: async (uid, cid, d) => { markActiveArgs = { uid, cid }; } },
     cohortRollupService: { recompute: async () => { rollupCalled = true; } },
     now: () => new Date(),
   };
@@ -204,7 +246,9 @@ test('syncSession: graded engine (done=true) → status=graded, markActive calle
   assert.strictEqual(result.status, 'graded');
   assert.strictEqual(result.result.score, 85);
   assert.strictEqual(result.result.integrity, 'high');
-  assert.strictEqual(markActiveCalled, true, 'markActive MUST be called on grade');
+  assert.ok(markActiveArgs, 'markActive MUST be called on grade');
+  assert.strictEqual(markActiveArgs.uid, 'user1', 'markActive called with correct userId');
+  assert.strictEqual(markActiveArgs.cid, 'cohort1', 'markActive called with cohortId');
   assert.strictEqual(rollupCalled, true, 'rollup recompute MUST be called on grade');
 });
 

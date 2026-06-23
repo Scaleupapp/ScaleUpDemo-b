@@ -64,14 +64,18 @@ class InterviewService {
   /**
    * Start a new interview session
    */
-  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null }) {
+  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null, abandonExisting = true } = {}) {
     // Auto-abandon any stale in-progress session — users were trapped if a
     // previous interview was force-quit or crashed. The diagnostic engine
     // does the same on startAttempt.
-    await InterviewSession.updateMany(
-      { userId, status: 'in_progress' },
-      { $set: { status: 'abandoned', completedAt: new Date() } }
-    );
+    // `abandonExisting: false` lets the assessment engine start a proctored
+    // interview without clobbering the student's other D2C sessions.
+    if (abandonExisting !== false) {
+      await InterviewSession.updateMany(
+        { userId, status: 'in_progress' },
+        { $set: { status: 'abandoned', completedAt: new Date() } }
+      );
+    }
 
     // Phase 6: bias topic selection from KnowledgeProfile.topicInterviewMastery.
     // Lower historical scores → more questions on that topic next session.
