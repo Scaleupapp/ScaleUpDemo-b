@@ -148,6 +148,7 @@ async function authorCapstone(assessmentId, deps = {}) {
   for (let i = 0; i < maxPolls; i++) {
     await sleep(pollMs);
     const polled = await CapstoneGenerationRequest.findById(reqDoc._id);
+    if (!polled) throw new Error('CAPSTONE_GEN_FAILED');
     if (polled.status === 'ready') {
       assessment.config.capstone.bundleId = polled.bundle_id;
       assessment.markModified('config');
