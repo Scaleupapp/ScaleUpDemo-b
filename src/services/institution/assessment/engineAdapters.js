@@ -32,6 +32,9 @@ const mcq = {
       raw: { competencyBreakdown: att.competencyBreakdown, topicBreakdown: att.topicBreakdown },
     };
   },
+  async getStartMeta(_session, _deps = {}) {
+    return {};
+  },
 };
 
 const capstone = {
@@ -49,6 +52,9 @@ const capstone = {
     const s = await CapstoneSession.findById(session.engine.sessionId);
     if (!s || s.status !== 'graded' || !s.result) return { done: false };
     return { done: true, score: s.result.overall_score, integrity: s.result.integrity_confidence, raw: { dimension_scores: s.result.dimension_scores } };
+  },
+  async getStartMeta(_session, _deps = {}) {
+    return {};
   },
 };
 
@@ -69,6 +75,11 @@ const interview = {
     const s = await InterviewSession.findById(session.engine.sessionId);
     if (!s || s.status !== 'evaluated' || !s.evaluation) return { done: false };
     return { done: true, score: s.evaluation.overallScore, integrity: s.evaluation.integrityReport ? s.evaluation.integrityReport.overallIntegrity : undefined, raw: { dimensions: { communication: s.evaluation.communication, content: s.evaluation.content, structure: s.evaluation.structure, confidence: s.evaluation.confidence } } };
+  },
+  async getStartMeta(session, deps = {}) {
+    const InterviewSession = deps.InterviewSession || require('../../../models/InterviewSession');
+    const s = await InterviewSession.findById(session.engine.sessionId);
+    return { systemInstruction: s ? s.systemInstruction : undefined };
   },
 };
 

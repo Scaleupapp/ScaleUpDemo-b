@@ -125,6 +125,10 @@ test('POST /assessments/:id/start happy path → 201 with assessmentSessionId + 
         status: 'in_progress',
       }),
     },
+    // Stub getAdapter to return a mcq-like adapter with getStartMeta
+    getAdapter: (type) => ({
+      getStartMeta: async () => ({}),
+    }),
   });
 
   const res = await request(app)
@@ -134,6 +138,67 @@ test('POST /assessments/:id/start happy path → 201 with assessmentSessionId + 
   assert.strictEqual(res.body.success, true);
   assert.strictEqual(res.body.data.assessmentSessionId, String(sessionId));
   assert.strictEqual(res.body.data.engine.type, 'mcq');
+  assert.ok('meta' in res.body.data, 'meta key must be present in response');
+  studentAssessments._deps = null;
+});
+
+test('POST /assessments/:id/start interview → 201 includes data.meta.systemInstruction', async () => {
+  const sessionId = '507f1f77bcf86cd799439031';
+  const app = makeApp({
+    auth: stubAuth(STUDENT_ID),
+    assessmentSessionService: {
+      startSession: async (userId, assessmentId) => ({
+        _id: sessionId,
+        userId,
+        assessmentId,
+        engine: { type: 'interview', sessionId: 'ivSess1' },
+        status: 'in_progress',
+      }),
+    },
+    // Stub getAdapter to simulate interview adapter with persisted systemInstruction
+    getAdapter: (type) => ({
+      getStartMeta: async (session) => ({
+        systemInstruction: 'You are a strict interviewer focused on React.',
+      }),
+    }),
+  });
+
+  const res = await request(app).post('/api/v2/me/assessments/a1/start');
+
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.success, true);
+  assert.ok(res.body.data.meta, 'meta must be present');
+  assert.strictEqual(
+    res.body.data.meta.systemInstruction,
+    'You are a strict interviewer focused on React.',
+    'systemInstruction must be passed through from engine meta'
+  );
+  studentAssessments._deps = null;
+});
+
+test('POST /assessments/:id/start → 201 even when getStartMeta throws (best-effort)', async () => {
+  const sessionId = '507f1f77bcf86cd799439032';
+  const app = makeApp({
+    auth: stubAuth(STUDENT_ID),
+    assessmentSessionService: {
+      startSession: async () => ({
+        _id: sessionId,
+        userId: STUDENT_ID,
+        assessmentId: 'a1',
+        engine: { type: 'interview', sessionId: 'ivSess1' },
+        status: 'in_progress',
+      }),
+    },
+    getAdapter: () => ({
+      getStartMeta: async () => { throw new Error('META_LOOKUP_FAILED'); },
+    }),
+  });
+
+  const res = await request(app).post('/api/v2/me/assessments/a1/start');
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.success, true);
+  // meta falls back to {}
+  assert.deepStrictEqual(res.body.data.meta, {});
   studentAssessments._deps = null;
 });
 
