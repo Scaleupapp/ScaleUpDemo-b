@@ -248,3 +248,83 @@ test('GET /cohorts/:cohortId/assessment-rollup returns null when no rollup compu
   assert.strictEqual(res.body.data, null);
   assessments._deps = null;
 });
+
+// ── Authoring trigger tests ───────────────────────────────────────────────────
+
+test('POST /assessments (mcq type) triggers authoringService.authorMcq with assessment id', async () => {
+  let authorMcqCalledWithId = null;
+
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async (scope, payload) => ({
+        _id: 'a-mcq-1',
+        type: 'mcq',
+        ...scope,
+        ...payload,
+      }),
+    },
+    authoringService: {
+      // Simulates fire-and-forget: returns a promise that resolves
+      authorMcq: async (id) => { authorMcqCalledWithId = String(id); return {}; },
+    },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'mcq', title: 'MCQ Test' });
+
+  // Route still returns 201 immediately (fire-and-forget)
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.success, true);
+
+  // Give the microtask queue one tick to let the fire-and-forget run
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(authorMcqCalledWithId, 'a-mcq-1', 'authorMcq should be called with the new assessment id');
+  assessments._deps = null;
+});
+
+test('POST /assessments (interview type) does NOT trigger authoringService.authorMcq', async () => {
+  let authorMcqCalled = false;
+
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async (scope, payload) => ({
+        _id: 'a-iv-1',
+        type: 'interview',
+        ...scope,
+        ...payload,
+      }),
+    },
+    authoringService: {
+      authorMcq: async () => { authorMcqCalled = true; return {}; },
+    },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'interview', title: 'Interview Test' });
+
+  assert.strictEqual(res.status, 201);
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(authorMcqCalled, false, 'authorMcq must NOT be called for non-mcq type');
+  assessments._deps = null;
+});
+
+// ── NO_QUESTIONS release gate ─────────────────────────────────────────────────
+
+test('POST /assessments/:id/release → 409 NO_QUESTIONS when mcq has no questions yet', async () => {
+  assessments._deps = {
+    assessmentService: {
+      releaseAssessment: async () => { throw new Error('NO_QUESTIONS'); },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a1/release')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'NO_QUESTIONS');
+  assert.ok(res.body.message, 'message should be present');
+  assessments._deps = null;
+});

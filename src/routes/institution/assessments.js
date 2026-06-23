@@ -6,6 +6,7 @@ const { institutionScope, requireInstitutionRole } = require('../../middleware/i
 const router = express.Router();
 router._deps = null;
 function svc() { return (router._deps && router._deps.assessmentService) || require('../../services/institution/assessment/assessmentService'); }
+function authoring() { return (router._deps && router._deps.authoringService) || require('../../services/institution/assessment/assessmentAuthoringService'); }
 function getAssessmentModel() { return (router._deps && router._deps.Assessment) || require('../../models/Assessment'); }
 function getAssessmentSessionModel() { return (router._deps && router._deps.AssessmentSession) || require('../../models/AssessmentSession'); }
 function getCohortRollupModel() { return (router._deps && router._deps.CohortRollup) || require('../../models/CohortRollup'); }
@@ -16,6 +17,10 @@ router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 
     const { cohortId, type, title } = req.body || {};
     if (!cohortId || !type || !title) return res.status(400).json({ success: false, code: 'VALIDATION', message: 'cohortId, type and title are required.' });
     const a = await svc().createAssessment(institutionScope(req), { ...req.body, createdBy: req.institution.institutionUserId });
+    // Fire-and-forget: author MCQ questions in background (no-op for non-mcq types)
+    if (a.type === 'mcq') {
+      authoring().authorMcq(a._id).catch((e) => console.warn('[assessments:authorMcq]', e.message));
+    }
     return res.status(201).json({ success: true, data: a });
   } catch (err) {
     if (err.name === 'ValidationError') return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid assessment data.' });
@@ -32,6 +37,7 @@ router.post('/assessments/:id/release', institutionAuth, requireInstitutionRole(
   } catch (err) {
     if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Assessment not found' });
     if (err.message === 'BAD_STATUS') return res.status(409).json({ success: false, code: 'BAD_STATUS', message: 'Only a configured assessment can be released.' });
+    if (err.message === 'NO_QUESTIONS') return res.status(409).json({ success: false, code: 'NO_QUESTIONS', message: 'Questions are still being generated — try again in a moment.' });
     console.error('[institution/assessments:release]', err.message);
     return res.status(500).json({ success: false, message: 'Could not release the assessment.' });
   }
