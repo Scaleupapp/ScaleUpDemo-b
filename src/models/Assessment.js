@@ -18,6 +18,10 @@ const AssessmentSchema = new mongoose.Schema({
     capstone: {
       bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },
       durationSeconds: { type: Number, default: 5400 },
+      roleTrack: String,
+      difficulty: { type: String, default: 'medium' },
+      jobDescription: String,
+      topicHint: String,
     },
     interview: {
       interviewType: { type: String },

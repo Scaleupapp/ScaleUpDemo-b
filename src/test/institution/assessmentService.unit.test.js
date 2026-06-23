@@ -108,7 +108,30 @@ test('releaseAssessment succeeds for interview type (no questions required)', as
 });
 
 test('releaseAssessment succeeds for capstone type (no questions required)', async () => {
+  const doc = makeAssessmentDoc({ type: 'capstone', config: { capstone: { bundleId: 'existing-bundle' } } });
+  const deps = { Assessment: { findOne: async () => doc } };
+  const result = await releaseAssessment(SCOPE, 'a1', 'user1', deps);
+  assert.strictEqual(result.status, 'released');
+});
+
+// ---------------------------------------------------------------------------
+// releaseAssessment — NO_BUNDLE gate
+// ---------------------------------------------------------------------------
+
+test('releaseAssessment throws NO_BUNDLE for capstone with no bundleId', async () => {
   const doc = makeAssessmentDoc({ type: 'capstone', config: { capstone: {} } });
+  const deps = { Assessment: { findOne: async () => doc } };
+  await assert.rejects(
+    () => releaseAssessment(SCOPE, 'a1', 'user1', deps),
+    (err) => {
+      assert.strictEqual(err.message, 'NO_BUNDLE');
+      return true;
+    }
+  );
+});
+
+test('releaseAssessment succeeds for capstone with bundleId set', async () => {
+  const doc = makeAssessmentDoc({ type: 'capstone', config: { capstone: { bundleId: 'b1' } } });
   const deps = { Assessment: { findOne: async () => doc } };
   const result = await releaseAssessment(SCOPE, 'a1', 'user1', deps);
   assert.strictEqual(result.status, 'released');

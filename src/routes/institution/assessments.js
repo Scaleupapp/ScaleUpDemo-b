@@ -21,6 +21,9 @@ router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 
     if (a.type === 'mcq') {
       authoring().authorMcq(a._id).catch((e) => console.warn('[assessments:authorMcq]', e.message));
     }
+    if (a.type === 'capstone') {
+      authoring().authorCapstone(a._id).catch((e) => console.warn('[assessments:authorCapstone]', e.message));
+    }
     return res.status(201).json({ success: true, data: a });
   } catch (err) {
     if (err.name === 'ValidationError') return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid assessment data.' });
@@ -38,6 +41,7 @@ router.post('/assessments/:id/release', institutionAuth, requireInstitutionRole(
     if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Assessment not found' });
     if (err.message === 'BAD_STATUS') return res.status(409).json({ success: false, code: 'BAD_STATUS', message: 'Only a configured assessment can be released.' });
     if (err.message === 'NO_QUESTIONS') return res.status(409).json({ success: false, code: 'NO_QUESTIONS', message: 'Questions are still being generated — try again in a moment.' });
+    if (err.message === 'NO_BUNDLE') return res.status(409).json({ success: false, code: 'NO_BUNDLE', message: 'The capstone is still being generated — try again in a moment.' });
     console.error('[institution/assessments:release]', err.message);
     return res.status(500).json({ success: false, message: 'Could not release the assessment.' });
   }

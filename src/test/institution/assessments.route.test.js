@@ -328,3 +328,127 @@ test('POST /assessments/:id/release → 409 NO_QUESTIONS when mcq has no questio
   assert.ok(res.body.message, 'message should be present');
   assessments._deps = null;
 });
+
+// ── Capstone authoring trigger ─────────────────────────────────────────────────
+
+test('POST /assessments (capstone type) triggers authoringService.authorCapstone with assessment id', async () => {
+  let authorCapstoneCalledWithId = null;
+
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async (scope, payload) => ({
+        _id: 'a-cap-1',
+        type: 'capstone',
+        ...scope,
+        ...payload,
+      }),
+    },
+    authoringService: {
+      authorMcq: async () => {},
+      authorCapstone: async (id) => { authorCapstoneCalledWithId = String(id); return {}; },
+    },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'capstone', title: 'Capstone Test' });
+
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.success, true);
+
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(authorCapstoneCalledWithId, 'a-cap-1', 'authorCapstone should be called with the new assessment id');
+  assessments._deps = null;
+});
+
+test('POST /assessments (capstone type) does NOT trigger authoringService.authorMcq', async () => {
+  let authorMcqCalled = false;
+
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async (scope, payload) => ({
+        _id: 'a-cap-2',
+        type: 'capstone',
+        ...scope,
+        ...payload,
+      }),
+    },
+    authoringService: {
+      authorMcq: async () => { authorMcqCalled = true; return {}; },
+      authorCapstone: async () => {},
+    },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'capstone', title: 'Capstone Test 2' });
+
+  assert.strictEqual(res.status, 201);
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(authorMcqCalled, false, 'authorMcq must NOT be called for capstone type');
+  assessments._deps = null;
+});
+
+test('POST /assessments (mcq type) does NOT trigger authoringService.authorCapstone', async () => {
+  let authorCapstoneCalled = false;
+
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async (scope, payload) => ({
+        _id: 'a-mcq-2',
+        type: 'mcq',
+        ...scope,
+        ...payload,
+      }),
+    },
+    authoringService: {
+      authorMcq: async () => {},
+      authorCapstone: async () => { authorCapstoneCalled = true; return {}; },
+    },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'mcq', title: 'MCQ Test 2' });
+
+  assert.strictEqual(res.status, 201);
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(authorCapstoneCalled, false, 'authorCapstone must NOT be called for mcq type');
+  assessments._deps = null;
+});
+
+// ── NO_BUNDLE release gate ─────────────────────────────────────────────────────
+
+test('POST /assessments/:id/release → 409 NO_BUNDLE when capstone has no bundleId', async () => {
+  assessments._deps = {
+    assessmentService: {
+      releaseAssessment: async () => { throw new Error('NO_BUNDLE'); },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a1/release')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'NO_BUNDLE');
+  assert.ok(res.body.message, 'message should be present');
+  assessments._deps = null;
+});
+
+test('POST /assessments/:id/release → 200 when capstone has bundleId (NO_BUNDLE not thrown)', async () => {
+  const fakeReleasedAt = new Date();
+  assessments._deps = {
+    assessmentService: {
+      releaseAssessment: async () => ({ _id: 'a-cap-ok', status: 'released', releasedAt: fakeReleasedAt }),
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a-cap-ok/release')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(res.body.data.status, 'released');
+  assessments._deps = null;
+});

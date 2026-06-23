@@ -30,6 +30,10 @@ async function releaseAssessment(scope, id, releasedBy, deps) {
   if (a.type === 'mcq' && !(a.config && a.config.mcq && a.config.mcq.questions && a.config.mcq.questions.length)) {
     throw new Error('NO_QUESTIONS');
   }
+  // Capstone assessments must have a bundle generated before release
+  if (a.type === 'capstone' && !(a.config && a.config.capstone && a.config.capstone.bundleId)) {
+    throw new Error('NO_BUNDLE');
+  }
   a.status = 'released';
   a.releasedBy = releasedBy;
   a.releasedAt = new Date();

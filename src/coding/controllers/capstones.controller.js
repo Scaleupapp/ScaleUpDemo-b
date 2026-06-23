@@ -14,6 +14,7 @@ const capstoneSummary = require('../services/capstoneSummary');
 const planIntegration = require('../services/planIntegration');
 const CapstoneGenerationRequest = require('../models/capstoneGenerationRequest.model');
 const capstoneGenerationWorker = require('../workers/capstoneGeneration.worker');
+const { requestGeneration } = require('../services/capstoneAuthoringSupport');
 const DifficultyState = require('../models/difficultyState.model');
 const { evaluateCodingEligibility } = require('../services/codingEligibility');
 const capstoneSessionService = require('../services/capstoneSessionService');
@@ -803,27 +804,23 @@ async function generateCapstone(req, res) {
 
   const language = inferLanguageFromInput(`${jd} ${hint}`, LANG_BY_TRACK[roleTrack] || 'python');
 
-  const reqDoc = await CapstoneGenerationRequest.create({
-    user_id: req.user.userId,
-    job_description: jd,
-    topic_hint: hint,
-    role_track: roleTrack,
-    difficulty: diff,
-    language,
-    status: 'queued',
-  });
-
-  // Enqueue is awaited: if the queue (Redis) is down, the job would never
-  // run and the learner would poll a 'queued' request forever. Mark the
-  // request failed and tell the client now, rather than hang silently.
+  // Enqueue is awaited via requestGeneration: if the queue (Redis) is down,
+  // the job would never run and the learner would poll a 'queued' request
+  // forever. requestGeneration marks the request failed and re-throws so we
+  // can tell the client now, rather than hang silently.
+  let reqDoc;
   try {
-    await capstoneGenerationWorker.enqueueGeneration(reqDoc._id);
+    reqDoc = await requestGeneration({
+      userId: req.user.userId,
+      roleTrack,
+      difficulty: diff,
+      language,
+      jobDescription: jd,
+      topicHint: hint,
+    });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[capstones.generate] enqueue failed:', err.message);
-    await CapstoneGenerationRequest.findByIdAndUpdate(reqDoc._id, {
-      $set: { status: 'failed', error: 'Could not queue generation. Try again shortly.' },
-    }).catch(() => {});
     return res.status(503).json({
       error: 'generation_unavailable',
       message: 'Generation is temporarily unavailable. Please try again in a moment.',
