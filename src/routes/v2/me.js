@@ -108,4 +108,9 @@ router.get('/context', auth, async (req, res) => {
   }
 });
 
+// Student assessment routes — list scheduled assessments, start, sync.
+// The studentAssessments router manages its own auth per-handler (same D2C `auth`).
+// Mounted here so final paths are /api/v2/me/assessments/*.
+router.use('/', require('../institution/studentAssessments'));
+
 module.exports = router;
