@@ -128,3 +128,123 @@ test('GET /assessments/:id → 404 when not found', async () => {
   assert.strictEqual(res.status, 404);
   assessments._deps = null;
 });
+
+// ── Monitoring: GET /assessments/:id/sessions ─────────────────────────────────
+
+test('GET /assessments/:id/sessions hides score while window is still open', async () => {
+  const future = new Date(Date.now() + 86400000); // closes tomorrow
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a1',
+        institutionId: 'i1',
+        closesAt: future,
+      }),
+    },
+    AssessmentSession: {
+      find: async () => [
+        { _id: 's1', userId: 'u1', status: 'graded',      result: { score: 92 } },
+        { _id: 's2', userId: 'u2', status: 'in_progress', result: null },
+      ],
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  const { counts, sessions } = res.body.data;
+  assert.strictEqual(counts.graded, 1);
+  assert.strictEqual(counts.started, 2);
+  // Scores must NOT be present while window is open
+  sessions.forEach((s) => assert.strictEqual(s.score, undefined, 'score must be hidden while window is open'));
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/sessions shows score after closesAt', async () => {
+  const past = new Date(Date.now() - 86400000); // closed yesterday
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a1',
+        institutionId: 'i1',
+        closesAt: past,
+      }),
+    },
+    AssessmentSession: {
+      find: async () => [
+        { _id: 's1', userId: 'u1', status: 'graded', result: { score: 88 } },
+      ],
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  const { sessions } = res.body.data;
+  assert.strictEqual(sessions[0].score, 88, 'score should be visible after window closes');
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/sessions → 404 when assessment not found', async () => {
+  assessments._deps = {
+    Assessment: { findOne: async () => null },
+    AssessmentSession: { find: async () => [] },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/missing/sessions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 404);
+  assessments._deps = null;
+});
+
+// ── Analytics: GET /cohorts/:cohortId/assessment-rollup ──────────────────────
+
+test('GET /cohorts/:cohortId/assessment-rollup returns cached rollup doc', async () => {
+  const fakeRollup = {
+    institutionId: 'i1',
+    cohortId: 'c1',
+    assessmentId: 'a1',
+    counts: { assigned: 30, started: 20, submitted: 18, graded: 18 },
+    avgScore: 74,
+  };
+  assessments._deps = {
+    CohortRollup: {
+      findOne: async (filter) => {
+        assert.strictEqual(String(filter.institutionId), 'i1');
+        assert.strictEqual(String(filter.cohortId), 'c1');
+        assert.strictEqual(String(filter.assessmentId), 'a1');
+        return fakeRollup;
+      },
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/cohorts/c1/assessment-rollup?assessmentId=a1')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(res.body.data.avgScore, 74);
+  assessments._deps = null;
+});
+
+test('GET /cohorts/:cohortId/assessment-rollup returns null when no rollup computed yet', async () => {
+  assessments._deps = {
+    CohortRollup: { findOne: async () => null },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/cohorts/c1/assessment-rollup?assessmentId=a1')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.data, null);
+  assessments._deps = null;
+});

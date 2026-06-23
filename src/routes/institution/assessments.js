@@ -6,6 +6,9 @@ const { institutionScope, requireInstitutionRole } = require('../../middleware/i
 const router = express.Router();
 router._deps = null;
 function svc() { return (router._deps && router._deps.assessmentService) || require('../../services/institution/assessment/assessmentService'); }
+function getAssessmentModel() { return (router._deps && router._deps.Assessment) || require('../../models/Assessment'); }
+function getAssessmentSessionModel() { return (router._deps && router._deps.AssessmentSession) || require('../../models/AssessmentSession'); }
+function getCohortRollupModel() { return (router._deps && router._deps.CohortRollup) || require('../../models/CohortRollup'); }
 
 // Configure (maker): tpo_head, tpo_coordinator
 router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
@@ -45,6 +48,76 @@ router.get('/assessments/:id', institutionAuth, async (req, res) => {
     if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
     return res.status(200).json({ success: true, data: a });
   } catch (err) { console.error('[institution/assessments:get]', err.message); return res.status(500).json({ success: false, message: 'Could not load the assessment.' }); }
+});
+
+// ── TPO monitoring: list sessions for an assessment ────────────────────────────
+// GET /assessments/:id/sessions (any institution role)
+// While the window is open: returns per-student { userId, status } — score omitted
+// (privacy / anti-anxiety). After closesAt, score is included.
+router.get('/assessments/:id/sessions', institutionAuth, async (req, res) => {
+  try {
+    const scope = institutionScope(req);
+    const Assessment = getAssessmentModel();
+    const AssessmentSession = getAssessmentSessionModel();
+
+    const assessment = await Assessment.findOne({ ...scope, _id: req.params.id });
+    if (!assessment) return res.status(404).json({ success: false, message: 'Assessment not found' });
+
+    const sessionsQuery = AssessmentSession.find({
+      ...scope,
+      assessmentId: assessment._id,
+    });
+    const allSessions = typeof sessionsQuery.lean === 'function'
+      ? await sessionsQuery.lean()
+      : await sessionsQuery;
+
+    const now = new Date();
+    const windowClosed = assessment.closesAt && now > assessment.closesAt;
+
+    const counts = {
+      assigned: allSessions.length,
+      started: allSessions.filter((s) => s.status !== 'scheduled').length,
+      submitted: allSessions.filter((s) => ['submitted', 'graded'].includes(s.status)).length,
+      graded: allSessions.filter((s) => s.status === 'graded').length,
+    };
+
+    const sessions = allSessions.map((s) => {
+      const entry = { userId: s.userId, status: s.status };
+      if (windowClosed && s.result && typeof s.result.score === 'number') {
+        entry.score = s.result.score;
+      }
+      return entry;
+    });
+
+    return res.status(200).json({ success: true, data: { counts, sessions } });
+  } catch (err) {
+    console.error('[institution/assessments:sessions]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not load sessions.' });
+  }
+});
+
+// ── TPO analytics: cohort rollup ───────────────────────────────────────────────
+// GET /cohorts/:cohortId/assessment-rollup?assessmentId= (any institution role)
+// Returns the cached CohortRollup document (or null if not yet computed).
+router.get('/cohorts/:cohortId/assessment-rollup', institutionAuth, async (req, res) => {
+  try {
+    const scope = institutionScope(req);
+    const CohortRollup = getCohortRollupModel();
+    const { assessmentId } = req.query;
+
+    const filter = { ...scope, cohortId: req.params.cohortId };
+    if (assessmentId) filter.assessmentId = assessmentId;
+    else filter.assessmentId = null; // cohort-wide rollup
+
+    const rollupQuery = CohortRollup.findOne(filter);
+    const rollup = typeof rollupQuery.lean === 'function'
+      ? await rollupQuery.lean()
+      : await rollupQuery;
+    return res.status(200).json({ success: true, data: rollup || null });
+  } catch (err) {
+    console.error('[institution/assessments:rollup]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not load rollup.' });
+  }
 });
 
 module.exports = router;
