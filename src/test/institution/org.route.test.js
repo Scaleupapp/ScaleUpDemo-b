@@ -224,3 +224,31 @@ test('institution_admin POST /departments → 201', async () => {
 
   org._deps = null;
 });
+
+// ── createCohort with an out-of-institution objective → 404 ──────────────────
+
+test('POST /cohorts with an objective not in the institution → 404 TEMPLATE_NOT_FOUND', async () => {
+  let captured = null;
+  org._deps = {
+    orgService: {
+      createCohort: async (scope, payload) => { captured = payload; throw new Error('TEMPLATE_NOT_FOUND'); },
+    },
+  };
+
+  stubLoadUser('inst-T', 'tpo_head');
+  const a = express();
+  a.use(express.json());
+  a.use('/api/institution', org);
+
+  const res = await request(a)
+    .post('/api/institution/cohorts')
+    .set('Authorization', `Bearer ${tok('inst-T', 'tpo_head')}`)
+    .send({ departmentId: 'd1', year: 'final', label: 'Batch 2026', objectiveTemplateId: 'foreign' });
+
+  assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.code, 'TEMPLATE_NOT_FOUND');
+  // route forwards objectiveTemplateId to the service
+  assert.strictEqual(captured.objectiveTemplateId, 'foreign');
+
+  org._deps = null;
+});

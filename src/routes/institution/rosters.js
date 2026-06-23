@@ -20,6 +20,7 @@ function getModels() {
     RosterUpload: require('../../models/RosterUpload'),
     PendingStudent: require('../../models/PendingStudent'),
     InstitutionEnrollment: require('../../models/InstitutionEnrollment'),
+    InstitutionCohort: require('../../models/InstitutionCohort'),
   };
 }
 
@@ -134,6 +135,19 @@ router.post(
         return res.status(409).json({
           success: false,
           message: `Cannot approve an upload with status '${rosterUpload.status}'`,
+        });
+      }
+
+      // Mandatory-objective gate: a cohort must have an objective attached before
+      // its students are invited, so every claimed student is seeded a locked
+      // institutional objective (1B). Without it, the seed would silently no-op.
+      const { InstitutionCohort } = getModels();
+      const cohort = await InstitutionCohort.findOne(institutionScope(req, { _id: rosterUpload.cohortId }));
+      if (!cohort || !cohort.objectiveTemplateId) {
+        return res.status(409).json({
+          success: false,
+          code: 'NO_OBJECTIVE',
+          message: 'Attach an objective to this cohort before approving its roster.',
         });
       }
 

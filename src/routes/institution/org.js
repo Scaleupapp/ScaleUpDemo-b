@@ -72,15 +72,18 @@ router.post(
     try {
       const orgService = getService(router._deps);
       const scope = institutionScope(req);
-      const { departmentId, year, label, placementSeason } = req.body || {};
+      const { departmentId, year, label, placementSeason, objectiveTemplateId } = req.body || {};
       if (!departmentId) {
         return res.status(400).json({ success: false, code: 'VALIDATION', message: 'departmentId is required.' });
       }
-      const cohort = await orgService.createCohort(scope, { departmentId, year, label, placementSeason });
+      const cohort = await orgService.createCohort(scope, { departmentId, year, label, placementSeason, objectiveTemplateId });
       return res.status(201).json({ success: true, data: cohort });
     } catch (err) {
       if (err.message === 'DEPARTMENT_NOT_FOUND') {
         return res.status(404).json({ success: false, message: 'Department not found in this institution' });
+      }
+      if (err.message === 'TEMPLATE_NOT_FOUND') {
+        return res.status(404).json({ success: false, code: 'TEMPLATE_NOT_FOUND', message: 'Objective template not found in this institution' });
       }
       if (err.name === 'ValidationError' || err.name === 'CastError') {
         return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid cohort data.' });
