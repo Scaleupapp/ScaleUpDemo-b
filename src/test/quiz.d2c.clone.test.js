@@ -47,18 +47,20 @@ test('listQuizzes excludes quizzes with source=institution_assessment', async ()
     };
   };
 
-  const { req, res } = makeReqRes();
-  await quizController.listQuizzes(req, res, (err) => { throw err; });
+  try {
+    const { req, res } = makeReqRes();
+    await quizController.listQuizzes(req, res, (err) => { throw err; });
 
-  // Restore
-  Quiz.find = originalFind;
-
-  assert.ok(capturedQuery, 'Quiz.find should have been called');
-  assert.deepStrictEqual(
-    capturedQuery.source,
-    { $ne: 'institution_assessment' },
-    'listQuizzes should exclude institution_assessment source'
-  );
+    assert.ok(capturedQuery, 'Quiz.find should have been called');
+    assert.deepStrictEqual(
+      capturedQuery.source,
+      { $ne: 'institution_assessment' },
+      'listQuizzes should exclude institution_assessment source'
+    );
+  } finally {
+    // Restore
+    Quiz.find = originalFind;
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -76,17 +78,19 @@ test('getSkillAssessments excludes quizzes with source=institution_assessment', 
     };
   };
 
-  const { req, res } = makeReqRes();
-  await quizController.getSkillAssessments(req, res, (err) => { throw err; });
+  try {
+    const { req, res } = makeReqRes();
+    await quizController.getSkillAssessments(req, res, (err) => { throw err; });
 
-  Quiz.find = originalFind;
-
-  assert.ok(capturedQuery, 'Quiz.find should have been called');
-  assert.deepStrictEqual(
-    capturedQuery.source,
-    { $ne: 'institution_assessment' },
-    'getSkillAssessments should exclude institution_assessment source'
-  );
+    assert.ok(capturedQuery, 'Quiz.find should have been called');
+    assert.deepStrictEqual(
+      capturedQuery.source,
+      { $ne: 'institution_assessment' },
+      'getSkillAssessments should exclude institution_assessment source'
+    );
+  } finally {
+    Quiz.find = originalFind;
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -109,16 +113,18 @@ test('getPendingQuizzes excludes quizzes with source=institution_assessment', as
     };
   };
 
-  const { req, res } = makeReqRes();
-  await quizController.getPendingQuizzes(req, res, (err) => { throw err; });
+  try {
+    const { req, res } = makeReqRes();
+    await quizController.getPendingQuizzes(req, res, (err) => { throw err; });
 
-  Quiz.find = originalFind;
-  UserObjective.findOne = originalFindOne;
-
-  assert.ok(capturedQuery, 'Quiz.find should have been called');
-  assert.deepStrictEqual(
-    capturedQuery.source,
-    { $ne: 'institution_assessment' },
-    'getPendingQuizzes should exclude institution_assessment source'
-  );
+    assert.ok(capturedQuery, 'Quiz.find should have been called');
+    assert.deepStrictEqual(
+      capturedQuery.source,
+      { $ne: 'institution_assessment' },
+      'getPendingQuizzes should exclude institution_assessment source'
+    );
+  } finally {
+    Quiz.find = originalFind;
+    UserObjective.findOne = originalFindOne;
+  }
 });

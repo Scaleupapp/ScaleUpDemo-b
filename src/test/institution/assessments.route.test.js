@@ -613,6 +613,31 @@ test('POST /assessments/:id/author-capstone → 404 when assessment not found', 
   assessments._deps = null;
 });
 
+test('tpo_coordinator POST /assessments/:id/author-capstone → 202', async () => {
+  let authorCalled = false;
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a-cap-1' }),
+    },
+    authoringService: {
+      authorCapstone: async () => { authorCalled = true; },
+    },
+  };
+  const res = await request(appAs('tpo_coordinator'))
+    .post('/api/institution/assessments/a-cap-1/author-capstone')
+    .set('Authorization', `Bearer ${tok('tpo_coordinator')}`);
+  assert.strictEqual(res.status, 202);
+  assert.strictEqual(res.body.data.status, 'authoring');
+  assessments._deps = null;
+});
+
+test('viewer POST /assessments/:id/author-capstone → 403 (role gate)', async () => {
+  const res = await request(appAs('viewer'))
+    .post('/api/institution/assessments/a-cap-1/author-capstone')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+  assert.strictEqual(res.status, 403);
+});
+
 // ── Create validation errors (Sub-feature E) ──────────────────────────────────
 
 test('POST /assessments → 404 COHORT_NOT_FOUND when cohort validation fails', async () => {
@@ -640,6 +665,22 @@ test('POST /assessments → 400 BAD_CONFIG when interview missing interviewType'
     .post('/api/institution/assessments')
     .set('Authorization', `Bearer ${tok('tpo_head')}`)
     .send({ cohortId: 'c1', type: 'interview', title: 'T', config: { interview: {} } });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.code, 'BAD_CONFIG');
+  assessments._deps = null;
+});
+
+test('POST /assessments → 400 BAD_CONFIG when capstone missing bundleId/roleTrack/jobDescription', async () => {
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async () => { throw new Error('BAD_CONFIG'); },
+    },
+    authoringService: { authorCapstone: async () => {} },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'capstone', title: 'Bad Capstone' });
   assert.strictEqual(res.status, 400);
   assert.strictEqual(res.body.code, 'BAD_CONFIG');
   assessments._deps = null;
