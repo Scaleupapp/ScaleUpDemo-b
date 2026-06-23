@@ -19,6 +19,7 @@ const listQuizzes = async (req, res, next) => {
     const quizzes = await Quiz.find({
       userId: req.user.userId,
       status: { $in: ['ready', 'delivered', 'in_progress', 'completed'] },
+      source: { $ne: 'institution_assessment' },
     }).sort({ createdAt: -1 }).select('-questions.correctAnswer -questions.explanation');
     res.json(apiResponse.success(quizzes));
   } catch (err) { next(err); }
@@ -26,6 +27,11 @@ const listQuizzes = async (req, res, next) => {
 
 const getHistory = async (req, res, next) => {
   try {
+    // NOTE(M8): getHistory returns QuizAttempt records; institution-cloned quiz attempts
+    // are not filtered here because QuizAttempt has no source field and joining to Quiz
+    // per attempt would be N+1. The Quiz-based readers (listQuizzes, getSkillAssessments,
+    // getPendingQuizzes) already exclude institution clones. A future migration could
+    // add a source field to QuizAttempt at clone time to enable cheap filtering here.
     const attempts = await QuizAttempt.find({ userId: req.user.userId, status: 'completed' })
       .sort({ completedAt: -1 })
       .populate('quizId', 'title topic type objectiveId');
@@ -356,7 +362,7 @@ const getPendingQuizzes = async (req, res, next) => {
       status: 'active',
     });
 
-    let quizQuery = { userId: req.user.userId, status: { $in: ['ready', 'delivered'] } };
+    let quizQuery = { userId: req.user.userId, status: { $in: ['ready', 'delivered'] }, source: { $ne: 'institution_assessment' } };
     if (activeObjective) {
       // Show quizzes for active objective OR legacy quizzes with no objective tag
       quizQuery.$or = [
@@ -393,6 +399,7 @@ const getSkillAssessments = async (req, res, next) => {
       userId: req.user.userId,
       type: 'competency_assessment',
       status: { $in: ['ready', 'delivered', 'in_progress', 'completed'] },
+      source: { $ne: 'institution_assessment' },
     }).sort({ createdAt: -1 }).select('-questions.correctAnswer -questions.explanation');
     res.json(apiResponse.success(quizzes));
   } catch (err) { next(err); }

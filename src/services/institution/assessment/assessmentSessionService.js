@@ -19,17 +19,47 @@ async function startSession(userId, assessmentId, deps = {}) {
   const enrollment = await Enrollment.findOne({ userId, cohortId: a.cohortId });
   if (!enrollment) throw new Error('NOT_ENROLLED');
 
-  // Single attempt: return the existing session instead of starting another.
-  const existing = await AssessmentSession.findOne({ assessmentId, userId });
-  if (existing) return existing;
+  // Reserve-first: atomically claim the row before creating any engine session.
+  // Concurrent starts: only one wins the unique-index write; the loser gets
+  // a duplicate-key error (code 11000) and returns the winner's row without
+  // ever spinning up an engine session.
+  let session;
+  try {
+    session = await AssessmentSession.create({
+      assessmentId,
+      institutionId: a.institutionId,
+      cohortId: a.cohortId,
+      userId,
+      enrollmentId: enrollment._id,
+      engine: { type: a.type },
+      status: 'scheduled',
+      startedAt: now,
+    });
+  } catch (e) {
+    if (e.code === 11000) {
+      // Another request already created the row — idempotent, no engine session
+      // created for this loser request.
+      return AssessmentSession.findOne({ assessmentId, userId });
+    }
+    throw e;
+  }
 
+  // Winner: start the engine session. If that fails, remove the placeholder
+  // row so the student can retry cleanly.
   const adapter = getAdapter(a.type);
-  const { engine } = await adapter.start(a, userId, deps.adapterDeps || {});
+  let engineData;
+  try {
+    const out = await adapter.start(a, userId, deps.adapterDeps || {});
+    engineData = out.engine;
+  } catch (adapterErr) {
+    await AssessmentSession.deleteOne({ _id: session._id });
+    throw adapterErr;
+  }
 
-  return AssessmentSession.create({
-    assessmentId, institutionId: a.institutionId, cohortId: a.cohortId, userId,
-    enrollmentId: enrollment._id, engine, status: 'in_progress', startedAt: now,
-  });
+  session.engine = engineData;
+  session.status = 'in_progress';
+  await session.save();
+  return session;
 }
 
 // Poll the engine; when graded, copy the summary, mark graded, advance enrollment to
@@ -52,7 +82,7 @@ async function syncSession(sessionId, deps = {}) {
   // Advance enrollment → active (best-effort; engines already fed readiness/mastery).
   try {
     const enrollmentProgress = deps.enrollmentProgressService || require('../enrollmentProgressService');
-    await enrollmentProgress.markActive(session.userId, deps);
+    await enrollmentProgress.markActive(session.userId, session.cohortId, deps);
   } catch (e) { console.warn('[assessmentSession] markActive failed', e.message); }
 
   // Recompute the cohort rollup (best-effort).

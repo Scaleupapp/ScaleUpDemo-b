@@ -18,6 +18,10 @@ const AssessmentSchema = new mongoose.Schema({
     capstone: {
       bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },
       durationSeconds: { type: Number, default: 5400 },
+      roleTrack: String,
+      difficulty: { type: String, default: 'medium' },
+      jobDescription: String,
+      topicHint: String,
     },
     interview: {
       interviewType: { type: String },
@@ -33,6 +37,7 @@ const AssessmentSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionUser' },
   releasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionUser' },
   releasedAt: { type: Date },
+  closedAt: { type: Date },
 }, { timestamps: true });
 
 AssessmentSchema.index({ institutionId: 1, cohortId: 1, status: 1 });

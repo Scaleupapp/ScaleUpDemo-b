@@ -71,6 +71,8 @@ const quizSchema = new mongoose.Schema({
   expiresAt: { type: Date },
   aiModel: { type: String, default: 'gpt-4o' },
   generatedAt: { type: Date },
+  source: { type: String },
+  assessmentId: { type: mongoose.Schema.Types.ObjectId },
 }, { timestamps: true });
 
 quizSchema.index({ userId: 1, status: 1, createdAt: -1 });

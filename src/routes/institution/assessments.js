@@ -10,6 +10,8 @@ function authoring() { return (router._deps && router._deps.authoringService) ||
 function getAssessmentModel() { return (router._deps && router._deps.Assessment) || require('../../models/Assessment'); }
 function getAssessmentSessionModel() { return (router._deps && router._deps.AssessmentSession) || require('../../models/AssessmentSession'); }
 function getCohortRollupModel() { return (router._deps && router._deps.CohortRollup) || require('../../models/CohortRollup'); }
+// Sub-feature A: injectable enrollment model
+function getEnrollmentModel() { return (router._deps && router._deps.InstitutionEnrollment) || require('../../models/InstitutionEnrollment'); }
 
 // Configure (maker): tpo_head, tpo_coordinator
 router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
@@ -21,8 +23,15 @@ router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 
     if (a.type === 'mcq') {
       authoring().authorMcq(a._id).catch((e) => console.warn('[assessments:authorMcq]', e.message));
     }
+    if (a.type === 'capstone') {
+      authoring().authorCapstone(a._id).catch((e) => console.warn('[assessments:authorCapstone]', e.message));
+    }
     return res.status(201).json({ success: true, data: a });
   } catch (err) {
+    // Sub-feature E: validation error codes
+    if (err.message === 'COHORT_NOT_FOUND') return res.status(404).json({ success: false, code: 'COHORT_NOT_FOUND', message: 'Cohort not found or does not belong to this institution.' });
+    if (err.message === 'BAD_CONFIG') return res.status(400).json({ success: false, code: 'BAD_CONFIG', message: 'Missing required engine configuration.' });
+    if (err.message === 'BAD_WINDOW') return res.status(400).json({ success: false, code: 'BAD_WINDOW', message: 'opensAt must be before closesAt.' });
     if (err.name === 'ValidationError') return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid assessment data.' });
     console.error('[institution/assessments:create]', err.message);
     return res.status(500).json({ success: false, message: 'Could not create the assessment.' });
@@ -38,8 +47,49 @@ router.post('/assessments/:id/release', institutionAuth, requireInstitutionRole(
     if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Assessment not found' });
     if (err.message === 'BAD_STATUS') return res.status(409).json({ success: false, code: 'BAD_STATUS', message: 'Only a configured assessment can be released.' });
     if (err.message === 'NO_QUESTIONS') return res.status(409).json({ success: false, code: 'NO_QUESTIONS', message: 'Questions are still being generated — try again in a moment.' });
+    if (err.message === 'NO_BUNDLE') return res.status(409).json({ success: false, code: 'NO_BUNDLE', message: 'The capstone is still being generated — try again in a moment.' });
     console.error('[institution/assessments:release]', err.message);
     return res.status(500).json({ success: false, message: 'Could not release the assessment.' });
+  }
+});
+
+// Sub-feature C: Close action (I5): tpo_head, institution_admin
+router.post('/assessments/:id/close', institutionAuth, requireInstitutionRole('tpo_head', 'institution_admin'), async (req, res) => {
+  try {
+    const a = await svc().closeAssessment(institutionScope(req), req.params.id, req.institution.institutionUserId);
+    return res.status(200).json({ success: true, data: { id: String(a._id), status: a.status, closedAt: a.closedAt } });
+  } catch (err) {
+    if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Assessment not found' });
+    console.error('[institution/assessments:close]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not close the assessment.' });
+  }
+});
+
+// Sub-feature D: Re-author MCQ (recovery): tpo_head, tpo_coordinator
+router.post('/assessments/:id/author-mcq', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const Assessment = getAssessmentModel();
+    const a = await Assessment.findOne({ ...institutionScope(req), _id: req.params.id });
+    if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
+    authoring().authorMcq(a._id).catch((e) => console.warn('[assessments:author-mcq]', e.message));
+    return res.status(202).json({ success: true, data: { status: 'authoring' } });
+  } catch (err) {
+    console.error('[institution/assessments:author-mcq]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not trigger authoring.' });
+  }
+});
+
+// Sub-feature D: Re-author Capstone (recovery): tpo_head, tpo_coordinator
+router.post('/assessments/:id/author-capstone', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const Assessment = getAssessmentModel();
+    const a = await Assessment.findOne({ ...institutionScope(req), _id: req.params.id });
+    if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
+    authoring().authorCapstone(a._id).catch((e) => console.warn('[assessments:author-capstone]', e.message));
+    return res.status(202).json({ success: true, data: { status: 'authoring' } });
+  } catch (err) {
+    console.error('[institution/assessments:author-capstone]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not trigger authoring.' });
   }
 });
 
@@ -59,12 +109,13 @@ router.get('/assessments/:id', institutionAuth, async (req, res) => {
 // ── TPO monitoring: list sessions for an assessment ────────────────────────────
 // GET /assessments/:id/sessions (any institution role)
 // While the window is open: returns per-student { userId, status } — score omitted
-// (privacy / anti-anxiety). After closesAt, score is included.
+// (privacy / anti-anxiety). After closesAt or status=closed, score is included.
 router.get('/assessments/:id/sessions', institutionAuth, async (req, res) => {
   try {
     const scope = institutionScope(req);
     const Assessment = getAssessmentModel();
     const AssessmentSession = getAssessmentSessionModel();
+    const InstitutionEnrollment = getEnrollmentModel();
 
     const assessment = await Assessment.findOne({ ...scope, _id: req.params.id });
     if (!assessment) return res.status(404).json({ success: false, message: 'Assessment not found' });
@@ -78,10 +129,14 @@ router.get('/assessments/:id/sessions', institutionAuth, async (req, res) => {
       : await sessionsQuery;
 
     const now = new Date();
-    const windowClosed = assessment.closesAt && now > assessment.closesAt;
+    // Sub-feature C: windowClosed also triggered by assessment.status === 'closed'
+    const windowClosed = assessment.status === 'closed' || (assessment.closesAt && now > assessment.closesAt);
+
+    // Sub-feature A: assigned = enrollment count (not session count)
+    const assigned = await InstitutionEnrollment.countDocuments({ cohortId: assessment.cohortId, status: { $ne: 'withdrawn' } });
 
     const counts = {
-      assigned: allSessions.length,
+      assigned,
       started: allSessions.filter((s) => s.status !== 'scheduled').length,
       submitted: allSessions.filter((s) => ['submitted', 'graded'].includes(s.status)).length,
       graded: allSessions.filter((s) => s.status === 'graded').length,

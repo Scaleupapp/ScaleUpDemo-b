@@ -85,4 +85,90 @@ async function authorMcq(assessmentId, deps = {}) {
   return assessment;
 }
 
-module.exports = { authorMcq };
+/**
+ * Author (generate) a capstone bundle for an assessment.
+ *
+ * Calls requestGeneration to create + enqueue a CapstoneGenerationRequest,
+ * then polls until the bundle is ready (status === 'ready') or failed/timeout.
+ * Idempotent: if a valid active bundle is already set, returns the assessment as-is.
+ *
+ * @param {string|ObjectId} assessmentId
+ * @param {object}          deps  - injectable: { Assessment, ArtifactBundle,
+ *                                    CapstoneGenerationRequest, requestGeneration,
+ *                                    sleep, pollMs, maxPolls }
+ * @returns {Promise<Assessment|null>} updated Assessment, or null if not capstone type
+ */
+async function authorCapstone(assessmentId, deps = {}) {
+  const Assessment = deps.Assessment || require('../../../models/Assessment');
+  const ArtifactBundle = deps.ArtifactBundle || require('../../../coding/models/artifactBundle.model');
+  const CapstoneGenerationRequest =
+    deps.CapstoneGenerationRequest ||
+    require('../../../coding/models/capstoneGenerationRequest.model');
+  const requestGenerationFn =
+    deps.requestGeneration ||
+    require('../../../coding/services/capstoneAuthoringSupport').requestGeneration;
+  const sleep = deps.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const pollMs = deps.pollMs !== undefined ? deps.pollMs : 3000;
+  const maxPolls = deps.maxPolls !== undefined ? deps.maxPolls : 60;
+
+  const assessment = await Assessment.findById(assessmentId);
+  if (!assessment) throw new Error('NOT_FOUND');
+
+  // Only capstone assessments need bundle authoring
+  if (assessment.type !== 'capstone') return null;
+
+  const cfg = assessment.config && assessment.config.capstone ? assessment.config.capstone : {};
+
+  // Idempotent check: if bundleId already set and bundle is active, nothing to do
+  if (cfg.bundleId) {
+    try {
+      const bundle = await ArtifactBundle.findById(cfg.bundleId);
+      if (bundle && bundle.status === 'active' && bundle.type === 'capstone') {
+        return assessment;
+      }
+    } catch (_) {
+      // If lookup fails, fall through to regenerate
+    }
+  }
+
+  // Coerce roleTrack + difficulty to valid enum values (CapstoneGenerationRequest model
+  // enforces required enums; passing invalid values causes a silent ValidationError).
+  const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
+  const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
+  const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
+
+  const roleTrack = VALID_ROLE_TRACKS.includes(cfg.roleTrack) ? cfg.roleTrack : 'swe';
+  const difficulty = VALID_DIFFICULTIES.includes(cfg.difficulty) ? cfg.difficulty : 'medium';
+  // language is required by the model; default by track when not explicitly provided.
+  const language = cfg.language || LANG_BY_TRACK[roleTrack] || 'python';
+
+  // Request generation
+  const reqDoc = await requestGenerationFn(
+    {
+      userId: assessment.createdBy,
+      roleTrack,
+      difficulty,
+      language,
+      jobDescription: cfg.jobDescription || assessment.title,
+      topicHint: cfg.topicHint,
+    },
+    deps
+  );
+
+  // Poll until ready or failed/timeout
+  for (let i = 0; i < maxPolls; i++) {
+    await sleep(pollMs);
+    const polled = await CapstoneGenerationRequest.findById(reqDoc._id);
+    if (!polled) throw new Error('CAPSTONE_GEN_FAILED');
+    if (polled.status === 'ready') {
+      assessment.config.capstone.bundleId = polled.bundle_id;
+      assessment.markModified('config');
+      await assessment.save();
+      return assessment;
+    }
+    if (polled.status === 'failed') throw new Error('CAPSTONE_GEN_FAILED');
+  }
+  throw new Error('CAPSTONE_GEN_FAILED'); // timeout
+}
+
+module.exports = { authorMcq, authorCapstone };

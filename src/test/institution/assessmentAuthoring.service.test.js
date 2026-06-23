@@ -6,7 +6,8 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const { authorMcq } = require('../../services/institution/assessment/assessmentAuthoringService');
+const { authorMcq, authorCapstone } = require('../../services/institution/assessment/assessmentAuthoringService');
+const { createAssessment } = require('../../services/institution/assessment/assessmentService');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -237,4 +238,267 @@ test('authorMcq works when Quiz.findByIdAndDelete is not a function (guard)', as
 
   const result = await authorMcq('assess1', deps);
   assert.ok(result, 'should not crash when findByIdAndDelete is absent');
+});
+
+// ---------------------------------------------------------------------------
+// authorCapstone tests
+// ---------------------------------------------------------------------------
+
+function makeCapstoneAssessment(overrides = {}) {
+  return {
+    _id: 'assess-cap-1',
+    type: 'capstone',
+    title: 'Capstone: Build a REST API',
+    createdBy: 'user-cap-1',
+    config: {
+      capstone: {
+        roleTrack: 'swe',
+        difficulty: 'medium',
+      },
+    },
+    markModified: function () {},
+    save: async function () { return this; },
+    ...overrides,
+  };
+}
+
+function makeCapstoneAssessmentWithConfig(configOverrides = {}) {
+  const base = makeCapstoneAssessment();
+  base.config.capstone = { ...base.config.capstone, ...configOverrides };
+  return base;
+}
+
+function makeCapstoneDeps(overrides = {}) {
+  return {
+    Assessment: {
+      findById: async () => makeCapstoneAssessment(),
+    },
+    ArtifactBundle: {
+      findById: async () => ({ status: 'active', type: 'capstone' }),
+    },
+    CapstoneGenerationRequest: {
+      findById: async (id) => ({ _id: id, status: 'ready', bundle_id: 'b1' }),
+    },
+    requestGeneration: async () => ({ _id: 'req1' }),
+    sleep: async () => {},
+    pollMs: 0,
+    maxPolls: 2,
+    ...overrides,
+  };
+}
+
+test('authorCapstone happy path: stub requestGeneration → reqDoc id; stub CapstoneGenerationRequest.findById → {status:"ready", bundle_id:"b1"}; sleep no-op → writes config.capstone.bundleId="b1", markModified, save', async () => {
+  const assessment = makeCapstoneAssessment();
+  let markModifiedCalled = false;
+  let savedCalled = false;
+  assessment.markModified = function () { markModifiedCalled = true; };
+  assessment.save = async function () { savedCalled = true; return this; };
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+  });
+
+  const result = await authorCapstone('assess-cap-1', deps);
+
+  assert.ok(result, 'should return the assessment');
+  assert.strictEqual(String(result.config.capstone.bundleId), 'b1');
+  assert.strictEqual(markModifiedCalled, true, 'markModified must be called');
+  assert.strictEqual(savedCalled, true, 'save must be called');
+});
+
+test('authorCapstone idempotent: when bundleId already set and ArtifactBundle is active+capstone → returns assessment without calling requestGeneration', async () => {
+  const assessment = makeCapstoneAssessmentWithConfig({ bundleId: 'existing-bundle' });
+  let requestGenerationCalled = false;
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    requestGeneration: async () => { requestGenerationCalled = true; return { _id: 'req1' }; },
+  });
+
+  const result = await authorCapstone('assess-cap-1', deps);
+
+  assert.ok(result, 'should return the assessment');
+  assert.strictEqual(requestGenerationCalled, false, 'requestGeneration must NOT be called when bundle already active');
+});
+
+test('authorCapstone throws CAPSTONE_GEN_FAILED when poll returns status="failed"', async () => {
+  const assessment = makeCapstoneAssessment();
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    CapstoneGenerationRequest: {
+      findById: async (id) => ({ _id: id, status: 'failed' }),
+    },
+  });
+
+  await assert.rejects(
+    () => authorCapstone('assess-cap-1', deps),
+    (err) => {
+      assert.strictEqual(err.message, 'CAPSTONE_GEN_FAILED');
+      return true;
+    }
+  );
+});
+
+test('authorCapstone returns null for non-capstone type', async () => {
+  const assessment = makeCapstoneAssessment({ type: 'mcq' });
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+  });
+
+  const result = await authorCapstone('assess-cap-1', deps);
+  assert.strictEqual(result, null);
+});
+
+test('authorCapstone throws NOT_FOUND when assessment not found', async () => {
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => null },
+  });
+
+  await assert.rejects(
+    () => authorCapstone('missing-id', deps),
+    (err) => {
+      assert.strictEqual(err.message, 'NOT_FOUND');
+      return true;
+    }
+  );
+});
+
+test('authorCapstone throws CAPSTONE_GEN_FAILED on timeout (maxPolls exhausted)', async () => {
+  const assessment = makeCapstoneAssessment();
+  // Always returns 'queued' → never becomes 'ready' or 'failed'
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    CapstoneGenerationRequest: {
+      findById: async (id) => ({ _id: id, status: 'queued' }),
+    },
+    maxPolls: 2,
+  });
+
+  await assert.rejects(
+    () => authorCapstone('assess-cap-1', deps),
+    (err) => {
+      assert.strictEqual(err.message, 'CAPSTONE_GEN_FAILED');
+      return true;
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Anti-masking: strict-validator stub tests
+//
+// These tests inject a CapstoneGenerationRequest stub whose create() method
+// enforces the real Mongoose model contract (required: language, role_track
+// enum ['swe','ds','ai_eng'], difficulty enum ['easy','medium','hard']).
+// This ensures the service's defaults satisfy the contract and that future
+// regressions (passing undefined language or invalid enum values) are caught
+// immediately rather than silently failing in fire-and-forget paths.
+// ---------------------------------------------------------------------------
+
+/**
+ * Strict stub that mimics Mongoose required/enum validation.
+ * Throws if any contract field is missing or out-of-enum.
+ */
+function makeStrictCapstoneGenerationRequest() {
+  const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
+  const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
+  const created = [];
+  const stub = {
+    __created: created,
+    create: async function (doc) {
+      if (!doc.language) {
+        throw new Error('ValidationError: language is required');
+      }
+      if (!VALID_ROLE_TRACKS.includes(doc.role_track)) {
+        throw new Error(`ValidationError: role_track "${doc.role_track}" not in enum`);
+      }
+      if (!VALID_DIFFICULTIES.includes(doc.difficulty)) {
+        throw new Error(`ValidationError: difficulty "${doc.difficulty}" not in enum`);
+      }
+      const saved = { _id: `req-${created.length + 1}`, status: 'queued', ...doc };
+      created.push(saved);
+      return saved;
+    },
+  };
+  return stub;
+}
+
+test('authorCapstone with empty config.capstone: strict-validator stub succeeds — service defaults language + roleTrack=swe + difficulty=medium', async () => {
+  // Assessment with NO roleTrack, NO difficulty, NO language — all must be defaulted.
+  const assessment = {
+    _id: 'assess-strict-1',
+    type: 'capstone',
+    title: 'Test Capstone',
+    createdBy: 'user-strict-1',
+    config: { capstone: {} },
+    markModified: function () {},
+    save: async function () { return this; },
+  };
+
+  const strictStub = makeStrictCapstoneGenerationRequest();
+
+  // Wire: pass the strict stub as CapstoneGenerationRequest in deps.
+  // authorCapstone passes deps to requestGenerationFn; capstoneAuthoringSupport.requestGeneration
+  // reads deps.CapstoneGenerationRequest — so the strict stub is used for the real .create() call.
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: { findById: async () => null },
+    CapstoneGenerationRequest: strictStub,
+    // Use the real requestGeneration from capstoneAuthoringSupport so the stub flows through it.
+    requestGeneration: require('../../coding/services/capstoneAuthoringSupport').requestGeneration,
+    // But we need to intercept enqueueGeneration to avoid Redis.
+    sleep: async () => {},
+    pollMs: 0,
+    maxPolls: 2,
+  };
+
+  // Patch: capstoneGenerationWorker.enqueueGeneration will be called by requestGeneration.
+  // We need to inject it via deps too. We'll wrap requestGeneration to inject capstoneGenerationWorker.
+  deps.requestGeneration = async (params, innerDeps) => {
+    return require('../../coding/services/capstoneAuthoringSupport').requestGeneration(params, {
+      ...innerDeps,
+      CapstoneGenerationRequest: strictStub,
+      capstoneGenerationWorker: { enqueueGeneration: async () => {} },
+    });
+  };
+
+  // Override CapstoneGenerationRequest.findById to return 'ready' after creation.
+  strictStub.findById = async (id) => ({ _id: id, status: 'ready', bundle_id: 'bundle-strict-1' });
+
+  // authorCapstone must succeed (not throw a ValidationError).
+  const result = await authorCapstone('assess-strict-1', deps);
+
+  assert.ok(result, 'authorCapstone should return the assessment');
+  assert.strictEqual(String(result.config.capstone.bundleId), 'bundle-strict-1');
+
+  // The strict stub must have been called with a valid doc.
+  assert.strictEqual(strictStub.__created.length, 1, 'CapstoneGenerationRequest.create was called once');
+  const created = strictStub.__created[0];
+  assert.ok(created.language, 'language must not be empty (was defaulted by service)');
+  assert.ok(['swe', 'ds', 'ai_eng'].includes(created.role_track),
+    `role_track "${created.role_track}" must be a valid enum value`);
+  assert.ok(['easy', 'medium', 'hard'].includes(created.difficulty),
+    `difficulty "${created.difficulty}" must be a valid enum value`);
+  // Specifically, the service defaults: roleTrack → 'swe', difficulty → 'medium', language → 'javascript'
+  assert.strictEqual(created.role_track, 'swe', 'roleTrack defaults to swe');
+  assert.strictEqual(created.difficulty, 'medium', 'difficulty defaults to medium');
+  assert.strictEqual(created.language, 'javascript', 'language defaults to javascript for swe track');
+});
+
+test('createAssessment rejects invalid roleTrack (BAD_CONFIG) — validates the whitelist guard in assessmentService', async () => {
+  const deps = {
+    Assessment: { create: async () => ({}) },
+    InstitutionCohort: { findOne: async () => ({ _id: 'c1' }) },
+  };
+  await assert.rejects(
+    () => createAssessment(
+      { institutionId: 'i1' },
+      { cohortId: 'c1', type: 'capstone', title: 'T', config: { capstone: { roleTrack: 'backend_engineer' } } },
+      deps
+    ),
+    (err) => {
+      assert.strictEqual(err.message, 'BAD_CONFIG', 'invalid roleTrack must throw BAD_CONFIG');
+      return true;
+    }
+  );
 });

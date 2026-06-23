@@ -77,7 +77,63 @@ test('mcq adapter.getStartMeta returns empty object', async () => {
   assert.deepStrictEqual(meta, {});
 });
 
-test('capstone adapter.getStartMeta returns empty object', async () => {
-  const meta = await getAdapter('capstone').getStartMeta({ engine: { sessionId: 's1' } }, {});
-  assert.deepStrictEqual(meta, {});
+test('capstone adapter.getStartMeta returns pairingCode, expiresAt, timeBudgetSeconds (injected deps)', async () => {
+  const fakeExpiry = new Date('2030-01-01');
+  const deps = {
+    pairingService: { mintCode: async () => ({ code: '000000', expiresAt: fakeExpiry }) },
+    CapstoneSession: { findById: async () => ({ time_budget_seconds: 3600 }) },
+  };
+  const meta = await getAdapter('capstone').getStartMeta({ userId: 'u1', engine: { sessionId: 's1' } }, deps);
+  assert.strictEqual(meta.pairingCode, '000000');
+  assert.strictEqual(meta.expiresAt, fakeExpiry);
+  assert.strictEqual(meta.timeBudgetSeconds, 3600);
+});
+
+test('capstone adapter.start calls injected startCapstone with bundleId and returns engine {type, sessionId}', async () => {
+  let calledWith = null;
+  const deps = {
+    startCapstone: async (args) => {
+      calledWith = args;
+      return { session: { _id: 'csess1' } };
+    },
+  };
+  const assessment = { config: { capstone: { bundleId: 'bundle99' } } };
+  const out = await getAdapter('capstone').start(assessment, 'user1', deps);
+  assert.strictEqual(String(calledWith.bundleId), 'bundle99');
+  assert.strictEqual(calledWith.userId, 'user1');
+  assert.strictEqual(out.engine.type, 'capstone');
+  assert.strictEqual(String(out.engine.sessionId), 'csess1');
+});
+
+test('capstone adapter.getStartMeta returns {pairingCode, expiresAt, timeBudgetSeconds} with injected deps', async () => {
+  const fakeExpiresAt = new Date('2030-01-01');
+  const deps = {
+    pairingService: {
+      mintCode: async ({ userId, sessionId }) => {
+        assert.strictEqual(userId, 'u42');
+        assert.strictEqual(String(sessionId), 'csess1');
+        return { code: '123456', expiresAt: fakeExpiresAt };
+      },
+    },
+    CapstoneSession: {
+      findById: async (id) => {
+        assert.strictEqual(String(id), 'csess1');
+        return { time_budget_seconds: 5400 };
+      },
+    },
+  };
+  const session = { userId: 'u42', engine: { sessionId: 'csess1' } };
+  const meta = await getAdapter('capstone').getStartMeta(session, deps);
+  assert.strictEqual(meta.pairingCode, '123456');
+  assert.strictEqual(meta.expiresAt, fakeExpiresAt);
+  assert.strictEqual(meta.timeBudgetSeconds, 5400);
+});
+
+test('capstone adapter.getStartMeta returns undefined timeBudgetSeconds when CapstoneSession not found', async () => {
+  const deps = {
+    pairingService: { mintCode: async () => ({ code: '000000', expiresAt: new Date() }) },
+    CapstoneSession: { findById: async () => null },
+  };
+  const meta = await getAdapter('capstone').getStartMeta({ userId: 'u1', engine: { sessionId: 'missing' } }, deps);
+  assert.strictEqual(meta.timeBudgetSeconds, undefined);
 });
