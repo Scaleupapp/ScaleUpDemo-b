@@ -50,3 +50,34 @@ test('interview adapter.readResult maps evaluated result', async () => {
 test('getAdapter throws on unknown type', () => {
   assert.throws(() => getAdapter('essay'));
 });
+
+// ── getStartMeta ─────────────────────────────────────────────────────────────
+
+test('interview adapter.getStartMeta returns systemInstruction from InterviewSession', async () => {
+  const deps = {
+    InterviewSession: {
+      findById: async (id) => {
+        assert.strictEqual(String(id), 'ivSess1');
+        return { systemInstruction: 'SYS' };
+      },
+    },
+  };
+  const meta = await getAdapter('interview').getStartMeta({ engine: { sessionId: 'ivSess1' } }, deps);
+  assert.strictEqual(meta.systemInstruction, 'SYS');
+});
+
+test('interview adapter.getStartMeta returns undefined systemInstruction when session not found', async () => {
+  const deps = { InterviewSession: { findById: async () => null } };
+  const meta = await getAdapter('interview').getStartMeta({ engine: { sessionId: 'missing' } }, deps);
+  assert.strictEqual(meta.systemInstruction, undefined);
+});
+
+test('mcq adapter.getStartMeta returns empty object', async () => {
+  const meta = await getAdapter('mcq').getStartMeta({ engine: { sessionId: 'att1' } }, {});
+  assert.deepStrictEqual(meta, {});
+});
+
+test('capstone adapter.getStartMeta returns empty object', async () => {
+  const meta = await getAdapter('capstone').getStartMeta({ engine: { sessionId: 's1' } }, {});
+  assert.deepStrictEqual(meta, {});
+});

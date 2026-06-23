@@ -9,7 +9,7 @@
  *   POST /api/v2/me/assessments/sessions/:sessionId/sync — sync/poll result
  *
  * DI seam: router._deps — inject { auth, assessmentSessionService,
- *   Assessment, AssessmentSession, InstitutionEnrollment } in tests.
+ *   Assessment, AssessmentSession, InstitutionEnrollment, getAdapter } in tests.
  *
  * TODO(assessment-sync-worker): a BullMQ poller that calls syncSession for
  * in_progress sessions whose engine has graded is the production-grade path.
@@ -17,6 +17,7 @@
  */
 const express = require('express');
 const realAuth = require('../../middleware/auth');
+const { getAdapter: realGetAdapter } = require('../../services/institution/assessment/engineAdapters');
 
 const router = express.Router();
 router._deps = null;
@@ -36,6 +37,9 @@ function getAssessmentSession() {
 }
 function getEnrollment() {
   return (router._deps && router._deps.InstitutionEnrollment) || require('../../models/InstitutionEnrollment');
+}
+function getAdapterFn() {
+  return (router._deps && router._deps.getAdapter) || realGetAdapter;
 }
 
 // GET /assessments — list released assessments for the student's cohort(s)
@@ -107,11 +111,23 @@ router.post('/assessments/:id/start', (req, res, next) => getAuth()(req, res, ne
     const assessmentId = req.params.id;
     const svc = getSessionService();
     const session = await svc.startSession(userId, assessmentId);
+
+    // Retrieve engine-specific start metadata (e.g. interview systemInstruction).
+    // Best-effort: a meta lookup failure must never fail the start.
+    let meta = {};
+    try {
+      const getAdapter = getAdapterFn();
+      meta = await getAdapter(session.engine.type).getStartMeta(session);
+    } catch (metaErr) {
+      console.warn('[studentAssessments:start] getStartMeta failed:', metaErr.message);
+    }
+
     return res.status(201).json({
       success: true,
       data: {
         assessmentSessionId: String(session._id),
         engine: session.engine,
+        meta,
       },
     });
   } catch (err) {
