@@ -21,4 +21,15 @@ async function markDiagnosticDone(userId, deps = {}) {
   );
 }
 
-module.exports = { markDiagnosticDone };
+// advance to 'active' on first graded proctored assessment. Idempotent: only moves
+// registered/diagnostic_done forward (never regresses active/withdrawn).
+async function markActive(userId, deps = {}) {
+  if (!userId) return null;
+  const InstitutionEnrollment = deps.InstitutionEnrollment || require('../../models/InstitutionEnrollment');
+  return InstitutionEnrollment.updateMany(
+    { userId, status: { $in: ['registered', 'diagnostic_done'] } },
+    { $set: { status: 'active' } }
+  );
+}
+
+module.exports = { markDiagnosticDone, markActive };

@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { markDiagnosticDone } = require('../../services/institution/enrollmentProgressService');
+const { markDiagnosticDone, markActive } = require('../../services/institution/enrollmentProgressService');
 
 test('markDiagnosticDone moves registered enrollments to diagnostic_done', async () => {
   let captured = null;
@@ -18,6 +18,25 @@ test('markDiagnosticDone is a no-op for a missing userId', async () => {
   let called = false;
   const InstitutionEnrollment = { updateMany: async () => { called = true; } };
   const res = await markDiagnosticDone(null, { InstitutionEnrollment });
+  assert.strictEqual(res, null);
+  assert.strictEqual(called, false);
+});
+
+test('markActive moves registered/diagnostic_done enrollments to active', async () => {
+  let captured = null;
+  const InstitutionEnrollment = {
+    updateMany: async (filter, update) => { captured = { filter, update }; return { matchedCount: 2, modifiedCount: 2 }; },
+  };
+  const res = await markActive('u2', { InstitutionEnrollment });
+  assert.deepStrictEqual(captured.filter, { userId: 'u2', status: { $in: ['registered', 'diagnostic_done'] } });
+  assert.deepStrictEqual(captured.update, { $set: { status: 'active' } });
+  assert.strictEqual(res.modifiedCount, 2);
+});
+
+test('markActive is a no-op for a missing userId', async () => {
+  let called = false;
+  const InstitutionEnrollment = { updateMany: async () => { called = true; } };
+  const res = await markActive(null, { InstitutionEnrollment });
   assert.strictEqual(res, null);
   assert.strictEqual(called, false);
 });
