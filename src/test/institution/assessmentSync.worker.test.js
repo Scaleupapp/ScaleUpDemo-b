@@ -45,21 +45,55 @@ test('runSyncTick: calls syncSession for each in_progress session', async () => 
     'syncSession called once per in_progress session');
 });
 
-test('runSyncTick: marks session expired when closesAt has passed and session is still in_progress', async () => {
+test('runSyncTick: marks session expired when closesAt has passed and engine still ungraded after final sync', async () => {
   const session = makeSession({ _id: 'sExp' });
   const pastClose = new Date(Date.now() - 1000); // already closed
   let syncCalled = false;
 
   const deps = {
-    AssessmentSession: { find: async () => [session] },
+    // AssessmentSession.findById returns the session still in_progress (engine not done).
+    AssessmentSession: {
+      find: async () => [session],
+      findById: async () => ({ ...session, status: 'in_progress' }),
+    },
     Assessment: { findById: async () => makeAssessment({ closesAt: pastClose }) },
     syncSession: async () => { syncCalled = true; },
     now: () => new Date(),
   };
 
   await runSyncTick(deps);
-  assert.strictEqual(session.status, 'expired', 'session must be marked expired');
-  assert.strictEqual(syncCalled, false, 'syncSession must NOT be called for an expired session');
+  assert.strictEqual(session.status, 'expired', 'session must be marked expired after failed final sync');
+  assert.strictEqual(syncCalled, true, 'syncSession MUST be called once as final-sync before expiry');
+});
+
+test('runSyncTick: graded in same tick as window close → finalized (graded), not expired', async () => {
+  // Scenario: engine grades the session right as the window closes.
+  // The worker sees closesAt passed, calls syncSession (which grades it),
+  // then re-reads the session and finds status='graded' → must NOT mark expired.
+  const session = makeSession({ _id: 'sGradedOnClose' });
+  const pastClose = new Date(Date.now() - 1000);
+  let syncCalled = false;
+
+  const deps = {
+    AssessmentSession: {
+      find: async () => [session],
+      // After syncSession runs, the session is graded in the DB.
+      findById: async () => ({ ...session, status: 'graded' }),
+    },
+    Assessment: { findById: async () => makeAssessment({ closesAt: pastClose }) },
+    syncSession: async (id) => {
+      syncCalled = true;
+      // Simulate: syncSession updates the session status to graded (in real usage
+      // it writes to DB; the worker reads it back via AssessmentSession.findById).
+    },
+    now: () => new Date(),
+  };
+
+  await runSyncTick(deps);
+  // Session must NOT be marked expired — it was graded on the final sync.
+  assert.strictEqual(session.status, 'in_progress',
+    'session.status should not have been changed to expired (it was graded)');
+  assert.strictEqual(syncCalled, true, 'syncSession was called for the final-sync');
 });
 
 test('runSyncTick: a syncSession throw does not abort the batch (remaining sessions still processed)', async () => {

@@ -247,7 +247,7 @@ test('createAssessment throws BAD_CONFIG for capstone without any of bundleId/ro
   );
 });
 
-test('createAssessment succeeds for capstone with only roleTrack', async () => {
+test('createAssessment succeeds for capstone with only roleTrack (valid enum)', async () => {
   let created = null;
   const deps = {
     Assessment: { create: async (d) => { created = d; return { _id: 'cap1', ...d }; } },
@@ -255,10 +255,24 @@ test('createAssessment succeeds for capstone with only roleTrack', async () => {
   };
   const result = await createAssessment(SCOPE, {
     cohortId: 'c1', type: 'capstone', title: 'Capstone T',
-    config: { capstone: { roleTrack: 'software_engineer' } },
+    config: { capstone: { roleTrack: 'swe' } },
   }, deps);
   assert.strictEqual(result._id, 'cap1');
   assert.ok(created, 'Assessment.create should be called');
+});
+
+test('createAssessment throws BAD_CONFIG for capstone with invalid roleTrack', async () => {
+  const deps = {
+    Assessment: { create: async () => ({}) },
+    InstitutionCohort: { findOne: async () => ({ _id: 'c1' }) },
+  };
+  await assert.rejects(
+    () => createAssessment(SCOPE, {
+      cohortId: 'c1', type: 'capstone', title: 'Capstone T',
+      config: { capstone: { roleTrack: 'software_engineer' } },
+    }, deps),
+    /BAD_CONFIG/
+  );
 });
 
 test('createAssessment throws BAD_WINDOW when opensAt >= closesAt (same date)', async () => {

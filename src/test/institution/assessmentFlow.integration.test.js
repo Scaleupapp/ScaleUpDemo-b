@@ -783,7 +783,9 @@ test('worker runSyncTick: expires session when closesAt has passed and engine no
 
   const expired = await S.AssessmentSession.findById(sessId);
   assert.equal(expired.status, 'expired', 'session should be expired');
-  assert.equal(syncSessionCalled, false, 'syncSession should NOT be called for expired session');
+  // sync-before-expire (grade/close race guard): runSyncTick attempts one final
+  // sync before expiring; since the engine never graded, it still expires.
+  assert.equal(syncSessionCalled, true, 'syncSession attempted once before expiry');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

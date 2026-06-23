@@ -21,6 +21,13 @@ async function createAssessment(scope, payload, deps) {
     if (!cap || (!cap.bundleId && !cap.roleTrack && !cap.jobDescription)) {
       throw new Error('BAD_CONFIG');
     }
+    // Reject an explicitly-set roleTrack that is not in the model's allowed enum.
+    // (No roleTrack is fine — authorCapstone defaults it to 'swe'.)
+    const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
+    if (cap.roleTrack !== undefined && cap.roleTrack !== null &&
+        !VALID_ROLE_TRACKS.includes(cap.roleTrack)) {
+      throw new Error('BAD_CONFIG');
+    }
   }
 
   // E3: window validation

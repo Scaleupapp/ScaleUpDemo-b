@@ -131,13 +131,24 @@ async function authorCapstone(assessmentId, deps = {}) {
     }
   }
 
+  // Coerce roleTrack + difficulty to valid enum values (CapstoneGenerationRequest model
+  // enforces required enums; passing invalid values causes a silent ValidationError).
+  const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
+  const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
+  const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
+
+  const roleTrack = VALID_ROLE_TRACKS.includes(cfg.roleTrack) ? cfg.roleTrack : 'swe';
+  const difficulty = VALID_DIFFICULTIES.includes(cfg.difficulty) ? cfg.difficulty : 'medium';
+  // language is required by the model; default by track when not explicitly provided.
+  const language = cfg.language || LANG_BY_TRACK[roleTrack] || 'python';
+
   // Request generation
   const reqDoc = await requestGenerationFn(
     {
       userId: assessment.createdBy,
-      roleTrack: cfg.roleTrack || 'swe',
-      difficulty: cfg.difficulty || 'medium',
-      language: cfg.language,
+      roleTrack,
+      difficulty,
+      language,
       jobDescription: cfg.jobDescription || assessment.title,
       topicHint: cfg.topicHint,
     },

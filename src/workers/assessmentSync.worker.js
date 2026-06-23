@@ -48,10 +48,22 @@ async function runSyncTick(deps = {}) {
       }
 
       if (assessment && assessment.closesAt && now > assessment.closesAt) {
-        // Window closed — engine has not graded it; expire the session.
-        session.status = 'expired';
-        await session.save();
-        console.log(`[assessmentSync] expired session ${session._id} (closesAt passed)`);
+        // Window closed — do ONE final sync first so that a session the engine
+        // graded right as the window closed gets finalized (graded+active) instead
+        // of being lost to 'expired'. Only expire if still not graded after the sync.
+        await syncSession(session._id);
+        // Re-read the (possibly-updated) session after the sync.
+        const refreshed = AssessmentSession.findById
+          ? await AssessmentSession.findById(session._id)
+          : null;
+        const statusAfterSync = (refreshed && refreshed.status) || session.status;
+        if (statusAfterSync !== 'graded') {
+          session.status = 'expired';
+          await session.save();
+          console.log(`[assessmentSync] expired session ${session._id} (closesAt passed, still ungraded after final sync)`);
+        } else {
+          console.log(`[assessmentSync] session ${session._id} graded on final-sync (closesAt passed); not expired`);
+        }
         continue;
       }
 
