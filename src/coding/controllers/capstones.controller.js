@@ -16,6 +16,8 @@ const CapstoneGenerationRequest = require('../models/capstoneGenerationRequest.m
 const capstoneGenerationWorker = require('../workers/capstoneGeneration.worker');
 const DifficultyState = require('../models/difficultyState.model');
 const { evaluateCodingEligibility } = require('../services/codingEligibility');
+const capstoneSessionService = require('../services/capstoneSessionService');
+const { abortNeverStartedSessions: abortNeverStartedSessionsSvc } = require('../services/capstoneSessionService');
 
 // Default language per role-track for generated capstones (learner can't pick
 // an arbitrary language; we map their track to its canonical language).
@@ -110,48 +112,26 @@ async function listLibrary(req, res) {
  * next start/retry. Only never-started sessions (no started_at, pre-pairing
  * statuses) are touched — a genuinely in-progress/paused session is left alone.
  */
-async function abortNeverStartedSessions(userId) {
-  const stale = await CapstoneSession.find({
-    user_id: userId,
-    status: { $in: ['scheduled', 'provisioning', 'ready'] },
-    started_at: null,
-  }).select('_id').lean();
-  for (const s of stale) {
-    await applyControl({ sessionId: s._id, userId, action: 'abort' }).catch(() => {});
-  }
-}
-
 async function start(req, res) {
   const { bundle_id } = req.body || {};
   if (!bundle_id) return res.status(400).json({ error: 'bundle_id required' });
 
-  const bundle = await ArtifactBundle.findById(bundle_id).lean();
-  if (!bundle) return res.status(404).json({ error: 'bundle_not_found' });
-  if (bundle.type !== 'capstone') return res.status(404).json({ error: 'not_a_capstone' });
-
-  // Clear never-started leftovers so they don't pile up as a phantom
-  // "in progress" or block this start.
-  await abortNeverStartedSessions(req.user.userId);
-
-  const session = await CapstoneSession.create({
-    user_id: req.user.userId,
-    bundle_id: bundle._id,
-    status: 'scheduled',
-    time_budget_seconds: bundle.time_budget_minutes * 60,
-  });
+  let session;
+  try {
+    const result = await capstoneSessionService.startSession({ userId: req.user.userId, bundleId: bundle_id });
+    session = result.session;
+  } catch (err) {
+    if (err.message === 'BUNDLE_NOT_FOUND') return res.status(404).json({ error: 'bundle_not_found' });
+    if (err.message === 'NOT_A_CAPSTONE') return res.status(404).json({ error: 'not_a_capstone' });
+    throw err;
+  }
 
   const { code, expiresAt } = await pairingService.mintCode({
     userId: req.user.userId,
     sessionId: session._id,
   });
 
-  // Async provision — don't make mobile wait. Status poll surfaces ready.
-  sandboxOrchestrator.provisionForSession(session._id).catch((err) => {
-    // Logged inside orchestrator; here we just make sure the error doesn't
-    // float up as unhandled.
-    // eslint-disable-next-line no-console
-    console.warn('[capstones.start] provision failed:', err.message);
-  });
+  // Async provision is now handled inside the service (non-blocking)
 
   res.status(201).json({
     session_id: String(session._id),
@@ -718,7 +698,7 @@ async function retry(req, res) {
   // Clear any never-started leftovers (a previous Start that provisioned but
   // was never begun on the laptop). Those used to linger as a phantom "in
   // progress" and 409 the retry. Only a genuinely-active session blocks now.
-  await abortNeverStartedSessions(req.user.userId);
+  await abortNeverStartedSessionsSvc(req.user.userId);
   const inProgress = await CapstoneSession.exists({
     user_id: req.user.userId,
     status: { $in: ['in_progress', 'paused', 'submitted', 'evaluating'] },

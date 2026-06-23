@@ -39,13 +39,10 @@ const mcq = {
 
 const capstone = {
   async start(assessment, userId, deps = {}) {
-    // TODO(capstone-start-wire): src/coding/services/capstoneSessionService.js does not exist.
-    // When that service is created, wire its startSession export here as the production default.
-    // Tests always inject deps.startCapstone so tests pass regardless.
-    const startCapstone = deps.startCapstone || function () { throw new Error('CAPSTONE_START_UNWIRED'); };
+    const startCapstone = deps.startCapstone || require('../../../coding/services/capstoneSessionService').startSession;
     const cfg = (assessment.config && assessment.config.capstone) || {};
-    const s = await startCapstone({ userId, bundleId: cfg.bundleId });
-    return { engine: { type: 'capstone', sessionId: s._id } };
+    const { session } = await startCapstone({ userId, bundleId: cfg.bundleId });
+    return { engine: { type: 'capstone', sessionId: session._id } };
   },
   async readResult(session, deps = {}) {
     const CapstoneSession = deps.CapstoneSession || require('../../../coding/models/capstoneSession.model');
@@ -53,8 +50,19 @@ const capstone = {
     if (!s || s.status !== 'graded' || !s.result) return { done: false };
     return { done: true, score: s.result.overall_score, integrity: s.result.integrity_confidence, raw: { dimension_scores: s.result.dimension_scores } };
   },
-  async getStartMeta(_session, _deps = {}) {
-    return {};
+  async getStartMeta(session, deps = {}) {
+    const pairingService = deps.pairingService || require('../../../coding/services/pairingService');
+    const CapstoneSession = deps.CapstoneSession || require('../../../coding/models/capstoneSession.model');
+    const { code, expiresAt } = await pairingService.mintCode({
+      userId: session.userId,
+      sessionId: session.engine.sessionId,
+    });
+    const cs = await CapstoneSession.findById(session.engine.sessionId);
+    return {
+      pairingCode: code,
+      expiresAt,
+      timeBudgetSeconds: cs ? cs.time_budget_seconds : undefined,
+    };
   },
 };
 
