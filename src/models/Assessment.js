@@ -14,6 +14,7 @@ const AssessmentSchema = new mongoose.Schema({
       durationSeconds: { type: Number, default: 1800 },
       assessmentType: String,
       topic: String,
+      sourceId: { type: mongoose.Schema.Types.ObjectId, ref: 'AssessmentSource' },
     },
     capstone: {
       bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },
@@ -22,12 +23,14 @@ const AssessmentSchema = new mongoose.Schema({
       difficulty: { type: String, default: 'medium' },
       jobDescription: String,
       topicHint: String,
+      sourceId: { type: mongoose.Schema.Types.ObjectId, ref: 'AssessmentSource' },
     },
     interview: {
       interviewType: { type: String },
       targetRole: String,
       difficulty: { type: String, default: 'moderate' },
       durationSeconds: { type: Number, default: 1800 },
+      sourceId: { type: mongoose.Schema.Types.ObjectId, ref: 'AssessmentSource' },
     },
   },
   integrityRequired: { type: Boolean, default: true },

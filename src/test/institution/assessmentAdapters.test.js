@@ -137,3 +137,123 @@ test('capstone adapter.getStartMeta returns undefined timeBudgetSeconds when Cap
   const meta = await getAdapter('capstone').getStartMeta({ userId: 'u1', engine: { sessionId: 'missing' } }, deps);
   assert.strictEqual(meta.timeBudgetSeconds, undefined);
 });
+
+// ── interview.start — sourceId grounding ─────────────────────────────────────
+
+test('interview adapter.start with config.interview.sourceId (ready): passes context to startInterview', async () => {
+  let capturedOpts = null;
+
+  const deps = {
+    interviewService: {
+      startInterview: async (userId, opts) => {
+        capturedOpts = opts;
+        return { session: { _id: 'ivSess1' } };
+      },
+    },
+    AssessmentSource: {
+      findById: async (id) => ({
+        _id: id,
+        status: 'ready',
+        extractedText: 'Topic 1: Sorting. Topic 2: Searching.',
+      }),
+    },
+  };
+
+  const assessment = {
+    config: {
+      interview: {
+        interviewType: 'placement_technical',
+        targetRole: 'SDE',
+        difficulty: 'moderate',
+        sourceId: 'src42',
+      },
+    },
+  };
+
+  const out = await getAdapter('interview').start(assessment, 'u1', deps);
+  assert.ok(capturedOpts, 'startInterview must be called');
+  assert.ok(capturedOpts.context, 'context should be passed when sourceId set');
+  assert.ok(capturedOpts.context.includes('Sorting'), 'context should include extractedText');
+  assert.strictEqual(out.engine.type, 'interview');
+});
+
+test('interview adapter.start without sourceId: passes empty context to startInterview', async () => {
+  let capturedOpts = null;
+
+  const deps = {
+    interviewService: {
+      startInterview: async (userId, opts) => {
+        capturedOpts = opts;
+        return { session: { _id: 'ivSess2' } };
+      },
+    },
+  };
+
+  const assessment = {
+    config: {
+      interview: {
+        interviewType: 'placement_technical',
+        targetRole: 'SDE',
+        difficulty: 'moderate',
+        // no sourceId
+      },
+    },
+  };
+
+  await getAdapter('interview').start(assessment, 'u1', deps);
+  assert.ok(capturedOpts, 'startInterview must be called');
+  assert.strictEqual(capturedOpts.context, '', 'context should be empty string when no sourceId');
+});
+
+test('interview adapter.start with sourceId but source not found: context is empty string', async () => {
+  let capturedOpts = null;
+
+  const deps = {
+    interviewService: {
+      startInterview: async (userId, opts) => {
+        capturedOpts = opts;
+        return { session: { _id: 'ivSess3' } };
+      },
+    },
+    AssessmentSource: {
+      findById: async () => null,
+    },
+  };
+
+  const assessment = {
+    config: {
+      interview: {
+        interviewType: 'behavioral',
+        sourceId: 'missing-src',
+      },
+    },
+  };
+
+  await getAdapter('interview').start(assessment, 'u1', deps);
+  assert.strictEqual(capturedOpts.context, '', 'context should be empty when source not found');
+});
+
+test('interview adapter.start with sourceId but source not ready: context is empty string', async () => {
+  let capturedOpts = null;
+
+  const deps = {
+    interviewService: {
+      startInterview: async (userId, opts) => {
+        capturedOpts = opts;
+        return { session: { _id: 'ivSess4' } };
+      },
+    },
+    AssessmentSource: {
+      findById: async () => ({ _id: 'srcX', status: 'extracting', extractedText: 'some text' }),
+    },
+  };
+
+  const assessment = {
+    config: {
+      interview: { interviewType: 'behavioral', sourceId: 'srcX' },
+    },
+  };
+
+  await getAdapter('interview').start(assessment, 'u1', deps);
+  assert.strictEqual(capturedOpts.context, '', 'context should be empty when source not ready');
+});

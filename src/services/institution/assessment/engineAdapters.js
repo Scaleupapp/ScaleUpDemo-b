@@ -68,15 +68,34 @@ const capstone = {
   },
 };
 
+const INTERVIEW_CONTEXT_LIMIT = 4000;
+
 const interview = {
   async start(assessment, userId, deps = {}) {
     const interviewService = deps.interviewService || require('../../interviewService');
     const cfg = (assessment.config && assessment.config.interview) || {};
+
+    // ── Grounding: load AssessmentSource when sourceId is configured ───────────
+    let context = '';
+    if (cfg.sourceId) {
+      const AssessmentSource =
+        deps.AssessmentSource || require('../../../models/AssessmentSource');
+      try {
+        const source = await AssessmentSource.findById(cfg.sourceId);
+        if (source && source.status === 'ready' && source.extractedText) {
+          context = source.extractedText.slice(0, INTERVIEW_CONTEXT_LIMIT);
+        }
+      } catch (err) {
+        console.warn('[engineAdapters:interview.start] Could not load AssessmentSource:', err.message);
+      }
+    }
+
     const out = await interviewService.startInterview(userId, {
       interviewType: cfg.interviewType,
       targetRole: cfg.targetRole,
       difficulty: cfg.difficulty || 'moderate',
       abandonExisting: false,
+      context,
     });
     const sid = out && out.session ? out.session._id : (out && out._id);
     return { engine: { type: 'interview', sessionId: sid } };

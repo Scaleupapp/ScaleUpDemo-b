@@ -502,3 +502,225 @@ test('createAssessment rejects invalid roleTrack (BAD_CONFIG) — validates the 
     }
   );
 });
+
+// ---------------------------------------------------------------------------
+// authorMcq — sourceId grounding
+// ---------------------------------------------------------------------------
+
+test('authorMcq with sourceId (ready): creates transient Content with keyConcepts, passes contentIds to generateQuiz, deletes transient Content', async () => {
+  const mongoose = require('mongoose');
+  const transientId = new mongoose.Types.ObjectId();
+  const assessment = makeAssessment({
+    config: {
+      mcq: {
+        topic: 'Data Structures',
+        totalQuestions: 5,
+        assessmentType: 'mixed',
+        questions: [],
+        sourceId: 'src1',
+      },
+    },
+  });
+
+  let contentCreated = null;
+  let contentDeletedId = null;
+  let generateQuizArgs = null;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    Content: {
+      create: async (doc) => {
+        contentCreated = doc;
+        return { _id: transientId, ...doc };
+      },
+      findByIdAndDelete: async (id) => {
+        contentDeletedId = String(id);
+      },
+    },
+    AssessmentSource: {
+      findById: async (id) => ({
+        _id: 'src1',
+        status: 'ready',
+        extractedText: 'Chapter 1: Linked Lists. Chapter 2: Trees.',
+        extractedTopics: [{ name: 'Linked Lists' }, { name: 'Trees' }, { name: 'Graphs' }],
+      }),
+    },
+    quizGenerationService: {
+      generateQuiz: async (args) => {
+        generateQuizArgs = args;
+        return makeQuiz();
+      },
+    },
+  };
+
+  const result = await authorMcq('assess1', deps);
+
+  // generateQuiz called with contentIds containing the transient Content _id
+  assert.ok(generateQuizArgs, 'generateQuiz must be called');
+  assert.ok(Array.isArray(generateQuizArgs.contentIds), 'contentIds should be an array');
+  assert.strictEqual(generateQuizArgs.contentIds.length, 1, 'contentIds should have 1 entry');
+  assert.strictEqual(String(generateQuizArgs.contentIds[0]), String(transientId));
+
+  // Transient Content created with correct structure
+  assert.ok(contentCreated, 'Content.create should have been called');
+  assert.strictEqual(contentCreated.contentType, 'notes');
+  assert.strictEqual(contentCreated.ocrText, 'Chapter 1: Linked Lists. Chapter 2: Trees.');
+  assert.deepStrictEqual(contentCreated.aiData.keyConcepts, [
+    { concept: 'Linked Lists', description: '', importance: 'high' },
+    { concept: 'Trees', description: '', importance: 'high' },
+    { concept: 'Graphs', description: '', importance: 'high' },
+  ]);
+
+  // Transient Content deleted after
+  assert.strictEqual(contentDeletedId, String(transientId), 'transient Content must be deleted');
+
+  // Assessment updated with quiz questions
+  assert.ok(result, 'should return assessment');
+  assert.deepStrictEqual(result.config.mcq.questions, [{ questionText: 'a' }, { questionText: 'b' }]);
+});
+
+test('authorMcq with sourceId but source not ready: falls back to topic-based (no contentIds)', async () => {
+  const assessment = makeAssessment({
+    config: {
+      mcq: { topic: 'Algorithms', totalQuestions: 5, assessmentType: 'mixed', questions: [], sourceId: 'src1' },
+    },
+  });
+
+  let generateQuizArgs = null;
+  let contentCreated = false;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    Content: {
+      create: async () => { contentCreated = true; return { _id: 'tid1' }; },
+      findByIdAndDelete: async () => {},
+    },
+    AssessmentSource: {
+      findById: async () => ({ _id: 'src1', status: 'extracting' }), // not ready
+    },
+    quizGenerationService: {
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+    },
+  };
+
+  await authorMcq('assess1', deps);
+
+  // Content should NOT have been created (no grounding)
+  assert.strictEqual(contentCreated, false, 'transient Content must NOT be created when source not ready');
+  // contentIds should be undefined (not passed)
+  assert.strictEqual(generateQuizArgs.contentIds, undefined, 'contentIds should be absent when source not ready');
+});
+
+test('authorMcq with sourceId but source not found: falls back to topic-based', async () => {
+  const assessment = makeAssessment({
+    config: {
+      mcq: { topic: 'OS', totalQuestions: 5, assessmentType: 'mixed', questions: [], sourceId: 'missing' },
+    },
+  });
+
+  let generateQuizArgs = null;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    Content: { create: async () => { throw new Error('should not be called'); }, findByIdAndDelete: async () => {} },
+    AssessmentSource: { findById: async () => null },
+    quizGenerationService: {
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+    },
+  };
+
+  await authorMcq('assess1', deps);
+  assert.strictEqual(generateQuizArgs.contentIds, undefined);
+});
+
+test('authorMcq without sourceId: behaves as before (no Content created, no contentIds)', async () => {
+  const assessment = makeAssessment(); // no sourceId in config.mcq
+  let contentCreated = false;
+  let generateQuizArgs = null;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    Content: { create: async () => { contentCreated = true; return { _id: 'tid' }; }, findByIdAndDelete: async () => {} },
+    AssessmentSource: { findById: async () => { throw new Error('should not be called'); } },
+    quizGenerationService: {
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+    },
+  };
+
+  await authorMcq('assess1', deps);
+  assert.strictEqual(contentCreated, false, 'Content.create must NOT be called when no sourceId');
+  assert.strictEqual(generateQuizArgs.contentIds, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// authorCapstone — sourceId grounding
+// ---------------------------------------------------------------------------
+
+test('authorCapstone with sourceId (ready): uses source extractedText (truncated 2000) as jobDescription', async () => {
+  const longText = 'A'.repeat(3000);
+  const assessment = makeCapstoneAssessmentWithConfig({ sourceId: 'src1' });
+  let capturedJobDescription = null;
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    AssessmentSource: {
+      findById: async () => ({
+        _id: 'src1',
+        status: 'ready',
+        extractedText: longText,
+      }),
+    },
+    requestGeneration: async (params) => {
+      capturedJobDescription = params.jobDescription;
+      return { _id: 'req1' };
+    },
+  });
+
+  await authorCapstone('assess-cap-1', deps);
+
+  assert.ok(capturedJobDescription, 'jobDescription must be set');
+  assert.strictEqual(capturedJobDescription.length, 2000, 'jobDescription should be truncated to 2000 chars');
+  assert.ok(capturedJobDescription.startsWith('A'), 'should be the source text');
+});
+
+test('authorCapstone with sourceId but source not ready: falls back to cfg.jobDescription', async () => {
+  const assessment = makeCapstoneAssessmentWithConfig({
+    sourceId: 'src1',
+    jobDescription: 'Build a REST API',
+  });
+  let capturedJobDescription = null;
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    AssessmentSource: {
+      findById: async () => ({ _id: 'src1', status: 'extracting' }), // not ready
+    },
+    requestGeneration: async (params) => {
+      capturedJobDescription = params.jobDescription;
+      return { _id: 'req1' };
+    },
+  });
+
+  await authorCapstone('assess-cap-1', deps);
+  assert.strictEqual(capturedJobDescription, 'Build a REST API', 'should fall back to cfg.jobDescription');
+});
+
+test('authorCapstone without sourceId: uses cfg.jobDescription as before', async () => {
+  const assessment = makeCapstoneAssessmentWithConfig({ jobDescription: 'Existing JD' });
+  let capturedJobDescription = null;
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    requestGeneration: async (params) => {
+      capturedJobDescription = params.jobDescription;
+      return { _id: 'req1' };
+    },
+  });
+
+  await authorCapstone('assess-cap-1', deps);
+  assert.strictEqual(capturedJobDescription, 'Existing JD');
+});
