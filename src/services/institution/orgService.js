@@ -9,6 +9,7 @@ function getModels(deps) {
   return {
     Department: require('../../models/Department'),
     InstitutionCohort: require('../../models/InstitutionCohort'),
+    ObjectiveTemplate: require('../../models/ObjectiveTemplate'),
   };
 }
 
@@ -40,8 +41,8 @@ async function listDepartments(scope, deps) {
  * @param {object} payload - { departmentId, year, label, placementSeason }
  * @param {object} [deps]
  */
-async function createCohort(scope, { departmentId, year, label, placementSeason } = {}, deps) {
-  const { Department, InstitutionCohort } = getModels(deps);
+async function createCohort(scope, { departmentId, year, label, placementSeason, objectiveTemplateId } = {}, deps) {
+  const { Department, InstitutionCohort, ObjectiveTemplate } = getModels(deps);
 
   // Verify the department belongs to this institution (scoped lookup)
   const dept = await Department.findOne({ ...scope, _id: departmentId });
@@ -49,7 +50,16 @@ async function createCohort(scope, { departmentId, year, label, placementSeason 
     throw new Error('DEPARTMENT_NOT_FOUND');
   }
 
-  return InstitutionCohort.create({ ...scope, departmentId, year, label, placementSeason });
+  // If an objective is provided at creation, verify it belongs to this institution.
+  if (objectiveTemplateId) {
+    const Tpl = ObjectiveTemplate || require('../../models/ObjectiveTemplate');
+    const tpl = await Tpl.findOne({ ...scope, _id: objectiveTemplateId });
+    if (!tpl) {
+      throw new Error('TEMPLATE_NOT_FOUND');
+    }
+  }
+
+  return InstitutionCohort.create({ ...scope, departmentId, year, label, placementSeason, objectiveTemplateId });
 }
 
 /**

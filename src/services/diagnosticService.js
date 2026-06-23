@@ -702,6 +702,13 @@ async function finishAttempt(attemptId) {
     } catch (err) {
       console.warn('[diagnosticService] failed to mark User.diagnosticComplete:', err.message);
     }
+    // Institutional (placement) students: advance their cohort enrollment so the
+    // TPO funnel reflects diagnostic completion. Best-effort; no-op for D2C users.
+    try {
+      await require('./institution/enrollmentProgressService').markDiagnosticDone(attempt.userId);
+    } catch (err) {
+      console.warn('[diagnosticService] failed to mark enrollment diagnostic_done:', err.message);
+    }
   }
 
   // Persist re-calibration growth before insights/plan so it's available in results.

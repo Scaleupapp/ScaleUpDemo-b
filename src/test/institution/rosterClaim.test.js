@@ -44,3 +44,23 @@ test('claimForUser is idempotent when an enrollment already exists', async () =>
   assert.strictEqual(d._created.length, 0);
   assert.strictEqual(d._seeded.length, 0); // existing enrollment → no new seed
 });
+
+test('claimForUser backfills the user name from the roster when the user has none', async () => {
+  const pending = { _id: 'p1', institutionId: 'i1', departmentId: 'd1', cohortId: 'c1', rollNumber: '7', name: 'Aarav Shah', status: 'invited', save: async () => {} };
+  const d = deps(pending);
+  let userUpdate = null;
+  d.User = { updateOne: async (filter, update) => { userUpdate = { filter, update }; } };
+  await claimForUser({ _id: 'u1', email: 'a@x.edu', phone: '+919800000001', firstName: 'Unknown' }, d);
+  assert.ok(userUpdate, 'User.updateOne should be called');
+  assert.strictEqual(userUpdate.update.$set.firstName, 'Aarav');
+  assert.strictEqual(userUpdate.update.$set.lastName, 'Shah');
+});
+
+test('claimForUser does NOT overwrite an existing user name', async () => {
+  const pending = { _id: 'p1', institutionId: 'i1', cohortId: 'c1', name: 'Roster Name', status: 'invited', save: async () => {} };
+  const d = deps(pending);
+  let called = false;
+  d.User = { updateOne: async () => { called = true; } };
+  await claimForUser({ _id: 'u2', email: 'a@x.edu', firstName: 'Priya' }, d);
+  assert.strictEqual(called, false, 'should not clobber a real existing name');
+});

@@ -143,6 +143,8 @@ test('approve: first call succeeds; second call returns 409 (commitRoster called
     },
     PendingStudent: { countDocuments: async () => 0 },
     InstitutionEnrollment: { countDocuments: async () => 0 },
+    // Cohort has an objective attached → passes the mandatory-objective gate.
+    InstitutionCohort: { findOne: async () => ({ _id: 'c1', objectiveTemplateId: 't1' }) },
   };
 
   // Stub commitRoster and sendInvites on the module objects (route calls via rosterService.commitRoster)
@@ -185,6 +187,33 @@ test('approve: first call succeeds; second call returns 409 (commitRoster called
   // Restore originals and clean up
   rosterService.commitRoster = origCommit;
   inviteService.sendInvites = origSend;
+  rosters._deps = null;
+});
+
+// ── Mandatory-objective gate: approve blocked when the cohort has no objective ──
+
+test('approve: cohort without an objective → 409 NO_OBJECTIVE (commitRoster not called)', async () => {
+  const upload = { _id: 'ru-noobj', institutionId: 'i1', departmentId: 'd1', cohortId: 'c2', status: 'validated', validData: [], save: async () => {} };
+  let commitCalled = false;
+  rosters._deps = {
+    Institution: { findOne: async () => ({ name: 'Test College' }) },
+    RosterUpload: { findOne: () => ({ select: () => Promise.resolve(upload) }) },
+    InstitutionCohort: { findOne: async () => ({ _id: 'c2', objectiveTemplateId: null }) },
+  };
+  const rosterService = require('../../services/institution/rosterService');
+  const origCommit = rosterService.commitRoster;
+  rosterService.commitRoster = async () => { commitCalled = true; return { created: 0, pending: [] }; };
+
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/rosters/ru-noobj/approve')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({});
+
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'NO_OBJECTIVE');
+  assert.strictEqual(commitCalled, false, 'commitRoster must not run when the cohort has no objective');
+
+  rosterService.commitRoster = origCommit;
   rosters._deps = null;
 });
 
