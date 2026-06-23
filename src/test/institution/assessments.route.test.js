@@ -138,6 +138,7 @@ test('GET /assessments/:id/sessions hides score while window is still open', asy
       findOne: async () => ({
         _id: 'a1',
         institutionId: 'i1',
+        cohortId: 'c1',
         closesAt: future,
       }),
     },
@@ -147,6 +148,7 @@ test('GET /assessments/:id/sessions hides score while window is still open', asy
         { _id: 's2', userId: 'u2', status: 'in_progress', result: null },
       ],
     },
+    InstitutionEnrollment: { countDocuments: async () => 2 },
   };
 
   const res = await request(appAs('viewer'))
@@ -170,6 +172,7 @@ test('GET /assessments/:id/sessions shows score after closesAt', async () => {
       findOne: async () => ({
         _id: 'a1',
         institutionId: 'i1',
+        cohortId: 'c1',
         closesAt: past,
       }),
     },
@@ -178,6 +181,7 @@ test('GET /assessments/:id/sessions shows score after closesAt', async () => {
         { _id: 's1', userId: 'u1', status: 'graded', result: { score: 88 } },
       ],
     },
+    InstitutionEnrollment: { countDocuments: async () => 1 },
   };
 
   const res = await request(appAs('viewer'))
@@ -450,5 +454,240 @@ test('POST /assessments/:id/release → 200 when capstone has bundleId (NO_BUNDL
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.body.success, true);
   assert.strictEqual(res.body.data.status, 'released');
+  assessments._deps = null;
+});
+
+// ── Close action (Sub-feature C) ─────────────────────────────────────────────
+
+test('POST /assessments/:id/close → 200 with {id, status, closedAt}', async () => {
+  const fakeClosedAt = new Date('2026-06-23T12:00:00Z');
+  assessments._deps = {
+    assessmentService: {
+      closeAssessment: async (scope, id, by) => ({
+        _id: 'a1', status: 'closed', closedAt: fakeClosedAt,
+      }),
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a1/close')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(res.body.data.status, 'closed');
+  assert.ok(res.body.data.closedAt, 'closedAt should be in response');
+  assert.ok(res.body.data.id, 'id should be in response');
+  assessments._deps = null;
+});
+
+test('tpo_coordinator POST /assessments/:id/close → 403 (role gate)', async () => {
+  const res = await request(appAs('tpo_coordinator'))
+    .post('/api/institution/assessments/a1/close')
+    .set('Authorization', `Bearer ${tok('tpo_coordinator')}`);
+  assert.strictEqual(res.status, 403);
+});
+
+test('institution_admin POST /assessments/:id/close → 200', async () => {
+  const fakeClosedAt = new Date();
+  assessments._deps = {
+    assessmentService: {
+      closeAssessment: async () => ({ _id: 'a1', status: 'closed', closedAt: fakeClosedAt }),
+    },
+  };
+  const res = await request(appAs('institution_admin'))
+    .post('/api/institution/assessments/a1/close')
+    .set('Authorization', `Bearer ${tok('institution_admin')}`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.data.status, 'closed');
+  assessments._deps = null;
+});
+
+test('POST /assessments/:id/close → 404 when NOT_FOUND thrown', async () => {
+  assessments._deps = {
+    assessmentService: {
+      closeAssessment: async () => { throw new Error('NOT_FOUND'); },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a1/close')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 404);
+  assessments._deps = null;
+});
+
+// ── Re-author endpoints (Sub-feature D) ──────────────────────────────────────
+
+test('POST /assessments/:id/author-mcq → 202 {status:authoring}', async () => {
+  let authorMcqCalledWithId = null;
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a1' }),
+    },
+    authoringService: {
+      authorMcq: async (id) => { authorMcqCalledWithId = String(id); return {}; },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a1/author-mcq')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 202);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(res.body.data.status, 'authoring');
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(authorMcqCalledWithId, 'a1', 'authorMcq should be called fire-and-forget');
+  assessments._deps = null;
+});
+
+test('tpo_coordinator POST /assessments/:id/author-mcq → 202', async () => {
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a1' }),
+    },
+    authoringService: {
+      authorMcq: async () => ({}),
+    },
+  };
+  const res = await request(appAs('tpo_coordinator'))
+    .post('/api/institution/assessments/a1/author-mcq')
+    .set('Authorization', `Bearer ${tok('tpo_coordinator')}`);
+  assert.strictEqual(res.status, 202);
+  assessments._deps = null;
+});
+
+test('viewer POST /assessments/:id/author-mcq → 403', async () => {
+  const res = await request(appAs('viewer'))
+    .post('/api/institution/assessments/a1/author-mcq')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+  assert.strictEqual(res.status, 403);
+});
+
+test('POST /assessments/:id/author-mcq → 404 when assessment not found', async () => {
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => null,
+    },
+    authoringService: {
+      authorMcq: async () => ({}),
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/missing/author-mcq')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 404);
+  assessments._deps = null;
+});
+
+test('POST /assessments/:id/author-capstone → 202 {status:authoring}', async () => {
+  let authorCapstoneCalledWithId = null;
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a-cap' }),
+    },
+    authoringService: {
+      authorCapstone: async (id) => { authorCapstoneCalledWithId = String(id); return {}; },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a-cap/author-capstone')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 202);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(res.body.data.status, 'authoring');
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(authorCapstoneCalledWithId, 'a-cap', 'authorCapstone should be called fire-and-forget');
+  assessments._deps = null;
+});
+
+test('POST /assessments/:id/author-capstone → 404 when assessment not found', async () => {
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => null,
+    },
+    authoringService: {
+      authorCapstone: async () => ({}),
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/missing/author-capstone')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 404);
+  assessments._deps = null;
+});
+
+// ── Create validation errors (Sub-feature E) ──────────────────────────────────
+
+test('POST /assessments → 404 COHORT_NOT_FOUND when cohort validation fails', async () => {
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async () => { throw new Error('COHORT_NOT_FOUND'); },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c-missing', type: 'mcq', title: 'T' });
+  assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.code, 'COHORT_NOT_FOUND');
+  assessments._deps = null;
+});
+
+test('POST /assessments → 400 BAD_CONFIG when interview missing interviewType', async () => {
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async () => { throw new Error('BAD_CONFIG'); },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'interview', title: 'T', config: { interview: {} } });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.code, 'BAD_CONFIG');
+  assessments._deps = null;
+});
+
+test('POST /assessments → 400 BAD_WINDOW when opensAt >= closesAt', async () => {
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async () => { throw new Error('BAD_WINDOW'); },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'mcq', title: 'T', opensAt: '2026-06-25T10:00:00Z', closesAt: '2026-06-25T10:00:00Z' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.code, 'BAD_WINDOW');
+  assessments._deps = null;
+});
+
+// ── Monitor route — windowClosed triggered by status=closed (Sub-feature C) ──
+
+test('GET /assessments/:id/sessions reveals score when assessment.status === \'closed\'', async () => {
+  // assessment has status='closed' but NO closesAt — score should still be visible
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a1',
+        institutionId: 'i1',
+        cohortId: 'c1',
+        status: 'closed',
+        closesAt: undefined, // no closesAt set
+      }),
+    },
+    AssessmentSession: {
+      find: async () => [
+        { _id: 's1', userId: 'u1', status: 'graded', result: { score: 95 } },
+      ],
+    },
+    InstitutionEnrollment: { countDocuments: async () => 1 },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  const { sessions } = res.body.data;
+  assert.strictEqual(sessions[0].score, 95, 'score should be visible when assessment is closed');
   assessments._deps = null;
 });

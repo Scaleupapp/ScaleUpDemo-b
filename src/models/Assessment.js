@@ -37,6 +37,7 @@ const AssessmentSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionUser' },
   releasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionUser' },
   releasedAt: { type: Date },
+  closedAt: { type: Date },
 }, { timestamps: true });
 
 AssessmentSchema.index({ institutionId: 1, cohortId: 1, status: 1 });

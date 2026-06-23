@@ -18,6 +18,8 @@ const mcq = {
       questions: cfg.questions || [],
       totalQuestions: cfg.totalQuestions || (cfg.questions ? cfg.questions.length : 0),
       status: 'in_progress',
+      source: 'institution_assessment',
+      assessmentId: assessment._id,
     });
     const attempt = await QuizAttempt.create({ userId, quizId: quiz._id, answers: [], startedAt: new Date(), status: 'in_progress' });
     return { engine: { type: 'mcq', quizId: quiz._id, sessionId: attempt._id } };
