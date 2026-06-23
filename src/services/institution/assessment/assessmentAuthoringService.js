@@ -18,6 +18,16 @@
  *   (lines 327-347), and ExternalContentTouch failures are caught too
  *   (lines 353-371). The only hard failure path is the OpenAI call itself, which
  *   is expected to throw on network/API error — that bubble is intentional.
+ *
+ * NOTE — zero D2C side-effects from the throwaway quiz:
+ *   The only persistent write generateQuiz makes here is the Quiz doc itself
+ *   (which we delete immediately after freezing its questions). Its other
+ *   side-effects are gated OFF by the args we pass: the QuizTrigger write is
+ *   gated on `triggerId` (we pass none) and the push notification is gated on
+ *   `suppressNotification` (we pass true). Crucially, Quiz.userId is set to an
+ *   InstitutionUser id; every D2C Quiz reader scopes by the authenticated
+ *   User id, and the two id-spaces never collide — so the transient quiz is
+ *   invisible to all D2C surfaces even before it is deleted.
  */
 
 function getModel(deps) { return (deps && deps.Assessment) || require('../../../models/Assessment'); }
