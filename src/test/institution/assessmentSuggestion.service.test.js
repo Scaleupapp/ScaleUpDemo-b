@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { buildSuggestions, isCodingOriented, mapTrack } = require('../../services/institution/assessment/assessmentSuggestionService');
+const { buildSuggestions, isCodingOriented, mapTrack, rankSuggestions } = require('../../services/institution/assessment/assessmentSuggestionService');
 
 // ── mapTrack ──────────────────────────────────────────────────────────────────
 
@@ -256,4 +256,162 @@ test('buildSuggestions: each suggestion has a non-empty reason string', () => {
   suggestions.forEach((s) => {
     assert.ok(typeof s.reason === 'string' && s.reason.length > 0, `suggestion type=${s.type} must have a reason`);
   });
+});
+
+// ── rankSuggestions ──────────────────────────────────────────────────────────
+
+// Helper: sample suggestions list
+function makeSuggestions() {
+  return [
+    { type: 'mcq',       title: 'Algorithms — MCQ',    cohortId: 'coh1', config: { mcq: { topic: 'Algorithms' } },       reason: 'Assess core competency "Algorithms".' },
+    { type: 'capstone',  title: 'Role — Capstone',     cohortId: 'coh1', config: { capstone: { roleTrack: 'swe' } },     reason: 'Capstone project.' },
+    { type: 'interview', title: 'HR Interview',         cohortId: 'coh1', config: { interview: {} },                      reason: 'Placement readiness — behavioural round' },
+  ];
+}
+
+function makeCohort() {
+  return { _id: 'coh1' };
+}
+
+function makeTemplate() {
+  return { label: 'SWE Prep', objectiveType: 'interview_preparation', capabilityTrack: 'software', competencies: [], specifics: { targetRole: 'Software Engineer' } };
+}
+
+test('rankSuggestions: reorders and rewrites reasons per stubbed LLM', async () => {
+  const suggestions = makeSuggestions();
+  const cohort = makeCohort();
+  const template = makeTemplate();
+
+  // LLM reverses order (capstone first, interview second, mcq third)
+  // and provides new reasons
+  const deps = {
+    llm: async () => ({
+      ranked: [
+        { index: 2, reason: 'Capstone is the highest-priority signal for SWE placements.' },
+        { index: 3, reason: 'HR interview is critical for placement rounds at SWE companies.' },
+        { index: 1, reason: 'Algorithms MCQ gauges core technical depth needed for interviews.' },
+      ],
+    }),
+  };
+
+  const result = await rankSuggestions(suggestions, cohort, template, deps);
+
+  assert.strictEqual(result.length, 3, 'all suggestions returned');
+  // Verify re-ordering: capstone → interview → mcq
+  assert.strictEqual(result[0].type, 'capstone', 'capstone should be first after LLM rerank');
+  assert.strictEqual(result[1].type, 'interview', 'interview should be second');
+  assert.strictEqual(result[2].type, 'mcq', 'mcq should be third');
+  // Verify reasons are replaced
+  assert.ok(result[0].reason.includes('Capstone'), 'capstone reason should be from LLM');
+  assert.ok(result[1].reason.includes('HR interview'), 'interview reason should be from LLM');
+  assert.ok(result[2].reason.includes('Algorithms'), 'mcq reason should be from LLM');
+  // Verify other properties preserved
+  assert.strictEqual(result[0].cohortId, 'coh1', 'cohortId preserved');
+  assert.deepStrictEqual(result[0].config, { capstone: { roleTrack: 'swe' } }, 'config preserved');
+});
+
+test('rankSuggestions: LLM returns string JSON — still parsed correctly', async () => {
+  const suggestions = makeSuggestions();
+  const cohort = makeCohort();
+  const template = makeTemplate();
+
+  const deps = {
+    llm: async () => JSON.stringify({
+      ranked: [
+        { index: 3, reason: 'HR first.' },
+        { index: 2, reason: 'Capstone second.' },
+        { index: 1, reason: 'MCQ third.' },
+      ],
+    }),
+  };
+
+  const result = await rankSuggestions(suggestions, cohort, template, deps);
+  assert.strictEqual(result[0].type, 'interview');
+  assert.strictEqual(result[1].type, 'capstone');
+  assert.strictEqual(result[2].type, 'mcq');
+});
+
+test('rankSuggestions: LLM throws → returns original list unchanged', async () => {
+  const suggestions = makeSuggestions();
+  const cohort = makeCohort();
+  const template = makeTemplate();
+
+  const deps = {
+    llm: async () => { throw new Error('LLM_UNAVAILABLE'); },
+  };
+
+  const result = await rankSuggestions(suggestions, cohort, template, deps);
+
+  // Must return the original list (same order, same objects)
+  assert.strictEqual(result.length, 3, 'all suggestions returned on failure');
+  assert.strictEqual(result[0].type, 'mcq', 'original order preserved on LLM failure');
+  assert.strictEqual(result[1].type, 'capstone');
+  assert.strictEqual(result[2].type, 'interview');
+});
+
+test('rankSuggestions: LLM returns bad JSON string → falls back to original', async () => {
+  const suggestions = makeSuggestions();
+  const cohort = makeCohort();
+  const template = makeTemplate();
+
+  const deps = {
+    llm: async () => 'not valid json at all !!!',
+  };
+
+  const result = await rankSuggestions(suggestions, cohort, template, deps);
+  assert.strictEqual(result.length, 3);
+  assert.strictEqual(result[0].type, 'mcq', 'original order preserved on bad JSON');
+});
+
+test('rankSuggestions: LLM returns partial ranked list → falls back to original', async () => {
+  const suggestions = makeSuggestions();
+  const cohort = makeCohort();
+  const template = makeTemplate();
+
+  // Only 2 of 3 entries returned — incomplete list, should fall back
+  const deps = {
+    llm: async () => ({
+      ranked: [
+        { index: 1, reason: 'First reason.' },
+        { index: 2, reason: 'Second reason.' },
+        // index 3 missing
+      ],
+    }),
+  };
+
+  const result = await rankSuggestions(suggestions, cohort, template, deps);
+  assert.strictEqual(result.length, 3, 'original list returned when ranked is incomplete');
+  assert.strictEqual(result[0].type, 'mcq', 'original order preserved');
+});
+
+test('rankSuggestions: empty suggestions → returns empty array without calling LLM', async () => {
+  let llmCalled = false;
+  const deps = {
+    llm: async () => { llmCalled = true; return { ranked: [] }; },
+  };
+
+  const result = await rankSuggestions([], makeCohort(), null, deps);
+  assert.deepStrictEqual(result, [], 'empty array returned');
+  assert.strictEqual(llmCalled, false, 'LLM should not be called for empty suggestions');
+});
+
+test('rankSuggestions: LLM reason blank/undefined → preserves original reason', async () => {
+  const suggestions = makeSuggestions();
+  const cohort = makeCohort();
+  const template = makeTemplate();
+
+  const deps = {
+    llm: async () => ({
+      ranked: [
+        { index: 1, reason: '' },      // blank reason → keep original
+        { index: 2, reason: '   ' },   // whitespace → keep original
+        { index: 3, reason: 'Good HR reason for SWE cohort.' },
+      ],
+    }),
+  };
+
+  const result = await rankSuggestions(suggestions, cohort, template, deps);
+  assert.strictEqual(result[0].reason, suggestions[0].reason, 'blank LLM reason falls back to original');
+  assert.strictEqual(result[1].reason, suggestions[1].reason, 'whitespace LLM reason falls back to original');
+  assert.strictEqual(result[2].reason, 'Good HR reason for SWE cohort.', 'valid LLM reason used');
 });

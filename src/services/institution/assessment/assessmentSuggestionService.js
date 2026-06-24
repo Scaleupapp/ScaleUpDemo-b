@@ -200,4 +200,93 @@ function buildSuggestions(cohort, template) {
   return { suggestions };
 }
 
-module.exports = { buildSuggestions, isCodingOriented, mapTrack };
+// ── rankSuggestions (optional LLM enrichment) ────────────────────────────────
+
+/**
+ * Ask the LLM to (a) re-order suggestions by placement-readiness priority for
+ * this cohort and (b) rewrite each suggestion's `reason` to be specific to the
+ * cohort's objective.
+ *
+ * Falls back to the original rule-based order on ANY error (LLM unavailable,
+ * bad JSON, etc.) so it never breaks the suggestions endpoint.
+ *
+ * @param {object[]} suggestions - from buildSuggestions (may be empty)
+ * @param {object}   cohort      - InstitutionCohort document
+ * @param {object|null} template - ObjectiveTemplate document or null
+ * @param {object}   deps        - injectable { llm? }
+ *   deps.llm must be a function: async (prompt: string) => parsedObject|string
+ *   Defaults to aiProvider.analyzeWithClaude (primary) or generateWithGPT (fallback).
+ * @returns {Promise<object[]>} ranked suggestions (never throws)
+ */
+async function rankSuggestions(suggestions, cohort, template, deps = {}) {
+  if (!suggestions || suggestions.length === 0) return suggestions;
+
+  try {
+    // Resolve LLM function
+    let llmFn = deps.llm;
+    if (!llmFn) {
+      const aiProvider = require('../../../config/aiProvider');
+      llmFn = aiProvider.analyzeWithClaude || aiProvider.generateWithGPT;
+    }
+    if (!llmFn) return suggestions;
+
+    const cohortObjective = template
+      ? `${template.label || template.objectiveType || 'placement'} (${template.objectiveType || ''})`
+      : 'general placement readiness';
+
+    const numberedList = suggestions
+      .map((s, i) => `${i + 1}. [${s.type}] "${s.title}" — ${s.reason}`)
+      .join('\n');
+
+    const prompt = [
+      `You are a placement coordinator assistant. A college cohort has the objective: "${cohortObjective}".`,
+      `Below are ${suggestions.length} assessment suggestions (numbered):`,
+      '',
+      numberedList,
+      '',
+      'Return a JSON object with a single key "ranked" whose value is an array of objects.',
+      'Each object must have: "index" (1-based original position, integer) and "reason" (improved, cohort-specific string).',
+      'Order the array from highest to lowest placement-readiness priority for this cohort.',
+      'Return ONLY valid JSON, no extra text.',
+      'Example: {"ranked": [{"index": 2, "reason": "..."}, {"index": 1, "reason": "..."}]}',
+    ].join('\n');
+
+    const raw = await llmFn(prompt);
+
+    // raw may be a parsed object or a string containing JSON
+    let parsed;
+    if (typeof raw === 'string') {
+      // Strip markdown code fences if present
+      const clean = raw.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim();
+      parsed = JSON.parse(clean);
+    } else {
+      parsed = raw;
+    }
+
+    if (!parsed || !Array.isArray(parsed.ranked)) return suggestions;
+
+    const ranked = parsed.ranked;
+    const result = [];
+    for (const entry of ranked) {
+      const idx = Number(entry.index) - 1; // convert 1-based to 0-based
+      if (idx < 0 || idx >= suggestions.length) continue;
+      const original = suggestions[idx];
+      result.push({
+        ...original,
+        reason: typeof entry.reason === 'string' && entry.reason.trim()
+          ? entry.reason.trim()
+          : original.reason,
+      });
+    }
+
+    // If we got a valid re-ordering (covers all suggestions), use it.
+    // Otherwise fall back to the original order to avoid partial lists.
+    if (result.length === suggestions.length) return result;
+    return suggestions;
+  } catch (_err) {
+    // Any failure — LLM timeout, bad JSON, network error — returns original
+    return suggestions;
+  }
+}
+
+module.exports = { buildSuggestions, isCodingOriented, mapTrack, rankSuggestions };

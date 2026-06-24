@@ -1053,6 +1053,67 @@ test('GET /cohorts/:cohortId/assessment-suggestions: no template → generic set
   assessments._deps = null;
 });
 
+test('GET /cohorts/:cohortId/assessment-suggestions: LLM rankSuggestions reorders result', async () => {
+  const original = [
+    { type: 'mcq', title: 'Algo MCQ', cohortId: 'c3', config: {}, reason: 'reason1' },
+    { type: 'capstone', title: 'Capstone', cohortId: 'c3', config: {}, reason: 'reason2' },
+  ];
+  const reordered = [
+    { type: 'capstone', title: 'Capstone', cohortId: 'c3', config: {}, reason: 'LLM reason capstone' },
+    { type: 'mcq', title: 'Algo MCQ', cohortId: 'c3', config: {}, reason: 'LLM reason mcq' },
+  ];
+  const fakeCohort = { _id: 'c3', institutionId: 'i1', objectiveTemplateId: null };
+
+  assessments._deps = {
+    InstitutionCohort: { findOne: async () => fakeCohort },
+    ObjectiveTemplate: { findOne: async () => null },
+    suggestionService: {
+      buildSuggestions: () => ({ suggestions: original }),
+      rankSuggestions: async () => reordered,
+    },
+    rankDeps: {},
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/cohorts/c3/assessment-suggestions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(res.body.data.suggestions[0].type, 'capstone', 'LLM-reranked capstone is first');
+  assert.strictEqual(res.body.data.suggestions[1].type, 'mcq');
+  assessments._deps = null;
+});
+
+test('GET /cohorts/:cohortId/assessment-suggestions: LLM rankSuggestions throws → still returns 200 with rule-based order', async () => {
+  const original = [
+    { type: 'mcq', title: 'Algo MCQ', cohortId: 'c4', config: {}, reason: 'reason1' },
+    { type: 'interview', title: 'HR Interview', cohortId: 'c4', config: {}, reason: 'reason2' },
+  ];
+  const fakeCohort = { _id: 'c4', institutionId: 'i1', objectiveTemplateId: null };
+
+  assessments._deps = {
+    InstitutionCohort: { findOne: async () => fakeCohort },
+    ObjectiveTemplate: { findOne: async () => null },
+    suggestionService: {
+      buildSuggestions: () => ({ suggestions: original }),
+      rankSuggestions: async () => { throw new Error('LLM_DOWN'); },
+    },
+    rankDeps: {},
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/cohorts/c4/assessment-suggestions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200, 'route should succeed even when LLM throws');
+  assert.strictEqual(res.body.success, true);
+  // Rule-based order preserved
+  assert.strictEqual(res.body.data.suggestions[0].type, 'mcq');
+  assert.strictEqual(res.body.data.suggestions[1].type, 'interview');
+  assessments._deps = null;
+});
+
 // ── Feature 5: GET /assessments/:id/preview ───────────────────────────────────
 
 test('GET /assessments/:id/preview → 200 for mcq type with questions', async () => {

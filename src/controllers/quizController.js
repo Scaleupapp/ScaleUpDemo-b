@@ -27,12 +27,22 @@ const listQuizzes = async (req, res, next) => {
 
 const getHistory = async (req, res, next) => {
   try {
-    // NOTE(M8): getHistory returns QuizAttempt records; institution-cloned quiz attempts
-    // are not filtered here because QuizAttempt has no source field and joining to Quiz
-    // per attempt would be N+1. The Quiz-based readers (listQuizzes, getSkillAssessments,
-    // getPendingQuizzes) already exclude institution clones. A future migration could
-    // add a source field to QuizAttempt at clone time to enable cheap filtering here.
-    const attempts = await QuizAttempt.find({ userId: req.user.userId, status: 'completed' })
+    // Exclude attempts whose quiz is an institution clone (source:'institution_assessment').
+    // QuizAttempt has no source field, so we first fetch the set of institution-clone quiz
+    // _ids for this user (one cheap Query.find), then exclude them via $nin.
+    // This avoids N+1 and keeps all other getHistory behaviour identical.
+    const institutionCloneIds = await Quiz.find(
+      { userId: req.user.userId, source: 'institution_assessment' },
+      '_id'
+    ).lean();
+    const excludeIds = institutionCloneIds.map((q) => q._id);
+
+    const query = { userId: req.user.userId, status: 'completed' };
+    if (excludeIds.length > 0) {
+      query.quizId = { $nin: excludeIds };
+    }
+
+    const attempts = await QuizAttempt.find(query)
       .sort({ completedAt: -1 })
       .populate('quizId', 'title topic type objectiveId');
     res.json(apiResponse.success(attempts));
