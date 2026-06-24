@@ -44,7 +44,7 @@ me._deps = {
     }),
   },
   Institution: {
-    findOne: (filter) => ({
+    findById: (filter) => ({
       _capturedFilter: filter,
       select: function () { return { lean: async () => ({ ...fakeInstitution, _capturedFilter: this._capturedFilter }) }; },
     }),
@@ -68,7 +68,7 @@ test('GET /api/institution/me returns 401 without token', async () => {
 });
 
 test('GET /api/institution/me returns 200 with correct shape for tpo_head', async () => {
-  // Capture the filter passed to Institution.findOne
+  // Capture the filter passed to Institution.findById
   let capturedFilter = null;
   me._deps = {
     InstitutionUser: {
@@ -77,7 +77,7 @@ test('GET /api/institution/me returns 200 with correct shape for tpo_head', asyn
       }),
     },
     Institution: {
-      findOne: (filter) => {
+      findById: (filter) => {
         capturedFilter = filter;
         return {
           select: () => ({ lean: async () => fakeInstitution }),
@@ -109,9 +109,9 @@ test('GET /api/institution/me returns 200 with correct shape for tpo_head', asyn
   assert.strictEqual(institution.seatsLicensed, fakeInstitution.seatsLicensed);
   assert.strictEqual(institution.seatsUsed, fakeInstitution.seatsUsed);
 
-  // Verify institutionId from token was used in the Institution query
-  assert.ok(capturedFilter, 'Institution.findOne should have been called');
-  assert.strictEqual(capturedFilter.institutionId, 'iA', 'Institution query must be scoped to token institutionId');
+  // Verify the Institution was looked up by the token's institutionId (via findById)
+  assert.ok(capturedFilter, 'Institution.findById should have been called');
+  assert.strictEqual(capturedFilter, 'iA', 'Institution must be looked up by the token institutionId');
 });
 
 test('GET /api/institution/me returns 404 if user not found', async () => {
@@ -122,7 +122,7 @@ test('GET /api/institution/me returns 404 if user not found', async () => {
       }),
     },
     Institution: {
-      findOne: () => ({
+      findById: () => ({
         select: () => ({ lean: async () => fakeInstitution }),
       }),
     },
@@ -145,7 +145,7 @@ test('GET /api/institution/me returns 404 if institution not found', async () =>
       }),
     },
     Institution: {
-      findOne: () => ({
+      findById: () => ({
         select: () => ({ lean: async () => null }),
       }),
     },

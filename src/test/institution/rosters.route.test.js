@@ -83,7 +83,7 @@ test('upload returns 201 with rosterUploadId and preview for tpo_coordinator (st
 
   rosters._deps = {
     Institution: {
-      findOne: async () => fakeInstitution,
+      findById: async () => fakeInstitution,
     },
     RosterUpload: function (data) {
       Object.assign(fakeRosterUploadInstance, data);
@@ -134,7 +134,7 @@ test('approve: first call succeeds; second call returns 409 (commitRoster called
   let commitRosterCallCount = 0;
 
   rosters._deps = {
-    Institution: { findOne: async () => ({ name: 'Test College' }) },
+    Institution: { findById: async () => ({ name: 'Test College' }) },
     // findOne returns the same stateful object; .select('+validData') chain is a no-op wrapper
     RosterUpload: {
       findOne: () => ({
@@ -196,7 +196,7 @@ test('approve: cohort without an objective → 409 NO_OBJECTIVE (commitRoster no
   const upload = { _id: 'ru-noobj', institutionId: 'i1', departmentId: 'd1', cohortId: 'c2', status: 'validated', validData: [], save: async () => {} };
   let commitCalled = false;
   rosters._deps = {
-    Institution: { findOne: async () => ({ name: 'Test College' }) },
+    Institution: { findById: async () => ({ name: 'Test College' }) },
     RosterUpload: { findOne: () => ({ select: () => Promise.resolve(upload) }) },
     InstitutionCohort: { findOne: async () => ({ _id: 'c2', objectiveTemplateId: null }) },
   };
