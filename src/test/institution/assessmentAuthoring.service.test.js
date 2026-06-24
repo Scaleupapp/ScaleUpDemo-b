@@ -903,3 +903,102 @@ test('C1 anti-regression: string importance DOES fail Content.validateSync() (co
     `Expected a validation error on importance field; got errors: ${JSON.stringify(Object.keys(validationError.errors))}`
   );
 });
+
+// ---------------------------------------------------------------------------
+// Task 3C: authorDrill — generation-on-demand tests
+// ---------------------------------------------------------------------------
+
+test('authorDrill generates when no library bundle matches and polls until active', async () => {
+  const assessment = makeDrillAssessment({
+    config: {
+      drill: { roleTrack: 'swe', drillSubtype: 'algo', difficulty: 'medium' },
+    },
+  });
+  let markModifiedCalled = false;
+  let savedCalled = false;
+  assessment.markModified = () => { markModifiedCalled = true; };
+  assessment.save = async function () { savedCalled = true; return this; };
+
+  let generateDrillArgs = null;
+  let pollCount = 0;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async (id) => {
+        if (String(id) === 'b1') {
+          pollCount += 1;
+          if (pollCount === 1) return { _id: 'b1', status: 'generating' };
+          return { _id: 'b1', status: 'active' };
+        }
+        return null; // idempotent check: no pre-existing bundle
+      },
+      findOne: async () => null, // no library match
+    },
+    generateDrill: async (params) => {
+      generateDrillArgs = params;
+      return { ok: true, bundle_id: 'b1' };
+    },
+    sleep: async () => {},
+    pollMs: 0,
+    maxPolls: 5,
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+
+  assert.ok(result, 'should return assessment');
+  assert.strictEqual(String(result.config.drill.bundleId), 'b1', 'bundleId should be set to b1');
+  assert.strictEqual(markModifiedCalled, true, 'markModified should be called');
+  assert.strictEqual(savedCalled, true, 'save should be called');
+
+  assert.ok(generateDrillArgs, 'generateDrill should have been called');
+  assert.strictEqual(generateDrillArgs.role_track, 'swe');
+  assert.strictEqual(generateDrillArgs.drill_subtype, 'algo');
+  assert.strictEqual(generateDrillArgs.difficulty, 'medium');
+  assert.strictEqual(generateDrillArgs.language, 'javascript');
+});
+
+test('authorDrill still prefers existing active library bundle over generation', async () => {
+  const assessment = makeDrillAssessment();
+  let generateDrillCalled = false;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => null, // no pre-existing bundleId
+      findOne: async () => ({ _id: 'bundleLib', status: 'active', type: 'drill' }), // library match
+    },
+    generateDrill: async () => { generateDrillCalled = true; throw new Error('should not be called'); },
+    sleep: async () => {},
+    pollMs: 0,
+    maxPolls: 5,
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+
+  assert.ok(result, 'should return assessment');
+  assert.strictEqual(String(result.config.drill.bundleId), 'bundleLib', 'bundleId should be set from library');
+  assert.strictEqual(generateDrillCalled, false, 'generateDrill must NOT be called when library bundle found');
+});
+
+test('authorDrill handles generateDrill failure gracefully without throwing', async () => {
+  const assessment = makeDrillAssessment();
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => null,
+      findOne: async () => null, // no library match
+    },
+    generateDrill: async () => { throw new Error('LLM_FAIL'); },
+    sleep: async () => {},
+    pollMs: 0,
+    maxPolls: 5,
+  };
+
+  // Should resolve, not throw
+  const result = await authorDrill('assess-drill-1', deps);
+
+  assert.ok(result, 'should return assessment even when generateDrill throws');
+  assert.ok(!result.config.drill.bundleId, 'bundleId should remain unset when generateDrill fails');
+});

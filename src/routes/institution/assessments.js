@@ -17,6 +17,8 @@ function getUserModel() { return (router._deps && router._deps.User) || require(
 function getReportService() { return (router._deps && router._deps.reportService) || require('../../services/institution/assessment/assessmentReportService'); }
 // Feature 4/5: injectable cohort/template/bundle models and suggestion service
 function getCohortModel() { return (router._deps && router._deps.InstitutionCohort) || require('../../models/InstitutionCohort'); }
+// Task 2: injectable trends service
+function getTrendsService() { return (router._deps && router._deps.trendsService) || require('../../services/institution/assessment/assessmentTrendsService'); }
 function getObjectiveTemplateModel() { return (router._deps && router._deps.ObjectiveTemplate) || require('../../models/ObjectiveTemplate'); }
 function getArtifactBundleModel() { return (router._deps && router._deps.ArtifactBundle) || require('../../coding/models/artifactBundle.model'); }
 function getSuggestionService() { return (router._deps && router._deps.suggestionService) || require('../../services/institution/assessment/assessmentSuggestionService'); }
@@ -100,6 +102,20 @@ router.post('/assessments/:id/author-capstone', institutionAuth, requireInstitut
     return res.status(202).json({ success: true, data: { status: 'authoring' } });
   } catch (err) {
     console.error('[institution/assessments:author-capstone]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not trigger authoring.' });
+  }
+});
+
+// Re-author Drill (recovery): tpo_head, tpo_coordinator
+router.post('/assessments/:id/author-drill', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const Assessment = getAssessmentModel();
+    const a = await Assessment.findOne({ ...institutionScope(req), _id: req.params.id });
+    if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
+    authoring().authorDrill(a._id).catch((e) => console.warn('[assessments:author-drill]', e.message));
+    return res.status(202).json({ success: true, data: { status: 'authoring' } });
+  } catch (err) {
+    console.error('[institution/assessments:author-drill]', err.message);
     return res.status(500).json({ success: false, message: 'Could not trigger authoring.' });
   }
 });
@@ -291,6 +307,50 @@ router.get('/assessments/:id/export.csv', institutionAuth, async (req, res) => {
   } catch (err) {
     console.error('[institution/assessments:export-csv]', err.message);
     return res.status(500).json({ success: false, message: 'Could not export CSV.' });
+  }
+});
+
+// ── Task 2: Cross-cohort comparison (MUST be before /:cohortId routes) ────────
+// GET /cohorts/comparison?cohortIds=c1,c2,...  (any institution role)
+router.get('/cohorts/comparison', institutionAuth, async (req, res) => {
+  try {
+    const scope = institutionScope(req);
+    const rawIds = req.query.cohortIds || '';
+    const cohortIds = rawIds.split(',').map(s => s.trim()).filter(Boolean);
+    if (cohortIds.length === 0) return res.status(400).json({ success: false, message: 'cohortIds query param required' });
+
+    const trends = getTrendsService();
+    const data = await trends.buildComparison(scope.institutionId, cohortIds, {
+      InstitutionCohort: getCohortModel(),
+      CohortRollup: getCohortRollupModel(),
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('[institution/assessments:comparison]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not load comparison.' });
+  }
+});
+
+// ── Task 2: Trends time-series for a single cohort ────────────────────────────
+// GET /cohorts/:cohortId/trends  (any institution role, scoped)
+router.get('/cohorts/:cohortId/trends', institutionAuth, async (req, res) => {
+  try {
+    const scope = institutionScope(req);
+    const InstitutionCohort = getCohortModel();
+    // Scope-check: 404 if cohort not in institution
+    const cohortQuery = InstitutionCohort.findOne({ ...scope, _id: req.params.cohortId });
+    const cohort = typeof cohortQuery.lean === 'function' ? await cohortQuery.lean() : await cohortQuery;
+    if (!cohort) return res.status(404).json({ success: false, message: 'Cohort not found' });
+
+    const trends = getTrendsService();
+    const data = await trends.buildTrends(req.params.cohortId, {
+      CohortRollup: getCohortRollupModel(),
+      Assessment: getAssessmentModel(),
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('[institution/assessments:trends]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not load trends.' });
   }
 });
 

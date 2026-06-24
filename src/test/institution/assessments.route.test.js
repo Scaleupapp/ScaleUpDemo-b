@@ -1405,3 +1405,49 @@ test('extractCompetencyValue scales capstone dimension_scores x10 (7 → 70)', (
   assert.strictEqual(extractCompetencyValue(null, 'code_quality'), '',
     'null raw should return empty string');
 });
+
+// ── Task 3: author-drill route ────────────────────────────────────────────────
+
+test('POST /assessments/:id/author-drill → 202 {status:authoring} for tpo_head', async () => {
+  let authorDrillCalledWithId = null;
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a-drill-1' }),
+    },
+    authoringService: {
+      authorDrill: async (id) => { authorDrillCalledWithId = String(id); return {}; },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a-drill-1/author-drill')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 202);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(res.body.data.status, 'authoring');
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(authorDrillCalledWithId, 'a-drill-1', 'authorDrill should be called fire-and-forget');
+  assessments._deps = null;
+});
+
+test('viewer POST /assessments/:id/author-drill → 403 (role gate)', async () => {
+  const res = await request(appAs('viewer'))
+    .post('/api/institution/assessments/a-drill-1/author-drill')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+  assert.strictEqual(res.status, 403);
+});
+
+test('POST /assessments/:id/author-drill → 404 when assessment not found', async () => {
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => null,
+    },
+    authoringService: {
+      authorDrill: async () => ({}),
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/missing/author-drill')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 404);
+  assessments._deps = null;
+});
