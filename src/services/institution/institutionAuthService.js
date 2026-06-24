@@ -48,11 +48,9 @@ async function _findByToken(tokenHash) {
 
 async function _sendLink(email, token, kind) {
   // The organiser portal is served under the /org path on the web app, so the base
-  // must include it (link → <base>/auth/callback = .../org/auth/callback). Default to
-  // the live Vercel URL; set ORGANISER_WEB_URL to the branded domain (e.g.
-  // https://placement.scaleupapp.club/org) once that domain is claimed by the
-  // scaleup-web Vercel project.
-  const base = process.env.ORGANISER_WEB_URL || 'https://scaleup-web.vercel.app/org';
+  // must include it (link → <base>/auth/callback = .../org/auth/callback). Branded
+  // domain placement.scaleupapp.club is live + bound to the scaleup-web Vercel project.
+  const base = process.env.ORGANISER_WEB_URL || 'https://placement.scaleupapp.club/org';
   const url = `${base}/auth/callback?token=${token}`;
   try {
     await require('../emailService').sendInstitutionSignInLink(email, url, kind);
