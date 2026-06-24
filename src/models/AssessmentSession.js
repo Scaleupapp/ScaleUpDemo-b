@@ -8,7 +8,7 @@ const AssessmentSessionSchema = new mongoose.Schema({
   enrollmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionEnrollment' },
   // Reference into the underlying engine session.
   engine: {
-    type: { type: String, enum: ['mcq', 'capstone', 'interview'], required: true },
+    type: { type: String, enum: ['mcq', 'capstone', 'interview', 'drill'], required: true },
     sessionId: { type: mongoose.Schema.Types.ObjectId }, // capstoneSession / interviewSession / quizAttempt id
     quizId: { type: mongoose.Schema.Types.ObjectId },     // mcq only: the per-student Quiz clone
   },

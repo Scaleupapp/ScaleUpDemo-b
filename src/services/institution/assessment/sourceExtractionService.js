@@ -111,7 +111,7 @@ async function extractFromBuffer({ buffer, mimeType, filename }, deps = {}) {
  */
 async function runExtraction(sourceId, deps = {}) {
   const AssessmentSource =
-    deps.AssessmentSource || require('../../models/AssessmentSource');
+    deps.AssessmentSource || require('../../../models/AssessmentSource');
   // Resolve require paths relative to this file
   const downloadBufferFn =
     deps.downloadBuffer ||
