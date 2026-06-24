@@ -17,10 +17,26 @@ app.set('etag', false);
 
 // --- Global Middleware ---
 app.use(helmet());
+const CORS_ALLOWLIST = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim())
+  : ['https://scaleupapp.club', 'https://www.scaleupapp.club', 'https://api.scaleupapp.club', 'http://scaleupapp.club', 'http://localhost:3000'];
+// The organiser/placement web portals are always allowed regardless of CORS_ORIGINS,
+// so the TPO portal works on any of its domains (placement.scaleupapp.club, the
+// scaleup-web Vercel URLs incl. preview deployments) + local dev.
+const PORTAL_ORIGIN_PATTERNS = [
+  /^https:\/\/(placement|placements)\.scaleupapp\.club$/,
+  /^https:\/\/scaleup[a-z0-9-]*\.vercel\.app$/,
+  /^http:\/\/localhost:\d+$/,
+];
 app.use(cors({
-  origin: process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',')
-    : ['https://scaleupapp.club', 'https://www.scaleupapp.club', 'https://api.scaleupapp.club', 'http://scaleupapp.club', 'http://localhost:3000'],
+  origin: (origin, cb) => {
+    // Non-browser clients (mobile apps, curl, server-to-server) send no Origin.
+    if (!origin) return cb(null, true);
+    if (CORS_ALLOWLIST.includes(origin) || PORTAL_ORIGIN_PATTERNS.some((re) => re.test(origin))) {
+      return cb(null, true);
+    }
+    return cb(null, false);
+  },
   credentials: true,
 }));
 app.use((req, res, next) => {
