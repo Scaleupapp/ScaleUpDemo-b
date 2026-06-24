@@ -64,7 +64,7 @@ class InterviewService {
   /**
    * Start a new interview session
    */
-  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null, abandonExisting = true } = {}) {
+  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null, abandonExisting = true, context = '' } = {}) {
     // Auto-abandon any stale in-progress session — users were trapped if a
     // previous interview was force-quit or crashed. The diagnostic engine
     // does the same on startAttempt.
@@ -182,7 +182,7 @@ Previously asked questions to AVOID (from past sessions):
 ${prevQuestionsStr}
 
 INTERVIEW TYPE GUIDELINES:
-${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBlock}${learnerContextBlock}`;
+${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBlock}${learnerContextBlock}${context ? `\n\nGround your questions in this syllabus/context:\n${context}` : ''}`;
 
     // Create session
     const session = await InterviewSession.create({

@@ -4,7 +4,7 @@ const AssessmentSchema = new mongoose.Schema({
   institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution', required: true, index: true },
   cohortId: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionCohort', required: true },
   departmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
-  type: { type: String, enum: ['mcq', 'capstone', 'interview'], required: true },
+  type: { type: String, enum: ['mcq', 'capstone', 'interview', 'drill'], required: true },
   title: { type: String, required: true, trim: true },
   // Engine-specific config, frozen at release. Only the sub-object matching `type` is used.
   config: {
@@ -14,6 +14,7 @@ const AssessmentSchema = new mongoose.Schema({
       durationSeconds: { type: Number, default: 1800 },
       assessmentType: String,
       topic: String,
+      sourceId: { type: mongoose.Schema.Types.ObjectId, ref: 'AssessmentSource' },
     },
     capstone: {
       bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },
@@ -22,12 +23,20 @@ const AssessmentSchema = new mongoose.Schema({
       difficulty: { type: String, default: 'medium' },
       jobDescription: String,
       topicHint: String,
+      sourceId: { type: mongoose.Schema.Types.ObjectId, ref: 'AssessmentSource' },
     },
     interview: {
       interviewType: { type: String },
       targetRole: String,
       difficulty: { type: String, default: 'moderate' },
       durationSeconds: { type: Number, default: 1800 },
+      sourceId: { type: mongoose.Schema.Types.ObjectId, ref: 'AssessmentSource' },
+    },
+    drill: {
+      roleTrack: String,
+      drillSubtype: String,
+      difficulty: { type: String, default: 'medium' },
+      bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },
     },
   },
   integrityRequired: { type: Boolean, default: true },

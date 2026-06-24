@@ -16,5 +16,6 @@ router.use('/', require('./users'));
 router.use('/', require('./rosters'));
 router.use('/', require('./objectiveTemplates'));
 router.use('/', require('./assessments'));
+router.use('/', require('./assessmentSources'));
 
 module.exports = router;

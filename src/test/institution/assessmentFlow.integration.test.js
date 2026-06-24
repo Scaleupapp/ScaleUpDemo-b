@@ -13,7 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createAssessment, releaseAssessment } = require('../../services/institution/assessment/assessmentService');
-const { authorMcq, authorCapstone } = require('../../services/institution/assessment/assessmentAuthoringService');
+const { authorMcq, authorCapstone, authorDrill } = require('../../services/institution/assessment/assessmentAuthoringService');
 const { startSession, syncSession } = require('../../services/institution/assessment/assessmentSessionService');
 const { recompute } = require('../../services/institution/assessment/cohortRollupService');
 const { markActive } = require('../../services/institution/enrollmentProgressService');
@@ -227,6 +227,7 @@ function makeStores() {
     CapstoneSession: makeCollection('CapstoneSession'),
     ArtifactBundle: makeCollection('ArtifactBundle'),
     CapstoneGenerationRequest: makeCollection('CapstoneGenerationRequest'),
+    DrillAttempt: makeCollection('DrillAttempt'),
   };
 }
 
@@ -791,6 +792,148 @@ test('worker runSyncTick: expires session when closesAt has passed and engine no
 // ─────────────────────────────────────────────────────────────────────────────
 // RACE — single-attempt duplicate-key guard
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRILL ENGINE — full lifecycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('drill engine: create→release-before-bundle (NO_BUNDLE)→authorDrill→release→start→grade→sync→rollup', async () => {
+  const S = makeStores();
+  S.DrillAttempt = makeCollection('DrillAttempt');
+  const institutionId = 'inst-drill';
+  const cohortId = nextId();
+  const scope = { institutionId };
+
+  await S.InstitutionCohort.create({ _id: cohortId, institutionId, name: 'Drill Cohort' });
+  await S.InstitutionEnrollment.create({ userId: 'stu-drill', cohortId, institutionId, status: 'registered' });
+
+  // 1. createAssessment — drill requires drillSubtype
+  const a = await createAssessment(scope, {
+    cohortId,
+    type: 'drill',
+    title: 'Prompt Drill',
+    config: { drill: { drillSubtype: 'prompt', roleTrack: 'swe', difficulty: 'medium' } },
+    createdBy: 'admin-drill',
+    opensAt: PAST,
+    closesAt: FUTURE,
+  }, { Assessment: S.Assessment, InstitutionCohort: S.InstitutionCohort });
+  assert.equal(a.status, 'configured');
+  const assessmentId = String(a._id);
+
+  // 2. Release BEFORE bundle → NO_BUNDLE
+  await assert.rejects(
+    () => releaseAssessment(scope, assessmentId, 'admin-drill', { Assessment: S.Assessment }),
+    (err) => { assert.equal(err.message, 'NO_BUNDLE'); return true; },
+    'release before bundle should throw NO_BUNDLE'
+  );
+
+  // 3. authorDrill — stub ArtifactBundle.findOne returns an active drill bundle
+  const bundleId = nextId();
+  await S.ArtifactBundle.create({
+    _id: bundleId,
+    type: 'drill',
+    drill_subtype: 'prompt',
+    role_track: 'swe',
+    difficulty: 'medium',
+    status: 'active',
+    brief: 'Build a CLI parser',
+    acceptance_criteria: ['handles --help flag'],
+    time_budget_minutes: 45,
+    starter_repo: null,
+  });
+
+  const authored = await authorDrill(assessmentId, {
+    Assessment: S.Assessment,
+    ArtifactBundle: S.ArtifactBundle,
+  });
+  assert.ok(authored, 'authorDrill returned assessment');
+  assert.equal(String(authored.config.drill.bundleId), String(bundleId), 'bundleId set on config');
+
+  // 4. Release AFTER bundle → success
+  const released = await releaseAssessment(scope, assessmentId, 'admin-drill', { Assessment: S.Assessment });
+  assert.equal(released.status, 'released');
+
+  // 5. startSession via drill adapter (injected DrillAttempt + ArtifactBundle)
+  const fakeDrillAttemptId = nextId();
+
+  let drillStartCallCount = 0;
+  const drillAdapterDeps = {
+    DrillAttempt: {
+      ...S.DrillAttempt,
+      create: async (d) => {
+        drillStartCallCount++;
+        const doc = { _id: fakeDrillAttemptId, ...d };
+        // Store in the backing collection so grading simulation can update it
+        S.DrillAttempt._store.set(String(fakeDrillAttemptId), { ...doc });
+        return doc;
+      },
+    },
+    ArtifactBundle: S.ArtifactBundle,
+  };
+
+  const deps = {
+    Assessment: S.Assessment,
+    AssessmentSession: S.AssessmentSession,
+    InstitutionEnrollment: S.InstitutionEnrollment,
+    now: () => FIXED_NOW,
+    adapterDeps: drillAdapterDeps,
+    enrollmentProgressService: { markActive },
+    cohortRollupService: { recompute },
+    CohortRollup: S.CohortRollup,
+    DrillAttempt: S.DrillAttempt,
+  };
+
+  const sess = await startSession('stu-drill', assessmentId, deps);
+  assert.equal(sess.status, 'in_progress');
+  assert.equal(sess.engine.type, 'drill');
+  assert.ok(sess.engine.sessionId, 'sessionId should be set');
+  assert.ok(sess.engine.bundleId, 'bundleId should be set');
+  const sessionId = String(sess._id);
+
+  // 6. Simulate grading: update DrillAttempt
+  const rawDA = S.DrillAttempt._store.get(String(fakeDrillAttemptId));
+  Object.assign(rawDA, {
+    status: 'graded',
+    grade: {
+      overall_score: 78,
+      integrity_confidence: 'high',
+      rubric_breakdown: [
+        { dimension: 'correctness', score: 80, feedback: 'Good logic' },
+        { dimension: 'clarity', score: 75, feedback: 'Clear enough' },
+      ],
+      what_you_missed: 'Edge cases',
+    },
+  });
+  S.DrillAttempt._store.set(String(fakeDrillAttemptId), rawDA);
+
+  // 7. syncSession → graded
+  const synced = await syncSession(sessionId, {
+    ...deps,
+    AssessmentSession: S.AssessmentSession,
+    adapterDeps: { DrillAttempt: S.DrillAttempt },
+  });
+  assert.equal(synced.status, 'graded');
+  assert.equal(synced.result.score, 78);
+  assert.equal(synced.result.integrity, 'high');
+
+  // 8. Enrollment flipped to active
+  const enrollment = await S.InstitutionEnrollment.findOne({ userId: 'stu-drill', cohortId });
+  assert.equal(enrollment.status, 'active');
+
+  // 9. Rollup byCompetency has the drill dimensions (no ×10 scaling)
+  const rollup = await S.CohortRollup.findOne({ institutionId, cohortId, assessmentId });
+  assert.ok(rollup, 'rollup should exist');
+  assert.equal(rollup.counts.graded, 1);
+  assert.equal(rollup.avgScore, 78);
+  const byComp = rollup.byCompetency;
+  assert.ok(Array.isArray(byComp) && byComp.length === 2, 'byCompetency should have 2 drill dimensions');
+  const correctness = byComp.find((c) => c.name === 'correctness');
+  assert.ok(correctness, 'correctness dimension present');
+  assert.equal(correctness.avgScore, 80, 'correctness score is 80 (no scaling)');
+  const clarity = byComp.find((c) => c.name === 'clarity');
+  assert.ok(clarity, 'clarity dimension present');
+  assert.equal(clarity.avgScore, 75, 'clarity score is 75 (no scaling)');
+});
 
 test('race: second concurrent startSession returns existing session without calling adapter.start twice', async () => {
   const S = makeStores();

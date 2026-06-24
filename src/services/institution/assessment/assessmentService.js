@@ -29,6 +29,17 @@ async function createAssessment(scope, payload, deps) {
       throw new Error('BAD_CONFIG');
     }
   }
+  if (type === 'drill') {
+    const VALID_SUBTYPES = ['prompt', 'verify', 'decompose', 'refactor'];
+    const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
+    const dr = config && config.drill;
+    if (!dr || !VALID_SUBTYPES.includes(dr.drillSubtype)) {
+      throw new Error('BAD_CONFIG');
+    }
+    if (dr.roleTrack !== undefined && dr.roleTrack !== null && !VALID_ROLE_TRACKS.includes(dr.roleTrack)) {
+      throw new Error('BAD_CONFIG');
+    }
+  }
 
   // E3: window validation
   if (opensAt && closesAt && new Date(opensAt) >= new Date(closesAt)) {
@@ -63,6 +74,9 @@ async function releaseAssessment(scope, id, releasedBy, deps) {
   }
   // Capstone assessments must have a bundle generated before release
   if (a.type === 'capstone' && !(a.config && a.config.capstone && a.config.capstone.bundleId)) {
+    throw new Error('NO_BUNDLE');
+  }
+  if (a.type === 'drill' && !(a.config && a.config.drill && a.config.drill.bundleId)) {
     throw new Error('NO_BUNDLE');
   }
   a.status = 'released';

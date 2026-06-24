@@ -745,4 +745,5 @@ module.exports = {
   baselineFromDrills,
   requestDrill,
   _setWorkersModule,
+  safeBundleView,
 };

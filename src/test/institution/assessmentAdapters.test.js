@@ -137,3 +137,213 @@ test('capstone adapter.getStartMeta returns undefined timeBudgetSeconds when Cap
   const meta = await getAdapter('capstone').getStartMeta({ userId: 'u1', engine: { sessionId: 'missing' } }, deps);
   assert.strictEqual(meta.timeBudgetSeconds, undefined);
 });
+
+// ── interview.start — sourceId grounding ─────────────────────────────────────
+
+test('interview adapter.start with config.interview.sourceId (ready): passes context to startInterview', async () => {
+  let capturedOpts = null;
+
+  const deps = {
+    interviewService: {
+      startInterview: async (userId, opts) => {
+        capturedOpts = opts;
+        return { session: { _id: 'ivSess1' } };
+      },
+    },
+    AssessmentSource: {
+      findById: async (id) => ({
+        _id: id,
+        status: 'ready',
+        extractedText: 'Topic 1: Sorting. Topic 2: Searching.',
+      }),
+    },
+  };
+
+  const assessment = {
+    config: {
+      interview: {
+        interviewType: 'placement_technical',
+        targetRole: 'SDE',
+        difficulty: 'moderate',
+        sourceId: 'src42',
+      },
+    },
+  };
+
+  const out = await getAdapter('interview').start(assessment, 'u1', deps);
+  assert.ok(capturedOpts, 'startInterview must be called');
+  assert.ok(capturedOpts.context, 'context should be passed when sourceId set');
+  assert.ok(capturedOpts.context.includes('Sorting'), 'context should include extractedText');
+  assert.strictEqual(out.engine.type, 'interview');
+});
+
+test('interview adapter.start without sourceId: passes empty context to startInterview', async () => {
+  let capturedOpts = null;
+
+  const deps = {
+    interviewService: {
+      startInterview: async (userId, opts) => {
+        capturedOpts = opts;
+        return { session: { _id: 'ivSess2' } };
+      },
+    },
+  };
+
+  const assessment = {
+    config: {
+      interview: {
+        interviewType: 'placement_technical',
+        targetRole: 'SDE',
+        difficulty: 'moderate',
+        // no sourceId
+      },
+    },
+  };
+
+  await getAdapter('interview').start(assessment, 'u1', deps);
+  assert.ok(capturedOpts, 'startInterview must be called');
+  assert.strictEqual(capturedOpts.context, '', 'context should be empty string when no sourceId');
+});
+
+test('interview adapter.start with sourceId but source not found: context is empty string', async () => {
+  let capturedOpts = null;
+
+  const deps = {
+    interviewService: {
+      startInterview: async (userId, opts) => {
+        capturedOpts = opts;
+        return { session: { _id: 'ivSess3' } };
+      },
+    },
+    AssessmentSource: {
+      findById: async () => null,
+    },
+  };
+
+  const assessment = {
+    config: {
+      interview: {
+        interviewType: 'behavioral',
+        sourceId: 'missing-src',
+      },
+    },
+  };
+
+  await getAdapter('interview').start(assessment, 'u1', deps);
+  assert.strictEqual(capturedOpts.context, '', 'context should be empty when source not found');
+});
+
+test('interview adapter.start with sourceId but source not ready: context is empty string', async () => {
+  let capturedOpts = null;
+
+  const deps = {
+    interviewService: {
+      startInterview: async (userId, opts) => {
+        capturedOpts = opts;
+        return { session: { _id: 'ivSess4' } };
+      },
+    },
+    AssessmentSource: {
+      findById: async () => ({ _id: 'srcX', status: 'extracting', extractedText: 'some text' }),
+    },
+  };
+
+  const assessment = {
+    config: {
+      interview: { interviewType: 'behavioral', sourceId: 'srcX' },
+    },
+  };
+
+  await getAdapter('interview').start(assessment, 'u1', deps);
+  assert.strictEqual(capturedOpts.context, '', 'context should be empty when source not ready');
+});
+
+// ── drill adapter ─────────────────────────────────────────────────────────────
+
+test('drill adapter.start creates a DrillAttempt and returns engine {type,sessionId,bundleId}', async () => {
+  let created = null;
+  const deps = {
+    DrillAttempt: {
+      create: async (d) => { created = d; return { _id: 'da1', ...d }; },
+    },
+  };
+  const assessment = {
+    config: { drill: { bundleId: 'bundle1', drillSubtype: 'prompt' } },
+  };
+  const out = await getAdapter('drill').start(assessment, 'user1', deps);
+  assert.strictEqual(created.user_id, 'user1');
+  assert.strictEqual(String(created.bundle_id), 'bundle1');
+  assert.strictEqual(created.drill_subtype, 'prompt');
+  assert.strictEqual(created.status, 'in_progress');
+  assert.ok(created.started_at instanceof Date);
+  assert.strictEqual(out.engine.type, 'drill');
+  assert.strictEqual(String(out.engine.sessionId), 'da1');
+  assert.strictEqual(String(out.engine.bundleId), 'bundle1');
+});
+
+test('drill adapter.readResult returns done:false when attempt not found', async () => {
+  const deps = { DrillAttempt: { findById: async () => null } };
+  const r = await getAdapter('drill').readResult({ engine: { sessionId: 'da1' } }, deps);
+  assert.strictEqual(r.done, false);
+});
+
+test('drill adapter.readResult returns done:false when attempt not graded', async () => {
+  const deps = { DrillAttempt: { findById: async () => ({ status: 'in_progress', grade: null }) } };
+  const r = await getAdapter('drill').readResult({ engine: { sessionId: 'da1' } }, deps);
+  assert.strictEqual(r.done, false);
+});
+
+test('drill adapter.readResult returns done:true with score/integrity/raw when graded', async () => {
+  const deps = {
+    DrillAttempt: {
+      findById: async () => ({
+        status: 'graded',
+        grade: {
+          overall_score: 85,
+          integrity_confidence: 'high',
+          rubric_breakdown: [{ dimension: 'correctness', score: 90, feedback: 'good' }],
+          what_you_missed: 'Nothing',
+        },
+      }),
+    },
+  };
+  const r = await getAdapter('drill').readResult({ engine: { sessionId: 'da1' } }, deps);
+  assert.strictEqual(r.done, true);
+  assert.strictEqual(r.score, 85);
+  assert.strictEqual(r.integrity, 'high');
+  assert.ok(Array.isArray(r.raw.rubric_breakdown));
+  assert.strictEqual(r.raw.rubric_breakdown[0].dimension, 'correctness');
+  assert.strictEqual(r.raw.what_you_missed, 'Nothing');
+});
+
+test('drill adapter.getStartMeta returns safeBundleView from ArtifactBundle', async () => {
+  const fakeBundle = {
+    _id: 'bundle1',
+    brief: 'Build a CLI parser',
+    acceptance_criteria: ['must handle flags'],
+    drill_subtype: 'prompt',
+    time_budget_minutes: 45,
+    starter_repo: null,
+    difficulty: 'medium',
+    role_track: 'swe',
+    language: 'javascript',
+  };
+  const deps = {
+    ArtifactBundle: { findById: async () => fakeBundle },
+  };
+  const session = { engine: { sessionId: 'da1', bundleId: 'bundle1' } };
+  const meta = await getAdapter('drill').getStartMeta(session, deps);
+  assert.ok(meta, 'meta should be returned');
+  assert.strictEqual(meta.brief, 'Build a CLI parser');
+  assert.strictEqual(meta.drill_subtype, 'prompt');
+  assert.strictEqual(meta.time_budget_minutes, 45);
+});
+
+test('drill adapter.getStartMeta returns empty object when bundle not found', async () => {
+  const deps = {
+    ArtifactBundle: { findById: async () => null },
+  };
+  const session = { engine: { sessionId: 'da1', bundleId: 'missing' } };
+  const meta = await getAdapter('drill').getStartMeta(session, deps);
+  assert.deepStrictEqual(meta, {});
+});

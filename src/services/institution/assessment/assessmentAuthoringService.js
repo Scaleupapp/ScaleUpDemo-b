@@ -28,19 +28,38 @@
  *   InstitutionUser id; every D2C Quiz reader scopes by the authenticated
  *   User id, and the two id-spaces never collide — so the transient quiz is
  *   invisible to all D2C surfaces even before it is deleted.
+ *
+ * NOTE — sourceId grounding (2A feature):
+ *   When cfg.sourceId is set on a mcq/capstone/interview assessment, the
+ *   authoring service loads the AssessmentSource and uses its extractedText /
+ *   extractedTopics to ground question generation. This is entirely additive —
+ *   when sourceId is absent the service behaves identically to before.
  */
+
+const SOURCE_TEXT_LIMIT_CAPSTONE = 2000;
 
 function getModel(deps) { return (deps && deps.Assessment) || require('../../../models/Assessment'); }
 function getQuiz(deps) { return (deps && deps.Quiz) || require('../../../models/Quiz'); }
+function getContent(deps) { return (deps && deps.Content) || require('../../../models/Content'); }
 function getQuizGenerationService(deps) {
   return (deps && deps.quizGenerationService) || require('../../quizGenerationService');
+}
+function getAssessmentSource(deps) {
+  return (deps && deps.AssessmentSource) || require('../../../models/AssessmentSource');
 }
 
 /**
  * Author (generate) MCQ questions for an assessment.
  *
+ * If cfg.sourceId is set and the AssessmentSource is ready:
+ *   - Creates a TRANSIENT Content doc (contentType:'notes') with keyConcepts from topics
+ *   - Passes its _id as contentIds to generateQuiz → content-grounded MCQ
+ *   - Deletes the transient Content after (best-effort)
+ * Otherwise behaves as before (topic-based).
+ *
  * @param {string|ObjectId} assessmentId
- * @param {object}          deps          - injectable: { Assessment, Quiz, quizGenerationService }
+ * @param {object}          deps          - injectable: { Assessment, Quiz, Content,
+ *                                            AssessmentSource, quizGenerationService }
  * @returns {Promise<Assessment|null>}    - updated Assessment, or null if not mcq type
  */
 async function authorMcq(assessmentId, deps = {}) {
@@ -53,10 +72,40 @@ async function authorMcq(assessmentId, deps = {}) {
 
   const cfg = assessment.config && assessment.config.mcq ? assessment.config.mcq : {};
 
-  // Call quizGenerationService to produce questions via LLM.
+  // ── Grounding: load AssessmentSource when sourceId is configured ────────────
+  let transientContentId = null;
+  let contentIds = undefined;
+
+  if (cfg.sourceId) {
+    const AssessmentSource = getAssessmentSource(deps);
+    const source = await AssessmentSource.findById(cfg.sourceId);
+    if (source && source.status === 'ready') {
+      // Create a transient Content doc so generateQuiz can inject concepts.
+      // importance MUST be a Number (keyConceptSchema: {type:Number,min:1,max:5}).
+      const Content = getContent(deps);
+      const keyConcepts = (source.extractedTopics || []).map((t) => ({
+        concept: t.name,
+        description: '',
+        importance: 5,
+      }));
+      const transient = await Content.create({
+        title: assessment.title,
+        contentType: 'notes',
+        domain: 'general',
+        contentURL: 'transient',
+        ocrText: source.extractedText || '',
+        aiData: { keyConcepts },
+        status: 'draft',
+      });
+      transientContentId = transient._id;
+      contentIds = [transient._id];
+    }
+  }
+
+  // ── Call quizGenerationService, then delete transient Content in finally ────
   // suppressNotification + noObjective prevent D2C side-effects.
   const quizGenerationService = getQuizGenerationService(deps);
-  const quiz = await quizGenerationService.generateQuiz({
+  const generateArgs = {
     userId: assessment.createdBy,
     topic: cfg.topic || assessment.title,
     questionCount: cfg.totalQuestions || 10,
@@ -64,7 +113,26 @@ async function authorMcq(assessmentId, deps = {}) {
     isSkillAssessment: true,
     suppressNotification: true,
     noObjective: true,
-  });
+  };
+  if (contentIds) generateArgs.contentIds = contentIds;
+
+  let quiz;
+  try {
+    quiz = await quizGenerationService.generateQuiz(generateArgs);
+  } finally {
+    // Best-effort: delete the transient Content regardless of whether generateQuiz
+    // succeeds or throws — prevents orphaned docs in the event of LLM/network errors.
+    if (transientContentId) {
+      const Content = getContent(deps);
+      try {
+        if (typeof Content.findByIdAndDelete === 'function') {
+          await Content.findByIdAndDelete(transientContentId);
+        }
+      } catch (e) {
+        console.warn('[assessmentAuthoring] Could not delete transient Content:', e.message);
+      }
+    }
+  }
 
   // Freeze questions onto the assessment config so the release gate can check them.
   assessment.config.mcq.questions = quiz.questions;
@@ -92,10 +160,14 @@ async function authorMcq(assessmentId, deps = {}) {
  * then polls until the bundle is ready (status === 'ready') or failed/timeout.
  * Idempotent: if a valid active bundle is already set, returns the assessment as-is.
  *
+ * If cfg.sourceId is set and the AssessmentSource is ready:
+ *   - Uses source.extractedText (truncated to 2000 chars) as jobDescription
+ * Otherwise uses cfg.jobDescription || assessment.title as before.
+ *
  * @param {string|ObjectId} assessmentId
  * @param {object}          deps  - injectable: { Assessment, ArtifactBundle,
  *                                    CapstoneGenerationRequest, requestGeneration,
- *                                    sleep, pollMs, maxPolls }
+ *                                    sleep, pollMs, maxPolls, AssessmentSource }
  * @returns {Promise<Assessment|null>} updated Assessment, or null if not capstone type
  */
 async function authorCapstone(assessmentId, deps = {}) {
@@ -142,6 +214,17 @@ async function authorCapstone(assessmentId, deps = {}) {
   // language is required by the model; default by track when not explicitly provided.
   const language = cfg.language || LANG_BY_TRACK[roleTrack] || 'python';
 
+  // ── Grounding: use sourceId text as jobDescription if ready ─────────────────
+  let jobDescription = cfg.jobDescription || assessment.title;
+
+  if (cfg.sourceId) {
+    const AssessmentSource = getAssessmentSource(deps);
+    const source = await AssessmentSource.findById(cfg.sourceId);
+    if (source && source.status === 'ready' && source.extractedText) {
+      jobDescription = source.extractedText.slice(0, SOURCE_TEXT_LIMIT_CAPSTONE);
+    }
+  }
+
   // Request generation
   const reqDoc = await requestGenerationFn(
     {
@@ -149,7 +232,7 @@ async function authorCapstone(assessmentId, deps = {}) {
       roleTrack,
       difficulty,
       language,
-      jobDescription: cfg.jobDescription || assessment.title,
+      jobDescription,
       topicHint: cfg.topicHint,
     },
     deps
@@ -171,4 +254,53 @@ async function authorCapstone(assessmentId, deps = {}) {
   throw new Error('CAPSTONE_GEN_FAILED'); // timeout
 }
 
-module.exports = { authorMcq, authorCapstone };
+/**
+ * Author (select) a drill bundle for an assessment.
+ *
+ * Idempotent: if a valid active drill bundle is already set, returns the assessment as-is.
+ * Finds an active ArtifactBundle matching the drill config (roleTrack, drillSubtype, difficulty).
+ * If no bundle found, leaves bundleId unset; the release gate will catch it.
+ *
+ * @param {string|ObjectId} assessmentId
+ * @param {object}          deps  - injectable: { Assessment, ArtifactBundle }
+ * @returns {Promise<Assessment|null>} updated Assessment, or null if not drill type
+ */
+async function authorDrill(assessmentId, deps = {}) {
+  const Assessment = deps.Assessment || require('../../../models/Assessment');
+  const ArtifactBundle = deps.ArtifactBundle || require('../../../coding/models/artifactBundle.model');
+
+  const assessment = await Assessment.findById(assessmentId);
+  if (!assessment) throw new Error('NOT_FOUND');
+  if (assessment.type !== 'drill') return null;
+
+  const cfg = (assessment.config && assessment.config.drill) || {};
+
+  // Idempotent: valid bundle already set
+  if (cfg.bundleId) {
+    try {
+      const bundle = await ArtifactBundle.findById(cfg.bundleId);
+      if (bundle && bundle.status === 'active' && bundle.type === 'drill') {
+        return assessment;
+      }
+    } catch (_) { /* fall through */ }
+  }
+
+  // Select an active drill bundle matching the config
+  const bundle = await ArtifactBundle.findOne({
+    type: 'drill',
+    role_track: cfg.roleTrack || 'swe',
+    drill_subtype: cfg.drillSubtype,
+    difficulty: cfg.difficulty || 'medium',
+    status: 'active',
+  });
+
+  if (bundle) {
+    assessment.config.drill.bundleId = bundle._id;
+    assessment.markModified('config');
+    await assessment.save();
+  }
+  // If none found: leave bundleId unset; release gate will catch it.
+  return assessment;
+}
+
+module.exports = { authorMcq, authorCapstone, authorDrill };

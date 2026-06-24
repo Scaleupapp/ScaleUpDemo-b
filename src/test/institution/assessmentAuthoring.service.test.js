@@ -6,7 +6,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const { authorMcq, authorCapstone } = require('../../services/institution/assessment/assessmentAuthoringService');
+const { authorMcq, authorCapstone, authorDrill } = require('../../services/institution/assessment/assessmentAuthoringService');
 const { createAssessment } = require('../../services/institution/assessment/assessmentService');
 
 // ---------------------------------------------------------------------------
@@ -500,5 +500,406 @@ test('createAssessment rejects invalid roleTrack (BAD_CONFIG) — validates the 
       assert.strictEqual(err.message, 'BAD_CONFIG', 'invalid roleTrack must throw BAD_CONFIG');
       return true;
     }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// authorMcq — sourceId grounding
+// ---------------------------------------------------------------------------
+
+test('authorMcq with sourceId (ready): creates transient Content with keyConcepts, passes contentIds to generateQuiz, deletes transient Content', async () => {
+  const mongoose = require('mongoose');
+  const transientId = new mongoose.Types.ObjectId();
+  const assessment = makeAssessment({
+    config: {
+      mcq: {
+        topic: 'Data Structures',
+        totalQuestions: 5,
+        assessmentType: 'mixed',
+        questions: [],
+        sourceId: 'src1',
+      },
+    },
+  });
+
+  let contentCreated = null;
+  let contentDeletedId = null;
+  let generateQuizArgs = null;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    Content: {
+      create: async (doc) => {
+        contentCreated = doc;
+        return { _id: transientId, ...doc };
+      },
+      findByIdAndDelete: async (id) => {
+        contentDeletedId = String(id);
+      },
+    },
+    AssessmentSource: {
+      findById: async (id) => ({
+        _id: 'src1',
+        status: 'ready',
+        extractedText: 'Chapter 1: Linked Lists. Chapter 2: Trees.',
+        extractedTopics: [{ name: 'Linked Lists' }, { name: 'Trees' }, { name: 'Graphs' }],
+      }),
+    },
+    quizGenerationService: {
+      generateQuiz: async (args) => {
+        generateQuizArgs = args;
+        return makeQuiz();
+      },
+    },
+  };
+
+  const result = await authorMcq('assess1', deps);
+
+  // generateQuiz called with contentIds containing the transient Content _id
+  assert.ok(generateQuizArgs, 'generateQuiz must be called');
+  assert.ok(Array.isArray(generateQuizArgs.contentIds), 'contentIds should be an array');
+  assert.strictEqual(generateQuizArgs.contentIds.length, 1, 'contentIds should have 1 entry');
+  assert.strictEqual(String(generateQuizArgs.contentIds[0]), String(transientId));
+
+  // Transient Content created with correct structure
+  assert.ok(contentCreated, 'Content.create should have been called');
+  assert.strictEqual(contentCreated.contentType, 'notes');
+  assert.strictEqual(contentCreated.ocrText, 'Chapter 1: Linked Lists. Chapter 2: Trees.');
+  assert.deepStrictEqual(contentCreated.aiData.keyConcepts, [
+    { concept: 'Linked Lists', description: '', importance: 5 },
+    { concept: 'Trees', description: '', importance: 5 },
+    { concept: 'Graphs', description: '', importance: 5 },
+  ]);
+
+  // Transient Content deleted after
+  assert.strictEqual(contentDeletedId, String(transientId), 'transient Content must be deleted');
+
+  // Assessment updated with quiz questions
+  assert.ok(result, 'should return assessment');
+  assert.deepStrictEqual(result.config.mcq.questions, [{ questionText: 'a' }, { questionText: 'b' }]);
+});
+
+test('authorMcq with sourceId but source not ready: falls back to topic-based (no contentIds)', async () => {
+  const assessment = makeAssessment({
+    config: {
+      mcq: { topic: 'Algorithms', totalQuestions: 5, assessmentType: 'mixed', questions: [], sourceId: 'src1' },
+    },
+  });
+
+  let generateQuizArgs = null;
+  let contentCreated = false;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    Content: {
+      create: async () => { contentCreated = true; return { _id: 'tid1' }; },
+      findByIdAndDelete: async () => {},
+    },
+    AssessmentSource: {
+      findById: async () => ({ _id: 'src1', status: 'extracting' }), // not ready
+    },
+    quizGenerationService: {
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+    },
+  };
+
+  await authorMcq('assess1', deps);
+
+  // Content should NOT have been created (no grounding)
+  assert.strictEqual(contentCreated, false, 'transient Content must NOT be created when source not ready');
+  // contentIds should be undefined (not passed)
+  assert.strictEqual(generateQuizArgs.contentIds, undefined, 'contentIds should be absent when source not ready');
+});
+
+test('authorMcq with sourceId but source not found: falls back to topic-based', async () => {
+  const assessment = makeAssessment({
+    config: {
+      mcq: { topic: 'OS', totalQuestions: 5, assessmentType: 'mixed', questions: [], sourceId: 'missing' },
+    },
+  });
+
+  let generateQuizArgs = null;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    Content: { create: async () => { throw new Error('should not be called'); }, findByIdAndDelete: async () => {} },
+    AssessmentSource: { findById: async () => null },
+    quizGenerationService: {
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+    },
+  };
+
+  await authorMcq('assess1', deps);
+  assert.strictEqual(generateQuizArgs.contentIds, undefined);
+});
+
+test('authorMcq without sourceId: behaves as before (no Content created, no contentIds)', async () => {
+  const assessment = makeAssessment(); // no sourceId in config.mcq
+  let contentCreated = false;
+  let generateQuizArgs = null;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    Content: { create: async () => { contentCreated = true; return { _id: 'tid' }; }, findByIdAndDelete: async () => {} },
+    AssessmentSource: { findById: async () => { throw new Error('should not be called'); } },
+    quizGenerationService: {
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+    },
+  };
+
+  await authorMcq('assess1', deps);
+  assert.strictEqual(contentCreated, false, 'Content.create must NOT be called when no sourceId');
+  assert.strictEqual(generateQuizArgs.contentIds, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// authorCapstone — sourceId grounding
+// ---------------------------------------------------------------------------
+
+test('authorCapstone with sourceId (ready): uses source extractedText (truncated 2000) as jobDescription', async () => {
+  const longText = 'A'.repeat(3000);
+  const assessment = makeCapstoneAssessmentWithConfig({ sourceId: 'src1' });
+  let capturedJobDescription = null;
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    AssessmentSource: {
+      findById: async () => ({
+        _id: 'src1',
+        status: 'ready',
+        extractedText: longText,
+      }),
+    },
+    requestGeneration: async (params) => {
+      capturedJobDescription = params.jobDescription;
+      return { _id: 'req1' };
+    },
+  });
+
+  await authorCapstone('assess-cap-1', deps);
+
+  assert.ok(capturedJobDescription, 'jobDescription must be set');
+  assert.strictEqual(capturedJobDescription.length, 2000, 'jobDescription should be truncated to 2000 chars');
+  assert.ok(capturedJobDescription.startsWith('A'), 'should be the source text');
+});
+
+test('authorCapstone with sourceId but source not ready: falls back to cfg.jobDescription', async () => {
+  const assessment = makeCapstoneAssessmentWithConfig({
+    sourceId: 'src1',
+    jobDescription: 'Build a REST API',
+  });
+  let capturedJobDescription = null;
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    AssessmentSource: {
+      findById: async () => ({ _id: 'src1', status: 'extracting' }), // not ready
+    },
+    requestGeneration: async (params) => {
+      capturedJobDescription = params.jobDescription;
+      return { _id: 'req1' };
+    },
+  });
+
+  await authorCapstone('assess-cap-1', deps);
+  assert.strictEqual(capturedJobDescription, 'Build a REST API', 'should fall back to cfg.jobDescription');
+});
+
+test('authorCapstone without sourceId: uses cfg.jobDescription as before', async () => {
+  const assessment = makeCapstoneAssessmentWithConfig({ jobDescription: 'Existing JD' });
+  let capturedJobDescription = null;
+
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    requestGeneration: async (params) => {
+      capturedJobDescription = params.jobDescription;
+      return { _id: 'req1' };
+    },
+  });
+
+  await authorCapstone('assess-cap-1', deps);
+  assert.strictEqual(capturedJobDescription, 'Existing JD');
+});
+
+// ---------------------------------------------------------------------------
+// authorDrill tests
+// ---------------------------------------------------------------------------
+
+function makeDrillAssessment(overrides = {}) {
+  return {
+    _id: 'assess-drill-1',
+    type: 'drill',
+    title: 'Prompt Engineering Drill',
+    createdBy: 'user-drill-1',
+    config: {
+      drill: {
+        drillSubtype: 'prompt',
+        roleTrack: 'swe',
+        difficulty: 'medium',
+      },
+    },
+    markModified: function () {},
+    save: async function () { return this; },
+    ...overrides,
+  };
+}
+
+test('authorDrill selects an active drill bundle matching config and saves bundleId', async () => {
+  const assessment = makeDrillAssessment();
+  let markModifiedCalled = false;
+  let savedCalled = false;
+  assessment.markModified = () => { markModifiedCalled = true; };
+  assessment.save = async function () { savedCalled = true; return this; };
+
+  const fakeBundle = { _id: 'bundle-d1', type: 'drill', status: 'active' };
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => null, // no pre-existing bundleId
+      findOne: async () => fakeBundle,
+    },
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+  assert.ok(result, 'should return assessment');
+  assert.strictEqual(String(result.config.drill.bundleId), 'bundle-d1');
+  assert.strictEqual(markModifiedCalled, true);
+  assert.strictEqual(savedCalled, true);
+});
+
+test('authorDrill is idempotent when bundleId already set and bundle is active+drill', async () => {
+  const assessment = makeDrillAssessment();
+  assessment.config.drill.bundleId = 'existing-bundle';
+  let findOneCalled = false;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => ({ _id: 'existing-bundle', status: 'active', type: 'drill' }),
+      findOne: async () => { findOneCalled = true; return null; },
+    },
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+  assert.ok(result);
+  assert.strictEqual(findOneCalled, false, 'findOne must NOT be called when bundle already active');
+});
+
+test('authorDrill leaves bundleId unset when no active bundle found', async () => {
+  const assessment = makeDrillAssessment();
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => null,
+      findOne: async () => null, // no matching bundle
+    },
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+  assert.ok(result, 'should return assessment even if no bundle found');
+  assert.ok(!result.config.drill.bundleId, 'bundleId should remain unset');
+});
+
+test('authorDrill returns null for non-drill type', async () => {
+  const assessment = makeDrillAssessment({ type: 'capstone' });
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: { findById: async () => null, findOne: async () => null },
+  };
+  const result = await authorDrill('assess-drill-1', deps);
+  assert.strictEqual(result, null);
+});
+
+test('authorDrill throws NOT_FOUND when assessment not found', async () => {
+  const deps = {
+    Assessment: { findById: async () => null },
+    ArtifactBundle: { findById: async () => null, findOne: async () => null },
+  };
+  await assert.rejects(
+    () => authorDrill('missing-id', deps),
+    (err) => { assert.strictEqual(err.message, 'NOT_FOUND'); return true; }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// C1 anti-regression: real Content model validates the transient doc shape
+//
+// Rationale: stub-based tests (above) verified the service flow but could not
+// catch a schema mismatch — the stub's Content.create() accepted anything.
+// This test runs the REAL Content model's validateSync() on the exact document
+// shape that authorMcq builds, ensuring importance is a Number not a String.
+// If anyone accidentally reverts importance back to 'high' (string) this test
+// will catch it immediately, before the silent fire-and-forget failure path.
+// ---------------------------------------------------------------------------
+
+test('C1 anti-regression: transient Content doc shape passes real Content.validateSync()', () => {
+  const Content = require('../../models/Content');
+
+  // Mirror the exact transient doc constructed by authorMcq when a ready source
+  // has extractedTopics — including the importance value that must be numeric.
+  const extractedTopics = [{ name: 'Linked Lists' }, { name: 'Trees' }];
+  const keyConcepts = extractedTopics.map((t) => ({
+    concept: t.name,
+    description: '',
+    importance: 5, // MUST be Number — schema: {type:Number,min:1,max:5}
+  }));
+
+  const doc = new Content({
+    title: 'Transient Assessment Source: test assessment',
+    contentType: 'notes',
+    domain: 'general',
+    contentURL: 'transient',
+    ocrText: 'Sample extracted text.',
+    aiData: { keyConcepts },
+    status: 'draft',
+  });
+
+  const validationError = doc.validateSync();
+
+  assert.strictEqual(
+    validationError,
+    undefined,
+    `Real Content.validateSync() should return no error for transient doc shape, but got: ${validationError}`
+  );
+
+  // Confirm keyConcepts were set correctly
+  assert.strictEqual(doc.aiData.keyConcepts.length, 2);
+  assert.strictEqual(typeof doc.aiData.keyConcepts[0].importance, 'number',
+    'importance must be stored as a number');
+  assert.strictEqual(doc.aiData.keyConcepts[0].importance, 5);
+});
+
+test('C1 anti-regression: string importance DOES fail Content.validateSync() (confirms guard is needed)', () => {
+  const Content = require('../../models/Content');
+
+  // Demonstrate that the old code (importance: 'high') would have thrown.
+  const doc = new Content({
+    title: 'Bad transient doc',
+    contentType: 'notes',
+    domain: 'general',
+    contentURL: 'transient',
+    ocrText: '',
+    aiData: {
+      keyConcepts: [{ concept: 'test', description: '', importance: 'high' }], // BAD: string not number
+    },
+    status: 'draft',
+  });
+
+  const validationError = doc.validateSync();
+
+  assert.ok(
+    validationError !== undefined,
+    'Content.validateSync() MUST return a ValidationError when importance is a string'
+  );
+  assert.ok(
+    validationError.errors && (
+      validationError.errors['aiData.keyConcepts.0.importance'] ||
+      Object.keys(validationError.errors).some((k) => k.includes('importance'))
+    ),
+    `Expected a validation error on importance field; got errors: ${JSON.stringify(Object.keys(validationError.errors))}`
   );
 });

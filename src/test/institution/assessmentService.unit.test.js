@@ -301,3 +301,97 @@ test('createAssessment passes through when opensAt < closesAt', async () => {
   assert.strictEqual(result._id, 'ok1');
   assert.ok(created);
 });
+
+// ---------------------------------------------------------------------------
+// createAssessment — drill type validation
+// ---------------------------------------------------------------------------
+
+test('createAssessment throws BAD_CONFIG for drill without drillSubtype', async () => {
+  const deps = {
+    Assessment: { create: async () => ({}) },
+    InstitutionCohort: { findOne: async () => ({ _id: 'c1' }) },
+  };
+  await assert.rejects(
+    () => createAssessment(SCOPE, {
+      cohortId: 'c1', type: 'drill', title: 'Drill T',
+      config: { drill: { roleTrack: 'swe' } }, // missing drillSubtype
+    }, deps),
+    /BAD_CONFIG/
+  );
+});
+
+test('createAssessment throws BAD_CONFIG for drill with invalid drillSubtype', async () => {
+  const deps = {
+    Assessment: { create: async () => ({}) },
+    InstitutionCohort: { findOne: async () => ({ _id: 'c1' }) },
+  };
+  await assert.rejects(
+    () => createAssessment(SCOPE, {
+      cohortId: 'c1', type: 'drill', title: 'Drill T',
+      config: { drill: { drillSubtype: 'essay' } }, // invalid
+    }, deps),
+    /BAD_CONFIG/
+  );
+});
+
+test('createAssessment throws BAD_CONFIG for drill with invalid roleTrack', async () => {
+  const deps = {
+    Assessment: { create: async () => ({}) },
+    InstitutionCohort: { findOne: async () => ({ _id: 'c1' }) },
+  };
+  await assert.rejects(
+    () => createAssessment(SCOPE, {
+      cohortId: 'c1', type: 'drill', title: 'Drill T',
+      config: { drill: { drillSubtype: 'prompt', roleTrack: 'backend_engineer' } },
+    }, deps),
+    /BAD_CONFIG/
+  );
+});
+
+test('createAssessment succeeds for drill with valid drillSubtype (no roleTrack)', async () => {
+  let created = null;
+  const deps = {
+    Assessment: { create: async (d) => { created = d; return { _id: 'dr1', ...d }; } },
+    InstitutionCohort: { findOne: async () => ({ _id: 'c1' }) },
+  };
+  const result = await createAssessment(SCOPE, {
+    cohortId: 'c1', type: 'drill', title: 'Prompt Drill',
+    config: { drill: { drillSubtype: 'prompt' } },
+  }, deps);
+  assert.strictEqual(result._id, 'dr1');
+  assert.ok(created);
+});
+
+test('createAssessment succeeds for drill with valid drillSubtype + valid roleTrack', async () => {
+  let created = null;
+  const deps = {
+    Assessment: { create: async (d) => { created = d; return { _id: 'dr2', ...d }; } },
+    InstitutionCohort: { findOne: async () => ({ _id: 'c1' }) },
+  };
+  const result = await createAssessment(SCOPE, {
+    cohortId: 'c1', type: 'drill', title: 'DS Drill',
+    config: { drill: { drillSubtype: 'verify', roleTrack: 'ds' } },
+  }, deps);
+  assert.strictEqual(result._id, 'dr2');
+  assert.ok(created);
+});
+
+// ---------------------------------------------------------------------------
+// releaseAssessment — drill NO_BUNDLE gate
+// ---------------------------------------------------------------------------
+
+test('releaseAssessment throws NO_BUNDLE for drill with no bundleId', async () => {
+  const doc = makeAssessmentDoc({ type: 'drill', config: { drill: { drillSubtype: 'prompt' } } });
+  const deps = { Assessment: { findOne: async () => doc } };
+  await assert.rejects(
+    () => releaseAssessment(SCOPE, 'a1', 'user1', deps),
+    (err) => { assert.strictEqual(err.message, 'NO_BUNDLE'); return true; }
+  );
+});
+
+test('releaseAssessment succeeds for drill with bundleId set', async () => {
+  const doc = makeAssessmentDoc({ type: 'drill', config: { drill: { bundleId: 'b1', drillSubtype: 'prompt' } } });
+  const deps = { Assessment: { findOne: async () => doc } };
+  const result = await releaseAssessment(SCOPE, 'a1', 'user1', deps);
+  assert.strictEqual(result.status, 'released');
+});
