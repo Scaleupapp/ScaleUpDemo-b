@@ -6,7 +6,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const { authorMcq, authorCapstone } = require('../../services/institution/assessment/assessmentAuthoringService');
+const { authorMcq, authorCapstone, authorDrill } = require('../../services/institution/assessment/assessmentAuthoringService');
 const { createAssessment } = require('../../services/institution/assessment/assessmentService');
 
 // ---------------------------------------------------------------------------
@@ -723,4 +723,104 @@ test('authorCapstone without sourceId: uses cfg.jobDescription as before', async
 
   await authorCapstone('assess-cap-1', deps);
   assert.strictEqual(capturedJobDescription, 'Existing JD');
+});
+
+// ---------------------------------------------------------------------------
+// authorDrill tests
+// ---------------------------------------------------------------------------
+
+function makeDrillAssessment(overrides = {}) {
+  return {
+    _id: 'assess-drill-1',
+    type: 'drill',
+    title: 'Prompt Engineering Drill',
+    createdBy: 'user-drill-1',
+    config: {
+      drill: {
+        drillSubtype: 'prompt',
+        roleTrack: 'swe',
+        difficulty: 'medium',
+      },
+    },
+    markModified: function () {},
+    save: async function () { return this; },
+    ...overrides,
+  };
+}
+
+test('authorDrill selects an active drill bundle matching config and saves bundleId', async () => {
+  const assessment = makeDrillAssessment();
+  let markModifiedCalled = false;
+  let savedCalled = false;
+  assessment.markModified = () => { markModifiedCalled = true; };
+  assessment.save = async function () { savedCalled = true; return this; };
+
+  const fakeBundle = { _id: 'bundle-d1', type: 'drill', status: 'active' };
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => null, // no pre-existing bundleId
+      findOne: async () => fakeBundle,
+    },
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+  assert.ok(result, 'should return assessment');
+  assert.strictEqual(String(result.config.drill.bundleId), 'bundle-d1');
+  assert.strictEqual(markModifiedCalled, true);
+  assert.strictEqual(savedCalled, true);
+});
+
+test('authorDrill is idempotent when bundleId already set and bundle is active+drill', async () => {
+  const assessment = makeDrillAssessment();
+  assessment.config.drill.bundleId = 'existing-bundle';
+  let findOneCalled = false;
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => ({ _id: 'existing-bundle', status: 'active', type: 'drill' }),
+      findOne: async () => { findOneCalled = true; return null; },
+    },
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+  assert.ok(result);
+  assert.strictEqual(findOneCalled, false, 'findOne must NOT be called when bundle already active');
+});
+
+test('authorDrill leaves bundleId unset when no active bundle found', async () => {
+  const assessment = makeDrillAssessment();
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => null,
+      findOne: async () => null, // no matching bundle
+    },
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+  assert.ok(result, 'should return assessment even if no bundle found');
+  assert.ok(!result.config.drill.bundleId, 'bundleId should remain unset');
+});
+
+test('authorDrill returns null for non-drill type', async () => {
+  const assessment = makeDrillAssessment({ type: 'capstone' });
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: { findById: async () => null, findOne: async () => null },
+  };
+  const result = await authorDrill('assess-drill-1', deps);
+  assert.strictEqual(result, null);
+});
+
+test('authorDrill throws NOT_FOUND when assessment not found', async () => {
+  const deps = {
+    Assessment: { findById: async () => null },
+    ArtifactBundle: { findById: async () => null, findOne: async () => null },
+  };
+  await assert.rejects(
+    () => authorDrill('missing-id', deps),
+    (err) => { assert.strictEqual(err.message, 'NOT_FOUND'); return true; }
+  );
 });

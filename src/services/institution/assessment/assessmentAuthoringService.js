@@ -249,4 +249,53 @@ async function authorCapstone(assessmentId, deps = {}) {
   throw new Error('CAPSTONE_GEN_FAILED'); // timeout
 }
 
-module.exports = { authorMcq, authorCapstone };
+/**
+ * Author (select) a drill bundle for an assessment.
+ *
+ * Idempotent: if a valid active drill bundle is already set, returns the assessment as-is.
+ * Finds an active ArtifactBundle matching the drill config (roleTrack, drillSubtype, difficulty).
+ * If no bundle found, leaves bundleId unset; the release gate will catch it.
+ *
+ * @param {string|ObjectId} assessmentId
+ * @param {object}          deps  - injectable: { Assessment, ArtifactBundle }
+ * @returns {Promise<Assessment|null>} updated Assessment, or null if not drill type
+ */
+async function authorDrill(assessmentId, deps = {}) {
+  const Assessment = deps.Assessment || require('../../../models/Assessment');
+  const ArtifactBundle = deps.ArtifactBundle || require('../../../coding/models/artifactBundle.model');
+
+  const assessment = await Assessment.findById(assessmentId);
+  if (!assessment) throw new Error('NOT_FOUND');
+  if (assessment.type !== 'drill') return null;
+
+  const cfg = (assessment.config && assessment.config.drill) || {};
+
+  // Idempotent: valid bundle already set
+  if (cfg.bundleId) {
+    try {
+      const bundle = await ArtifactBundle.findById(cfg.bundleId);
+      if (bundle && bundle.status === 'active' && bundle.type === 'drill') {
+        return assessment;
+      }
+    } catch (_) { /* fall through */ }
+  }
+
+  // Select an active drill bundle matching the config
+  const bundle = await ArtifactBundle.findOne({
+    type: 'drill',
+    role_track: cfg.roleTrack || 'swe',
+    drill_subtype: cfg.drillSubtype,
+    difficulty: cfg.difficulty || 'medium',
+    status: 'active',
+  });
+
+  if (bundle) {
+    assessment.config.drill.bundleId = bundle._id;
+    assessment.markModified('config');
+    await assessment.save();
+  }
+  // If none found: leave bundleId unset; release gate will catch it.
+  return assessment;
+}
+
+module.exports = { authorMcq, authorCapstone, authorDrill };

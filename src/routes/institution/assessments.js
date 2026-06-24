@@ -26,6 +26,9 @@ router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 
     if (a.type === 'capstone') {
       authoring().authorCapstone(a._id).catch((e) => console.warn('[assessments:authorCapstone]', e.message));
     }
+    if (a.type === 'drill') {
+      authoring().authorDrill(a._id).catch((e) => console.warn('[assessments:authorDrill]', e.message));
+    }
     return res.status(201).json({ success: true, data: a });
   } catch (err) {
     // Sub-feature E: validation error codes

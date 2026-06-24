@@ -273,6 +273,45 @@ test('recompute byCompetency averages correctly for capstone engine', async () =
   assert.strictEqual(comm.n, 2);
 });
 
+test('recompute byCompetency averages correctly for drill engine (rubric_breakdown)', async () => {
+  const sessions = [
+    makeSession('graded', 80, 'high', 'drill', {
+      rubric_breakdown: [
+        { dimension: 'correctness', score: 85, feedback: 'good' },
+        { dimension: 'clarity', score: 70, feedback: 'ok' },
+      ],
+    }),
+    makeSession('graded', 75, 'high', 'drill', {
+      rubric_breakdown: [
+        { dimension: 'correctness', score: 75, feedback: 'fair' },
+        { dimension: 'clarity', score: 80, feedback: 'great' },
+      ],
+    }),
+  ];
+
+  const deps = {
+    AssessmentSession: { find: async () => sessions },
+    CohortRollup: { findOneAndUpdate: async () => ({}) },
+    InstitutionEnrollment: makeEnrollmentStub(2),
+    now: () => new Date(),
+  };
+
+  const doc = await recompute('inst1', 'cohort1', 'assess1', deps);
+
+  assert.ok(Array.isArray(doc.byCompetency));
+  const correctness = doc.byCompetency.find((e) => e.name === 'correctness');
+  assert.ok(correctness, 'correctness dimension should exist');
+  // (85 + 75) / 2 = 80 — NO ×10 scaling (drill scores are already 0-100)
+  assert.strictEqual(correctness.avgScore, 80, 'correctness avg should be 80');
+  assert.strictEqual(correctness.n, 2);
+
+  const clarity = doc.byCompetency.find((e) => e.name === 'clarity');
+  assert.ok(clarity, 'clarity dimension should exist');
+  // (70 + 80) / 2 = 75
+  assert.strictEqual(clarity.avgScore, 75, 'clarity avg should be 75');
+  assert.strictEqual(clarity.n, 2);
+});
+
 test('recompute byCompetency skips sessions with missing raw', async () => {
   const sessions = [
     // session with raw

@@ -36,6 +36,16 @@ function computeByCompetency(engineType, gradedSessions) {
         acc[dim].sum += val * 10; // scale 0-10 → 0-100
         acc[dim].n += 1;
       }
+    } else if (engineType === 'drill') {
+      const breakdown = raw.rubric_breakdown;
+      if (!Array.isArray(breakdown)) continue;
+      for (const entry of breakdown) {
+        if (!entry || typeof entry.score !== 'number') continue;
+        const name = entry.dimension || 'unknown';
+        if (!acc[name]) acc[name] = { sum: 0, n: 0 };
+        acc[name].sum += entry.score;
+        acc[name].n += 1;
+      }
     }
   }
   return Object.entries(acc).map(([name, { sum, n }]) => ({ name, avgScore: Math.round(sum / n), n }));

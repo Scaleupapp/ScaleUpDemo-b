@@ -113,7 +113,44 @@ const interview = {
   },
 };
 
-const ADAPTERS = { mcq, capstone, interview };
+const drill = {
+  async start(assessment, userId, deps = {}) {
+    const DrillAttempt = deps.DrillAttempt || require('../../../coding/models/drillAttempt.model');
+    const cfg = (assessment.config && assessment.config.drill) || {};
+    const bundleId = cfg.bundleId;
+    const attempt = await DrillAttempt.create({
+      user_id: userId,
+      bundle_id: bundleId,
+      drill_subtype: cfg.drillSubtype,
+      status: 'in_progress',
+      started_at: new Date(),
+    });
+    return { engine: { type: 'drill', sessionId: attempt._id, bundleId } };
+  },
+  async readResult(session, deps = {}) {
+    const DrillAttempt = deps.DrillAttempt || require('../../../coding/models/drillAttempt.model');
+    const attempt = await DrillAttempt.findById(session.engine.sessionId);
+    if (!attempt || attempt.status !== 'graded') return { done: false };
+    return {
+      done: true,
+      score: attempt.grade.overall_score,
+      integrity: attempt.grade.integrity_confidence,
+      raw: {
+        rubric_breakdown: attempt.grade.rubric_breakdown,
+        what_you_missed: attempt.grade.what_you_missed,
+      },
+    };
+  },
+  async getStartMeta(session, deps = {}) {
+    const ArtifactBundle = deps.ArtifactBundle || require('../../../coding/models/artifactBundle.model');
+    const { safeBundleView } = require('../../../coding/controllers/drills.controller');
+    const bundle = await ArtifactBundle.findById(session.engine.bundleId);
+    if (!bundle) return {};
+    return safeBundleView(bundle, session.engine.sessionId);
+  },
+};
+
+const ADAPTERS = { mcq, capstone, interview, drill };
 
 function getAdapter(type) {
   const a = ADAPTERS[type];
