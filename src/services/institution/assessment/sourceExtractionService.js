@@ -5,19 +5,80 @@
  * Extracts text + syllabus topics from an uploaded buffer.
  *
  * Extraction logic:
- *   - application/pdf  → pdf-parse (deps.pdfParse injectable)
- *   - image/*          → GPT-4o vision OCR (deps.visionOcr injectable)
- *   - anything else    → buffer.toString('utf8')
+ *   - application/pdf        → pdf-parse; if near-empty (<= SCANNED_PDF_THRESHOLD chars
+ *                              of trimmed text), falls back to fileExtract (OpenAI Files API)
+ *   - image/*                → GPT-4o vision OCR (deps.visionOcr injectable)
+ *   - application/vnd.openxmlformats-officedocument.wordprocessingml.document (docx)
+ *   - application/vnd.openxmlformats-officedocument.presentationml.presentation (pptx)
+ *                            → fileExtract (OpenAI Files API — deps.fileExtract injectable)
+ *   - anything else          → buffer.toString('utf8')
  *
  * Topic derivation:
  *   - Calls deps.extractTopics (default: asks GPT-4o for 5-15 topic names)
  *   - Input text is truncated to 8000 chars before sending to the LLM.
  *
- * All external I/O (pdfParse, visionOcr, extractTopics, AssessmentSource,
+ * All external I/O (pdfParse, visionOcr, fileExtract, extractTopics, AssessmentSource,
  * downloadBuffer) is injectable so tests run without real I/O.
  */
 
 const MAX_TOPIC_TEXT = 8000;
+
+// MIME types for Office documents that use the OpenAI Files API path
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+// Scanned PDFs produce nearly-empty text from pdf-parse; fall back at this threshold
+const SCANNED_PDF_THRESHOLD = 50;
+
+// ── Default: OpenAI Files API extraction (docx, pptx, scanned PDFs) ─────────
+
+/**
+ * Upload a buffer to the OpenAI Files API and ask GPT-4o to extract its text.
+ * Pattern mirrors src/workers/ocrProcessor.js lines ~95-116.
+ *
+ * @param {Buffer} buffer
+ * @param {string} filename - used as the file name when uploading
+ * @returns {Promise<string>}
+ */
+async function defaultFileExtract(buffer, filename) {
+  const { Readable } = require('stream');
+  const openai = require('../../../config/openai');
+
+  // openai.files.create requires a ReadableStream (Node Readable) plus name/type hints
+  const stream = Readable.from(buffer);
+  stream.path = filename || 'document';
+
+  const uploaded = await openai.files.create({
+    file: stream,
+    purpose: 'assistants',
+  });
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an OCR assistant. Extract ALL text from the provided document. Preserve structure, headings, bullet points. For handwritten text, do your best to accurately transcribe. Return only the extracted text.',
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'file', file: { file_id: uploaded.id } },
+            { type: 'text', text: 'Extract all text from this document.' },
+          ],
+        },
+      ],
+      max_tokens: 4096,
+      temperature: 0.1,
+    });
+    return response.choices[0]?.message?.content || '';
+  } finally {
+    // Clean up the uploaded file; ignore errors (best-effort)
+    try { await openai.files.del(uploaded.id); } catch (_) {}
+  }
+}
 
 // ── Default: GPT-4o vision OCR ──────────────────────────────────────────────
 
@@ -75,12 +136,13 @@ async function defaultExtractTopics(text) {
  * Extract text and topics from a file buffer.
  *
  * @param {{ buffer: Buffer, mimeType: string, filename: string }} file
- * @param {object} deps - injectable { pdfParse, visionOcr, extractTopics }
+ * @param {object} deps - injectable { pdfParse, visionOcr, fileExtract, extractTopics }
  * @returns {Promise<{ text: string, topics: Array<{name:string}> }>}
  */
 async function extractFromBuffer({ buffer, mimeType, filename }, deps = {}) {
   const pdfParse = deps.pdfParse || null;
   const visionOcr = deps.visionOcr || defaultVisionOcr;
+  const fileExtract = deps.fileExtract || defaultFileExtract;
   const extractTopics = deps.extractTopics || defaultExtractTopics;
 
   let text = '';
@@ -89,6 +151,14 @@ async function extractFromBuffer({ buffer, mimeType, filename }, deps = {}) {
     const parseFn = pdfParse || require('pdf-parse');
     const data = await parseFn(buffer);
     text = data.text || '';
+    // Scanned PDF: pdf-parse returns near-empty text (image-only pages).
+    // Fall back to the OpenAI Files API extraction path so we don't lose content.
+    if (text.trim().length <= SCANNED_PDF_THRESHOLD) {
+      text = await fileExtract(buffer, filename);
+    }
+  } else if (mimeType === DOCX_MIME || mimeType === PPTX_MIME) {
+    // Office documents: upload to OpenAI Files API and let GPT-4o extract text
+    text = await fileExtract(buffer, filename);
   } else if (mimeType.startsWith('image/')) {
     text = await visionOcr(buffer, mimeType, filename);
   } else {

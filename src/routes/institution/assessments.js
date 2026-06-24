@@ -338,7 +338,22 @@ router.get('/cohorts/:cohortId/assessment-suggestions', institutionAuth, async (
       template = typeof tplQuery.lean === 'function' ? await tplQuery.lean() : await tplQuery;
     }
 
-    const result = getSuggestionService().buildSuggestions(cohort, template);
+    const svc = getSuggestionService();
+    const result = svc.buildSuggestions(cohort, template);
+
+    // Best-effort LLM enrichment: re-order and sharpen reasons.
+    // Falls back to rule-based order on any failure (never throws to the client).
+    if (result.suggestions && result.suggestions.length > 0 && svc.rankSuggestions) {
+      try {
+        const rankDeps = (router._deps && router._deps.rankDeps) || {};
+        result.suggestions = await svc.rankSuggestions(
+          result.suggestions, cohort, template, rankDeps
+        );
+      } catch (_rankErr) {
+        // rankSuggestions has its own internal try/catch, so this is a safety net
+      }
+    }
+
     return res.status(200).json({ success: true, data: result });
   } catch (err) {
     console.error('[institution/assessments:suggestions]', err.message);
