@@ -43,7 +43,7 @@ router.post(
 
       // Compute available seats — always scoped to the institution from the token
       const scopeFilter = institutionScope(req);
-      const institution = await Institution.findOne(scopeFilter);
+      const institution = await Institution.findById(req.institution.institutionId);
       if (!institution) {
         return res.status(404).json({ success: false, message: 'Institution not found' });
       }
@@ -158,7 +158,7 @@ router.post(
       });
 
       // Get institution name for invite messaging
-      const institution = await Institution.findOne(institutionScope(req));
+      const institution = await Institution.findById(req.institution.institutionId);
       const institutionName = institution ? institution.name : 'Your Institution';
       const baseLink = process.env.STUDENT_APP_JOIN_URL || 'https://scaleupapp.club/join';
 

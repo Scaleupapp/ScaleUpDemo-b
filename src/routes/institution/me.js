@@ -29,7 +29,7 @@ router.get('/', institutionAuth, async (req, res) => {
       InstitutionUser.findById(req.institution.institutionUserId)
         .select('name email role scope')
         .lean(),
-      Institution.findOne(institutionScope(req))
+      Institution.findById(req.institution.institutionId)
         .select('name logoUrl brandColor seatsLicensed seatsUsed')
         .lean(),
     ]);
