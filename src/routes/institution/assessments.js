@@ -106,6 +106,20 @@ router.post('/assessments/:id/author-capstone', institutionAuth, requireInstitut
   }
 });
 
+// Re-author Drill (recovery): tpo_head, tpo_coordinator
+router.post('/assessments/:id/author-drill', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const Assessment = getAssessmentModel();
+    const a = await Assessment.findOne({ ...institutionScope(req), _id: req.params.id });
+    if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
+    authoring().authorDrill(a._id).catch((e) => console.warn('[assessments:author-drill]', e.message));
+    return res.status(202).json({ success: true, data: { status: 'authoring' } });
+  } catch (err) {
+    console.error('[institution/assessments:author-drill]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not trigger authoring.' });
+  }
+});
+
 // List + get (any institution role)
 router.get('/assessments', institutionAuth, async (req, res) => {
   try { return res.status(200).json({ success: true, data: await svc().listAssessments(institutionScope(req), { cohortId: req.query.cohortId }) }); }

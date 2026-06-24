@@ -298,8 +298,49 @@ async function authorDrill(assessmentId, deps = {}) {
     assessment.config.drill.bundleId = bundle._id;
     assessment.markModified('config');
     await assessment.save();
+    return assessment;
   }
-  // If none found: leave bundleId unset; release gate will catch it.
+
+  // No library bundle found — generate one
+  const generateDrill = deps.generateDrill || (async (params) => require('../../../coding/services/generationPipeline').runPipeline(params));
+  const sleep = deps.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const pollMs = deps.pollMs !== undefined ? deps.pollMs : 3000;
+  const maxPolls = deps.maxPolls !== undefined ? deps.maxPolls : 60;
+
+  const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
+  const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
+  const roleTrack = VALID_ROLE_TRACKS.includes(cfg.roleTrack) ? cfg.roleTrack : 'swe';
+  const language = LANG_BY_TRACK[roleTrack] || 'python';
+
+  let pipelineResult;
+  try {
+    pipelineResult = await generateDrill({
+      role_track: roleTrack,
+      drill_subtype: cfg.drillSubtype,
+      difficulty: cfg.difficulty || 'medium',
+      language,
+    });
+  } catch (e) {
+    // Fire-and-forget: never throw. Leave bundleId unset.
+    console.warn('[assessmentAuthoring:authorDrill] generateDrill error:', e.message);
+    return assessment;
+  }
+
+  if (!pipelineResult || !pipelineResult.bundle_id) return assessment;
+
+  // Poll until the ArtifactBundle is status 'active'
+  for (let i = 0; i < maxPolls; i++) {
+    await sleep(pollMs);
+    const polled = await ArtifactBundle.findById(pipelineResult.bundle_id);
+    if (polled && polled.status === 'active') {
+      assessment.config.drill.bundleId = polled._id;
+      assessment.markModified('config');
+      await assessment.save();
+      return assessment;
+    }
+  }
+  // Timeout — leave bundleId unset; never throw
+  console.warn('[assessmentAuthoring:authorDrill] polling timeout, bundleId left unset');
   return assessment;
 }
 
