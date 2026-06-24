@@ -15,6 +15,11 @@ function getEnrollmentModel() { return (router._deps && router._deps.Institution
 // TPO Granular Analytics: injectable User model and report service
 function getUserModel() { return (router._deps && router._deps.User) || require('../../models/User'); }
 function getReportService() { return (router._deps && router._deps.reportService) || require('../../services/institution/assessment/assessmentReportService'); }
+// Feature 4/5: injectable cohort/template/bundle models and suggestion service
+function getCohortModel() { return (router._deps && router._deps.InstitutionCohort) || require('../../models/InstitutionCohort'); }
+function getObjectiveTemplateModel() { return (router._deps && router._deps.ObjectiveTemplate) || require('../../models/ObjectiveTemplate'); }
+function getArtifactBundleModel() { return (router._deps && router._deps.ArtifactBundle) || require('../../coding/models/artifactBundle.model'); }
+function getSuggestionService() { return (router._deps && router._deps.suggestionService) || require('../../services/institution/assessment/assessmentSuggestionService'); }
 
 // Configure (maker): tpo_head, tpo_coordinator
 router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
@@ -310,6 +315,105 @@ router.get('/cohorts/:cohortId/assessment-rollup', institutionAuth, async (req, 
   } catch (err) {
     console.error('[institution/assessments:rollup]', err.message);
     return res.status(500).json({ success: false, message: 'Could not load rollup.' });
+  }
+});
+
+// ── Feature 4: Assessment suggestions based on cohort objective ──────────────
+// GET /cohorts/:cohortId/assessment-suggestions (any institution role, scoped)
+router.get('/cohorts/:cohortId/assessment-suggestions', institutionAuth, async (req, res) => {
+  try {
+    const scope = institutionScope(req);
+    const InstitutionCohort = getCohortModel();
+    const ObjectiveTemplate = getObjectiveTemplateModel();
+
+    // Load cohort (scoped — must belong to this institution)
+    const cohortQuery = InstitutionCohort.findOne({ ...scope, _id: req.params.cohortId });
+    const cohort = typeof cohortQuery.lean === 'function' ? await cohortQuery.lean() : await cohortQuery;
+    if (!cohort) return res.status(404).json({ success: false, message: 'Cohort not found' });
+
+    // Load template if linked
+    let template = null;
+    if (cohort.objectiveTemplateId) {
+      const tplQuery = ObjectiveTemplate.findOne({ _id: cohort.objectiveTemplateId });
+      template = typeof tplQuery.lean === 'function' ? await tplQuery.lean() : await tplQuery;
+    }
+
+    const result = getSuggestionService().buildSuggestions(cohort, template);
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    console.error('[institution/assessments:suggestions]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not build assessment suggestions.' });
+  }
+});
+
+// ── Feature 5: Content preview before release ─────────────────────────────────
+// GET /assessments/:id/preview (any institution role, scoped)
+// TPO staff may see full MCQ content (incl. correctAnswer) — they are reviewing before release.
+// Capstone/drill: returns safeBundleView — NEVER reference_solution/hidden_tests.
+router.get('/assessments/:id/preview', institutionAuth, async (req, res) => {
+  try {
+    const scope = institutionScope(req);
+    const Assessment = getAssessmentModel();
+    const ArtifactBundle = getArtifactBundleModel();
+
+    const a = await Assessment.findOne({ ...scope, _id: req.params.id });
+    if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
+
+    const type = a.type;
+    let preview = { type };
+
+    if (type === 'mcq') {
+      const questions = (a.config && a.config.mcq && a.config.mcq.questions) || [];
+      const ready = !!(questions && questions.length);
+      preview = {
+        type: 'mcq',
+        ready,
+        questionCount: questions.length,
+        questions: questions.map((q) => ({
+          questionText: q.questionText,
+          options: q.options,
+          correctAnswer: q.correctAnswer,
+          concept: q.concept,
+        })),
+      };
+    } else if (type === 'capstone' || type === 'drill') {
+      const configKey = type; // 'capstone' or 'drill'
+      const bundleId = a.config && a.config[configKey] && a.config[configKey].bundleId;
+      if (!bundleId) {
+        preview = { type, ready: false, message: 'Bundle not yet generated.' };
+      } else {
+        const bundleQuery = ArtifactBundle.findOne({ _id: bundleId });
+        const bundle = typeof bundleQuery.lean === 'function' ? await bundleQuery.lean() : await bundleQuery;
+        if (!bundle) {
+          preview = { type, ready: false, message: 'Bundle not found.' };
+        } else {
+          // Safe view: NEVER includes reference_solution or hidden_tests
+          preview = {
+            type,
+            ready: true,
+            brief: bundle.brief,
+            acceptance_criteria: bundle.acceptance_criteria,
+            visible_tests: bundle.visible_tests,
+            difficulty: bundle.difficulty,
+            time_budget_minutes: bundle.time_budget_minutes,
+            role_track: bundle.role_track,
+            language: bundle.language,
+          };
+        }
+      }
+    } else if (type === 'interview') {
+      // No pre-generated content; per-session dynamic
+      preview = {
+        type: 'interview',
+        ready: true,
+        config: (a.config && a.config.interview) || {},
+      };
+    }
+
+    return res.status(200).json({ success: true, data: preview });
+  } catch (err) {
+    console.error('[institution/assessments:preview]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not load preview.' });
   }
 });
 

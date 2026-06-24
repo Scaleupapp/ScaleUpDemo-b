@@ -968,6 +968,300 @@ test('GET /assessments/:id/export.csv → score column blank when window not clo
   assessments._deps = null;
 });
 
+// ── Feature 4: GET /cohorts/:cohortId/assessment-suggestions ─────────────────
+
+test('GET /cohorts/:cohortId/assessment-suggestions → 200 with suggestions (any role)', async () => {
+  const fakeSuggestions = [
+    { type: 'mcq', title: 'Algorithms — MCQ', cohortId: 'c1', config: { mcq: { topic: 'Algorithms', totalQuestions: 15, assessmentType: 'mixed' } }, reason: 'core MCQ' },
+    { type: 'interview', title: 'HR Interview', cohortId: 'c1', config: { interview: { interviewType: 'placement_hr', difficulty: 'moderate' } }, reason: 'Placement readiness — behavioural round' },
+  ];
+  const fakeCohort = { _id: 'c1', institutionId: 'i1', objectiveTemplateId: 'tpl1' };
+  const fakeTemplate = { _id: 'tpl1', capabilityTrack: 'software', competencies: [] };
+
+  assessments._deps = {
+    InstitutionCohort: {
+      findOne: async (filter) => {
+        assert.strictEqual(String(filter.institutionId), 'i1');
+        assert.strictEqual(String(filter._id), 'c1');
+        return fakeCohort;
+      },
+    },
+    ObjectiveTemplate: {
+      findOne: async () => fakeTemplate,
+    },
+    suggestionService: {
+      buildSuggestions: (cohort, template) => {
+        assert.ok(cohort, 'cohort should be passed');
+        assert.ok(template, 'template should be passed');
+        return { suggestions: fakeSuggestions };
+      },
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/cohorts/c1/assessment-suggestions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  assert.ok(Array.isArray(res.body.data.suggestions), 'suggestions should be an array');
+  assert.strictEqual(res.body.data.suggestions.length, 2);
+  assessments._deps = null;
+});
+
+test('GET /cohorts/:cohortId/assessment-suggestions → 404 when cohort not in scope', async () => {
+  assessments._deps = {
+    InstitutionCohort: {
+      findOne: async () => null, // not found / not scoped
+    },
+    ObjectiveTemplate: { findOne: async () => null },
+    suggestionService: { buildSuggestions: () => ({ suggestions: [] }) },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .get('/api/institution/cohorts/c-evil/assessment-suggestions')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+
+  assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.success, false);
+  assessments._deps = null;
+});
+
+test('GET /cohorts/:cohortId/assessment-suggestions: no template → generic set with note', async () => {
+  const fakeCohort = { _id: 'c2', institutionId: 'i1', objectiveTemplateId: null };
+
+  assessments._deps = {
+    InstitutionCohort: { findOne: async () => fakeCohort },
+    ObjectiveTemplate: { findOne: async () => null },
+    suggestionService: {
+      buildSuggestions: (cohort, template) => {
+        assert.strictEqual(template, null, 'template should be null when not linked');
+        // Invoke real service to verify generic path
+        const { buildSuggestions: real } = require('../../services/institution/assessment/assessmentSuggestionService');
+        return real(cohort, null);
+      },
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/cohorts/c2/assessment-suggestions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.data.note, 'note should be present for generic set');
+  assert.ok(res.body.data.suggestions.length >= 1, 'should have at least one generic suggestion');
+  assessments._deps = null;
+});
+
+// ── Feature 5: GET /assessments/:id/preview ───────────────────────────────────
+
+test('GET /assessments/:id/preview → 200 for mcq type with questions', async () => {
+  const fakeQuestions = [
+    { questionText: 'What is O(n)?', options: ['A', 'B', 'C', 'D'], correctAnswer: 'A', concept: 'complexity' },
+    { questionText: 'Best sort for nearly sorted?', options: ['P', 'Q', 'R', 'S'], correctAnswer: 'P', concept: 'sorting' },
+  ];
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a1',
+        institutionId: 'i1',
+        type: 'mcq',
+        config: { mcq: { questions: fakeQuestions, totalQuestions: 2 } },
+      }),
+    },
+    ArtifactBundle: { findOne: async () => null },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/preview')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  const d = res.body.data;
+  assert.strictEqual(d.type, 'mcq');
+  assert.strictEqual(d.ready, true);
+  assert.strictEqual(d.questionCount, 2);
+  assert.strictEqual(d.questions.length, 2);
+  // TPO may review answers
+  assert.strictEqual(d.questions[0].correctAnswer, 'A');
+  assert.strictEqual(d.questions[0].questionText, 'What is O(n)?');
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/preview → mcq with no questions: ready=false, questionCount=0', async () => {
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a-empty',
+        institutionId: 'i1',
+        type: 'mcq',
+        config: { mcq: { questions: [] } },
+      }),
+    },
+    ArtifactBundle: { findOne: async () => null },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .get('/api/institution/assessments/a-empty/preview')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+
+  assert.strictEqual(res.status, 200);
+  const d = res.body.data;
+  assert.strictEqual(d.ready, false);
+  assert.strictEqual(d.questionCount, 0);
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/preview → capstone returns safeBundleView WITHOUT reference_solution/hidden_tests', async () => {
+  const fakeBundle = {
+    _id: 'bun1',
+    brief: 'Build a REST API for a todo app.',
+    acceptance_criteria: ['GET /todos returns list', 'POST /todos creates item'],
+    visible_tests: [{ name: 'smoke test', command: 'npm test' }],
+    difficulty: 'medium',
+    time_budget_minutes: 90,
+    role_track: 'swe',
+    language: 'javascript',
+    // These should NEVER appear in the preview response:
+    reference_solution: { files: [{ path: 'src/app.js', content: 'SECRET' }] },
+    hidden_tests: [{ name: 'hidden', command: 'npm run test:hidden', expected_exit_code: 0 }],
+  };
+
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a-cap',
+        institutionId: 'i1',
+        type: 'capstone',
+        config: { capstone: { bundleId: 'bun1', roleTrack: 'swe', difficulty: 'medium' } },
+      }),
+    },
+    ArtifactBundle: { findOne: async () => fakeBundle },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .get('/api/institution/assessments/a-cap/preview')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  const d = res.body.data;
+  assert.strictEqual(d.type, 'capstone');
+  assert.strictEqual(d.ready, true);
+  assert.strictEqual(d.brief, 'Build a REST API for a todo app.');
+  assert.ok(Array.isArray(d.acceptance_criteria), 'acceptance_criteria should be present');
+  assert.ok(Array.isArray(d.visible_tests), 'visible_tests should be present');
+  assert.strictEqual(d.difficulty, 'medium');
+  assert.strictEqual(d.time_budget_minutes, 90);
+  // CRITICAL: these must NEVER be present in the response
+  assert.strictEqual(d.reference_solution, undefined, 'reference_solution MUST NOT be in preview response');
+  assert.strictEqual(d.hidden_tests, undefined, 'hidden_tests MUST NOT be in preview response');
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/preview → drill safeBundleView WITHOUT reference_solution/hidden_tests', async () => {
+  const fakeDrillBundle = {
+    _id: 'bun-drill',
+    brief: 'Decompose this problem into functions.',
+    acceptance_criteria: ['Function decomposed', 'Tests pass'],
+    visible_tests: [{ name: 'test1', command: 'pytest' }],
+    difficulty: 'medium',
+    time_budget_minutes: 30,
+    role_track: 'swe',
+    language: 'python',
+    reference_solution: { files: [{ path: 'solution.py', content: 'HIDDEN SOLUTION' }] },
+    hidden_tests: [{ name: 'grader', command: 'pytest grader.py' }],
+  };
+
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a-drill',
+        institutionId: 'i1',
+        type: 'drill',
+        config: { drill: { bundleId: 'bun-drill', roleTrack: 'swe', drillSubtype: 'decompose' } },
+      }),
+    },
+    ArtifactBundle: { findOne: async () => fakeDrillBundle },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a-drill/preview')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  const d = res.body.data;
+  assert.strictEqual(d.type, 'drill');
+  assert.strictEqual(d.ready, true);
+  assert.ok(d.brief, 'brief should be present');
+  assert.strictEqual(d.reference_solution, undefined, 'reference_solution MUST NOT be in drill preview');
+  assert.strictEqual(d.hidden_tests, undefined, 'hidden_tests MUST NOT be in drill preview');
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/preview → capstone with no bundleId: ready=false', async () => {
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a-cap-no-bundle',
+        institutionId: 'i1',
+        type: 'capstone',
+        config: { capstone: { roleTrack: 'swe', difficulty: 'medium' } }, // no bundleId
+      }),
+    },
+    ArtifactBundle: { findOne: async () => null },
+  };
+
+  const res = await request(appAs('tpo_head'))
+    .get('/api/institution/assessments/a-cap-no-bundle/preview')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.data.ready, false);
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/preview → interview returns config (no content)', async () => {
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({
+        _id: 'a-iv',
+        institutionId: 'i1',
+        type: 'interview',
+        config: { interview: { interviewType: 'placement_hr', difficulty: 'moderate' } },
+      }),
+    },
+    ArtifactBundle: { findOne: async () => null },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a-iv/preview')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  const d = res.body.data;
+  assert.strictEqual(d.type, 'interview');
+  assert.strictEqual(d.ready, true);
+  assert.strictEqual(d.config.interviewType, 'placement_hr');
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/preview → 404 when assessment not in scope', async () => {
+  assessments._deps = {
+    Assessment: { findOne: async () => null },
+    ArtifactBundle: { findOne: async () => null },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/missing/preview')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.success, false);
+  assessments._deps = null;
+});
+
 // toCsv escaping unit tests (no HTTP)
 test('toCsv escapes fields with commas and quotes', () => {
   const { toCsv } = require('../../services/institution/assessment/assessmentReportService');
