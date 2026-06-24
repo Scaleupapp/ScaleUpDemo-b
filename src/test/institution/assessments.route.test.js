@@ -148,7 +148,8 @@ test('GET /assessments/:id/sessions hides score while window is still open', asy
         { _id: 's2', userId: 'u2', status: 'in_progress', result: null },
       ],
     },
-    InstitutionEnrollment: { countDocuments: async () => 2 },
+    InstitutionEnrollment: { countDocuments: async () => 2, find: async () => [] },
+    User: { find: async () => [] },
   };
 
   const res = await request(appAs('viewer'))
@@ -181,7 +182,8 @@ test('GET /assessments/:id/sessions shows score after closesAt', async () => {
         { _id: 's1', userId: 'u1', status: 'graded', result: { score: 88 } },
       ],
     },
-    InstitutionEnrollment: { countDocuments: async () => 1 },
+    InstitutionEnrollment: { countDocuments: async () => 1, find: async () => [] },
+    User: { find: async () => [] },
   };
 
   const res = await request(appAs('viewer'))
@@ -720,7 +722,8 @@ test('GET /assessments/:id/sessions reveals score when assessment.status === \'c
         { _id: 's1', userId: 'u1', status: 'graded', result: { score: 95 } },
       ],
     },
-    InstitutionEnrollment: { countDocuments: async () => 1 },
+    InstitutionEnrollment: { countDocuments: async () => 1, find: async () => [] },
+    User: { find: async () => [] },
   };
 
   const res = await request(appAs('viewer'))
@@ -731,4 +734,258 @@ test('GET /assessments/:id/sessions reveals score when assessment.status === \'c
   const { sessions } = res.body.data;
   assert.strictEqual(sessions[0].score, 95, 'score should be visible when assessment is closed');
   assessments._deps = null;
+});
+
+// ── TPO Granular Analytics tests (feat/2a) ────────────────────────────────────
+
+// Monitor — name + rollNumber
+test('GET /assessments/:id/sessions includes name and rollNumber from enrollment+user', async () => {
+  const past = new Date(Date.now() - 86400000);
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a1', institutionId: 'i1', cohortId: 'c1', closesAt: past }),
+    },
+    AssessmentSession: {
+      find: async () => [{ _id: 's1', userId: 'u1', status: 'graded', result: { score: 88 } }],
+    },
+    InstitutionEnrollment: {
+      countDocuments: async () => 1,
+      find: async () => [{ userId: 'u1', rollNumber: '2021CS001' }],
+    },
+    User: {
+      find: async () => [{ _id: 'u1', firstName: 'Priya', lastName: 'Sharma' }],
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  const { sessions } = res.body.data;
+  assert.strictEqual(sessions[0].name, 'Priya Sharma');
+  assert.strictEqual(sessions[0].rollNumber, '2021CS001');
+  assessments._deps = null;
+});
+
+// Per-student detail — happy path (window closed)
+test('GET /assessments/:id/sessions/:userId returns full detail when window closed', async () => {
+  const past = new Date(Date.now() - 86400000);
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a1', institutionId: 'i1', cohortId: 'c1', closesAt: past }),
+    },
+    AssessmentSession: {
+      findOne: async () => ({
+        _id: 's1',
+        userId: 'u1',
+        status: 'graded',
+        startedAt: new Date('2026-01-01T09:00:00Z'),
+        submittedAt: new Date('2026-01-01T10:00:00Z'),
+        gradedAt: new Date('2026-01-01T11:00:00Z'),
+        result: { score: 77, integrity: 'clean', raw: { competencyBreakdown: [] } },
+      }),
+    },
+    InstitutionEnrollment: {
+      findOne: async () => ({ rollNumber: '2021CS042', cohortId: 'c1', userId: 'u1' }),
+    },
+    User: {
+      findOne: async () => ({ _id: 'u1', firstName: 'Priya', lastName: 'Sharma' }),
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions/u1')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(res.body.data.score, 77);
+  assert.strictEqual(res.body.data.integrity, 'clean');
+  assert.ok(res.body.data.raw, 'raw should be present');
+  assert.strictEqual(res.body.data.name, 'Priya Sharma');
+  assert.strictEqual(res.body.data.rollNumber, '2021CS042');
+  assessments._deps = null;
+});
+
+// Per-student detail — score hidden when window open
+test('GET /assessments/:id/sessions/:userId hides score while window open', async () => {
+  const future = new Date(Date.now() + 86400000);
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a1', institutionId: 'i1', cohortId: 'c1', closesAt: future }),
+    },
+    AssessmentSession: {
+      findOne: async () => ({
+        _id: 's1',
+        userId: 'u1',
+        status: 'graded',
+        startedAt: null,
+        submittedAt: null,
+        gradedAt: null,
+        result: { score: 77, integrity: 'clean', raw: null },
+      }),
+    },
+    InstitutionEnrollment: { findOne: async () => null },
+    User: { findOne: async () => null },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions/u1')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.data.score, undefined, 'score key must be absent while window is open');
+  assessments._deps = null;
+});
+
+// Per-student detail — 404 when no session
+test('GET /assessments/:id/sessions/:userId → 404 when session not found', async () => {
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a1', institutionId: 'i1', cohortId: 'c1' }),
+    },
+    AssessmentSession: {
+      findOne: async () => null,
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions/u-missing')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 404);
+  assessments._deps = null;
+});
+
+// Per-student detail — 404 when assessment not found
+test('GET /assessments/:id/sessions/:userId → 404 when assessment not found', async () => {
+  assessments._deps = {
+    Assessment: { findOne: async () => null },
+    AssessmentSession: { findOne: async () => null },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/missing/sessions/u1')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 404);
+  assessments._deps = null;
+});
+
+// CSV export — 200 text/csv with correct columns
+test('GET /assessments/:id/export.csv → 200 text/csv with correct columns', async () => {
+  const past = new Date(Date.now() - 86400000);
+  const fakeRows = [{
+    userId: 'u1',
+    name: 'Priya Sharma',
+    rollNumber: '2021CS001',
+    status: 'graded',
+    score: 88,
+    integrity: 'clean',
+    submittedAt: new Date('2026-01-01T10:00:00Z'),
+    gradedAt: new Date('2026-01-02T10:00:00Z'),
+    raw: null,
+  }];
+
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a1', institutionId: 'i1', cohortId: 'c1', closesAt: past, title: 'Round 1' }),
+    },
+    CohortRollup: {
+      findOne: () => ({
+        lean: async () => ({ byCompetency: [{ name: 'Algorithms', avgScore: 70 }] }),
+      }),
+    },
+    reportService: {
+      buildSessionRows: async () => fakeRows,
+      toCsv: (rows, cols) => {
+        const { toCsv: realToCsv } = require('../../services/institution/assessment/assessmentReportService');
+        return realToCsv(rows, cols);
+      },
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/export.csv')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.headers['content-type'].includes('text/csv'), 'content-type should include text/csv');
+  assert.ok(res.text.includes('rollNumber,name,status,score'), 'header row should be present');
+  assert.ok(res.text.includes('2021CS001'), 'roll number should appear in CSV');
+  assessments._deps = null;
+});
+
+// CSV export — score blank when window not closed
+test('GET /assessments/:id/export.csv → score column blank when window not closed', async () => {
+  const future = new Date(Date.now() + 86400000);
+  const fakeRows = [{
+    userId: 'u1',
+    name: 'Priya Sharma',
+    rollNumber: '2021CS001',
+    status: 'graded',
+    score: null, // null because revealScores=false
+    integrity: 'clean',
+    submittedAt: null,
+    gradedAt: null,
+    raw: null,
+  }];
+
+  assessments._deps = {
+    Assessment: {
+      findOne: async () => ({ _id: 'a1', institutionId: 'i1', cohortId: 'c1', closesAt: future, title: 'Round 1' }),
+    },
+    CohortRollup: {
+      findOne: () => ({ lean: async () => null }),
+    },
+    reportService: {
+      buildSessionRows: async () => fakeRows,
+      toCsv: (rows, cols) => {
+        const { toCsv: realToCsv } = require('../../services/institution/assessment/assessmentReportService');
+        return realToCsv(rows, cols);
+      },
+    },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/export.csv')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  // Split into data lines and check score column (index 3) in first data row
+  const lines = res.text.split('\n');
+  const dataRow = lines[1]; // first data row (after header)
+  const cols = dataRow.split(',');
+  assert.strictEqual(cols[3], '', 'score column should be blank when window not closed');
+  assessments._deps = null;
+});
+
+// toCsv escaping unit tests (no HTTP)
+test('toCsv escapes fields with commas and quotes', () => {
+  const { toCsv } = require('../../services/institution/assessment/assessmentReportService');
+
+  // Field with comma should be quoted
+  const csv1 = toCsv([{
+    rollNumber: '001',
+    name: 'Smith, John',
+    status: 'graded',
+    score: 90,
+    integrity: 'clean',
+    submittedAt: null,
+    gradedAt: null,
+  }], []);
+  assert.ok(csv1.includes('"Smith, John"'), `Expected name to be quoted; got: ${csv1}`);
+
+  // Field with double-quote: internal quotes doubled
+  const csv2 = toCsv([{
+    rollNumber: '002',
+    name: 'O\'Brien "Jr"',
+    status: 'graded',
+    score: null,
+    integrity: null,
+    submittedAt: null,
+    gradedAt: null,
+  }], []);
+  assert.ok(csv2.includes('"O\'Brien ""Jr"""'), `Expected internal quotes doubled; got: ${csv2}`);
 });
