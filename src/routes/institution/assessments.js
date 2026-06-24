@@ -267,11 +267,15 @@ router.get('/assessments/:id/export.csv', institutionAuth, async (req, res) => {
 
     const competencyColumns = (rollup && rollup.byCompetency || []).map((c) => c.name);
 
-    const rows = await reportService.buildSessionRows(assessment._id, { revealScores: windowClosed }, {
-      AssessmentSession: getAssessmentSessionModel(),
-      InstitutionEnrollment: getEnrollmentModel(),
-      User: getUserModel(),
-    });
+    const rows = await reportService.buildSessionRows(
+      assessment._id,
+      { revealScores: windowClosed, cohortId: assessment.cohortId },
+      {
+        AssessmentSession: getAssessmentSessionModel(),
+        InstitutionEnrollment: getEnrollmentModel(),
+        User: getUserModel(),
+      }
+    );
 
     const csv = reportService.toCsv(rows, competencyColumns);
 

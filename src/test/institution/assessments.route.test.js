@@ -914,6 +914,12 @@ test('GET /assessments/:id/export.csv → 200 text/csv with correct columns', as
   assert.ok(res.headers['content-type'].includes('text/csv'), 'content-type should include text/csv');
   assert.ok(res.text.includes('rollNumber,name,status,score'), 'header row should be present');
   assert.ok(res.text.includes('2021CS001'), 'roll number should appear in CSV');
+  // Fixture uses comma-free values (name='Priya Sharma', rollNumber='2021CS001') so
+  // positional split by ',' is safe here.
+  const linesOpen = res.text.split('\n');
+  const dataRowOpen = linesOpen[1];
+  const colsOpen = dataRowOpen.split(',');
+  assert.strictEqual(colsOpen[3], '88', 'score column should be present when window is closed');
   assessments._deps = null;
 });
 
@@ -953,7 +959,8 @@ test('GET /assessments/:id/export.csv → score column blank when window not clo
     .set('Authorization', `Bearer ${tok('viewer')}`);
 
   assert.strictEqual(res.status, 200);
-  // Split into data lines and check score column (index 3) in first data row
+  // Fixture uses comma-free values (name='Priya Sharma', rollNumber='2021CS001',
+  // integrity='clean') so positional split by ',' is safe here.
   const lines = res.text.split('\n');
   const dataRow = lines[1]; // first data row (after header)
   const cols = dataRow.split(',');

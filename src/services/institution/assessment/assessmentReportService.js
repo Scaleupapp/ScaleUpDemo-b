@@ -9,30 +9,68 @@
 
 /**
  * CSV-escape a single field value.
- * Fields containing comma, double-quote, or newline are wrapped in double-quotes
- * with internal double-quotes doubled. All other values are output as-is.
+ * Fields containing comma, double-quote, newline (\n), or carriage return (\r)
+ * are wrapped in double-quotes with internal double-quotes doubled.
+ * All other values are output as-is.
  *
  * @param {*} val
  * @returns {string}
  */
 function escapeCsvField(val) {
   const str = val == null ? '' : String(val);
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
     return '"' + str.replace(/"/g, '""') + '"';
   }
   return str;
 }
 
 /**
+ * Extract a competency/dimension value from a session result's raw object.
+ * Handles all four engine shapes:
+ *   - mcq:       raw.competencyBreakdown  [{ competency, percentage }]
+ *   - interview:  raw.dimensions          { [dim]: { score } }
+ *   - capstone:   raw.dimension_scores    { [dim]: number }
+ *   - drill:      raw.rubric_breakdown    [{ dimension, score }]
+ *
+ * @param {object|null} raw
+ * @param {string} col  Column / dimension name to look up
+ * @returns {number|string} The score/percentage number, or '' if not found
+ */
+function extractCompetencyValue(raw, col) {
+  if (!raw) return '';
+  // mcq competencyBreakdown
+  if (Array.isArray(raw.competencyBreakdown)) {
+    const entry = raw.competencyBreakdown.find((e) => e && e.competency === col);
+    if (entry && typeof entry.percentage === 'number') return entry.percentage;
+  }
+  // interview dimensions
+  if (raw.dimensions && typeof raw.dimensions === 'object') {
+    const dim = raw.dimensions[col];
+    if (dim && typeof dim.score === 'number') return dim.score;
+  }
+  // capstone dimension_scores
+  if (raw.dimension_scores && typeof raw.dimension_scores === 'object') {
+    const val = raw.dimension_scores[col];
+    if (typeof val === 'number') return val;
+  }
+  // drill rubric_breakdown
+  if (Array.isArray(raw.rubric_breakdown)) {
+    const entry = raw.rubric_breakdown.find((e) => e && e.dimension === col);
+    if (entry && typeof entry.score === 'number') return entry.score;
+  }
+  return '';
+}
+
+/**
  * Fetch all AssessmentSession docs for an assessment, then batch-resolve
- * enrollment (→ rollNumber) and user (→ name) in two single queries.
+ * enrollment (→ rollNumber) and user (→ name) in two parallel queries.
  *
  * @param {*}  assessmentId
- * @param {{ revealScores: boolean }} opts
+ * @param {{ revealScores: boolean, cohortId?: string }} opts
  * @param {{ AssessmentSession, InstitutionEnrollment, User }} deps
  * @returns {Promise<Array>}
  */
-async function buildSessionRows(assessmentId, { revealScores }, deps) {
+async function buildSessionRows(assessmentId, { revealScores, cohortId }, deps) {
   const { AssessmentSession, InstitutionEnrollment, User } = deps;
 
   // 1. Fetch all sessions for the assessment
@@ -45,23 +83,19 @@ async function buildSessionRows(assessmentId, { revealScores }, deps) {
 
   const userIds = sessions.map((s) => s.userId);
 
-  // 2. Batch fetch enrollments — we need assessmentId's cohortId but we don't
-  //    have it here; the spec says find by userId $in, relying on the caller
-  //    to pass the right assessment._id. Enrollments are looked up across the
-  //    institution; rollNumber is typically unique per user anyway.
-  //    (The monitor route already has cohortId — but the service only receives
-  //    assessmentId. We query without cohortId filter here; for the CSV route
-  //    the assessment._id ties us to the right cohort via AssessmentSession.)
-  const enrollmentsQuery = InstitutionEnrollment.find({ userId: { $in: userIds } });
-  const enrollments = typeof enrollmentsQuery.lean === 'function'
-    ? await enrollmentsQuery.lean()
-    : await enrollmentsQuery;
+  // 2. Build enrollment filter — scope to cohortId when provided to avoid
+  //    cross-cohort roll-number collisions.
+  const enrollmentFilter = { userId: { $in: userIds } };
+  if (cohortId) enrollmentFilter.cohortId = cohortId;
 
-  // 3. Batch fetch users (only firstName + lastName)
+  // 3. Batch fetch enrollments and users in parallel (not sequential)
+  const enrollmentsQuery = InstitutionEnrollment.find(enrollmentFilter);
   const usersQuery = User.find({ _id: { $in: userIds } }, { firstName: 1, lastName: 1 });
-  const users = typeof usersQuery.lean === 'function'
-    ? await usersQuery.lean()
-    : await usersQuery;
+
+  const [enrollments, users] = await Promise.all([
+    (typeof enrollmentsQuery.lean === 'function' ? enrollmentsQuery.lean() : enrollmentsQuery),
+    (typeof usersQuery.lean === 'function' ? usersQuery.lean() : usersQuery),
+  ]);
 
   // 4. Build lookup maps (keyed by stringified userId / _id)
   const enrollmentByUserId = {};
@@ -136,9 +170,9 @@ function toCsv(rows, competencyColumns) {
       escapeCsvField(row.gradedAt ? new Date(row.gradedAt).toISOString() : ''),
     ];
 
-    // Competency columns (not in the base row — would need to be pre-joined by caller if needed)
+    // Competency columns — look up value from row.raw across all engine shapes
     for (const col of competencyColumns) {
-      cells.push(escapeCsvField(''));
+      cells.push(escapeCsvField(String(extractCompetencyValue(row.raw, col))));
     }
 
     lines.push(cells.join(','));
@@ -147,4 +181,4 @@ function toCsv(rows, competencyColumns) {
   return lines.join('\n');
 }
 
-module.exports = { buildSessionRows, toCsv };
+module.exports = { buildSessionRows, toCsv, extractCompetencyValue };
