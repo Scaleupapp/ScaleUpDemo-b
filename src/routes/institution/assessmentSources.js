@@ -17,10 +17,39 @@ const mongoose = require('mongoose');
 const router = express.Router();
 router._deps = null;
 
-// ── Multer: 20 MB in-memory ──────────────────────────────────────────────────
+// ── Allowed upload MIME types ─────────────────────────────────────────────────
+const ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'text/plain',
+]);
+
+/**
+ * Returns true if the given mimetype is allowed for assessment source uploads.
+ * Exported so unit tests can verify the allow-list without exercising multer.
+ *
+ * @param {string} mimetype
+ * @returns {boolean}
+ */
+function isAllowedMimeType(mimetype) {
+  return ALLOWED_MIME_TYPES.has(mimetype);
+}
+
+// ── Multer: 20 MB in-memory, allow-listed MIME types only ────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: function (_req, file, cb) {
+    if (isAllowedMimeType(file.mimetype)) {
+      cb(null, true);
+    } else {
+      const err = new Error('BAD_FILE_TYPE');
+      err.code = 'BAD_FILE_TYPE';
+      cb(err, false);
+    }
+  },
 });
 
 // ── Dependency getters ───────────────────────────────────────────────────────
@@ -169,4 +198,20 @@ router.get(
   }
 );
 
+// ── Multer error handler ─────────────────────────────────────────────────────
+// Catches fileFilter rejections (BAD_FILE_TYPE) and size-limit errors before
+// they bubble up to the generic 500 handler.
+// eslint-disable-next-line no-unused-vars
+router.use((err, _req, res, _next) => {
+  if (err && (err.code === 'BAD_FILE_TYPE' || err.message === 'BAD_FILE_TYPE')) {
+    return res.status(400).json({ success: false, code: 'BAD_FILE_TYPE', message: 'File type not allowed.' });
+  }
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ success: false, code: 'FILE_TOO_LARGE', message: 'File exceeds the 20 MB size limit.' });
+  }
+  console.error('[institution/assessmentSources]', err && err.message);
+  return res.status(500).json({ success: false, message: 'Upload error.' });
+});
+
 module.exports = router;
+module.exports.isAllowedMimeType = isAllowedMimeType;

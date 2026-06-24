@@ -80,12 +80,13 @@ async function authorMcq(assessmentId, deps = {}) {
     const AssessmentSource = getAssessmentSource(deps);
     const source = await AssessmentSource.findById(cfg.sourceId);
     if (source && source.status === 'ready') {
-      // Create a transient Content doc so generateQuiz can inject concepts
+      // Create a transient Content doc so generateQuiz can inject concepts.
+      // importance MUST be a Number (keyConceptSchema: {type:Number,min:1,max:5}).
       const Content = getContent(deps);
       const keyConcepts = (source.extractedTopics || []).map((t) => ({
         concept: t.name,
         description: '',
-        importance: 'high',
+        importance: 5,
       }));
       const transient = await Content.create({
         title: assessment.title,
@@ -101,7 +102,7 @@ async function authorMcq(assessmentId, deps = {}) {
     }
   }
 
-  // ── Call quizGenerationService ────────────────────────────────────────────
+  // ── Call quizGenerationService, then delete transient Content in finally ────
   // suppressNotification + noObjective prevent D2C side-effects.
   const quizGenerationService = getQuizGenerationService(deps);
   const generateArgs = {
@@ -115,7 +116,23 @@ async function authorMcq(assessmentId, deps = {}) {
   };
   if (contentIds) generateArgs.contentIds = contentIds;
 
-  const quiz = await quizGenerationService.generateQuiz(generateArgs);
+  let quiz;
+  try {
+    quiz = await quizGenerationService.generateQuiz(generateArgs);
+  } finally {
+    // Best-effort: delete the transient Content regardless of whether generateQuiz
+    // succeeds or throws — prevents orphaned docs in the event of LLM/network errors.
+    if (transientContentId) {
+      const Content = getContent(deps);
+      try {
+        if (typeof Content.findByIdAndDelete === 'function') {
+          await Content.findByIdAndDelete(transientContentId);
+        }
+      } catch (e) {
+        console.warn('[assessmentAuthoring] Could not delete transient Content:', e.message);
+      }
+    }
+  }
 
   // Freeze questions onto the assessment config so the release gate can check them.
   assessment.config.mcq.questions = quiz.questions;
@@ -130,18 +147,6 @@ async function authorMcq(assessmentId, deps = {}) {
       await Quiz.findByIdAndDelete(quiz._id);
     } catch (e) {
       console.warn('[assessmentAuthoring] Could not delete throwaway quiz:', e.message);
-    }
-  }
-
-  // Best-effort: delete the transient Content doc.
-  if (transientContentId) {
-    const Content = getContent(deps);
-    try {
-      if (typeof Content.findByIdAndDelete === 'function') {
-        await Content.findByIdAndDelete(transientContentId);
-      }
-    } catch (e) {
-      console.warn('[assessmentAuthoring] Could not delete transient Content:', e.message);
     }
   }
 

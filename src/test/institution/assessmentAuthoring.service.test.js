@@ -567,9 +567,9 @@ test('authorMcq with sourceId (ready): creates transient Content with keyConcept
   assert.strictEqual(contentCreated.contentType, 'notes');
   assert.strictEqual(contentCreated.ocrText, 'Chapter 1: Linked Lists. Chapter 2: Trees.');
   assert.deepStrictEqual(contentCreated.aiData.keyConcepts, [
-    { concept: 'Linked Lists', description: '', importance: 'high' },
-    { concept: 'Trees', description: '', importance: 'high' },
-    { concept: 'Graphs', description: '', importance: 'high' },
+    { concept: 'Linked Lists', description: '', importance: 5 },
+    { concept: 'Trees', description: '', importance: 5 },
+    { concept: 'Graphs', description: '', importance: 5 },
   ]);
 
   // Transient Content deleted after
@@ -822,5 +822,84 @@ test('authorDrill throws NOT_FOUND when assessment not found', async () => {
   await assert.rejects(
     () => authorDrill('missing-id', deps),
     (err) => { assert.strictEqual(err.message, 'NOT_FOUND'); return true; }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// C1 anti-regression: real Content model validates the transient doc shape
+//
+// Rationale: stub-based tests (above) verified the service flow but could not
+// catch a schema mismatch — the stub's Content.create() accepted anything.
+// This test runs the REAL Content model's validateSync() on the exact document
+// shape that authorMcq builds, ensuring importance is a Number not a String.
+// If anyone accidentally reverts importance back to 'high' (string) this test
+// will catch it immediately, before the silent fire-and-forget failure path.
+// ---------------------------------------------------------------------------
+
+test('C1 anti-regression: transient Content doc shape passes real Content.validateSync()', () => {
+  const Content = require('../../models/Content');
+
+  // Mirror the exact transient doc constructed by authorMcq when a ready source
+  // has extractedTopics — including the importance value that must be numeric.
+  const extractedTopics = [{ name: 'Linked Lists' }, { name: 'Trees' }];
+  const keyConcepts = extractedTopics.map((t) => ({
+    concept: t.name,
+    description: '',
+    importance: 5, // MUST be Number — schema: {type:Number,min:1,max:5}
+  }));
+
+  const doc = new Content({
+    title: 'Transient Assessment Source: test assessment',
+    contentType: 'notes',
+    domain: 'general',
+    contentURL: 'transient',
+    ocrText: 'Sample extracted text.',
+    aiData: { keyConcepts },
+    status: 'draft',
+  });
+
+  const validationError = doc.validateSync();
+
+  assert.strictEqual(
+    validationError,
+    undefined,
+    `Real Content.validateSync() should return no error for transient doc shape, but got: ${validationError}`
+  );
+
+  // Confirm keyConcepts were set correctly
+  assert.strictEqual(doc.aiData.keyConcepts.length, 2);
+  assert.strictEqual(typeof doc.aiData.keyConcepts[0].importance, 'number',
+    'importance must be stored as a number');
+  assert.strictEqual(doc.aiData.keyConcepts[0].importance, 5);
+});
+
+test('C1 anti-regression: string importance DOES fail Content.validateSync() (confirms guard is needed)', () => {
+  const Content = require('../../models/Content');
+
+  // Demonstrate that the old code (importance: 'high') would have thrown.
+  const doc = new Content({
+    title: 'Bad transient doc',
+    contentType: 'notes',
+    domain: 'general',
+    contentURL: 'transient',
+    ocrText: '',
+    aiData: {
+      keyConcepts: [{ concept: 'test', description: '', importance: 'high' }], // BAD: string not number
+    },
+    status: 'draft',
+  });
+
+  const validationError = doc.validateSync();
+
+  assert.ok(
+    validationError !== undefined,
+    'Content.validateSync() MUST return a ValidationError when importance is a string'
+  );
+  assert.ok(
+    validationError.errors && (
+      validationError.errors['aiData.keyConcepts.0.importance'] ||
+      Object.keys(validationError.errors).some((k) => k.includes('importance'))
+    ),
+    `Expected a validation error on importance field; got errors: ${JSON.stringify(Object.keys(validationError.errors))}`
   );
 });

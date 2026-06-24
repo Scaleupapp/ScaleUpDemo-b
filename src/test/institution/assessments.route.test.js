@@ -1290,3 +1290,57 @@ test('toCsv escapes fields with commas and quotes', () => {
   }], []);
   assert.ok(csv2.includes('"O\'Brien ""Jr"""'), `Expected internal quotes doubled; got: ${csv2}`);
 });
+
+// ── I1: CSV formula-injection guard (escapeCsvField) ─────────────────────────
+
+test('escapeCsvField prefixes formula-trigger chars with a single quote', () => {
+  const { toCsv } = require('../../services/institution/assessment/assessmentReportService');
+
+  // Helper: build a single-row CSV with a given name field and extract the name cell.
+  function csvNameCell(name) {
+    const csv = toCsv([{
+      rollNumber: '001', name, status: 'graded', score: null,
+      integrity: null, submittedAt: null, gradedAt: null, raw: null,
+    }], []);
+    // Second line, second cell (0-indexed: rollNumber,name,...)
+    const cells = csv.split('\n')[1].split(',');
+    return cells[1];
+  }
+
+  // =HYPERLINK(...) — formula trigger '='
+  const hyperlink = csvNameCell('=HYPERLINK("http://evil.com","click")');
+  assert.ok(hyperlink.startsWith("'=") || hyperlink.startsWith('"\'='),
+    `=HYPERLINK name should be prefixed with quote; got: ${hyperlink}`);
+
+  // +cmd — trigger '+'
+  const plus = csvNameCell('+cmd|"/C calc"!A0');
+  assert.ok(plus.startsWith("'+") || plus.startsWith('"\'+"') || plus.includes("'+"),
+    `+cmd name should be prefixed with quote; got: ${plus}`);
+
+  // @SUM — trigger '@'
+  const at = csvNameCell('@SUM(A1)');
+  assert.ok(at.startsWith("'@") || at.includes("'@"),
+    `@SUM name should be prefixed with quote; got: ${at}`);
+
+  // Normal name — no prefix added
+  const normal = csvNameCell('Priya Sharma');
+  assert.strictEqual(normal, 'Priya Sharma', 'normal name must not be prefixed');
+});
+
+// ── I2: Capstone competency scale (extractCompetencyValue) ───────────────────
+
+test('extractCompetencyValue scales capstone dimension_scores x10 (7 → 70)', () => {
+  const { extractCompetencyValue } = require('../../services/institution/assessment/assessmentReportService');
+
+  const raw = { dimension_scores: { code_quality: 7, problem_solving: 5 } };
+  assert.strictEqual(extractCompetencyValue(raw, 'code_quality'), 70,
+    'capstone dimension 7 should export as 70 (scaled 0-10 → 0-100)');
+  assert.strictEqual(extractCompetencyValue(raw, 'problem_solving'), 50,
+    'capstone dimension 5 should export as 50');
+
+  // Edge cases
+  assert.strictEqual(extractCompetencyValue(raw, 'missing_dim'), '',
+    'missing dimension should return empty string');
+  assert.strictEqual(extractCompetencyValue(null, 'code_quality'), '',
+    'null raw should return empty string');
+});

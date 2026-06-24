@@ -37,7 +37,6 @@ const AssessmentSchema = new mongoose.Schema({
       drillSubtype: String,
       difficulty: { type: String, default: 'medium' },
       bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },
-      sourceId: mongoose.Schema.Types.ObjectId,
     },
   },
   integrityRequired: { type: Boolean, default: true },

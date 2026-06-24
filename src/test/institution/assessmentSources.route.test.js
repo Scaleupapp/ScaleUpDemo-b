@@ -341,3 +341,25 @@ test('GET /assessment-sources/:id: does not return source from another instituti
   assert.strictEqual(String(filterUsed.institutionId), 'inst-A', 'must scope by caller institutionId');
   assert.strictEqual(res._status, 404);
 });
+
+// ── I3: isAllowedMimeType allow-list predicate ────────────────────────────────
+
+test('isAllowedMimeType: allows only the configured MIME types', () => {
+  const { isAllowedMimeType } = require('../../routes/institution/assessmentSources');
+
+  // Allowed types
+  assert.strictEqual(isAllowedMimeType('application/pdf'), true, 'PDF should be allowed');
+  assert.strictEqual(isAllowedMimeType('image/png'), true, 'PNG should be allowed');
+  assert.strictEqual(isAllowedMimeType('image/jpeg'), true, 'JPEG should be allowed');
+  assert.strictEqual(isAllowedMimeType('image/webp'), true, 'WebP should be allowed');
+  assert.strictEqual(isAllowedMimeType('text/plain'), true, 'text/plain should be allowed');
+
+  // Disallowed types
+  assert.strictEqual(isAllowedMimeType('application/zip'), false, 'ZIP should be rejected');
+  assert.strictEqual(isAllowedMimeType('application/octet-stream'), false, 'binary stream should be rejected');
+  assert.strictEqual(isAllowedMimeType('text/html'), false, 'HTML should be rejected');
+  assert.strictEqual(isAllowedMimeType('video/mp4'), false, 'video should be rejected');
+  assert.strictEqual(isAllowedMimeType('application/x-www-form-urlencoded'), false, 'form-urlencoded should be rejected');
+  assert.strictEqual(isAllowedMimeType(''), false, 'empty string should be rejected');
+  assert.strictEqual(isAllowedMimeType(undefined), false, 'undefined should be rejected');
+});

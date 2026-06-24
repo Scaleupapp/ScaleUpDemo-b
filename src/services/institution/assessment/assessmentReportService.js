@@ -18,10 +18,17 @@
  */
 function escapeCsvField(val) {
   const str = val == null ? '' : String(val);
-  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-    return '"' + str.replace(/"/g, '""') + '"';
+  // CSV formula-injection protection: if the value starts with a spreadsheet
+  // formula trigger character (= + - @ or tab/CR), prefix with a single quote
+  // so spreadsheet applications treat it as a literal string.
+  const first = str.length > 0 ? str[0] : '';
+  const needsInjectionGuard = first === '=' || first === '+' || first === '-' ||
+    first === '@' || first === '\t' || first === '\r';
+  const safe = needsInjectionGuard ? "'" + str : str;
+  if (safe.includes(',') || safe.includes('"') || safe.includes('\n') || safe.includes('\r')) {
+    return '"' + safe.replace(/"/g, '""') + '"';
   }
-  return str;
+  return safe;
 }
 
 /**
@@ -48,10 +55,10 @@ function extractCompetencyValue(raw, col) {
     const dim = raw.dimensions[col];
     if (dim && typeof dim.score === 'number') return dim.score;
   }
-  // capstone dimension_scores
+  // capstone dimension_scores (0-10 native → scale to 0-100 to match cohortRollupService)
   if (raw.dimension_scores && typeof raw.dimension_scores === 'object') {
     const val = raw.dimension_scores[col];
-    if (typeof val === 'number') return val;
+    if (typeof val === 'number') return val * 10;
   }
   // drill rubric_breakdown
   if (Array.isArray(raw.rubric_breakdown)) {
