@@ -1,7 +1,7 @@
 // src/test/institution/rosterClaim.test.js
 const test = require('node:test');
 const assert = require('node:assert');
-const { claimForUser } = require('../../services/institution/rosterClaimService');
+const { claimForUser, claimByCode } = require('../../services/institution/rosterClaimService');
 
 function deps(pending, existing = null) {
   const created = [];
@@ -63,4 +63,26 @@ test('claimForUser does NOT overwrite an existing user name', async () => {
   d.User = { updateOne: async () => { called = true; } };
   await claimForUser({ _id: 'u2', email: 'a@x.edu', firstName: 'Priya' }, d);
   assert.strictEqual(called, false, 'should not clobber a real existing name');
+});
+
+test('claimByCode binds by a 6-digit code regardless of the user email', async () => {
+  const pending = { _id: 'p1', institutionId: 'i1', departmentId: 'd1', cohortId: 'c1', rollNumber: '7', status: 'invited', save: async () => {} };
+  const d = deps(pending);
+  const enr = await claimByCode({ _id: 'u1', email: 'different@x.edu' }, '123456', d);
+  assert.ok(enr);
+  assert.strictEqual(d._created[0].userId, 'u1');
+  assert.strictEqual(pending.status, 'claimed');
+  assert.strictEqual(d._seeded.length, 1);
+});
+
+test('claimByCode rejects a malformed code (not 6 digits) without touching the DB', async () => {
+  const d = deps({ _id: 'p1', save: async () => {} });
+  assert.strictEqual(await claimByCode({ _id: 'u1' }, '12', d), null);
+  assert.strictEqual(d._created.length, 0);
+});
+
+test('claimByCode returns null when no pending matches the code', async () => {
+  const d = deps(null);
+  assert.strictEqual(await claimByCode({ _id: 'u1' }, '999999', d), null);
+  assert.strictEqual(d._created.length, 0);
 });

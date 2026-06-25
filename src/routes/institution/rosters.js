@@ -166,7 +166,7 @@ router.post(
       // Get institution name for invite messaging
       const institution = await Institution.findById(req.institution.institutionId);
       const institutionName = institution ? institution.name : 'Your Institution';
-      const baseLink = process.env.STUDENT_APP_JOIN_URL || 'https://scaleupapp.club/join';
+      const baseLink = process.env.STUDENT_APP_JOIN_URL || 'https://placement.scaleupapp.club/join';
 
       // Send invites (email + SMS)
       const { invited } = await inviteService.sendInvites(pending, { institutionName, baseLink });

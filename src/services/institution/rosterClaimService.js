@@ -1,17 +1,14 @@
 'use strict';
-async function claimForUser(user, deps = {}) {
-  if (!user) return null;
-  const PendingStudent = deps.PendingStudent || require('../../models/PendingStudent');
+
+// Shared enrollment: given a resolved PendingStudent + the user, create the
+// InstitutionEnrollment, mark the pending claimed, backfill the name, and seed
+// the locked institutional objective. Used by both claim paths (email auto-match
+// and 6-digit code redemption). Idempotent per (institution, user).
+async function enrollPending(user, pending, deps = {}) {
   const InstitutionEnrollment = deps.InstitutionEnrollment || require('../../models/InstitutionEnrollment');
   const User = deps.User || require('../../models/User');
   const objectiveBindingService = deps.objectiveBindingService || require('./objectiveBindingService');
-  // EMAIL is the identity anchor for roster matching — a phone number can never
-  // claim a roster spot (it's reassignable/typo-prone and could pull in the wrong
-  // person). Students provide their phone during onboarding, not via the roster.
-  const email = (user.email || '').toLowerCase();
-  if (!email) return null;
-  const pending = await PendingStudent.findOne({ status: { $in: ['pending', 'invited'] }, email });
-  if (!pending) return null;
+
   const existing = await InstitutionEnrollment.findOne({ institutionId: pending.institutionId, userId: user._id });
   if (existing) return existing;
   const enrollment = await InstitutionEnrollment.create({
@@ -37,11 +34,9 @@ async function claimForUser(user, deps = {}) {
     console.warn('[claim] name backfill failed', e.message);
   }
   // Seed the locked institutional objective from the cohort's template (best-effort).
-  // This only runs for a matched (institutional) student — a pure D2C user returns
-  // above and never reaches here. Even so, claimForUser is awaited inline on the
-  // signup/login path, so we cap the wait: a slow/hung seed keeps running in the
-  // background while the claim returns promptly. A missing template is a no-op;
-  // a failure must never block the claim.
+  // claimForUser is awaited inline on the signup/login path, so we cap the wait: a
+  // slow/hung seed keeps running in the background while the claim returns promptly.
+  // A missing template is a no-op; a failure must never block the claim.
   const SEED_TIMEOUT_MS = Number(process.env.INSTITUTION_SEED_TIMEOUT_MS || 3000);
   const seedPromise = objectiveBindingService
     .seedObjectiveFromCohort(user._id, enrollment.cohortId, { assignedBy: null })
@@ -54,4 +49,30 @@ async function claimForUser(user, deps = {}) {
   clearTimeout(seedTimer);
   return enrollment;
 }
-module.exports = { claimForUser };
+
+// Auto-match on signup/login: EMAIL is the identity anchor (a phone number can
+// never claim a roster spot — reassignable/typo-prone). Returns null for a pure
+// D2C user (no matching roster row), so it's a safe no-op on every auth path.
+async function claimForUser(user, deps = {}) {
+  if (!user) return null;
+  const PendingStudent = deps.PendingStudent || require('../../models/PendingStudent');
+  const email = (user.email || '').toLowerCase();
+  if (!email) return null;
+  const pending = await PendingStudent.findOne({ status: { $in: ['pending', 'invited'] }, email });
+  if (!pending) return null;
+  return enrollPending(user, pending, deps);
+}
+
+// Manual claim by the 6-digit code printed in the invite. Works even when the
+// student's app email differs from the roster email. Returns null on a bad/used code.
+async function claimByCode(user, code, deps = {}) {
+  if (!user) return null;
+  const PendingStudent = deps.PendingStudent || require('../../models/PendingStudent');
+  const normalized = String(code || '').replace(/\D/g, '');
+  if (normalized.length !== 6) return null;
+  const pending = await PendingStudent.findOne({ status: { $in: ['pending', 'invited'] }, claimCode: normalized });
+  if (!pending) return null;
+  return enrollPending(user, pending, deps);
+}
+
+module.exports = { claimForUser, claimByCode, enrollPending };

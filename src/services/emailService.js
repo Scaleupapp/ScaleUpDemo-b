@@ -40,12 +40,16 @@ class EmailService {
     });
   }
 
-  async sendStudentInvite(email, { studentName, institutionName, link }) {
+  async sendStudentInvite(email, { studentName, institutionName, link, code }) {
     await this.transporter.sendMail({
       from: this.from,
       to: email,
       subject: `${institutionName} invites you to ScaleUp Placements`,
-      html: `<p>Hi ${studentName || 'there'},</p><p>${institutionName} has set up your placement-readiness programme on ScaleUp. Tap to join:</p><p><a href="${link}">${link}</a></p>`,
+      html: `<p>Hi ${studentName || 'there'},</p>
+<p>${institutionName} has set up your placement-readiness programme on ScaleUp.</p>
+${code ? `<p>Your 6-digit join code:</p><p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>` : ''}
+<p>Open your invite for next steps:</p><p><a href="${link}">${link}</a></p>
+<p>When the ScaleUp app is on your phone, sign up and enter this code to join your cohort.</p>`,
     });
   }
 

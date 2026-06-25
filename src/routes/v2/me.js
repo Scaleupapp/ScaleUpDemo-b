@@ -138,6 +138,26 @@ router.post('/context/switch', auth, async (req, res) => {
   }
 });
 
+// Redeem a 6-digit invite code → enrol the signed-in student into their cohort.
+// Works even if their app email differs from the roster email. Returns the freshly
+// resolved context so the app can route into the placement shell.
+router.post('/claim-code', auth, async (req, res) => {
+  try {
+    const { code } = req.body || {};
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    const enrollment = await require('../../services/institution/rosterClaimService').claimByCode(user, code);
+    if (!enrollment) {
+      return res.status(404).json({ success: false, code: 'INVALID_CODE', message: 'That code is invalid or has already been used.' });
+    }
+    const data = await resolvePersona(req.user.userId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[v2/me/claim-code] error', err);
+    return res.status(500).json({ success: false, message: 'Could not redeem the code.' });
+  }
+});
+
 // Student assessment routes — list scheduled assessments, start, sync.
 // The studentAssessments router manages its own auth per-handler (same D2C `auth`).
 // Mounted here so final paths are /api/v2/me/assessments/*.

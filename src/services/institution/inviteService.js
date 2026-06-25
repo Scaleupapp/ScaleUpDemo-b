@@ -9,8 +9,8 @@ async function sendInvites(pendingList = [], { institutionName, baseLink, deps =
   for (const p of pendingList) {
     const link = `${baseLink}?token=${p.inviteToken}`;
     try {
-      if (p.email) await email.sendStudentInvite(p.email, { studentName: p.name, institutionName, link });
-      if (p.phone) await sendSMS(p.phone, `${institutionName} invited you to ScaleUp Placements. Join: ${link}`);
+      if (p.email) await email.sendStudentInvite(p.email, { studentName: p.name, institutionName, link, code: p.claimCode });
+      if (p.phone) await sendSMS(p.phone, `${institutionName} invited you to ScaleUp Placements. Your join code: ${p.claimCode}. Details: ${link}`);
       p.status = 'invited';
       await p.save();
       invited += 1;

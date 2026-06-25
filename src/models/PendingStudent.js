@@ -9,6 +9,10 @@ const PendingStudentSchema = new mongoose.Schema({
   email: { type: String, lowercase: true, trim: true },
   phone: { type: String, trim: true },
   inviteToken: String,
+  // Human-friendly 6-digit code a student types in the app to claim their seat
+  // (works even if they sign up with a different email than the roster). Unique
+  // among un-claimed students; consumed when status → 'claimed'.
+  claimCode: { type: String, index: true },
   status: { type: String, enum: ['pending', 'invited', 'claimed', 'expired'], default: 'pending' },
   matchedUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
