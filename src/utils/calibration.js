@@ -26,11 +26,15 @@ function scoreToBand(score) {
   return 'Expert';
 }
 
+// Neutral fallback (~midway between Familiar and Proficient) for a topic the
+// student didn't self-rate. NEVER throw here: a single missing/unknown rating
+// used to 500 the whole diagnostic `finish` (insights generation) — leaving the
+// student stuck on "Something went wrong" and never reaching Home.
+const NEUTRAL_MIDPOINT = 50;
 function selfRatingToMidpoint(rating) {
-  if (typeof rating !== 'string') throw new Error('unknown self-rating: ' + rating);
+  if (typeof rating !== 'string') return NEUTRAL_MIDPOINT;
   const m = MIDPOINT_BY_NAME[rating.toLowerCase()];
-  if (m === undefined) throw new Error('unknown self-rating: ' + rating);
-  return m;
+  return m === undefined ? NEUTRAL_MIDPOINT : m;
 }
 
 function calibrationDelta(measuredScore, selfRating) {

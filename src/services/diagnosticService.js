@@ -754,11 +754,19 @@ async function finishAttempt(attemptId) {
     insightsResult = await insightsGenerationService.generateInsights(insightsInput);
   } catch (err) {
     console.warn('[diagnosticService] insights generation hard failure:', err.message);
-    insightsResult = {
-      source: 'template',
-      fallbackReason: 'error',
-      insights: insightsGenerationService._templateInsights(insightsInput),
-    };
+    try {
+      insightsResult = {
+        source: 'template',
+        fallbackReason: 'error',
+        insights: insightsGenerationService._templateInsights(insightsInput),
+      };
+    } catch (err2) {
+      // Even the template fallback threw — insights must NEVER block finishing the
+      // diagnostic. Save a null placeholder; the student still reaches Home and the
+      // insights screen recomputes its own view from the attempt.
+      console.warn('[diagnosticService] template insights fallback also failed:', err2.message);
+      insightsResult = { source: 'template', fallbackReason: 'error', insights: null };
+    }
   }
 
   attempt.insightsJson      = insightsResult.insights;
