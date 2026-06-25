@@ -75,6 +75,9 @@ class AuthService {
 
     user.lastLoginAt = new Date();
     await user.save();
+    // Auto-merge: enrol an existing user who matches a pending college roster
+    // (by email/phone). No-op for pure D2C users. Non-fatal.
+    try { await require('./institution/rosterClaimService').claimForUser(user); } catch (e) { console.error('[rosterClaim] non-fatal', e.message); }
 
     return { user: this._sanitize(user), ...this._tokenPair(user) };
   }
@@ -117,6 +120,9 @@ class AuthService {
 
     user.lastLoginAt = new Date();
     await user.save();
+
+    // Auto-merge: enrol a user who matches a pending college roster (by email). No-op for D2C-only. Non-fatal.
+    try { await require('./institution/rosterClaimService').claimForUser(user); } catch (e) { console.error('[rosterClaim] non-fatal', e.message); }
 
     if (isNewUser) {
       this._autoFollowAdmin(user._id).catch(() => {});
