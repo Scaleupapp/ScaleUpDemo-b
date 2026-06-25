@@ -22,16 +22,40 @@ async function commitRoster({ rosterUpload, validRows, deps = {} }) {
   const PendingStudent = deps.PendingStudent || require('../../models/PendingStudent');
   const randomToken = deps.randomToken || (() => crypto.randomBytes(16).toString('hex'));
   const pending = [];
+  let created = 0, updated = 0;
   for (const row of validRows) {
-    const claimCode = await generateClaimCode(PendingStudent);
-    pending.push(await PendingStudent.create({
-      institutionId: rosterUpload.institutionId, departmentId: rosterUpload.departmentId, cohortId: rosterUpload.cohortId,
-      rosterUploadId: rosterUpload._id, name: row.name, rollNumber: row.rollNumber, email: row.email, phone: row.phone,
-      inviteToken: randomToken(), claimCode, status: 'pending',
-    }));
+    // UPSERT by (institution, cohort, email) — re-uploading the same roster must
+    // UPDATE the existing student, not add a duplicate. Keep their claimCode +
+    // inviteToken + status stable so a re-approve doesn't churn codes or re-invite.
+    let existing = null;
+    try {
+      existing = await PendingStudent.findOne({
+        institutionId: rosterUpload.institutionId, cohortId: rosterUpload.cohortId, email: row.email,
+      });
+    } catch { existing = null; }
+    if (existing) {
+      existing.name = row.name;
+      existing.rollNumber = row.rollNumber;
+      existing.phone = row.phone;
+      existing.departmentId = rosterUpload.departmentId;
+      existing.rosterUploadId = rosterUpload._id;
+      if (!existing.claimCode) existing.claimCode = await generateClaimCode(PendingStudent);
+      if (!existing.inviteToken) existing.inviteToken = randomToken();
+      await existing.save();
+      pending.push(existing);
+      updated += 1;
+    } else {
+      const claimCode = await generateClaimCode(PendingStudent);
+      pending.push(await PendingStudent.create({
+        institutionId: rosterUpload.institutionId, departmentId: rosterUpload.departmentId, cohortId: rosterUpload.cohortId,
+        rosterUploadId: rosterUpload._id, name: row.name, rollNumber: row.rollNumber, email: row.email, phone: row.phone,
+        inviteToken: randomToken(), claimCode, status: 'pending',
+      }));
+      created += 1;
+    }
   }
   rosterUpload.status = 'committed';
   await rosterUpload.save();
-  return { created: pending.length, pending };
+  return { created, updated, pending };
 }
 module.exports = { commitRoster, generateClaimCode };
