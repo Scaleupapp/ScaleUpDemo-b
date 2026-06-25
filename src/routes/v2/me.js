@@ -30,50 +30,32 @@ router.get('/status', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
     const user = await User.findById(userId)
-      .select('v2OptedIn v2NeedsOnboarding v2PromptLastShownAt onboardingComplete')
+      .select('v2OptedIn v2NeedsOnboarding onboardingComplete diagnosticComplete')
       .lean();
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Already on v2 — stays on v2 (no path back to v1).
-    if (user.v2OptedIn) {
-      return res.json({
-        success: true,
-        data: {
-          v2Enabled: true,
-          needsOnboarding: !!user.v2NeedsOnboarding,
-          shouldShowPrompt: false,
-        },
-      });
-    }
-
-    // Not opted in — is this a brand-new account or an existing user with data?
-    const hasObjective = await UserObjective.exists({ userId });
-    const hasData = !!hasObjective || !!user.onboardingComplete;
-
-    if (!hasData) {
-      // New user — force v2. Opt them in now and mark them for onboarding.
+    // v2 is the DEFAULT experience for EVERYONE now — there is no v1 fallback and no
+    // "try v2" prompt. (The old logic kept anyone with a UserObjective on v1, which
+    // wrongly dropped placement students — who get a seeded institutional objective —
+    // onto the v1 home.) Opt every user in on first sight so the flag is sticky.
+    if (!user.v2OptedIn) {
       await User.updateOne(
         { _id: userId },
-        { $set: { v2OptedIn: true, v2OptedInAt: new Date(), v2NeedsOnboarding: true } }
+        { $set: { v2OptedIn: true, v2OptedInAt: new Date() } }
       );
-      return res.json({
-        success: true,
-        data: { v2Enabled: true, needsOnboarding: true, shouldShowPrompt: false },
-      });
     }
 
-    // Existing user with data — stay on v1, maybe show the "try v2" prompt.
-    const last = user.v2PromptLastShownAt
-      ? new Date(user.v2PromptLastShownAt).getTime()
-      : 0;
-    const shouldShowPrompt = Date.now() - last > PROMPT_COOLDOWN_MS;
+    // A user only still needs onboarding if they have NOT completed the diagnostic.
+    // Anyone who finished it (including our placement students) goes straight to Home
+    // — never back into the onboarding flow.
+    const needsOnboarding = !user.diagnosticComplete;
 
     return res.json({
       success: true,
-      data: { v2Enabled: false, needsOnboarding: false, shouldShowPrompt },
+      data: { v2Enabled: true, needsOnboarding, shouldShowPrompt: false },
     });
   } catch (err) {
     console.error('[v2/me/status] error', err);
