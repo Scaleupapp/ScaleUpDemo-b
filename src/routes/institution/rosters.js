@@ -31,7 +31,7 @@ function getModels() {
 router.post(
   '/rosters/upload',
   institutionAuth,
-  requireInstitutionRole('tpo_head', 'tpo_coordinator'),
+  requireInstitutionRole('institution_admin', 'tpo_head', 'tpo_coordinator'),
   async (req, res) => {
     try {
       const { Institution, RosterUpload } = getModels();
