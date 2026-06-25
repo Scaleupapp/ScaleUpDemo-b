@@ -198,7 +198,10 @@ router.get('/assessments/:id/sessions', institutionAuth, async (req, res) => {
       }
       const rollNumber = (enrollment && enrollment.rollNumber) ? enrollment.rollNumber : '';
       const entry = { userId: s.userId, name, rollNumber, status: s.status };
-      if (windowClosed && s.result && typeof s.result.score === 'number') {
+      // TPO sees scores immediately — this endpoint is institution-authenticated
+      // (placement office only). The anti-anxiety/anti-cheat hold-back applies to the
+      // STUDENT-facing reveal, not the TPO dashboard.
+      if (s.result && typeof s.result.score === 'number') {
         entry.score = s.result.score;
       }
       return entry;
@@ -254,7 +257,8 @@ router.get('/assessments/:id/sessions/:userId', institutionAuth, async (req, res
       raw: result.raw != null ? result.raw : null,
     };
 
-    if (windowClosed && typeof result.score === 'number') {
+    // TPO sees the score immediately (institution-only endpoint).
+    if (typeof result.score === 'number') {
       data.score = result.score;
     }
 
@@ -290,7 +294,7 @@ router.get('/assessments/:id/export.csv', institutionAuth, async (req, res) => {
 
     const rows = await reportService.buildSessionRows(
       assessment._id,
-      { revealScores: windowClosed, cohortId: assessment.cohortId },
+      { revealScores: true, cohortId: assessment.cohortId }, // TPO export always includes scores
       {
         AssessmentSession: getAssessmentSessionModel(),
         InstitutionEnrollment: getEnrollmentModel(),
@@ -444,12 +448,31 @@ router.get('/assessments/:id/preview', institutionAuth, async (req, res) => {
         type: 'mcq',
         ready,
         questionCount: questions.length,
-        questions: questions.map((q) => ({
-          questionText: q.questionText,
-          options: q.options,
-          correctAnswer: q.correctAnswer,
-          concept: q.concept,
-        })),
+        questions: questions.map((q) => {
+          const opts = q.options || [];
+          // correctAnswer may be a numeric index, a label (A/B/..), or the option
+          // text/_id — normalize to an index so the UI can highlight the right one.
+          let correct = -1;
+          if (typeof q.correctAnswer === 'number') {
+            correct = q.correctAnswer;
+          } else if (q.correctAnswer != null) {
+            const target = String(q.correctAnswer);
+            correct = opts.findIndex((o, i) => {
+              if (typeof o === 'string') return o === target || String.fromCharCode(65 + i) === target;
+              return target === o.label || target === o.text || String(o._id) === target;
+            });
+          }
+          return {
+            // The web reads `question` + `correct`; the backend stored `questionText`
+            // + `correctAnswer`. Return BOTH names so the preview always renders.
+            question: q.questionText || q.question || '',
+            questionText: q.questionText || q.question || '',
+            options: opts,
+            correct,
+            correctAnswer: q.correctAnswer,
+            concept: q.concept,
+          };
+        }),
       };
     } else if (type === 'capstone' || type === 'drill') {
       const configKey = type; // 'capstone' or 'drill'
