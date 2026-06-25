@@ -1,18 +1,16 @@
 'use strict';
-function digits(s) { return String(s || '').replace(/\D/g, ''); }
 async function claimForUser(user, deps = {}) {
   if (!user) return null;
   const PendingStudent = deps.PendingStudent || require('../../models/PendingStudent');
   const InstitutionEnrollment = deps.InstitutionEnrollment || require('../../models/InstitutionEnrollment');
   const User = deps.User || require('../../models/User');
   const objectiveBindingService = deps.objectiveBindingService || require('./objectiveBindingService');
+  // EMAIL is the identity anchor for roster matching — a phone number can never
+  // claim a roster spot (it's reassignable/typo-prone and could pull in the wrong
+  // person). Students provide their phone during onboarding, not via the roster.
   const email = (user.email || '').toLowerCase();
-  const phoneDigits = digits(user.phone);
-  const or = [];
-  if (email) or.push({ email });
-  if (phoneDigits) or.push({ phone: new RegExp(phoneDigits + '$') });
-  if (!or.length) return null;
-  const pending = await PendingStudent.findOne({ status: { $in: ['pending', 'invited'] }, $or: or });
+  if (!email) return null;
+  const pending = await PendingStudent.findOne({ status: { $in: ['pending', 'invited'] }, email });
   if (!pending) return null;
   const existing = await InstitutionEnrollment.findOne({ institutionId: pending.institutionId, userId: user._id });
   if (existing) return existing;

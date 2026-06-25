@@ -17,7 +17,9 @@ function validateRoster(rows = [], { seatsAvailable = Infinity } = {}) {
     if (!rollNumber) { errors.push({ row, field: 'rollNumber', reason: 'missing roll number' }); rowOk = false; }
     if (!email) { errors.push({ row, field: 'email', reason: 'missing email' }); rowOk = false; }
     else if (!EMAIL_RE.test(email)) { errors.push({ row, field: 'email', reason: 'malformed email' }); rowOk = false; }
-    if (digits(phone).length < 8) { errors.push({ row, field: 'phone', reason: 'missing or malformed phone' }); rowOk = false; }
+    // Phone is OPTIONAL — email is the identity anchor; students provide their
+    // phone at onboarding. Only validate format when a phone is actually given.
+    if (phone && digits(phone).length < 8) { errors.push({ row, field: 'phone', reason: 'malformed phone' }); rowOk = false; }
     if (email && seenEmail.has(email)) { errors.push({ row, field: 'email', reason: `duplicate email (row ${seenEmail.get(email)})` }); rowOk = false; }
     if (phone && seenPhone.has(phone)) { errors.push({ row, field: 'phone', reason: `duplicate phone (row ${seenPhone.get(phone)})` }); rowOk = false; }
     if (rollNumber && seenRoll.has(rollNumber)) { errors.push({ row, field: 'rollNumber', reason: `duplicate roll (row ${seenRoll.get(rollNumber)})` }); rowOk = false; }
