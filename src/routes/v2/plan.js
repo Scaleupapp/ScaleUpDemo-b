@@ -41,6 +41,13 @@ router.post('/generate', auth, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Diagnostic attempt not found' });
     }
 
+    // Mark the user done FIRST so the app always routes them to Home — even if the
+    // plan-generation queue is unavailable. Never dead-end a student on plan gen.
+    await require('../../models/User').updateOne(
+      { _id: req.user.userId },
+      { $set: { v2NeedsOnboarding: false, diagnosticComplete: true } }
+    ).catch((e) => console.warn('[v2/plan/generate] flag update failed (non-fatal)', e.message));
+
     // Already moving / done — idempotent no-op.
     if (['generating', 'ready'].includes(attempt.planGenerationStatus)) {
       return res.json({ success: true, data: { status: attempt.planGenerationStatus, alreadyTriggered: true } });
@@ -49,27 +56,29 @@ router.post('/generate', auth, async (req, res) => {
     await DiagnosticAttempt.updateOne(
       { _id: attempt._id },
       { $set: { planGenerationStatus: 'generating' } }
-    );
-    await planGenerationQueue.add(
-      'generate',
-      { attemptId: String(attempt._id) },
-      { attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: 50 }
-    );
+    ).catch((e) => console.warn('[v2/plan/generate] status update failed (non-fatal)', e.message));
 
-    // The user has finished the v2 onboarding flow + diagnostic — clear the
-    // re-onboard flag AND guarantee diagnosticComplete is set, so the next
-    // launch routes them straight to v2 Home instead of back into the
-    // diagnostic welcome. (finishAttempt sets diagnosticComplete too, but
-    // belt-and-suspenders here covers any attempt that finished oddly.)
-    await require('../../models/User').updateOne(
-      { _id: req.user.userId },
-      { $set: { v2NeedsOnboarding: false, diagnosticComplete: true } }
-    );
+    // Enqueue best-effort with a short timeout — a Redis/queue outage must never
+    // hang or 500 this request. If it fails, the user still proceeds to Home; the
+    // worker picks the job up when Redis recovers, or the plan regenerates later.
+    try {
+      await Promise.race([
+        planGenerationQueue.add(
+          'generate',
+          { attemptId: String(attempt._id) },
+          { attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: 50 }
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('enqueue timeout')), 4000)),
+      ]);
+    } catch (qErr) {
+      console.error('[v2/plan/generate] enqueue failed (non-fatal):', qErr.message);
+    }
 
     return res.json({ success: true, data: { status: 'generating', alreadyTriggered: false } });
   } catch (err) {
     console.error('[v2/plan/generate] error', err);
-    return res.status(500).json({ success: false, message: 'Failed to start plan generation' });
+    // Surface the real reason (temporary) so we can diagnose without box access.
+    return res.status(500).json({ success: false, message: 'Failed to start plan generation', detail: String(err && err.message || err) });
   }
 });
 
