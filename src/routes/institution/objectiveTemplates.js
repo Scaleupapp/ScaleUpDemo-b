@@ -21,9 +21,12 @@ function cohortModel() {
 // ── POST /objective-templates ── Gate: institution_admin, tpo_head
 router.post('/objective-templates', institutionAuth, requireInstitutionRole('institution_admin', 'tpo_head'), async (req, res) => {
   try {
-    const { label, objectiveType, specifics, competencies, capabilityTrack } = req.body || {};
+    const { label, specifics, competencies, capabilityTrack } = req.body || {};
     if (!label || !String(label).trim()) return res.status(400).json({ success: false, code: 'VALIDATION', message: 'A template label is required.' });
-    if (!objectiveType) return res.status(400).json({ success: false, code: 'VALIDATION', message: 'objectiveType is required.' });
+    // Placement objectives don't expose an objective-type picker — the type is an
+    // internal engine concern. Default to interview_preparation (the placement-aligned
+    // engine behaviour) unless a caller explicitly overrides it.
+    const objectiveType = req.body.objectiveType || 'interview_preparation';
     const tpl = await svc().createTemplate(
       institutionScope(req),
       { label, objectiveType, specifics, competencies, capabilityTrack, createdBy: req.institution.institutionUserId },

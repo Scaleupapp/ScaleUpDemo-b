@@ -2,7 +2,7 @@
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function digits(s) { return String(s || '').replace(/\D/g, ''); }
 
-function validateRoster(rows = [], { seatsAvailable = Infinity } = {}) {
+function validateRoster(rows = [], { seatsAvailable = Infinity, registeredEmails = new Set() } = {}) {
   const errors = [];
   const seenEmail = new Map(), seenPhone = new Map(), seenRoll = new Map();
   const validRows = [];
@@ -17,6 +17,9 @@ function validateRoster(rows = [], { seatsAvailable = Infinity } = {}) {
     if (!rollNumber) { errors.push({ row, field: 'rollNumber', reason: 'missing roll number' }); rowOk = false; }
     if (!email) { errors.push({ row, field: 'email', reason: 'missing email' }); rowOk = false; }
     else if (!EMAIL_RE.test(email)) { errors.push({ row, field: 'email', reason: 'malformed email' }); rowOk = false; }
+    // Placement accounts are dedicated — a roster email must NOT already belong to
+    // an existing ScaleUp account. The college uses a fresh email for the student.
+    else if (registeredEmails.has(email)) { errors.push({ row, field: 'email', reason: 'email already registered — use a different email for placement' }); rowOk = false; }
     // Phone is OPTIONAL — email is the identity anchor; students provide their
     // phone at onboarding. Only validate format when a phone is actually given.
     if (phone && digits(phone).length < 8) { errors.push({ row, field: 'phone', reason: 'malformed phone' }); rowOk = false; }

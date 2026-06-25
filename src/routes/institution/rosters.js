@@ -58,8 +58,21 @@ router.post(
       const licensed = institution.seatsLicensed || 0;
       const seatsAvailable = licensed > 0 ? licensed - (institution.seatsUsed || 0) : Infinity;
 
+      // Dedicated placement accounts: a roster email must not already belong to an
+      // existing ScaleUp account. Look up which of the pasted emails are taken so the
+      // validator can flag them (the college then uses a different email).
+      let registeredEmails = new Set();
+      try {
+        const User = require('../../models/User');
+        const emailList = rows.map((r) => String((r && r.email) || '').trim().toLowerCase()).filter(Boolean);
+        if (emailList.length) {
+          const taken = await User.find({ email: { $in: emailList } }).select('email');
+          registeredEmails = new Set(taken.map((u) => String(u.email || '').toLowerCase()));
+        }
+      } catch (e) { console.warn('[roster] registered-email check failed', e.message); }
+
       // Validate the incoming rows
-      const { validRows, errors, counts } = validateRoster(rows, { seatsAvailable });
+      const { validRows, errors, counts } = validateRoster(rows, { seatsAvailable, registeredEmails });
 
       // Persist the upload record (validData stored with select:false for approve step)
       const rosterUpload = new RosterUpload({
@@ -232,6 +245,38 @@ router.get(
       });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// ── GET /cohorts/:cohortId/students ──────────────────────────────────────────
+// Per-student roster view for a cohort: roll, name, email, code + live status
+// (invited → registered → diagnostic_done → active). Scoped to the institution.
+router.get(
+  '/cohorts/:cohortId/students',
+  institutionAuth,
+  requireInstitutionRole('institution_admin', 'tpo_head', 'tpo_coordinator', 'faculty', 'viewer'),
+  async (req, res) => {
+    try {
+      const { PendingStudent, InstitutionEnrollment } = getModels();
+      const cohortId = req.params.cohortId;
+      const scope = institutionScope(req, { cohortId });
+      const [pendings, enrollments] = await Promise.all([
+        PendingStudent.find(scope).select('name rollNumber email claimCode status').sort({ rollNumber: 1 }).limit(2000),
+        InstitutionEnrollment.find(scope).select('pendingStudentId status'),
+      ]);
+      const enrByPending = new Map(enrollments.map((e) => [String(e.pendingStudentId), e.status]));
+      const students = pendings.map((p) => {
+        const enrStatus = enrByPending.get(String(p._id));
+        // Pending row status: invited/pending → "invited"; claimed → the enrollment's
+        // live status (registered/diagnostic_done/active) if we have it, else "registered".
+        const status = enrStatus || (p.status === 'claimed' ? 'registered' : 'invited');
+        return { id: String(p._id), name: p.name || null, rollNumber: p.rollNumber || null, email: p.email || null, code: p.claimCode || null, status };
+      });
+      return res.status(200).json({ success: true, data: students });
+    } catch (err) {
+      console.error('[institution/cohorts:students]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not load students.' });
     }
   }
 );
