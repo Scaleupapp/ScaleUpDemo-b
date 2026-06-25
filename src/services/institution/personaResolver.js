@@ -11,12 +11,27 @@ async function resolvePersona(userId, deps = {}) {
     .findOne({ userId, status: { $in: ['registered', 'diagnostic_done', 'active'] } })
     .populate('institutionId cohortId');
   if (!enrollment) return { persona: 'general' };
-  const inst = enrollment.institutionId, cohort = enrollment.cohortId;
+  // An enrollment means placement, full stop. Guard the populate: if the
+  // institution/cohort ref can't be loaded, STILL return placement with safe
+  // defaults — never throw (a 500 here would make the client fall back to the
+  // D2C/general experience and re-run the generic onboarding for a placement
+  // student, which is exactly the failure we must avoid).
+  const inst = enrollment.institutionId || {};
+  const cohort = enrollment.cohortId || {};
   return {
     persona: 'placement',
     placement: {
-      institution: { id: String(inst._id), name: inst.name, logoUrl: inst.logoUrl, brandColor: inst.brandColor },
-      cohort: { id: String(cohort._id), year: cohort.year, label: cohort.label },
+      institution: {
+        id: inst._id ? String(inst._id) : String(enrollment.institutionId || ''),
+        name: inst.name || 'Your college',
+        logoUrl: inst.logoUrl ?? null,
+        brandColor: inst.brandColor ?? null,
+      },
+      cohort: {
+        id: cohort._id ? String(cohort._id) : String(enrollment.cohortId || ''),
+        year: cohort.year || '',
+        label: cohort.label || '',
+      },
       placementSeason: { deadline: cohort.placementSeason?.endDate ?? null },
       objective: { locked: true },
     },
