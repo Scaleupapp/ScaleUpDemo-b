@@ -3,13 +3,19 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { seedObjectiveFromCohort } = require('../../services/institution/objectiveBindingService');
 
-function makeDeps({ cohort, template, existing = null } = {}) {
+function makeDeps({ cohort, template, existing = null, priorPrimary = null } = {}) {
   const state = { demoteCalls: [], saved: null };
   class FakeUO {
     constructor(data) { Object.assign(this, data); this.$locals = {}; }
     async save() { state.saved = this; return this; }
   }
-  FakeUO.findOne = async () => existing;
+  // Filter-aware: the idempotency check queries by institutionContext.cohortId;
+  // the dual-context guard queries by isPrimary. Return the right stub for each.
+  FakeUO.findOne = async (filter = {}) => {
+    if (filter['institutionContext.cohortId'] !== undefined) return existing;
+    if (filter.isPrimary) return priorPrimary;
+    return null;
+  };
   FakeUO.updateMany = async (filter, update) => { state.demoteCalls.push({ filter, update }); return { acknowledged: true }; };
   return {
     _state: state,
@@ -41,6 +47,15 @@ test('seeds a locked institutional objective from the cohort template', async ()
   // prior primaries demoted
   assert.strictEqual(deps._state.demoteCalls.length, 1);
   assert.strictEqual(deps._state.demoteCalls[0].update.$set.isPrimary, false);
+});
+
+test('DUAL-context: when the user already has a personal primary, the institutional objective is added NON-primary and the personal primary is NOT demoted', async () => {
+  const deps = makeDeps({ cohort: COHORT, template: TEMPLATE, priorPrimary: { _id: 'personal-obj', isPrimary: true } });
+  const obj = await seedObjectiveFromCohort('u1', 'c1', { assignedBy: 'admin1', deps });
+  assert.ok(obj);
+  assert.strictEqual(obj.isPrimary, false, 'institutional objective must NOT be primary for a dual user');
+  assert.strictEqual(obj.institutionContext.locked, true);
+  assert.strictEqual(deps._state.demoteCalls.length, 0, 'must NOT demote the personal primary');
 });
 
 test('no-op (null) when the cohort has no template', async () => {

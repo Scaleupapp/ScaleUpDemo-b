@@ -67,6 +67,13 @@ const userSchema = new mongoose.Schema({
   // "ask again later" cooldown so we don't nag on every launch.
   v2PromptLastShownAt: { type: Date },
 
+  // --- Placement persona switcher (dual B2C + placement identity) ---
+  // Which experience a DUAL-context user sees — one who has BOTH a college
+  // enrollment AND their own personal objective (e.g. higher-ed prep). null →
+  // not yet chosen, so the client shows the one-time chooser. Drives
+  // personaResolver; non-dual users (pure D2C or pure placement) ignore it.
+  preferredContext: { type: String, enum: ['placement', 'personal'], default: null },
+
   // --- Engagement (denormalized counters) ---
   followersCount: { type: Number, default: 0 },
   followingCount: { type: Number, default: 0 },

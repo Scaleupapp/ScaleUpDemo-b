@@ -22,10 +22,19 @@ async function seedObjectiveFromCohort(userId, cohortId, { assignedBy = null, de
   // Deadline injected from the cohort's placement season.
   const targetDate = cohort.placementSeason && cohort.placementSeason.endDate ? cohort.placementSeason.endDate : undefined;
 
-  // The institutional objective is the single primary so the diagnostic scopes to it.
-  // Demote any prior primaries for this (now placement) user. updateMany bypasses the
-  // pre-save hook, so this causes no D2C cohort-directory churn.
-  await UserObjective.updateMany({ userId, isPrimary: true }, { $set: { isPrimary: false } });
+  // DUAL-context guard: if the user already has an active primary objective (a
+  // personal D2C goal), keep it primary and add the institutional objective as
+  // NON-primary — the persona switcher (personaResolver → needsContextChoice) lets
+  // them choose which experience to see, and switching sets the right one primary.
+  // Only a student with no prior primary (a pure placement student) gets the
+  // institutional objective as primary, so the diagnostic scopes to it as before.
+  const priorPrimary = await UserObjective.findOne({ userId, status: 'active', isPrimary: true });
+  const makePrimary = !priorPrimary;
+  if (makePrimary) {
+    // Defensive: demote any straggler primaries so this becomes the sole primary.
+    // updateMany bypasses the pre-save hook, so this causes no D2C directory churn.
+    await UserObjective.updateMany({ userId, isPrimary: true }, { $set: { isPrimary: false } });
+  }
 
   const doc = new UserObjective({
     userId,
@@ -36,7 +45,7 @@ async function seedObjectiveFromCohort(userId, cohortId, { assignedBy = null, de
     currentLevel: 'intermediate',
     weeklyCommitHours: 8,
     status: 'active',
-    isPrimary: true,
+    isPrimary: makePrimary,
     analysis: {
       competencies: (template.competencies || []).map((c) => ({ name: c.name, weight: c.weight, category: c.category })),
       analyzedAt: new Date(),

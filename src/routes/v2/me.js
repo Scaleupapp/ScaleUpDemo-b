@@ -108,6 +108,36 @@ router.get('/context', auth, async (req, res) => {
   }
 });
 
+// Switch a DUAL-context user's active experience (placement <-> personal).
+// Persists User.preferredContext and makes the chosen track's objective primary
+// so the v2 home/plan/diagnostic scope to it. Returns the freshly resolved context.
+// No-op-safe for non-dual users (they simply won't have the other objective).
+router.post('/context/switch', auth, async (req, res) => {
+  try {
+    const objectiveService = require('../../services/objectiveService');
+    const { context } = req.body || {};
+    if (!['placement', 'personal'].includes(context)) {
+      return res.status(400).json({ success: false, message: "context must be 'placement' or 'personal'" });
+    }
+    await User.findByIdAndUpdate(req.user.userId, { preferredContext: context });
+
+    // Make the chosen track's objective primary so home/plan scope to it.
+    const filter = context === 'placement'
+      ? { userId: req.user.userId, status: 'active', 'institutionContext.locked': true }
+      : { userId: req.user.userId, status: 'active', 'institutionContext.locked': { $ne: true } };
+    const target = await UserObjective.findOne(filter).sort({ isPrimary: -1, createdAt: -1 });
+    if (target && !target.isPrimary) {
+      await objectiveService.setPrimary(req.user.userId, target._id);
+    }
+
+    const data = await resolvePersona(req.user.userId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[v2/me/context/switch] error', err);
+    return res.status(500).json({ success: false, message: 'Failed to switch context' });
+  }
+});
+
 // Student assessment routes — list scheduled assessments, start, sync.
 // The studentAssessments router manages its own auth per-handler (same D2C `auth`).
 // Mounted here so final paths are /api/v2/me/assessments/*.
