@@ -18,7 +18,14 @@ function can(role, capability) {
 }
 function requireInstitutionRole(...roles) {
   return (req, res, next) => {
-    if (!req.institution || !roles.includes(req.institution.role)) {
+    if (!req.institution) {
+      return res.status(403).json({ success: false, message: 'Insufficient role' });
+    }
+    // institution_admin is the superset role (holds '*' permissions) — it is
+    // permitted everywhere a more specific role is, so an admin always has at
+    // least TPO-head-equivalent access across the portal.
+    if (req.institution.role === 'institution_admin') return next();
+    if (!roles.includes(req.institution.role)) {
       return res.status(403).json({ success: false, message: 'Insufficient role' });
     }
     next();
