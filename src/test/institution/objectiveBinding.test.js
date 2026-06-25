@@ -3,8 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { seedObjectiveFromCohort } = require('../../services/institution/objectiveBindingService');
 
-function makeDeps({ cohort, template, existing = null, priorPrimary = null } = {}) {
-  const state = { demoteCalls: [], saved: null };
+function makeDeps({ cohort, template, existing = null, priorPrimary = null, profileUser = { education: [], skills: [] } } = {}) {
+  const state = { demoteCalls: [], saved: null, profileUpdate: null };
   class FakeUO {
     constructor(data) { Object.assign(this, data); this.$locals = {}; }
     async save() { state.saved = this; return this; }
@@ -22,6 +22,13 @@ function makeDeps({ cohort, template, existing = null, priorPrimary = null } = {
     InstitutionCohort: { findById: async () => cohort },
     ObjectiveTemplate: { findById: async () => template },
     UserObjective: FakeUO,
+    // Profile auto-fill stubs (education from college, skills from competencies).
+    User: {
+      findById: () => ({ select: async () => profileUser }),
+      updateOne: async (_filter, update) => { state.profileUpdate = update; },
+    },
+    Institution: { findById: () => ({ select: async () => ({ name: 'Test College' }) }) },
+    Department: { findById: () => ({ select: async () => ({ name: 'CSE' }) }) },
   };
 }
 
@@ -47,6 +54,12 @@ test('seeds a locked institutional objective from the cohort template', async ()
   // prior primaries demoted
   assert.strictEqual(deps._state.demoteCalls.length, 1);
   assert.strictEqual(deps._state.demoteCalls[0].update.$set.isPrimary, false);
+  // profile auto-filled: education from the college, skills from the competencies
+  assert.ok(deps._state.profileUpdate, 'profile should be auto-filled');
+  assert.strictEqual(deps._state.profileUpdate.$set.education[0].institution, 'Test College');
+  assert.strictEqual(deps._state.profileUpdate.$set.education[0].currentlyPursuing, true);
+  assert.strictEqual(deps._state.profileUpdate.$set.education[0].yearOfCompletion, 2026);
+  assert.deepStrictEqual(deps._state.profileUpdate.$set.skills, ['dsa']);
 });
 
 test('DUAL-context: when the user already has a personal primary, the institutional objective is added NON-primary and the personal primary is NOT demoted', async () => {

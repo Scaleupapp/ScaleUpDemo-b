@@ -61,6 +61,42 @@ async function seedObjectiveFromCohort(userId, cohortId, { assignedBy = null, de
   });
   doc.$locals.skipInstitutionalDirectory = true;   // keep institutional objectives out of the D2C directory
   await doc.save();
+
+  // Auto-populate the placement student's profile from the roster/cohort so they
+  // never enter it (the placement onboarding skips the education/skills steps):
+  //   education = their college + branch + currently-pursuing,
+  //   skills    = the objective's competencies.
+  // Best-effort; fills empties only (never clobbers what the student set themselves).
+  try {
+    const User = deps.User || require('../../models/User');
+    const u = await User.findById(userId).select('education skills');
+    if (u) {
+      const set = {};
+      if (!Array.isArray(u.education) || u.education.length === 0) {
+        const Institution = deps.Institution || require('../../models/Institution');
+        const Department = deps.Department || require('../../models/Department');
+        const [inst, dept] = await Promise.all([
+          Institution.findById(template.institutionId || cohort.institutionId).select('name'),
+          cohort.departmentId ? Department.findById(cohort.departmentId).select('name') : Promise.resolve(null),
+        ]);
+        const passout = cohort.placementSeason && cohort.placementSeason.endDate
+          ? new Date(cohort.placementSeason.endDate).getFullYear() : undefined;
+        set.education = [{
+          degree: dept ? dept.name : undefined,
+          institution: inst ? inst.name : undefined,
+          yearOfCompletion: passout,
+          currentlyPursuing: true,
+        }];
+      }
+      if (!Array.isArray(u.skills) || u.skills.length === 0) {
+        const skills = (template.competencies || [])
+          .map((c) => String(c.name || '').toLowerCase().trim()).filter(Boolean).slice(0, 20);
+        if (skills.length) set.skills = skills;
+      }
+      if (Object.keys(set).length) await User.updateOne({ _id: userId }, { $set: set });
+    }
+  } catch (e) { console.warn('[seed] profile backfill failed', e.message); }
+
   return doc;
 }
 
