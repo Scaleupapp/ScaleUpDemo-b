@@ -102,12 +102,41 @@ async function authorMcq(assessmentId, deps = {}) {
     }
   }
 
+  // ── Disambiguate the topic with the cohort's placement-objective domain ─────
+  // Placement MCQs pass noObjective, so generateQuiz gets no competency context —
+  // a bare topic like "RAG" is ambiguous and the LLM defaults to project status.
+  // Enrich the topic with the objective's domain so acronyms resolve correctly
+  // (e.g. "RAG" = Retrieval-Augmented Generation in a Full-stack-AI track). Best-effort.
+  let domainContext = '';
+  try {
+    const InstitutionCohort = deps.InstitutionCohort || require('../../../models/InstitutionCohort');
+    const ObjectiveTemplate = deps.ObjectiveTemplate || require('../../../models/ObjectiveTemplate');
+    const cohort = assessment.cohortId ? await InstitutionCohort.findById(assessment.cohortId).select('objectiveTemplateId') : null;
+    const tpl = cohort && cohort.objectiveTemplateId
+      ? await ObjectiveTemplate.findById(cohort.objectiveTemplateId).select('label objectiveType specifics capabilityTrack competencies')
+      : null;
+    if (tpl) {
+      const parts = [];
+      if (tpl.label) parts.push(tpl.label);
+      if (tpl.capabilityTrack) parts.push(`track: ${String(tpl.capabilityTrack).replace(/_/g, ' ')}`);
+      if (tpl.specifics && tpl.specifics.targetRole) parts.push(`role: ${tpl.specifics.targetRole}`);
+      const comps = (tpl.competencies || []).map((c) => c.name).filter(Boolean).slice(0, 8);
+      if (comps.length) parts.push(`competencies: ${comps.join(', ')}`);
+      if (parts.length) domainContext = parts.join('; ');
+    }
+  } catch (e) { console.warn('[authorMcq] domain context lookup failed', e.message); }
+
+  const baseTopic = cfg.topic || assessment.title;
+  const enrichedTopic = domainContext
+    ? `${baseTopic} — strictly within this technical placement domain: ${domainContext}. Interpret every term/acronym in THIS domain (e.g. "RAG" means Retrieval-Augmented Generation, NOT Red-Amber-Green project status). Do not generate project-management or generic-business questions.`
+    : baseTopic;
+
   // ── Call quizGenerationService, then delete transient Content in finally ────
   // suppressNotification + noObjective prevent D2C side-effects.
   const quizGenerationService = getQuizGenerationService(deps);
   const generateArgs = {
     userId: assessment.createdBy,
-    topic: cfg.topic || assessment.title,
+    topic: enrichedTopic,
     questionCount: cfg.totalQuestions || 10,
     assessmentType: cfg.assessmentType || 'mixed',
     isSkillAssessment: true,
