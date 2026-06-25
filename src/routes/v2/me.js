@@ -158,6 +158,40 @@ router.post('/claim-code', auth, async (req, res) => {
   }
 });
 
+// Placement onboarding prefill — everything the short placement signup flow needs
+// pre-filled from the roster + cohort, so the student doesn't re-enter it: their
+// name, institution, branch (department), year (cohort), roll number, and the
+// objective's competency topics to self-rate. 404 if not a placement student.
+router.get('/placement-onboarding', auth, async (req, res) => {
+  try {
+    const InstitutionEnrollment = require('../../models/InstitutionEnrollment');
+    const UserObjective = require('../../models/UserObjective');
+    const enr = await InstitutionEnrollment
+      .findOne({ userId: req.user.userId, status: { $in: ['registered', 'diagnostic_done', 'active'] } })
+      .populate('institutionId departmentId cohortId');
+    if (!enr) return res.status(404).json({ success: false, message: 'No placement enrollment' });
+    const user = await User.findById(req.user.userId).select('firstName lastName phone');
+    const obj = await UserObjective.findOne({ userId: req.user.userId, 'institutionContext.cohortId': enr.cohortId ? enr.cohortId._id : enr.cohortId });
+    const competencies = (obj && obj.analysis && Array.isArray(obj.analysis.competencies))
+      ? obj.analysis.competencies.map((c) => ({ name: c.name, category: c.category || 'core' }))
+      : [];
+    return res.json({ success: true, data: {
+      name: user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || null : null,
+      phone: user ? (user.phone || null) : null,
+      rollNumber: enr.rollNumber || null,
+      institution: enr.institutionId ? enr.institutionId.name : null,
+      branch: enr.departmentId ? enr.departmentId.name : null,
+      year: enr.cohortId ? enr.cohortId.year : null,
+      cohortLabel: enr.cohortId ? enr.cohortId.label : null,
+      objectiveLabel: obj ? ((obj.specifics && obj.specifics.targetRole) || null) : null,
+      competencies,
+    } });
+  } catch (err) {
+    console.error('[v2/me/placement-onboarding] error', err);
+    return res.status(500).json({ success: false, message: 'Could not load onboarding details' });
+  }
+});
+
 // Student assessment routes — list scheduled assessments, start, sync.
 // The studentAssessments router manages its own auth per-handler (same D2C `auth`).
 // Mounted here so final paths are /api/v2/me/assessments/*.

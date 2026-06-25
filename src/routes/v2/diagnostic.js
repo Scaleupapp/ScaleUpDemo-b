@@ -174,14 +174,21 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
     const objective = await UserObjective.findOne({ userId, status: 'active', isPrimary: true });
     let trajectory = null;
     if (objective) {
-      trajectory = forecastTrajectory({
-        currentReadiness: baselineReadiness,
-        objectiveType: objective.objectiveType,
-        specifics: objective.specifics || {},
-        timeline: objective.timeline,
-        currentLevel: objective.currentLevel,
-        targetReadiness: require('../../services/readiness/targetService').getEffectiveTarget(objective),
-      });
+      // Trajectory + target are external/derived — never let a forecast failure
+      // 500 the whole insights screen (trajectory is optional on the client).
+      try {
+        trajectory = forecastTrajectory({
+          currentReadiness: baselineReadiness,
+          objectiveType: objective.objectiveType,
+          specifics: objective.specifics || {},
+          timeline: objective.timeline,
+          currentLevel: objective.currentLevel,
+          targetReadiness: require('../../services/readiness/targetService').getEffectiveTarget(objective),
+        });
+      } catch (e) {
+        console.warn('[v2/diagnostic/insights] trajectory forecast failed (non-fatal)', e.message);
+        trajectory = null;
+      }
     }
 
     // Top 3 leverage actions — highest-impact gaps. calibrationDelta is in
@@ -256,7 +263,21 @@ router.get('/:attemptId/insights', auth, async (req, res) => {
     });
   } catch (err) {
     console.error('[v2/diagnostic/insights] error', err);
-    return res.status(500).json({ success: false, message: 'Failed to load insights' });
+    // NEVER block the student on the insights screen with an undecodable 500.
+    // Return a safe, fully-shaped minimal payload so the client decodes cleanly
+    // and proceeds to home. The real error is logged above for follow-up.
+    return res.json({
+      success: true,
+      data: {
+        baseline: { readiness: 0, headline: 'Your baseline is ready.' },
+        calibration: { selfRated: [], actual: [], gap: [], summary: '' },
+        performance: [],
+        patterns: ['Your diagnostic is saved — your plan is ready.'],
+        trajectory: null,
+        topActions: [],
+        planHeadline: 'We’ve built your plan around your diagnostic.',
+      },
+    });
   }
 });
 
