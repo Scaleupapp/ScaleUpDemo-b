@@ -50,7 +50,13 @@ router.post(
       // NOTE: seat accounting (seatsUsed increment on commit) is deferred to Plan 2b.
       // This overflow check is therefore per-upload only (seatsUsed is not yet incremented
       // at approve time, so seatsAvailable here reflects the licence ceiling only).
-      const seatsAvailable = (institution.seatsLicensed || 0) - (institution.seatsUsed || 0);
+      //
+      // Until an institution is actually provisioned a seat licence, seatsLicensed is 0.
+      // Enforcing a 0 ceiling would reject EVERY roster row as "seat overflow" — a false
+      // block, since real seat accounting/provisioning lands in 2b. So treat "no licence
+      // configured" (seatsLicensed <= 0) as uncapped; only enforce when seats are set.
+      const licensed = institution.seatsLicensed || 0;
+      const seatsAvailable = licensed > 0 ? licensed - (institution.seatsUsed || 0) : Infinity;
 
       // Validate the incoming rows
       const { validRows, errors, counts } = validateRoster(rows, { seatsAvailable });
