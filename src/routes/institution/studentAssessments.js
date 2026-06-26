@@ -42,6 +42,9 @@ function getEnrollment() {
 function getAdapterFn() {
   return (router._deps && router._deps.getAdapter) || realGetAdapter;
 }
+function getPlacementDrive() {
+  return (router._deps && router._deps.PlacementDrive) || require('../../models/PlacementDrive');
+}
 
 // GET /assessments — list released assessments for the student's cohort(s)
 // + left-join the student's own AssessmentSession per assessment.
@@ -213,6 +216,25 @@ router.get('/assessments/sessions/:sessionId/review', (req, res, next) => getAut
   } catch (err) {
     console.error('[studentAssessments:review]', err.message);
     return res.status(500).json({ success: false, message: 'Could not load review.' });
+  }
+});
+
+// GET /placement/companies — recruiting drives for the student's cohort(s).
+router.get('/placement/companies', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const Enrollment = getEnrollment();
+    const PlacementDrive = getPlacementDrive();
+    const enrollmentsQuery = Enrollment.find({ userId });
+    const enrollments = typeof enrollmentsQuery.lean === 'function' ? await enrollmentsQuery.lean() : await enrollmentsQuery;
+    const cohortIds = enrollments.map((e) => e.cohortId);
+    if (!cohortIds.length) return res.status(200).json({ success: true, data: [] });
+    const drivesQuery = PlacementDrive.find({ cohortId: { $in: cohortIds } }).sort({ driveDate: 1, createdAt: 1 });
+    const drives = typeof drivesQuery.lean === 'function' ? await drivesQuery.lean() : await drivesQuery;
+    return res.status(200).json({ success: true, data: drives });
+  } catch (err) {
+    console.error('[studentAssessments:companies]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not list companies.' });
   }
 });
 
