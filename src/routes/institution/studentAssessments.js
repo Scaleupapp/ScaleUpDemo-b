@@ -261,8 +261,9 @@ router.get('/placement/companies', (req, res, next) => getAuth()(req, res, next)
       const DriveBookmark = getDriveBookmark();
       const bookmarkQuery = DriveBookmark.find({ userId, driveId: { $in: drives.map((d) => d._id) } });
       bookmarks = typeof bookmarkQuery.lean === 'function' ? await bookmarkQuery.lean() : await bookmarkQuery;
-    } catch (_) {
+    } catch (bookmarkErr) {
       // Bookmark lookup failed (e.g. no DB in tests) — treat as no bookmarks.
+      console.warn('[studentAssessments:companies:bookmarks]', bookmarkErr.message);
     }
     const bookmarkedSet = new Set(bookmarks.map((b) => String(b.driveId)));
     const data = drives.map((d) => ({ ...d, bookmarked: bookmarkedSet.has(String(d._id)) }));
