@@ -19,5 +19,6 @@ router.use('/', require('./assessments'));
 router.use('/', require('./assessmentSources'));
 router.use('/', require('./uploads'));
 router.use('/', require('./notices'));
+router.use('/', require('./shelves'));
 
 module.exports = router;
