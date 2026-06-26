@@ -45,6 +45,9 @@ function getAdapterFn() {
 function getPlacementDrive() {
   return (router._deps && router._deps.PlacementDrive) || require('../../models/PlacementDrive');
 }
+function getNotice() { return (router._deps && router._deps.InstitutionNotice) || require('../../models/InstitutionNotice'); }
+function getNoticeRead() { return (router._deps && router._deps.NoticeRead) || require('../../models/NoticeRead'); }
+function getGenDownload() { return (router._deps && router._deps.generateDownloadURL) || require('../../config/s3').generateDownloadURL; }
 
 // GET /assessments — list released assessments for the student's cohort(s)
 // + left-join the student's own AssessmentSession per assessment.
@@ -251,6 +254,53 @@ router.get('/placement/companies', (req, res, next) => getAuth()(req, res, next)
   } catch (err) {
     console.error('[studentAssessments:companies]', err.message);
     return res.status(500).json({ success: false, message: 'Could not list companies.' });
+  }
+});
+
+// GET /placement/notices — cohort notices with this student's read state.
+router.get('/placement/notices', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const Enrollment = getEnrollment();
+    const enq = Enrollment.find({ userId });
+    const enrollments = typeof enq.lean === 'function' ? await enq.lean() : await enq;
+    const cohortIds = enrollments.map((e) => e.cohortId);
+    if (!cohortIds.length) return res.status(200).json({ success: true, data: [] });
+    const Notice = getNotice();
+    const nq = Notice.find({ cohortId: { $in: cohortIds } }).sort({ pinned: -1, createdAt: -1 });
+    const notices = typeof nq.lean === 'function' ? await nq.lean() : await nq;
+    const NoticeRead = getNoticeRead();
+    const rq = NoticeRead.find({ userId, noticeId: { $in: notices.map((n) => n._id) } });
+    const reads = typeof rq.lean === 'function' ? await rq.lean() : await rq;
+    const readSet = new Set(reads.map((r) => String(r.noticeId)));
+    const genDownload = getGenDownload();
+    const data = [];
+    for (const n of notices) {
+      let attachment = null;
+      if (n.attachment && n.attachment.s3Key) {
+        let url = null;
+        try { url = await genDownload(n.attachment.s3Key); } catch (e) { url = null; }
+        attachment = { fileName: n.attachment.fileName, mime: n.attachment.mime, url };
+      }
+      data.push({ _id: n._id, title: n.title, body: n.body, pinned: !!n.pinned, link: n.link || null, attachment, createdAt: n.createdAt, read: readSet.has(String(n._id)) });
+    }
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('[studentAssessments:notices]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not list notices.' });
+  }
+});
+
+// POST /placement/notices/:noticeId/read — mark a notice read (idempotent upsert).
+router.post('/placement/notices/:noticeId/read', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const NoticeRead = getNoticeRead();
+    await NoticeRead.updateOne({ noticeId: req.params.noticeId, userId }, { $setOnInsert: { readAt: new Date() } }, { upsert: true });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[studentAssessments:notice-read]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not mark read.' });
   }
 });
 
