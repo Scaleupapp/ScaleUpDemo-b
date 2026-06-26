@@ -229,8 +229,24 @@ router.get('/placement/companies', (req, res, next) => getAuth()(req, res, next)
     const enrollments = typeof enrollmentsQuery.lean === 'function' ? await enrollmentsQuery.lean() : await enrollmentsQuery;
     const cohortIds = enrollments.map((e) => e.cohortId);
     if (!cohortIds.length) return res.status(200).json({ success: true, data: [] });
-    const drivesQuery = PlacementDrive.find({ cohortId: { $in: cohortIds } }).sort({ driveDate: 1, createdAt: 1 });
+    // Defense-in-depth: also filter by the student's institutionId(s) to prevent
+    // cross-institution data leakage if cohortId happens to match another institution.
+    const institutionIds = [...new Set(enrollments.map((e) => e.institutionId).filter(Boolean))];
+    const driveFilter = { cohortId: { $in: cohortIds } };
+    if (institutionIds.length) driveFilter.institutionId = { $in: institutionIds };
+    const drivesQuery = PlacementDrive.find(driveFilter);
     const drives = typeof drivesQuery.lean === 'function' ? await drivesQuery.lean() : await drivesQuery;
+    // Null-date-last sort: drives with a driveDate come first (ascending),
+    // then drives without a driveDate (sorted by createdAt).
+    drives.sort((a, b) => {
+      const aHas = !!a.driveDate;
+      const bHas = !!b.driveDate;
+      if (aHas && bHas) return new Date(a.driveDate) - new Date(b.driveDate);
+      if (aHas) return -1;
+      if (bHas) return 1;
+      // Both have no driveDate: sort by createdAt
+      return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+    });
     return res.status(200).json({ success: true, data: drives });
   } catch (err) {
     console.error('[studentAssessments:companies]', err.message);

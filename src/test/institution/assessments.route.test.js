@@ -131,7 +131,9 @@ test('GET /assessments/:id → 404 when not found', async () => {
 
 // ── Monitoring: GET /assessments/:id/sessions ─────────────────────────────────
 
-test('GET /assessments/:id/sessions hides score while window is still open', async () => {
+test('GET /assessments/:id/sessions reveals score to TPO even while window is still open', async () => {
+  // The TPO dashboard (institution-auth endpoint) always reveals scores immediately.
+  // Score hiding applies only to the student-facing endpoint, not this one.
   const future = new Date(Date.now() + 86400000); // closes tomorrow
   assessments._deps = {
     Assessment: {
@@ -161,8 +163,12 @@ test('GET /assessments/:id/sessions hides score while window is still open', asy
   const { counts, sessions } = res.body.data;
   assert.strictEqual(counts.graded, 1);
   assert.strictEqual(counts.started, 2);
-  // Scores must NOT be present while window is open
-  sessions.forEach((s) => assert.strictEqual(s.score, undefined, 'score must be hidden while window is open'));
+  // TPO sees scores immediately — score must be present for the graded session
+  const gradedSession = sessions.find((s) => s.status === 'graded');
+  assert.strictEqual(gradedSession.score, 92, 'TPO must see score even while window is open');
+  // Session with no result has no score property
+  const inProgressSession = sessions.find((s) => s.status === 'in_progress');
+  assert.strictEqual(inProgressSession.score, undefined, 'session with no result should have no score');
   assessments._deps = null;
 });
 
@@ -808,8 +814,10 @@ test('GET /assessments/:id/sessions/:userId returns full detail when window clos
   assessments._deps = null;
 });
 
-// Per-student detail — score hidden when window open
-test('GET /assessments/:id/sessions/:userId hides score while window open', async () => {
+// Per-student detail — TPO sees score even while window is open
+test('GET /assessments/:id/sessions/:userId reveals score to TPO while window open', async () => {
+  // The per-student detail endpoint is institution-auth only (TPO portal).
+  // TPO sees scores immediately regardless of the assessment window state.
   const future = new Date(Date.now() + 86400000);
   assessments._deps = {
     Assessment: {
@@ -835,7 +843,7 @@ test('GET /assessments/:id/sessions/:userId hides score while window open', asyn
     .set('Authorization', `Bearer ${tok('viewer')}`);
 
   assert.strictEqual(res.status, 200);
-  assert.strictEqual(res.body.data.score, undefined, 'score key must be absent while window is open');
+  assert.strictEqual(res.body.data.score, 77, 'TPO must see score even while window is open');
   assessments._deps = null;
 });
 

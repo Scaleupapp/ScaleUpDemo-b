@@ -59,3 +59,12 @@ test('PATCH unknown drive → 404', async () => {
   assert.strictEqual(res.status, 404);
   org._deps = null;
 });
+
+test('DELETE unknown drive → 404', async () => {
+  org._deps = { orgService: { deleteDrive: async () => { throw new Error('DRIVE_NOT_FOUND'); } } };
+  const res = await request(appAs('inst-A', 'tpo_head'))
+    .delete('/api/institution/cohorts/c1/drives/dX')
+    .set('Authorization', `Bearer ${tok('inst-A', 'tpo_head')}`);
+  assert.strictEqual(res.status, 404);
+  org._deps = null;
+});
