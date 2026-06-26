@@ -50,6 +50,9 @@ function getNoticeRead() { return (router._deps && router._deps.NoticeRead) || r
 function getGenDownload() { return (router._deps && router._deps.generateDownloadURL) || require('../../config/s3').generateDownloadURL; }
 function getShelf() { return (router._deps && router._deps.Shelf) || require('../../models/Shelf'); }
 function getShelfItem() { return (router._deps && router._deps.ShelfItem) || require('../../models/ShelfItem'); }
+function getDriveBookmark() {
+  return (router._deps && router._deps.DriveBookmark) || require('../../models/DriveBookmark');
+}
 
 // GET /assessments — list released assessments for the student's cohort(s)
 // + left-join the student's own AssessmentSession per assessment.
@@ -252,10 +255,51 @@ router.get('/placement/companies', (req, res, next) => getAuth()(req, res, next)
       // Both have no driveDate: sort by createdAt
       return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
     });
-    return res.status(200).json({ success: true, data: drives });
+    // bookmark lookup — best-effort; missing DriveBookmark stub in tests falls back to [].
+    let bookmarks = [];
+    try {
+      const DriveBookmark = getDriveBookmark();
+      const bookmarkQuery = DriveBookmark.find({ userId, driveId: { $in: drives.map((d) => d._id) } });
+      bookmarks = typeof bookmarkQuery.lean === 'function' ? await bookmarkQuery.lean() : await bookmarkQuery;
+    } catch (_) {
+      // Bookmark lookup failed (e.g. no DB in tests) — treat as no bookmarks.
+    }
+    const bookmarkedSet = new Set(bookmarks.map((b) => String(b.driveId)));
+    const data = drives.map((d) => ({ ...d, bookmarked: bookmarkedSet.has(String(d._id)) }));
+    return res.status(200).json({ success: true, data });
   } catch (err) {
     console.error('[studentAssessments:companies]', err.message);
     return res.status(500).json({ success: false, message: 'Could not list companies.' });
+  }
+});
+
+// POST /placement/companies/:driveId/bookmark — bookmark a drive (idempotent).
+router.post('/placement/companies/:driveId/bookmark', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const DriveBookmark = getDriveBookmark();
+    await DriveBookmark.updateOne(
+      { userId, driveId: req.params.driveId },
+      { $setOnInsert: { createdAt: new Date() } },
+      { upsert: true }
+    );
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[studentAssessments:bookmark]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not bookmark drive.' });
+  }
+});
+
+// DELETE /placement/companies/:driveId/bookmark — remove bookmark.
+router.delete('/placement/companies/:driveId/bookmark', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const DriveBookmark = getDriveBookmark();
+    await DriveBookmark.deleteOne({ userId, driveId: req.params.driveId });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[studentAssessments:unbookmark]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not remove bookmark.' });
   }
 });
 
