@@ -266,8 +266,13 @@ router.get('/placement/notices', (req, res, next) => getAuth()(req, res, next), 
     const enrollments = typeof enq.lean === 'function' ? await enq.lean() : await enq;
     const cohortIds = enrollments.map((e) => e.cohortId);
     if (!cohortIds.length) return res.status(200).json({ success: true, data: [] });
+    // Defense-in-depth: also filter by the student's institutionId(s) to prevent
+    // cross-institution data leakage if cohortId happens to match another institution.
+    const institutionIds = [...new Set(enrollments.map((e) => e.institutionId).filter(Boolean))];
     const Notice = getNotice();
-    const nq = Notice.find({ cohortId: { $in: cohortIds } }).sort({ pinned: -1, createdAt: -1 });
+    const noticeFilter = { cohortId: { $in: cohortIds } };
+    if (institutionIds.length) noticeFilter.institutionId = { $in: institutionIds };
+    const nq = Notice.find(noticeFilter).sort({ pinned: -1, createdAt: -1 });
     const notices = typeof nq.lean === 'function' ? await nq.lean() : await nq;
     const NoticeRead = getNoticeRead();
     const rq = NoticeRead.find({ userId, noticeId: { $in: notices.map((n) => n._id) } });

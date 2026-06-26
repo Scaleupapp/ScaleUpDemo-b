@@ -8,7 +8,7 @@ function getService(deps) { return (deps && deps.noticeService) || require('../.
 const WRITE = requireInstitutionRole('institution_admin', 'tpo_head', 'tpo_coordinator');
 
 router.post('/cohorts/:cohortId/notices', institutionAuth, WRITE, async (req, res) => {
-  try { const n = await getService(router._deps).createNotice(institutionScope(req), req.params.cohortId, req.body || {});
+  try { const n = await getService(router._deps).createNotice({ ...institutionScope(req), createdBy: req.institution.institutionUserId }, req.params.cohortId, req.body || {});
     return res.status(201).json({ success: true, data: n });
   } catch (err) { if (err.name === 'ValidationError' || err.name === 'CastError') return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid notice data.' });
     console.error('[institution/notices:create]', err.message); return res.status(500).json({ success: false, message: 'Could not create notice.' }); }

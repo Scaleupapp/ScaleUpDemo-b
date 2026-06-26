@@ -8,8 +8,8 @@ const authStub = (userId) => (req, _res, next) => { req.user = { userId }; next(
 test('notices: cohort-scoped, pinned-first, with read flag + attachment url', async () => {
   const app = appWith({
     auth: authStub('stu1'),
-    InstitutionEnrollment: { find: () => ({ lean: async () => ([{ cohortId: 'c1' }]) }) },
-    InstitutionNotice: { find: (q) => { assert.deepStrictEqual(q.cohortId.$in, ['c1']); return { sort: () => ({ lean: async () => ([
+    InstitutionEnrollment: { find: () => ({ lean: async () => ([{ cohortId: 'c1', institutionId: 'inst1' }]) }) },
+    InstitutionNotice: { find: (q) => { assert.deepStrictEqual(q.cohortId.$in, ['c1'], 'cohortId.$in should match enrolled cohorts'); assert.deepStrictEqual(q.institutionId.$in, ['inst1'], 'institutionId.$in should match enrollment institutions'); return { sort: () => ({ lean: async () => ([
       { _id: 'n1', title: 'A', pinned: true, attachment: { s3Key: 'k', fileName: 'f.pdf', mime: 'application/pdf' } },
       { _id: 'n2', title: 'B', pinned: false },
     ]) }) }; } },
