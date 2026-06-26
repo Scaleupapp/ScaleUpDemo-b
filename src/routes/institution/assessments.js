@@ -262,6 +262,15 @@ router.get('/assessments/:id/sessions/:userId', institutionAuth, async (req, res
       data.score = result.score;
     }
 
+    // TPO also sees the detailed per-question review (ungated) for MCQ sessions.
+    try {
+      const reviewService = require('../../services/institution/assessment/assessmentReviewService');
+      const review = await reviewService.buildMcqReview(session);
+      if (review) data.questions = review.questions;
+    } catch (revErr) {
+      console.warn('[institution/assessments:session-detail] review build failed:', revErr.message);
+    }
+
     return res.status(200).json({ success: true, data });
   } catch (err) {
     console.error('[institution/assessments:session-detail]', err.message);

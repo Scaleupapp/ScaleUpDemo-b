@@ -165,7 +165,7 @@ router.get('/placement-onboarding', auth, async (req, res) => {
       branch: enr.departmentId ? enr.departmentId.name : null,
       year: enr.cohortId ? enr.cohortId.year : null,
       cohortLabel: enr.cohortId ? enr.cohortId.label : null,
-      objectiveLabel: obj ? ((obj.specifics && obj.specifics.targetRole) || null) : null,
+      objectiveLabel: obj ? (obj.label || (obj.specifics && obj.specifics.targetRole) || null) : null,
       competencies,
     } });
   } catch (err) {

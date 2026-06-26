@@ -94,6 +94,33 @@ router.post(
   }
 );
 
+// ── PATCH /cohorts/:cohortId ──────────────────────────────────────────────────
+// Update the placement-season timeline (and optionally the label).
+// Gate: institution_admin, tpo_head
+router.patch(
+  '/cohorts/:cohortId',
+  institutionAuth,
+  requireInstitutionRole('institution_admin', 'tpo_head'),
+  async (req, res) => {
+    try {
+      const orgService = getService(router._deps);
+      const scope = institutionScope(req);
+      const { placementSeason, label } = req.body || {};
+      const cohort = await orgService.updateCohort(scope, req.params.cohortId, { placementSeason, label });
+      return res.status(200).json({ success: true, data: cohort });
+    } catch (err) {
+      if (err.message === 'COHORT_NOT_FOUND') {
+        return res.status(404).json({ success: false, message: 'Cohort not found in this institution' });
+      }
+      if (err.name === 'ValidationError' || err.name === 'CastError') {
+        return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid cohort data.' });
+      }
+      console.error('[institution/cohorts:update]', err.message);
+      return res.status(500).json({ success: false, message: 'Could not update cohort.' });
+    }
+  }
+);
+
 // ── GET /cohorts ─────────────────────────────────────────────────────────────
 // Gate: any authenticated institution role
 // Optional query param: ?departmentId=...

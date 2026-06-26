@@ -73,4 +73,31 @@ async function listCohorts(scope, { departmentId } = {}, deps) {
   return InstitutionCohort.find({ ...scope, ...(departmentId ? { departmentId } : {}) }).limit(1000);
 }
 
-module.exports = { createDepartment, listDepartments, createCohort, listCohorts };
+/**
+ * Update a cohort's placement-season timeline (and optionally its label).
+ * Scoped to the institution so a TPO cannot touch another institution's cohorts.
+ * @param {object} scope    - { institutionId }
+ * @param {string} cohortId
+ * @param {object} patch    - { placementSeason?: { startDate?, endDate? }, label? }
+ * @param {object} [deps]
+ */
+async function updateCohort(scope, cohortId, { placementSeason, label } = {}, deps) {
+  const { InstitutionCohort } = getModels(deps);
+  const set = {};
+  if (placementSeason !== undefined) {
+    set.placementSeason = {
+      startDate: placementSeason && placementSeason.startDate ? placementSeason.startDate : null,
+      endDate: placementSeason && placementSeason.endDate ? placementSeason.endDate : null,
+    };
+  }
+  if (label !== undefined) set.label = label;
+  const cohort = await InstitutionCohort.findOneAndUpdate(
+    { ...scope, _id: cohortId },
+    { $set: set },
+    { new: true },
+  );
+  if (!cohort) throw new Error('COHORT_NOT_FOUND');
+  return cohort;
+}
+
+module.exports = { createDepartment, listDepartments, createCohort, listCohorts, updateCohort };

@@ -171,6 +171,20 @@ router.get('/today', auth, async (req, res) => {
     ]);
 
     const greeting = user?.firstName ? `Hi, ${user.firstName}.` : 'Hi.';
+
+    // Institution objectives display the TPO's human label. New seeds copy it onto
+    // the UserObjective; for objectives created before that field existed, fall back
+    // to the linked ObjectiveTemplate so the name is correct without a migration.
+    if (objective && !objective.label && objective.institutionContext?.templateId) {
+      try {
+        const tmpl = await require('../../models/ObjectiveTemplate')
+          .findById(objective.institutionContext.templateId).select('label').lean();
+        if (tmpl?.label) objective.label = tmpl.label;
+      } catch (err) {
+        console.warn('[plan/today] objective label lookup failed:', err.message);
+      }
+    }
+
     const objectiveLabel = buildObjectiveLabel(objective);
     const objectiveName = buildObjectiveName(objective);
 
@@ -1053,6 +1067,8 @@ async function synthesizeBonusTasks({ userId, objective, knowledge }) {
 
 function buildObjectiveLabel(obj) {
   if (!obj) return null;
+  // Institution-assigned objectives carry the TPO's human label verbatim.
+  if (obj.label && String(obj.label).trim()) return String(obj.label).trim();
   const s = obj.specifics || {};
   const parts = [];
   if (s.targetRole) parts.push(s.targetRole);
@@ -1076,6 +1092,13 @@ function buildObjectiveLabel(obj) {
  */
 function buildObjectiveName(obj) {
   if (!obj) return null;
+  // Institution-assigned objectives carry the TPO's human label. Show it in full
+  // (uppercased to match the card style); allow a longer cap than D2C names since
+  // the placement card renders it on its own line.
+  if (obj.label && String(obj.label).trim()) {
+    const up = String(obj.label).trim().toUpperCase();
+    return up.length > 26 ? up.slice(0, 26) : up;
+  }
   const s = obj.specifics || {};
   let raw = s.examName || s.targetRole || s.targetSkill || obj.objectiveType || '';
   raw = String(raw).replace(/_/g, ' ').trim();

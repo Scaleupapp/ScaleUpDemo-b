@@ -12,6 +12,10 @@ const userObjectiveSchema = new mongoose.Schema({
     ],
     required: true,
   },
+  // Human-readable display name. For institution-assigned objectives this is
+  // copied verbatim from the TPO's ObjectiveTemplate.label (e.g. "Software
+  // Development"); D2C objectives leave it unset and derive a name from specifics.
+  label: { type: String, trim: true },
   specifics: {
     examName: { type: String, trim: true },
     targetRole: { type: String, trim: true },

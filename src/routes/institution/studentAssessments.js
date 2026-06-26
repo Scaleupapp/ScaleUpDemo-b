@@ -18,6 +18,7 @@
 const express = require('express');
 const realAuth = require('../../middleware/auth');
 const { getAdapter: realGetAdapter } = require('../../services/institution/assessment/engineAdapters');
+const reviewService = require('../../services/institution/assessment/assessmentReviewService');
 
 const router = express.Router();
 router._deps = null;
@@ -95,6 +96,8 @@ router.get('/assessments', (req, res, next) => getAuth()(req, res, next), async 
     const data = assessments.map((a) => ({
       assessment: a,
       session: sessionByAssessmentId[String(a._id)] || null,
+      // Detailed per-question review unlocks for the student once the window closes.
+      windowClosed: reviewService.isWindowClosed(a),
     }));
 
     return res.status(200).json({ success: true, data });
@@ -168,6 +171,48 @@ router.post('/assessments/sessions/:sessionId/sync', (req, res, next) => getAuth
     if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Session not found.' });
     console.error('[studentAssessments:sync]', err.message);
     return res.status(500).json({ success: false, message: 'Could not sync session.' });
+  }
+});
+
+// GET /assessments/sessions/:sessionId/review — detailed per-question review.
+// Gated: students only see it once the assessment window has closed (so answers
+// can't be shared while peers are still taking it). Returns { windowClosed,
+// score, questions } — `questions` is null/empty until unlocked.
+router.get('/assessments/sessions/:sessionId/review', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { sessionId } = req.params;
+    const AssessmentSession = getAssessmentSession();
+    const Assessment = getAssessment();
+
+    const sessionQuery = AssessmentSession.findById(sessionId);
+    const session = typeof sessionQuery.lean === 'function' ? await sessionQuery.lean() : await sessionQuery;
+    if (!session || String(session.userId) !== String(userId)) {
+      return res.status(404).json({ success: false, message: 'Session not found.' });
+    }
+
+    const assessmentQuery = Assessment.findById(session.assessmentId);
+    const assessment = typeof assessmentQuery.lean === 'function' ? await assessmentQuery.lean() : await assessmentQuery;
+    const windowClosed = reviewService.isWindowClosed(assessment);
+
+    if (!windowClosed) {
+      // Locked — score is already visible elsewhere; withhold the answers.
+      return res.status(200).json({ success: true, data: { windowClosed: false, questions: [] } });
+    }
+
+    const review = await reviewService.buildMcqReview(session);
+    return res.status(200).json({
+      success: true,
+      data: {
+        windowClosed: true,
+        score: session.result ? session.result.score : null,
+        engineType: review ? review.engineType : (session.engine ? session.engine.type : null),
+        questions: review ? review.questions : [],
+      },
+    });
+  } catch (err) {
+    console.error('[studentAssessments:review]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not load review.' });
   }
 });
 

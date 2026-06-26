@@ -39,6 +39,7 @@ async function seedObjectiveFromCohort(userId, cohortId, { assignedBy = null, de
   const doc = new UserObjective({
     userId,
     objectiveType: template.objectiveType,
+    label: template.label,             // TPO's human label, e.g. "Software Development"
     specifics: template.specifics || {},
     timeline: 'no_deadline',           // explicit deadline lives in targetDate, not the timeline enum
     targetDate,
