@@ -12,6 +12,12 @@ const s3 = new S3Client({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
+  // Newer AWS SDK v3 defaults to WHEN_SUPPORTED, which bakes an x-amz-checksum-crc32
+  // into presigned PUT URLs. A browser fetch() PUT can't reproduce that checksum, so
+  // the upload fails. WHEN_REQUIRED restores the legacy behaviour (no auto-checksum)
+  // so browser uploads via generateUploadURL work; server-side uploads still send a
+  // correct checksum when the operation requires one.
+  requestChecksumCalculation: 'WHEN_REQUIRED',
 });
 
 async function generateUploadURL(key, contentType, expiresIn = 3600) {
