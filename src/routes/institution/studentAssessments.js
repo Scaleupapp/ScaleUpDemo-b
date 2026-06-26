@@ -48,6 +48,8 @@ function getPlacementDrive() {
 function getNotice() { return (router._deps && router._deps.InstitutionNotice) || require('../../models/InstitutionNotice'); }
 function getNoticeRead() { return (router._deps && router._deps.NoticeRead) || require('../../models/NoticeRead'); }
 function getGenDownload() { return (router._deps && router._deps.generateDownloadURL) || require('../../config/s3').generateDownloadURL; }
+function getShelf() { return (router._deps && router._deps.Shelf) || require('../../models/Shelf'); }
+function getShelfItem() { return (router._deps && router._deps.ShelfItem) || require('../../models/ShelfItem'); }
 
 // GET /assessments — list released assessments for the student's cohort(s)
 // + left-join the student's own AssessmentSession per assessment.
@@ -306,6 +308,38 @@ router.post('/placement/notices/:noticeId/read', (req, res, next) => getAuth()(r
   } catch (err) {
     console.error('[studentAssessments:notice-read]', err.message);
     return res.status(500).json({ success: false, message: 'Could not mark read.' });
+  }
+});
+
+// GET /placement/shelves — curated shelves for the student's cohort(s).
+router.get('/placement/shelves', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const Enrollment = getEnrollment();
+    const enq = Enrollment.find({ userId });
+    const enrollments = typeof enq.lean === 'function' ? await enq.lean() : await enq;
+    const cohortIds = enrollments.map((e) => e.cohortId);
+    const institutionIds = [...new Set(enrollments.map((e) => e.institutionId).filter(Boolean))];
+    if (!cohortIds.length) return res.status(200).json({ success: true, data: [] });
+    const Shelf = getShelf();
+    const sq = Shelf.find({ institutionId: { $in: institutionIds }, cohortId: { $in: cohortIds } }).sort({ order: 1, createdAt: 1 });
+    const shelves = typeof sq.lean === 'function' ? await sq.lean() : await sq;
+    if (!shelves.length) return res.status(200).json({ success: true, data: [] });
+    const ShelfItem = getShelfItem();
+    const iq = ShelfItem.find({ shelfId: { $in: shelves.map((s) => s._id) } }).sort({ order: 1, createdAt: 1 });
+    const items = typeof iq.lean === 'function' ? await iq.lean() : await iq;
+    const genDownload = getGenDownload();
+    const byShelf = {};
+    for (const it of items) {
+      let url = it.url || null;
+      if (it.type === 'file' && it.s3Key) { try { url = await genDownload(it.s3Key); } catch (e) { url = null; } }
+      (byShelf[String(it.shelfId)] ||= []).push({ _id: it._id, type: it.type, title: it.title, note: it.note || null, fileName: it.fileName || null, mime: it.mime || null, url });
+    }
+    const data = shelves.map((s) => ({ _id: s._id, title: s.title, order: s.order, items: byShelf[String(s._id)] || [] }));
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('[studentAssessments:shelves]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not list shelves.' });
   }
 });
 
