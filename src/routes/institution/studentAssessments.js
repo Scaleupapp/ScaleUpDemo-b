@@ -388,4 +388,58 @@ router.get('/placement/shelves', (req, res, next) => getAuth()(req, res, next), 
   }
 });
 
+const PRACTICE_TYPES = [
+  { key: 'quiz', label: 'Quiz' },
+  { key: 'drill', label: 'Coding drill' },
+  { key: 'capstone', label: 'Capstone' },
+  { key: 'interview', label: 'Mock interview' },
+];
+
+// Normalize an engine result.raw into [{ name, score }] competency rows.
+function extractCompetencies(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw.competencyBreakdown)) {
+    return raw.competencyBreakdown.map((c) => ({ name: c.competency || c.name, score: typeof c.percentage === 'number' ? c.percentage : c.score }));
+  }
+  const dims = raw.dimensions || raw.dimension_scores;
+  if (Array.isArray(dims)) return dims.map((d) => ({ name: d.name, score: d.score }));
+  if (Array.isArray(raw.rubric_breakdown)) return raw.rubric_breakdown.map((r) => ({ name: r.criterion || r.dimension || r.name, score: r.score }));
+  return [];
+}
+
+// GET /placement/practice — recommend practice on the student's weakest assessed competencies.
+router.get('/placement/practice', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const Enrollment = getEnrollment();
+    const enq = Enrollment.find({ userId });
+    const enrollments = typeof enq.lean === 'function' ? await enq.lean() : await enq;
+    const cohortIds = enrollments.map((e) => e.cohortId);
+    if (!cohortIds.length) {
+      return res.status(200).json({ success: true, data: { hasAssessment: false, recommendations: [], types: PRACTICE_TYPES } });
+    }
+    const AssessmentSession = getAssessmentSession();
+    const sq = AssessmentSession.findOne({ userId, cohortId: { $in: cohortIds }, status: 'graded' }).sort({ gradedAt: -1 });
+    const session = typeof sq.lean === 'function' ? await sq.lean() : await sq;
+    if (!session) {
+      return res.status(200).json({ success: true, data: { hasAssessment: false, recommendations: [], types: PRACTICE_TYPES } });
+    }
+    const comps = extractCompetencies(session.result && session.result.raw)
+      .filter((c) => c.name && typeof c.score === 'number')
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 3);
+    const recommendations = comps.map((c) => ({
+      competency: c.name,
+      score: Math.round(c.score),
+      suggestedType: 'quiz',
+      topic: c.name,
+      reason: `You scored ${Math.round(c.score)}% on ${c.name}`,
+    }));
+    return res.status(200).json({ success: true, data: { hasAssessment: true, recommendations, types: PRACTICE_TYPES } });
+  } catch (err) {
+    console.error('[studentAssessments:practice]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not load practice.' });
+  }
+});
+
 module.exports = router;
