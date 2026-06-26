@@ -100,4 +100,37 @@ async function updateCohort(scope, cohortId, { placementSeason, label } = {}, de
   return cohort;
 }
 
-module.exports = { createDepartment, listDepartments, createCohort, listCohorts, updateCohort };
+// ── Placement Drive methods ──────────────────────────────────────────────────
+
+const DRIVE_FIELDS = ['name', 'role', 'package', 'driveDate', 'eligibility', 'status', 'applyLink', 'notes'];
+function pickDrive(body = {}) {
+  const out = {};
+  for (const k of DRIVE_FIELDS) if (body[k] !== undefined) out[k] = body[k];
+  return out;
+}
+
+async function createDrive(scope, cohortId, body, deps) {
+  const PlacementDrive = (deps && deps.PlacementDrive) || require('../../models/PlacementDrive');
+  return PlacementDrive.create({ ...scope, cohortId, ...pickDrive(body) });
+}
+
+async function listDrives(scope, cohortId, deps) {
+  const PlacementDrive = (deps && deps.PlacementDrive) || require('../../models/PlacementDrive');
+  return PlacementDrive.find({ ...scope, cohortId }).sort({ driveDate: 1, createdAt: 1 }).limit(500);
+}
+
+async function updateDrive(scope, cohortId, driveId, body, deps) {
+  const PlacementDrive = (deps && deps.PlacementDrive) || require('../../models/PlacementDrive');
+  const d = await PlacementDrive.findOneAndUpdate({ ...scope, cohortId, _id: driveId }, { $set: pickDrive(body) }, { new: true });
+  if (!d) throw new Error('DRIVE_NOT_FOUND');
+  return d;
+}
+
+async function deleteDrive(scope, cohortId, driveId, deps) {
+  const PlacementDrive = (deps && deps.PlacementDrive) || require('../../models/PlacementDrive');
+  const d = await PlacementDrive.findOneAndDelete({ ...scope, cohortId, _id: driveId });
+  if (!d) throw new Error('DRIVE_NOT_FOUND');
+  return d;
+}
+
+module.exports = { createDepartment, listDepartments, createCohort, listCohorts, updateCohort, createDrive, listDrives, updateDrive, deleteDrive };

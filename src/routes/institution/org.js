@@ -141,4 +141,53 @@ router.get(
   }
 );
 
+// ── Cohort recruiting drives ─────────────────────────────────────────────────
+router.post('/cohorts/:cohortId/drives', institutionAuth, requireInstitutionRole('institution_admin', 'tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const orgService = getService(router._deps);
+    const drive = await orgService.createDrive(institutionScope(req), req.params.cohortId, req.body || {});
+    return res.status(201).json({ success: true, data: drive });
+  } catch (err) {
+    if (err.name === 'ValidationError' || err.name === 'CastError') return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid drive data.' });
+    console.error('[institution/drives:create]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not create drive.' });
+  }
+});
+
+router.get('/cohorts/:cohortId/drives', institutionAuth, async (req, res) => {
+  try {
+    const orgService = getService(router._deps);
+    const drives = await orgService.listDrives(institutionScope(req), req.params.cohortId);
+    return res.status(200).json({ success: true, data: drives });
+  } catch (err) {
+    console.error('[institution/drives:list]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not list drives.' });
+  }
+});
+
+router.patch('/cohorts/:cohortId/drives/:driveId', institutionAuth, requireInstitutionRole('institution_admin', 'tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const orgService = getService(router._deps);
+    const drive = await orgService.updateDrive(institutionScope(req), req.params.cohortId, req.params.driveId, req.body || {});
+    return res.status(200).json({ success: true, data: drive });
+  } catch (err) {
+    if (err.message === 'DRIVE_NOT_FOUND') return res.status(404).json({ success: false, message: 'Drive not found.' });
+    if (err.name === 'ValidationError' || err.name === 'CastError') return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Invalid drive data.' });
+    console.error('[institution/drives:update]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not update drive.' });
+  }
+});
+
+router.delete('/cohorts/:cohortId/drives/:driveId', institutionAuth, requireInstitutionRole('institution_admin', 'tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const orgService = getService(router._deps);
+    await orgService.deleteDrive(institutionScope(req), req.params.cohortId, req.params.driveId);
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    if (err.message === 'DRIVE_NOT_FOUND') return res.status(404).json({ success: false, message: 'Drive not found.' });
+    console.error('[institution/drives:delete]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not delete drive.' });
+  }
+});
+
 module.exports = router;
