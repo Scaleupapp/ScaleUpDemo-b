@@ -28,7 +28,9 @@ async function listByDrive(scope, cohortId, driveId, deps) {
       .map((a) => String(a.studentUserId))
   );
 
-  // Fetch bookmarks for this drive
+  // Fetch bookmarks for this drive.
+  // DriveBookmark has no institutionId field; safety relies on driveId being unique per institution
+  // (ObjectId). This is safe as long as driveIds are not shared across institutions.
   const bmQuery = DriveBookmark.find({ driveId });
   const bookmarks = typeof bmQuery.lean === 'function' ? await bmQuery.lean() : await bmQuery;
 
@@ -36,9 +38,13 @@ async function listByDrive(scope, cohortId, driveId, deps) {
   const seededEntries = bookmarks
     .filter((bm) => !existingUserIds.has(String(bm.userId)))
     .map((bm) => ({
-      studentUserId: bm.userId,
+      _id: null,
+      driveId,
       studentName: '',
+      rollNumber: null,
+      studentUserId: String(bm.userId),
       stage: 'interested',
+      createdAt: null,
       _seeded: true,
     }));
 

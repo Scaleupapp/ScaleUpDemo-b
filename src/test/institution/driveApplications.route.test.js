@@ -106,4 +106,5 @@ test('listByDrive includes bookmark-seeded interested entry for bookmarked stude
   const seeded = result.applications.find((a) => a._seeded && String(a.studentUserId) === 'u1');
   assert.ok(seeded, 'should include seeded interested entry for bookmarked user u1');
   assert.strictEqual(seeded.stage, 'interested');
+  assert.strictEqual(seeded.driveId, 'd1', 'seeded entry should carry the driveId');
 });
