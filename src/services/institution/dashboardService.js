@@ -14,7 +14,7 @@ function models(deps) {
 }
 async function build(scope, deps) {
   const { outcomeService, Enrollment, Drive, Assessment, pendingRostersCount, now } = models(deps);
-  const out = await outcomeService.institutionOutcomes(scope, deps);
+  const out = await outcomeService.institutionOutcomes(scope);
   const labelByCohort = {}; for (const c of (out.cohorts || [])) labelByCohort[String(c.cohortId)] = c.label;
   const [invited, registered, diagnosticDone, active] = await Promise.all([
     Enrollment.countDocuments({ ...scope, status: 'invited' }),
