@@ -6,8 +6,10 @@ function models(deps) {
     Drive: (deps && deps.PlacementDrive) || require('../../models/PlacementDrive'),
     Assessment: (deps && deps.Assessment) || require('../../models/Assessment'),
     pendingRostersCount: (deps && deps.pendingRostersCount) || (async (scope) => {
+      // "Pending approval" = a validated-but-not-yet-approved RosterUpload — the
+      // exact set the /rosters/pending + Approvals page show (status: 'validated').
       const RosterUpload = require('../../models/RosterUpload');
-      try { return await RosterUpload.countDocuments({ ...scope, status: 'pending' }); } catch (e) { return 0; }
+      try { return await RosterUpload.countDocuments({ ...scope, status: 'validated' }); } catch (e) { return 0; }
     }),
     now: (deps && deps.now) || new Date(),
   };
