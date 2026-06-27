@@ -52,4 +52,16 @@ async function institutionOutcomes(scope, deps) {
   }
   return { cohorts: perCohort, institution: summarize(allOffers, totalEnroll) };
 }
-module.exports = { summarize, createOffer, listOffers, updateOffer, deleteOffer, importOffers, cohortOutcomes, institutionOutcomes };
+async function buildReportRows(scope, cohortId, deps) {
+  const Offer = (deps && deps.PlacementOffer) || require('../../models/PlacementOffer');
+  const q = Offer.find({ ...scope, cohortId }).sort({ status: 1, createdAt: -1 });
+  const offers = typeof q.lean === 'function' ? await q.lean() : await q;
+  const header = ['Student','Roll No','Branch','Company','Role','CTC (LPA)','Type','Status','Offer date'];
+  const rows = offers.map((o) => [
+    o.studentName || '', o.rollNumber || '', o.branch || '', o.companyName || '', o.role || '',
+    (typeof o.ctc === 'number' ? String(o.ctc) : ''), o.offerType || '', o.status || '',
+    o.offerDate ? new Date(o.offerDate).toISOString().slice(0,10) : '',
+  ]);
+  return { header, rows };
+}
+module.exports = { summarize, createOffer, listOffers, updateOffer, deleteOffer, importOffers, cohortOutcomes, institutionOutcomes, buildReportRows };

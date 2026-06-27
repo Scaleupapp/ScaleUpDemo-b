@@ -46,4 +46,14 @@ router.get('/outcomes', institutionAuth, async (req, res) => {
     return res.status(200).json({ success: true, data });
   } catch (err) { console.error('[institution/outcomes:institution]', err.message); return res.status(500).json({ success: false, message: 'Could not get institution outcomes.' }); }
 });
+function csvEscape(v) { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; }
+router.get('/cohorts/:cohortId/report.csv', institutionAuth, async (req, res) => {
+  try {
+    const { header, rows } = await getService(router._deps).buildReportRows(institutionScope(req), req.params.cohortId);
+    const csv = [header, ...rows].map((r) => r.map(csvEscape).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="placement-report-${req.params.cohortId}.csv"`);
+    return res.status(200).send(csv);
+  } catch (err) { console.error('[institution/report.csv]', err.message); return res.status(500).json({ success: false, message: 'Could not build report.' }); }
+});
 module.exports = router;
