@@ -23,5 +23,6 @@ router.use('/', require('./shelves'));
 router.use('/', require('./outcomes'));
 router.use('/', require('./driveApplications'));
 router.use('/', require('./dashboard'));
+router.use('/', require('./analytics'));
 
 module.exports = router;
