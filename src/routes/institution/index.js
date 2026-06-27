@@ -21,6 +21,7 @@ router.use('/', require('./uploads'));
 router.use('/', require('./notices'));
 router.use('/', require('./shelves'));
 router.use('/', require('./outcomes'));
+router.use('/', require('./driveApplications'));
 router.use('/', require('./dashboard'));
 
 module.exports = router;
