@@ -15,8 +15,6 @@ function summarize(offers, cohortSize) {
   const companiesVisited = new Set(offers.map((o) => (o.companyName||'').trim().toLowerCase()).filter(Boolean)).size;
   const statusCounts = { offered: 0, accepted: 0, joined: 0, declined: 0 };
   for (const o of offers) if (statusCounts[o.status] !== undefined) statusCounts[o.status]++;
-  const branchMap = {};
-  for (const o of placedOffers) { const b = o.branch && o.branch.trim(); if (b) branchMap[b] = (branchMap[b]||0); }
   // count distinct placed students per branch
   const seenByBranch = {};
   for (const o of placedOffers) { const b = o.branch && o.branch.trim(); if (!b) continue; (seenByBranch[b] ||= new Set()).add(studentKey(o)); }
