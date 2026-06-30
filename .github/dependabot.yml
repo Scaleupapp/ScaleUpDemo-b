@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # ── npm dependencies ────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    # Group all PATCH-level version bumps into a single PR so the
+    # auto-merge workflow can land low-risk updates in one shot.
+    # Minor and major bumps are opened as individual PRs and are NOT
+    # auto-merged (they require a human + the full validation pass).
+    groups:
+      npm-patch:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+    # Security fixes are always opened by Dependabot regardless of the
+    # schedule; the workflow auto-merges them only when they are patch-level.
+
+  # ── GitHub Actions used by our workflows ────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"

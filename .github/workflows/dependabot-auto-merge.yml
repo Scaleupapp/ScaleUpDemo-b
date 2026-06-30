@@ -1,0 +1,61 @@
+name: Dependabot auto-merge
+
+# Safely auto-merges Dependabot PRs:
+#   • PATCH-level updates  -> auto-merged AFTER the CI gate passes
+#   • minor / major updates -> CI runs, then the PR is flagged for a human
+# The CI gate is infra-free and reliable (no flaky boot against external
+# services): clean install + security audit + syntax check. Runtime safety
+# at deploy time is guaranteed separately by the deploy script's health
+# check + auto-rollback.
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  guarded-auto-merge:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Clean install (lockfile integrity)
+        run: npm ci --no-audit --no-fund
+
+      - name: Security audit (block new high/critical)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Syntax check entrypoints
+        run: |
+          node --check server.js
+          node --check src/app.js
+
+      - name: Auto-merge PATCH updates
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch'
+        run: gh pr merge --squash --delete-branch "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Flag minor/major for manual review
+        if: steps.meta.outputs.update-type != 'version-update:semver-patch'
+        run: |
+          gh pr comment "$PR_URL" --body "🔒 **${{ steps.meta.outputs.update-type }}** update — CI checks passed, but auto-merge is restricted to patch-level. Please review and merge manually (run the app's full validation; minor/major bumps can change behavior)."
+          gh pr edit "$PR_URL" --add-label "needs-manual-review" || true
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
