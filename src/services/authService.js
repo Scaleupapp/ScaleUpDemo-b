@@ -183,6 +183,13 @@ class AuthService {
   async sendPhoneOTP(phone) {
     const normalized = this._normalizePhone(phone);
 
+    // App Store reviewer / demo bypass: a reserved phone gets a fixed OTP and
+    // never triggers an SMS. Env-gated (REVIEWER_PHONE) so it stays inert unless
+    // explicitly configured, and can be switched off instantly post-review.
+    if (this._isReviewerPhone(normalized)) {
+      return { message: 'OTP sent successfully', phone: normalized };
+    }
+
     // Rate limit: 1 OTP per phone per 60 seconds
     const rateLimitKey = `otp:ratelimit:${normalized}`;
     const isRateLimited = await redis.get(rateLimitKey);
@@ -215,13 +222,16 @@ class AuthService {
     const normalized = this._normalizePhone(phone);
     const otpKey = `otp:phone:${normalized}`;
 
-    const storedOtp = await redis.get(otpKey);
-    if (!storedOtp || storedOtp !== otp) {
-      throw new ApiError(400, 'Invalid or expired OTP');
+    // App Store reviewer / demo bypass (env-gated): the reserved phone accepts
+    // the fixed REVIEWER_OTP without an SMS/Redis round-trip. Real users unaffected.
+    if (!this._isReviewerOTP(normalized, otp)) {
+      const storedOtp = await redis.get(otpKey);
+      if (!storedOtp || storedOtp !== otp) {
+        throw new ApiError(400, 'Invalid or expired OTP');
+      }
+      // OTP is valid — consume it
+      await redis.del(otpKey);
     }
-
-    // OTP is valid — consume it
-    await redis.del(otpKey);
 
     // Look up existing user by phone
     let user = await User.findOne({ phone: normalized });
@@ -296,6 +306,30 @@ class AuthService {
       throw new ApiError(400, 'Invalid phone number');
     }
     return cleaned;
+  }
+
+  /**
+   * App Store reviewer / demo bypass helpers (env-gated, inert by default).
+   * Set REVIEWER_PHONE (e.g. "9000000009") and REVIEWER_OTP (e.g. "424242") in
+   * the backend environment to enable a fixed-OTP login for App Review, then
+   * unset them after the app is approved.
+   */
+  _isReviewerPhone(normalizedPhone) {
+    const reviewer = process.env.REVIEWER_PHONE;
+    if (!reviewer) return false;
+    try {
+      return normalizedPhone === this._normalizePhone(reviewer);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  _isReviewerOTP(normalizedPhone, otp) {
+    return (
+      !!process.env.REVIEWER_OTP &&
+      otp === process.env.REVIEWER_OTP &&
+      this._isReviewerPhone(normalizedPhone)
+    );
   }
 
   /**

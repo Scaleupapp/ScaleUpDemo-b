@@ -105,4 +105,22 @@ contentSchema.index({ tags: 1 });
 contentSchema.index({ contentType: 1, status: 1, publishedAt: -1 });
 contentSchema.index({ youtubeVideoId: 1 }, { sparse: true });
 
+// ─── App Store v1.0: hide imported YouTube content from learner feeds ───────────
+// We launch on first-party content + the AI engine while we bring video back the
+// compliant way (official YouTube embed) in a follow-up. This hook is env-gated
+// (HIDE_YOUTUBE_CONTENT=true) and SURGICAL: it only augments queries that already
+// scope to published content — i.e. the learner-facing feeds / discovery /
+// recommendations — and never touches admin, ingestion, or by-_id lookups. Fully
+// reversible: unset HIDE_YOUTUBE_CONTENT to restore the full library.
+function _hideYoutubeFromPublishedFeeds() {
+  if (process.env.HIDE_YOUTUBE_CONTENT !== 'true') return;
+  const q = this.getQuery();
+  if (q && q.status === 'published' && q.isYoutubeImport === undefined) {
+    this.where({ isYoutubeImport: { $ne: true } });
+  }
+}
+contentSchema.pre('find', _hideYoutubeFromPublishedFeeds);
+contentSchema.pre('findOne', _hideYoutubeFromPublishedFeeds);
+contentSchema.pre('countDocuments', _hideYoutubeFromPublishedFeeds);
+
 module.exports = mongoose.model('Content', contentSchema);
