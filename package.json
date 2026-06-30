@@ -27,7 +27,7 @@
     "bullmq": "^5.21.0",
     "compression": "^1.7.5",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.4.2",
     "express": "^4.21.0",
     "firebase-admin": "^13.8.0",
     "google-auth-library": "^9.14.0",
