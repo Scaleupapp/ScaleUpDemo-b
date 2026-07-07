@@ -1,6 +1,7 @@
 const Content = require('../models/Content');
 const { paginationMeta } = require('../utils/pagination');
 const ApiError = require('../utils/apiError');
+const moderationService = require('./moderationService');
 const { s3 } = require('../config/s3');
 const { GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
@@ -97,7 +98,7 @@ class ContentService {
     return { items, pagination: paginationMeta(total, page, limit) };
   }
 
-  async explore({ domain, topics, difficulty, search, creatorId, contentType, page = 1, limit = 20 }) {
+  async explore({ domain, topics, difficulty, search, creatorId, contentType, page = 1, limit = 20 }, viewerId = null) {
     const filter = { status: 'published' };
     if (domain) filter.domain = domain;
     if (topics) filter.topics = { $in: Array.isArray(topics) ? topics : [topics] };
@@ -105,6 +106,10 @@ class ContentService {
     if (search) filter.title = { $regex: escapeRegex(search), $options: 'i' };
     if (creatorId) filter.creatorId = creatorId;
     if (contentType) filter.contentType = contentType;
+    if (viewerId) {
+      const blocked = await moderationService.getBlockedIds(viewerId);
+      if (blocked.length) filter.creatorId = creatorId ? { $eq: creatorId, $nin: blocked } : { $nin: blocked };
+    }
 
     const skip = (page - 1) * limit;
     const [items, total] = await Promise.all([

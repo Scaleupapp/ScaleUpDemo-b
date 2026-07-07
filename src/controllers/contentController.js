@@ -65,7 +65,7 @@ const getFeed = async (req, res, next) => {
 
 const explore = async (req, res, next) => {
   try {
-    const data = await contentService.explore(req.query);
+    const data = await contentService.explore(req.query, req.user.userId);
     res.json(apiResponse.paginated(data.items, data.pagination));
   } catch (err) { next(err); }
 };
@@ -114,7 +114,7 @@ const rateContent = async (req, res, next) => {
 
 const getComments = async (req, res, next) => {
   try {
-    const data = await socialService.getComments(req.params.id, req.query);
+    const data = await socialService.getComments(req.params.id, req.query, req.user.userId);
     res.json(apiResponse.success(data));
   } catch (err) { next(err); }
 };

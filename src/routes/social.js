@@ -10,6 +10,12 @@ router.delete('/follow/:userId', ctrl.unfollowUser);
 router.get('/followers/:userId', ctrl.getFollowers);
 router.get('/following/:userId', ctrl.getFollowing);
 
+// Moderation — block abusive users & report objectionable content
+router.get('/blocked', ctrl.getBlocked);
+router.post('/block/:userId', ctrl.blockUser);
+router.delete('/block/:userId', ctrl.unblockUser);
+router.post('/report', ctrl.reportTarget);
+
 // Comments
 router.put('/comments/:commentId', ctrl.editComment);
 router.delete('/comments/:commentId', ctrl.deleteComment);

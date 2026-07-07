@@ -7,6 +7,7 @@ const Notification = require('../models/Notification');
 const WeeklyLeaderboard = require('../models/WeeklyLeaderboard');
 const apiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
+const moderationService = require('../services/moderationService');
 const { uploadBuffer } = require('../config/s3');
 const { v4: uuidv4 } = require('uuid');
 
@@ -24,6 +25,7 @@ const getPublicProfile = async (req, res, next) => {
       .select('firstName lastName username profilePicture bio role followersCount followingCount skills createdAt isActive');
     if (!user) throw new ApiError(404, 'User not found');
     if (!user.isActive) throw new ApiError(410, 'This account is no longer active');
+    if (await moderationService.isBlockedEitherWay(req.user.userId, req.params.userId)) throw new ApiError(404, 'User not found');
     res.json(apiResponse.success(user));
   } catch (err) { next(err); }
 };

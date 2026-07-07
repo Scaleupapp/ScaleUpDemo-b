@@ -7,6 +7,7 @@ const User = require('../models/User');
 const { paginate, paginationMeta } = require('../utils/pagination');
 const ApiError = require('../utils/apiError');
 const { notificationQueue } = require('../config/queue');
+const moderationService = require('./moderationService');
 
 class SocialService {
 
@@ -48,7 +49,8 @@ class SocialService {
     return { following: false };
   }
 
-  async getFollowers(userId, { page = 1, limit = 20 } = {}) {
+  async getFollowers(userId, { page = 1, limit = 20 } = {}, viewerId = null) {
+    const blocked = viewerId ? new Set((await moderationService.getBlockedIds(viewerId)).map(String)) : new Set();
     const filter = { followingId: userId };
     const total = await Follow.countDocuments(filter);
     const { query, page: p, limit: l } = paginate(
@@ -58,12 +60,13 @@ class SocialService {
     const followers = await query.lean();
     // Filter out deactivated users from the list
     return {
-      followers: followers.map(f => f.followerId).filter(u => u && u.isActive !== false),
+      followers: followers.map(f => f.followerId).filter(u => u && u.isActive !== false && !blocked.has(String(u._id))),
       pagination: paginationMeta(total, p, l),
     };
   }
 
-  async getFollowing(userId, { page = 1, limit = 20 } = {}) {
+  async getFollowing(userId, { page = 1, limit = 20 } = {}, viewerId = null) {
+    const blocked = viewerId ? new Set((await moderationService.getBlockedIds(viewerId)).map(String)) : new Set();
     const filter = { followerId: userId };
     const total = await Follow.countDocuments(filter);
     const { query, page: p, limit: l } = paginate(
@@ -73,7 +76,7 @@ class SocialService {
     const following = await query.lean();
     // Filter out deactivated users from the list
     return {
-      following: following.map(f => f.followingId).filter(u => u && u.isActive !== false),
+      following: following.map(f => f.followingId).filter(u => u && u.isActive !== false && !blocked.has(String(u._id))),
       pagination: paginationMeta(total, p, l),
     };
   }
@@ -279,9 +282,13 @@ class SocialService {
     return comment;
   }
 
-  async getComments(contentId, { page = 1, limit = 20 } = {}) {
+  async getComments(contentId, { page = 1, limit = 20 } = {}, viewerId = null) {
     // Only top-level comments (no parentId)
     const filter = { contentId, parentId: { $exists: false }, deletedAt: { $exists: false } };
+    if (viewerId) {
+      const blocked = await moderationService.getBlockedIds(viewerId);
+      if (blocked.length) filter.userId = { $nin: blocked };
+    }
     const total = await Comment.countDocuments(filter);
     const { query, page: p, limit: l } = paginate(
       Comment.find(filter).sort({ createdAt: -1 }).populate('userId', 'firstName lastName username profilePicture'),
@@ -350,8 +357,12 @@ class SocialService {
     return { liked: true, likeCount: comment.likeCount };
   }
 
-  async getReplies(parentId, { page = 1, limit = 10 } = {}) {
+  async getReplies(parentId, { page = 1, limit = 10 } = {}, viewerId = null) {
     const filter = { parentId, deletedAt: { $exists: false } };
+    if (viewerId) {
+      const blocked = await moderationService.getBlockedIds(viewerId);
+      if (blocked.length) filter.userId = { $nin: blocked };
+    }
     const total = await Comment.countDocuments(filter);
     const { query, page: p, limit: l } = paginate(
       Comment.find(filter).sort({ createdAt: 1 }).populate('userId', 'firstName lastName username profilePicture'),

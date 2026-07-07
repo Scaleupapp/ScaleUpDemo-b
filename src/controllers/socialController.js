@@ -1,4 +1,5 @@
 const socialService = require('../services/socialService');
+const moderationService = require('../services/moderationService');
 const apiResponse = require('../utils/apiResponse');
 
 // ─── Follow ──────────────────────────────────────────────────────────
@@ -10,13 +11,13 @@ const unfollowUser = async (req, res, next) => {
 };
 const getFollowers = async (req, res, next) => {
   try {
-    const data = await socialService.getFollowers(req.params.userId, req.query);
+    const data = await socialService.getFollowers(req.params.userId, req.query, req.user.userId);
     res.json(apiResponse.success(data));
   } catch (err) { next(err); }
 };
 const getFollowing = async (req, res, next) => {
   try {
-    const data = await socialService.getFollowing(req.params.userId, req.query);
+    const data = await socialService.getFollowing(req.params.userId, req.query, req.user.userId);
     res.json(apiResponse.success(data));
   } catch (err) { next(err); }
 };
@@ -32,7 +33,7 @@ const toggleCommentLike = async (req, res, next) => {
   try { res.json(apiResponse.success(await socialService.toggleCommentLike(req.user.userId, req.params.commentId))); } catch (err) { next(err); }
 };
 const getReplies = async (req, res, next) => {
-  try { res.json(apiResponse.success(await socialService.getReplies(req.params.commentId, req.query))); } catch (err) { next(err); }
+  try { res.json(apiResponse.success(await socialService.getReplies(req.params.commentId, req.query, req.user.userId))); } catch (err) { next(err); }
 };
 
 // ─── Playlists ───────────────────────────────────────────────────────
@@ -58,8 +59,28 @@ const deletePlaylist = async (req, res, next) => {
   try { res.json(apiResponse.success(await socialService.deletePlaylist(req.user.userId, req.params.playlistId))); } catch (err) { next(err); }
 };
 
+// ─── Moderation: block & report ──────────────────────────────────────
+const blockUser = async (req, res, next) => {
+  try { res.json(apiResponse.success(await moderationService.blockUser(req.user.userId, req.params.userId))); } catch (err) { next(err); }
+};
+const unblockUser = async (req, res, next) => {
+  try { res.json(apiResponse.success(await moderationService.unblockUser(req.user.userId, req.params.userId))); } catch (err) { next(err); }
+};
+const getBlocked = async (req, res, next) => {
+  try { res.json(apiResponse.success(await moderationService.listBlocked(req.user.userId))); } catch (err) { next(err); }
+};
+const reportTarget = async (req, res, next) => {
+  try {
+    const { targetType, targetId, reason, description } = req.body || {};
+    res.status(201).json(apiResponse.success(
+      await moderationService.report({ reporterId: req.user.userId, targetType, targetId, reason, description }),
+    ));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   followUser, unfollowUser, getFollowers, getFollowing,
   deleteComment, editComment, toggleCommentLike, getReplies,
   createPlaylist, getMyPlaylists, getPlaylist, updatePlaylist, addToPlaylist, removeFromPlaylist, deletePlaylist,
+  blockUser, unblockUser, getBlocked, reportTarget,
 };

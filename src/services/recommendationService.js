@@ -8,6 +8,7 @@ const Quiz = require('../models/Quiz');
 const Journey = require('../models/Journey');
 const { DIFFICULTY_MIX } = require('../utils/constants');
 const { paginationMeta } = require('../utils/pagination');
+const moderationService = require('./moderationService');
 
 // ─── Scoring weight constants ──────────────────────────────────────────────────
 const SCORE_WEIGHTS = {
@@ -130,11 +131,12 @@ class RecommendationService {
    * history to score and rank all published content for a user.
    */
   async getPersonalizedFeed(userId, { page = 1, limit = 20 } = {}) {
-    const [objectives, knowledgeProfile, consumptionGraph, consumedIds] = await Promise.all([
+    const [objectives, knowledgeProfile, consumptionGraph, consumedIds, blockedIds] = await Promise.all([
       UserObjective.find({ userId, status: 'active' }),
       KnowledgeProfile.findOne({ userId }),
       ConsumptionGraph.findOne({ userId }),
       this._getConsumedContentIds(userId),
+      moderationService.getBlockedIds(userId),
     ]);
 
     // Cold start redirect — if the user has no objectives and no consumption, fall back
@@ -146,10 +148,9 @@ class RecommendationService {
     const objectiveTopics = this._buildObjectiveTopicWeights(objectives);
 
     // Fetch candidate content — published, not yet consumed
-    const candidates = await Content.find({
-      status: 'published',
-      _id: { $nin: consumedIds },
-    }).lean();
+    const candidateFilter = { status: 'published', _id: { $nin: consumedIds } };
+    if (blockedIds.length) candidateFilter.creatorId = { $nin: blockedIds };
+    const candidates = await Content.find(candidateFilter).lean();
 
     // Score each candidate
     const scored = candidates.map(content => ({
