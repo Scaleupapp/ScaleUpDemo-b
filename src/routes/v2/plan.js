@@ -829,13 +829,10 @@ function extractPayload(task) {
   };
 }
 
-function computeReadinessFromKnowledge(knowledge) {
-  if (!knowledge?.topicProfiles) return null;
-  const entries = Object.values(knowledge.topicProfiles || {});
-  if (entries.length === 0) return null;
-  const avg = entries.reduce((s, t) => s + (t.masteryLevel || 0), 0) / entries.length;
-  return Math.round(avg);
-}
+// Canonical knowledge→readiness (overallScore → topicMastery → topicProfiles).
+// A stale local fork only read `topicProfiles` — a field nothing writes — so the
+// knowledge branch was dead and quiz/assessment mastery never unlocked Home.
+const { computeReadinessFromKnowledge } = require('../../services/readiness/readinessService');
 
 /**
  * Current-readiness waterfall + provenance tag. Preserves the exact numeric

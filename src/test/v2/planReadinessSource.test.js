@@ -55,3 +55,23 @@ test('deriveReadiness: default (30) tagged distinctly from a real 30 from knowle
 test('deriveReadiness: empty knowledge profiles → default', () => {
   assert.deepStrictEqual(deriveReadiness(null, null, { topicProfiles: {} }), { currentReadiness: 30, readinessSource: 'default' });
 });
+
+// Regression — the ring-unlock bug: quizzes/assessments write topicMastery (+ overallScore),
+// never topicProfiles. A stale local fork of computeReadinessFromKnowledge only read
+// topicProfiles, so the first practice quiz left readinessSource stuck on 'default'
+// (locked ring) even though real mastery existed. plan.js now uses the canonical
+// readinessService implementation (overallScore → topicMastery → topicProfiles).
+test('deriveReadiness: topicMastery-only knowledge (first quiz, no diagnostic) unlocks → knowledge', () => {
+  const knowledge = { topicMastery: [{ topic: 'problem solving', score: 62 }], overallScore: 0 };
+  assert.deepStrictEqual(deriveReadiness(null, null, knowledge), { currentReadiness: 62, readinessSource: 'knowledge' });
+});
+
+test('deriveReadiness: overallScore wins over topicMastery average', () => {
+  const knowledge = { overallScore: 47.6, topicMastery: [{ score: 10 }] };
+  assert.deepStrictEqual(deriveReadiness(null, null, knowledge), { currentReadiness: 48, readinessSource: 'knowledge' });
+});
+
+test('deriveReadiness: zero-score topicMastery entry still unlocks (honest 0, not default)', () => {
+  const knowledge = { topicMastery: [{ topic: 'sql', score: 0 }], overallScore: 0 };
+  assert.deepStrictEqual(deriveReadiness(null, null, knowledge), { currentReadiness: 0, readinessSource: 'knowledge' });
+});
