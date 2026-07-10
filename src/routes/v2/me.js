@@ -157,6 +157,9 @@ router.get('/placement-onboarding', auth, async (req, res) => {
     const competencies = (obj && obj.analysis && Array.isArray(obj.analysis.competencies))
       ? obj.analysis.competencies.map((c) => ({ name: c.name, category: c.category || 'core' }))
       : [];
+    // Best-effort extras for the first-login hook screens (season window +
+    // cohort size). Never fail the response on these — missing data → nulls.
+    const extras = await buildPlacementOnboardingExtras(enr, router._deps || {});
     return res.json({ success: true, data: {
       name: user ? [user.firstName, user.lastName].filter(Boolean).join(' ') || null : null,
       phone: user ? (user.phone || null) : null,
@@ -167,6 +170,10 @@ router.get('/placement-onboarding', auth, async (req, res) => {
       cohortLabel: enr.cohortId ? enr.cohortId.label : null,
       objectiveLabel: obj ? (obj.label || (obj.specifics && obj.specifics.targetRole) || null) : null,
       competencies,
+      seasonName: extras.seasonName,
+      seasonStartsAt: extras.seasonStartsAt,
+      seasonEndsAt: extras.seasonEndsAt,
+      cohortStudentCount: extras.cohortStudentCount,
     } });
   } catch (err) {
     console.error('[v2/me/placement-onboarding] error', err);
@@ -174,9 +181,98 @@ router.get('/placement-onboarding', auth, async (req, res) => {
   }
 });
 
+// Mark the placement first-login hook complete — the placement replacement for
+// the D2C diagnostic. Flips the same user flags the diagnostic-finish path sets
+// (diagnosticComplete/v2NeedsOnboarding) so the app routes the student to Home,
+// and advances their cohort enrollment (best-effort, per D1). 404 NOT_PLACEMENT
+// for a non-placement (D2C) user so this endpoint can never affect the D2C flow.
+// Idempotent — repeat calls are safe no-ops.
+router.post('/placement-onboarding/complete', auth, async (req, res) => {
+  try {
+    const result = await completePlacementOnboarding(req.user.userId, router._deps || {});
+    if (!result.ok && result.code === 'NOT_PLACEMENT') {
+      return res.status(404).json({ success: false, code: 'NOT_PLACEMENT', message: 'No placement enrollment' });
+    }
+    return res.json({ success: true, data: { ok: true } });
+  } catch (err) {
+    console.error('[v2/me/placement-onboarding/complete] error', err);
+    return res.status(500).json({ success: false, message: 'Could not complete placement onboarding' });
+  }
+});
+
 // Student assessment routes — list scheduled assessments, start, sync.
 // The studentAssessments router manages its own auth per-handler (same D2C `auth`).
 // Mounted here so final paths are /api/v2/me/assessments/*.
 router.use('/', require('../institution/studentAssessments'));
+
+// ── Testable helpers (deps-injectable; no DB in unit tests) ──────────────────
+
+/**
+ * Complete the placement first-login hook for a placement student.
+ * Guard: only a student with an active-ish InstitutionEnrollment may proceed
+ * (a D2C user has none → NOT_PLACEMENT, so the endpoint is inert for D2C).
+ * Effects mirror the v2 diagnostic-finish flags + advance cohort enrollment.
+ */
+async function completePlacementOnboarding(userId, deps = {}) {
+  const InstitutionEnrollment = deps.InstitutionEnrollment || require('../../models/InstitutionEnrollment');
+  const UserModel = deps.User || User;
+  const enrollmentProgressService = deps.enrollmentProgressService
+    || require('../../services/institution/enrollmentProgressService');
+
+  const enr = await InstitutionEnrollment.findOne({
+    userId,
+    status: { $in: ['registered', 'diagnostic_done', 'active'] },
+  });
+  if (!enr) return { ok: false, code: 'NOT_PLACEMENT' };
+
+  // Same flags the diagnostic-finish + /plan/generate paths set (plan.js:46-49):
+  // route the student to Home and never back into onboarding. Idempotent.
+  await UserModel.updateOne(
+    { _id: userId },
+    { $set: { diagnosticComplete: true, v2NeedsOnboarding: false } }
+  );
+
+  // Advance the cohort enrollment (registered → diagnostic_done). Best-effort:
+  // never let a funnel-advance hiccup fail the student's completion.
+  try {
+    await enrollmentProgressService.markDiagnosticDone(userId);
+  } catch (e) {
+    console.warn('[v2/me/placement-onboarding/complete] markDiagnosticDone failed (non-fatal):', e.message);
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Best-effort hook-screen extras from the student's cohort: the placement
+ * season window and the (non-withdrawn) cohort size. Never throws — any
+ * missing/absent data yields null fields (the season has no dedicated name
+ * field today, so seasonName is null unless one is added later).
+ */
+async function buildPlacementOnboardingExtras(enr, deps = {}) {
+  const out = { seasonName: null, seasonStartsAt: null, seasonEndsAt: null, cohortStudentCount: null };
+  try {
+    const cohort = enr && enr.cohortId;
+    const season = cohort && cohort.placementSeason;
+    if (season) {
+      out.seasonName = season.name || null; // no dedicated field on placementSeason today
+      out.seasonStartsAt = season.startDate || null;
+      out.seasonEndsAt = season.endDate || null;
+    }
+    const cohortId = cohort && cohort._id ? cohort._id : cohort;
+    if (cohortId) {
+      const InstitutionEnrollment = deps.InstitutionEnrollment || require('../../models/InstitutionEnrollment');
+      out.cohortStudentCount = await InstitutionEnrollment.countDocuments({
+        cohortId,
+        status: { $ne: 'withdrawn' },
+      });
+    }
+  } catch (e) {
+    console.warn('[v2/me/placement-onboarding] extras failed (non-fatal):', e.message);
+  }
+  return out;
+}
+
+router._helpers = { completePlacementOnboarding, buildPlacementOnboardingExtras };
 
 module.exports = router;

@@ -230,11 +230,10 @@ router.get('/today', auth, async (req, res) => {
     // You tab. Fall back to the diagnostic baseline only if no snapshot exists yet.
     const latestSnap = await require('../../models/ReadinessSnapshot')
       .findOne({ userId, objectiveId: objective._id }).sort({ createdAt: -1 }).select('value').lean();
-    const currentReadiness =
-      (latestSnap && typeof latestSnap.value === 'number' ? latestSnap.value : null) ??
-      diagnosticBaselineReadiness(latestAttempt) ??
-      computeReadinessFromKnowledge(knowledge) ??
-      30;
+    // Same waterfall as before, but tag which branch produced the value so the
+    // client can render a LOCKED ring when there's no real evidence
+    // (readinessSource === 'default'). Numeric result is byte-for-byte identical.
+    const { currentReadiness, readinessSource } = deriveReadiness(latestSnap, latestAttempt, knowledge);
 
     const trajectory = forecastTrajectory({
       currentReadiness,
@@ -264,6 +263,7 @@ router.get('/today', auth, async (req, res) => {
           statusLine: "Your plan is being personalized. Meanwhile, here's content relevant to your goal.",
           trajectory,
           fallback: 'plan_brewing',
+          readinessSource,
           weekProgress: null,
           planSchedule: [],
           bonusTasks: [],
@@ -423,6 +423,7 @@ router.get('/today', auth, async (req, res) => {
             todaysTasks,
             totalDurationMin,
             hasMoreThisWeek: false,
+            readinessSource,
             skippedCount,
             behindByWeeks,
             pendingPriorTasks: [],
@@ -475,6 +476,7 @@ router.get('/today', auth, async (req, res) => {
           weekActivity,
           topGap,
           fallback: 'day_done',
+          readinessSource,
           skippedCount,
           behindByWeeks,
           getAheadTasks: getAheadShaped,
@@ -625,6 +627,7 @@ router.get('/today', auth, async (req, res) => {
         todaysTasks,
         totalDurationMin,
         hasMoreThisWeek: ranked.length > todaysTasks.length,
+        readinessSource,
         skippedCount,
         // New: backlog + get-ahead surfaces (Home renders these as their own sections)
         behindByWeeks,
@@ -832,6 +835,29 @@ function computeReadinessFromKnowledge(knowledge) {
   if (entries.length === 0) return null;
   const avg = entries.reduce((s, t) => s + (t.masteryLevel || 0), 0) / entries.length;
   return Math.round(avg);
+}
+
+/**
+ * Current-readiness waterfall + provenance tag. Preserves the exact numeric
+ * result of the original `??` chain (snapshot → diagnostic baseline → knowledge
+ * → 30) while reporting which branch fired so Home can lock the ring when the
+ * value is a bare default (no real evidence yet).
+ *
+ * @returns {{ currentReadiness: number, readinessSource: 'snapshot'|'diagnostic'|'knowledge'|'default' }}
+ */
+function deriveReadiness(latestSnap, latestAttempt, knowledge) {
+  if (latestSnap && typeof latestSnap.value === 'number') {
+    return { currentReadiness: latestSnap.value, readinessSource: 'snapshot' };
+  }
+  const diagBaseline = diagnosticBaselineReadiness(latestAttempt);
+  if (diagBaseline !== null && diagBaseline !== undefined) {
+    return { currentReadiness: diagBaseline, readinessSource: 'diagnostic' };
+  }
+  const knowledgeReadiness = computeReadinessFromKnowledge(knowledge);
+  if (knowledgeReadiness !== null && knowledgeReadiness !== undefined) {
+    return { currentReadiness: knowledgeReadiness, readinessSource: 'knowledge' };
+  }
+  return { currentReadiness: 30, readinessSource: 'default' };
 }
 
 /**
@@ -1128,5 +1154,7 @@ function buildPlanSchedule(plan, currentWeek) {
     };
   });
 }
+
+router._helpers = { deriveReadiness };
 
 module.exports = router;
