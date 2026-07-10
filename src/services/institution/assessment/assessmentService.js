@@ -83,6 +83,9 @@ async function releaseAssessment(scope, id, releasedBy, deps) {
   a.releasedBy = releasedBy;
   a.releasedAt = new Date();
   await a.save();
+  // Notify the cohort that a new assessment is open. Gated + best-effort:
+  // never let a notification error fail the release.
+  await _notifyAssessmentAssigned(a, deps);
   return a;
 }
 
@@ -96,7 +99,88 @@ async function closeAssessment(scope, id, by, deps) {
   a.closedAt = now;
   if (!a.closesAt) a.closesAt = now;
   await a.save();
+  // Manual close makes results available — same notify+guard as the sync worker.
+  await _notifyAssessmentResults(a, deps);
   return a;
 }
 
-module.exports = { createAssessment, listAssessments, getAssessment, releaseAssessment, closeAssessment };
+// ── Placement assessment notifications (Workstream B) ────────────────────────
+// ALL emission is gated behind PLACEMENTS_NOTIFICATIONS_ENABLED (default OFF).
+// With the flag off these are inert no-ops, so release/close behaviour — and
+// every current D2C/placement app build — is completely unchanged.
+
+function _closesClause(closesAt) {
+  if (!closesAt) return '';
+  const d = new Date(closesAt);
+  if (isNaN(d.getTime())) return '';
+  return ` — closes ${d.toDateString()}`;
+}
+
+async function _resolveCohortUserIds(cohortId, deps) {
+  const InstitutionEnrollment = (deps && deps.InstitutionEnrollment) || require('../../../models/InstitutionEnrollment');
+  const enrollments = await InstitutionEnrollment
+    .find({ cohortId, userId: { $exists: true }, status: { $ne: 'withdrawn' } })
+    .select('userId');
+  return (enrollments || []).map((e) => e.userId).filter(Boolean);
+}
+
+// On release → tell the cohort a new assessment is open. Best-effort.
+async function _notifyAssessmentAssigned(a, deps) {
+  if (process.env.PLACEMENTS_NOTIFICATIONS_ENABLED !== 'true') return { notified: false, reason: 'disabled' };
+  try {
+    const notificationService = (deps && deps.notificationService) || require('../../notificationService');
+    const userIds = await _resolveCohortUserIds(a.cohortId, deps);
+    if (userIds.length === 0) return { notified: false, reason: 'no_recipients' };
+    await notificationService.sendToUsers(userIds, {
+      title: `New assessment: ${a.title}`,
+      body: `${a.title} is now open${_closesClause(a.closesAt)}.`,
+      data: { type: 'assessment_assigned', assessmentId: String(a._id) },
+    });
+    return { notified: true, count: userIds.length };
+  } catch (err) {
+    console.warn('[assessmentService] assessment_assigned notify failed (non-fatal):', err.message);
+    return { notified: false, reason: 'error' };
+  }
+}
+
+// On results-available → tell the cohort. Atomic notify-once guard: only the
+// caller that flips resultsNotifiedAt (null → now) wins and notifies; concurrent
+// worker ticks / sessions / a later manual close all no-op. Best-effort.
+async function _notifyAssessmentResults(assessment, deps) {
+  if (process.env.PLACEMENTS_NOTIFICATIONS_ENABLED !== 'true') return { notified: false, reason: 'disabled' };
+  const Assessment = getModel(deps);
+  const now = (deps && deps.now && deps.now()) || new Date();
+
+  let won = null;
+  try {
+    won = await Assessment.findOneAndUpdate(
+      { _id: assessment._id, $or: [{ resultsNotifiedAt: null }, { resultsNotifiedAt: { $exists: false } }] },
+      { $set: { resultsNotifiedAt: now } },
+      { new: true }
+    );
+  } catch (err) {
+    console.warn('[assessmentService] results notify guard failed (non-fatal):', err.message);
+    return { notified: false, reason: 'error' };
+  }
+  if (!won) return { notified: false, reason: 'already_notified' };
+
+  try {
+    const notificationService = (deps && deps.notificationService) || require('../../notificationService');
+    const userIds = await _resolveCohortUserIds(assessment.cohortId, deps);
+    if (userIds.length === 0) return { notified: false, reason: 'no_recipients' };
+    await notificationService.sendToUsers(userIds, {
+      title: 'Results are out',
+      body: `Your ${assessment.title} results are ready to review.`,
+      data: { type: 'assessment_results', assessmentId: String(assessment._id) },
+    });
+    return { notified: true, count: userIds.length };
+  } catch (err) {
+    console.warn('[assessmentService] assessment_results notify failed (non-fatal):', err.message);
+    return { notified: false, reason: 'error' };
+  }
+}
+
+module.exports = {
+  createAssessment, listAssessments, getAssessment, releaseAssessment, closeAssessment,
+  _notifyAssessmentAssigned, _notifyAssessmentResults,
+};

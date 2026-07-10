@@ -170,6 +170,11 @@ class NotificationService {
       // values so the in-app record persists (push carries the custom copy).
       coding_capstone_generated: 'coding_capstone_available',
       coding_capstone_generation_failed: 'journey_update',
+      // Institution assessments (placement). Emission is gated by
+      // PLACEMENTS_NOTIFICATIONS_ENABLED at the call sites; these mappings just
+      // let the in-app record persist once emission is turned on.
+      assessment_assigned: 'assessment_assigned',
+      assessment_results: 'assessment_results',
     };
     return map[dataType] || 'journey_update';
   }

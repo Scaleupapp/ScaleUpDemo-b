@@ -47,6 +47,10 @@ const AssessmentSchema = new mongoose.Schema({
   releasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionUser' },
   releasedAt: { type: Date },
   closedAt: { type: Date },
+  // Set once, atomically, the first time results become available (window close
+  // via the sync worker, or an explicit close) so the cohort is notified exactly
+  // once. Null until then. Emission is gated by PLACEMENTS_NOTIFICATIONS_ENABLED.
+  resultsNotifiedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 AssessmentSchema.index({ institutionId: 1, cohortId: 1, status: 1 });

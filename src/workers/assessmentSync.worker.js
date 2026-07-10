@@ -29,6 +29,10 @@ async function runSyncTick(deps = {}) {
   const AssessmentSession = deps.AssessmentSession || require('../models/AssessmentSession');
   const Assessment = deps.Assessment || require('../models/Assessment');
   const syncSession = deps.syncSession || require('../services/institution/assessment/assessmentSessionService').syncSession;
+  // Results notify (Workstream B) — gated OFF by default; the helper no-ops
+  // unless PLACEMENTS_NOTIFICATIONS_ENABLED === 'true'. Injectable for tests.
+  const notifyAssessmentResults = deps.notifyAssessmentResults
+    || require('../services/institution/assessment/assessmentService')._notifyAssessmentResults;
   const now = (deps.now && deps.now()) || new Date();
 
   // Load all in_progress sessions (optionally could add a small age filter,
@@ -48,6 +52,14 @@ async function runSyncTick(deps = {}) {
       }
 
       if (assessment && assessment.closesAt && now > assessment.closesAt) {
+        // Window just closed → results are available. Notify the cohort exactly
+        // once (atomic guard lives inside the helper). Gated + best-effort: a
+        // notify failure must never disrupt the expiry/sync loop below.
+        try {
+          await notifyAssessmentResults(assessment, { Assessment, now: () => now });
+        } catch (nerr) {
+          console.warn(`[assessmentSync] results notify failed for ${assessment._id}: ${nerr.message}`);
+        }
         // Window closed — do ONE final sync first so that a session the engine
         // graded right as the window closed gets finalized (graded+active) instead
         // of being lost to 'expired'. Only expire if still not graded after the sync.
