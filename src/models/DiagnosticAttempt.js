@@ -58,6 +58,13 @@ const diagnosticAttemptSchema = new mongoose.Schema({
   // Pool used for this attempt (refs into DiagnosticQuestionBank)
   poolQuestionIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'DiagnosticQuestionBank' }],
 
+  // Planned total from the selector plan (PLAN_BY_RATING sums), persisted at
+  // attempt creation. nextQuestion caps the served count at this value so the
+  // progress counter can never overflow (e.g. "Question 38 of 24") when the
+  // assembled pool returns more docs than the plan slotted. Legacy attempts
+  // (created before this field) fall back to poolQuestionIds.length.
+  totalEstimatedQuestions: { type: Number },
+
   // Self-rating snapshot at attempt time
   selfRatings: {
     type: Map,

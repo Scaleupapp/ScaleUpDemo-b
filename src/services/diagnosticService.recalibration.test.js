@@ -138,6 +138,8 @@ async function test_happyPath_createsAttemptWithRecalibrationType() {
     assert.ok(created, 'DiagnosticAttempt.create should have been called');
     assert.strictEqual(created.attemptType, 'recalibration');
     assert.strictEqual(String(created.previousAttemptId), String(prevId));
+    assert.strictEqual(created.totalEstimatedQuestions, 2,
+      'recalibration must persist totalEstimatedQuestions = pool.length (Workstream C)');
   } finally {
     teardown();
   }

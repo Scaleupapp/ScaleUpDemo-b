@@ -84,17 +84,18 @@ test('startAttempt → nextQuestion → submitAnswer → finishAttempt with cano
   };
 
   const FakePool = {
-    assemblePool: async () => ({
-      questions: [{
-        _id: qId,
-        canonicalCompetency: 'product-strategy',
-        difficulty: 'medium',
-        questionText: 'What is product strategy?',
-        options: [{ label: 'A', text: 'a' }, { label: 'B', text: 'b' }],
-        correctAnswer: 'A',
-        requiresVoice: false,
-      }],
-    }),
+    // assemblePool returns an ARRAY of question docs (see diagnosticService.js
+    // submitSelfRating:44 `pool.map(...)` and _ensureAttemptPool:419
+    // `(questions||[]).map(...)`), not a wrapper object.
+    assemblePool: async () => ([{
+      _id: qId,
+      canonicalCompetency: 'product-strategy',
+      difficulty: 'medium',
+      questionText: 'What is product strategy?',
+      options: [{ label: 'A', text: 'a' }, { label: 'B', text: 'b' }],
+      correctAnswer: 'A',
+      requiresVoice: false,
+    }]),
     _internal: { calculatePoolAllocation: () => [] },
   };
 
@@ -105,16 +106,25 @@ test('startAttempt → nextQuestion → submitAnswer → finishAttempt with cano
   const poolpath2  = require.resolve('./diagnosticPoolService');
   const igspath2   = require.resolve('./diagnostic/insightsGenerationService');
   const svcpath2   = require.resolve('./diagnosticService');
+  // finishAttempt best-effort side-effects lazy-require these — stub so the test
+  // doesn't hit real mongoose and stall on buffering timeouts.
+  const kspath2    = require.resolve('./knowledgeService');
+  const userpath2  = require.resolve('../models/User');
+  const epspath2   = require.resolve('./institution/enrollmentProgressService');
   const orig2 = {
     da:   require.cache[dapath2],   obj:  require.cache[objpath2],
     bank: require.cache[bankpath2], tax:  require.cache[taxpath2],  pool: require.cache[poolpath2],
     igs:  require.cache[igspath2],  svc:  require.cache[svcpath2],
+    ks:   require.cache[kspath2],   user: require.cache[userpath2], eps: require.cache[epspath2],
   };
   require.cache[dapath2]   = { exports: FakeDA, loaded: true, id: dapath2 };
   require.cache[objpath2]  = { exports: FakeUO, loaded: true, id: objpath2 };
   require.cache[bankpath2] = { exports: FakeBank, loaded: true, id: bankpath2 };
   require.cache[taxpath2]  = { exports: FakeTax, loaded: true, id: taxpath2 };
   require.cache[poolpath2] = { exports: FakePool, loaded: true, id: poolpath2 };
+  require.cache[kspath2]   = { exports: { updateMastery: async () => ({ profile: null }) }, loaded: true, id: kspath2 };
+  require.cache[userpath2] = { exports: { findByIdAndUpdate: async () => ({}), findById: () => ({ select: () => ({ lean: async () => ({ v2OptedIn: false }) }) }) }, loaded: true, id: userpath2 };
+  require.cache[epspath2]  = { exports: { markDiagnosticDone: async () => ({}) }, loaded: true, id: epspath2 };
   // Stub insightsGenerationService so finishAttempt doesn't call OpenAI
   require.cache[igspath2]  = {
     exports: {
@@ -132,6 +142,8 @@ test('startAttempt → nextQuestion → submitAnswer → finishAttempt with cano
     assert.ok(start, 'startAttempt should return a result');
     assert.strictEqual(start.flowType, 'new_user');
     assert.ok(start.totalEstimatedQuestions > 0, 'totalEstimatedQuestions should be positive');
+    assert.strictEqual(savedAttempt.totalEstimatedQuestions, start.totalEstimatedQuestions,
+      'planned total must be persisted on the attempt doc (Workstream C)');
     assert.ok(savedAttempt.selfRatings.has('product-strategy'), 'canonical key should be set');
 
     const next = await svc.nextQuestion(savedAttempt._id);
@@ -168,6 +180,9 @@ test('startAttempt → nextQuestion → submitAnswer → finishAttempt with cano
     if (orig2.pool) require.cache[poolpath2] = orig2.pool; else delete require.cache[poolpath2];
     if (orig2.igs)  require.cache[igspath2]  = orig2.igs;  else delete require.cache[igspath2];
     if (orig2.svc)  require.cache[svcpath2]  = orig2.svc;  else delete require.cache[svcpath2];
+    if (orig2.ks)   require.cache[kspath2]   = orig2.ks;   else delete require.cache[kspath2];
+    if (orig2.user) require.cache[userpath2] = orig2.user; else delete require.cache[userpath2];
+    if (orig2.eps)  require.cache[epspath2]  = orig2.eps;  else delete require.cache[epspath2];
   }
 });
 
@@ -227,6 +242,12 @@ test('finishAttempt populates insightsJson/Source/Status/Latency on template fal
   const igspath3b  = require.resolve('./diagnostic/insightsGenerationService');
   const calpath3b  = require.resolve('../utils/calibration');
   const svcpath3b  = require.resolve('./diagnosticService');
+  // finishAttempt best-effort side-effects (knowledge seed, user flag, enrollment
+  // advance) lazy-require these. Stub them so the test doesn't hit real mongoose
+  // and stall on buffering timeouts — behaviour under test (insights) is unchanged.
+  const kspath3b   = require.resolve('./knowledgeService');
+  const userpath3b = require.resolve('../models/User');
+  const epspath3b  = require.resolve('./institution/enrollmentProgressService');
 
   const orig3b = {
     da:  require.cache[dapath3b],
@@ -234,11 +255,17 @@ test('finishAttempt populates insightsJson/Source/Status/Latency on template fal
     obj: require.cache[objpath3b],
     igs: require.cache[igspath3b],
     svc: require.cache[svcpath3b],
+    ks:  require.cache[kspath3b],
+    user: require.cache[userpath3b],
+    eps: require.cache[epspath3b],
   };
 
   require.cache[dapath3b]  = { exports: { findById: async () => fakeAttempt3b, updateOne: async () => ({ modifiedCount: 0 }) }, loaded: true, id: dapath3b };
   require.cache[taxpath3b] = { exports: { findOne: () => ({ lean: async () => null }) }, loaded: true, id: taxpath3b };
   require.cache[objpath3b] = { exports: { findById: () => ({ lean: async () => null }) }, loaded: true, id: objpath3b };
+  require.cache[kspath3b]  = { exports: { updateMastery: async () => ({ profile: null }) }, loaded: true, id: kspath3b };
+  require.cache[userpath3b] = { exports: { findByIdAndUpdate: async () => ({}), findById: () => ({ select: () => ({ lean: async () => ({ v2OptedIn: false }) }) }) }, loaded: true, id: userpath3b };
+  require.cache[epspath3b] = { exports: { markDiagnosticDone: async () => ({}) }, loaded: true, id: epspath3b };
   // Stub insightsGenerationService: generateInsights throws → hard-failure path exercises template branch in service
   const templateOut = { hero: 'h', calibration: 'c', patterns: ['p'], topicTakeaways: { sql: 'do it' }, planHeadline: 'plan for you here' };
   require.cache[igspath3b] = {
@@ -276,6 +303,9 @@ test('finishAttempt populates insightsJson/Source/Status/Latency on template fal
     if (orig3b.obj) require.cache[objpath3b] = orig3b.obj; else delete require.cache[objpath3b];
     if (orig3b.igs) require.cache[igspath3b] = orig3b.igs; else delete require.cache[igspath3b];
     if (orig3b.svc) require.cache[svcpath3b] = orig3b.svc; else delete require.cache[svcpath3b];
+    if (orig3b.ks)  require.cache[kspath3b]  = orig3b.ks;  else delete require.cache[kspath3b];
+    if (orig3b.user) require.cache[userpath3b] = orig3b.user; else delete require.cache[userpath3b];
+    if (orig3b.eps) require.cache[epspath3b] = orig3b.eps; else delete require.cache[epspath3b];
     // restore calibration (not stubbed, but clean up if polluted)
     delete require.cache[calpath3b];
     require(calpath3b);

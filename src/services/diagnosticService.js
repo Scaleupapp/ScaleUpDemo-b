@@ -294,6 +294,9 @@ async function startAttempt(userId) {
     status: 'in_progress',
     startedAt: new Date(),
     selfRatings: canonicalRatings, // canonical keys throughout
+    // Persist the planned total so nextQuestion's cap terminates the attempt at
+    // exactly this many questions (the value already returned to the client).
+    totalEstimatedQuestions: totalEstimated,
     objectiveSnapshot: {
       _id: objective._id,
       label: objectiveLabel,
@@ -399,6 +402,16 @@ async function _ensureAttemptPool(attempt) {
     }
   }
 
+  // Freeze the pool once the attempt is underway: NEVER re-assemble or overwrite
+  // poolQuestionIds for an attempt that already has answers. If the rehydrate
+  // above found nothing (bank docs deleted, or the in-memory cache was lost
+  // mid-attempt), end the attempt gracefully — nextQuestion sees an empty pool
+  // and returns done:true — rather than assembling a brand-new batch of
+  // questions and overflowing the progress counter ("Question 38 of 24").
+  if (Array.isArray(attempt.answers) && attempt.answers.length > 0) {
+    return { _meta: meta, questions: [] };
+  }
+
   const ratingsMap = attempt.selfRatings instanceof Map
     ? attempt.selfRatings
     : new Map(Object.entries(attempt.selfRatings || {}));
@@ -433,7 +446,14 @@ async function nextQuestion(attemptId) {
   // plan (PLAN_BY_RATING sums). The assembled pool can be larger because the bank
   // may return more docs than the plan slots; without this guard the progress
   // counter overflows ("Question 64 of 39").
-  const totalPlanned = attempt.totalEstimatedQuestions || null;
+  // Prefer the persisted plan total; for legacy/in-flight attempts created
+  // before totalEstimatedQuestions existed, fall back to the frozen pool size.
+  // Neither available (legacy attempt, no pool) → null: behaviour unchanged
+  // (effectiveTotal falls back to the assembled pool's unique count below).
+  const totalPlanned = attempt.totalEstimatedQuestions
+    || (Array.isArray(attempt.poolQuestionIds) && attempt.poolQuestionIds.length
+      ? attempt.poolQuestionIds.length
+      : null);
   if (totalPlanned !== null && attempt.answers.length >= totalPlanned) {
     return {
       done: true,
@@ -899,6 +919,9 @@ async function startRecalibration(userId, opts = {}) {
     attemptType: 'recalibration',
     previousAttemptId: eligibility.previousAttemptId,
     poolQuestionIds: pool.map(q => q._id),
+    // Recalibration has no PLAN_BY_RATING plan — its pool IS the plan, so the
+    // planned total is the pool size (the value returned to the client below).
+    totalEstimatedQuestions: pool.length,
     selfRatings: previousAttempt?.selfRatings || new Map(),
     objectiveSnapshot: {
       _id: objectiveId,
