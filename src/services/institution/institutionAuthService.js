@@ -62,13 +62,15 @@ async function _sendLink(email, token, kind) {
 
 async function requestLink(email) {
   const user = await module.exports._findByEmail(email);
-  if (!user) return { ok: true }; // do not leak existence
+  // `found` intentionally discloses registration: invite-only B2B portal, so the
+  // UX cost of a silent dead-end outweighs enumeration risk (founder-approved).
+  if (!user) return { ok: true, found: false };
   const token = module.exports._mintToken();
   user.authTokenHash = module.exports._hash(token);
   user.authTokenExpires = new Date(Date.now() + TOKEN_TTL_MS);
   await user.save();
   await module.exports._sendLink(user.email, token, 'login');
-  return { ok: true };
+  return { ok: true, found: true };
 }
 
 async function verify(rawToken) {

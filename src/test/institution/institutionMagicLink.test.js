@@ -12,12 +12,14 @@ test('requestLink sets a token + emails the user (existing), no leak for unknown
   const sent = []; let saved = null;
   svc._sendLink = async (email, token, kind) => sent.push({ email, kind, token });
   svc._findByEmail = async (email) => email === 'a@ngit.edu' ? ({ _id: 'u1', email, status: 'active', save: async function () { saved = this; } }) : null;
-  await svc.requestLink('a@ngit.edu');
+  const known = await svc.requestLink('a@ngit.edu');
   assert.strictEqual(sent.length, 1);
   assert.ok(saved.authTokenHash && saved.authTokenExpires);
+  assert.deepStrictEqual(known, { ok: true, found: true });
   sent.length = 0;
-  await svc.requestLink('nobody@x.edu'); // unknown → no email, no throw
+  const unknown = await svc.requestLink('nobody@x.edu'); // unknown → no email, no throw
   assert.strictEqual(sent.length, 0);
+  assert.deepStrictEqual(unknown, { ok: true, found: false });
 });
 
 test('verify with a valid token activates the user and returns an institution JWT', async () => {
