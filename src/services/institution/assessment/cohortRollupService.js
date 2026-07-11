@@ -65,11 +65,15 @@ async function recompute(institutionId, cohortId, assessmentId, deps = {}) {
   // Sub-feature A: assigned = cohort enrollment count (not session count)
   const assigned = await InstitutionEnrollment.countDocuments({ cohortId, status: { $ne: 'withdrawn' } });
 
+  // Honest lifecycle buckets (Wave 3 block 2). submitted = reached submission
+  // (submitted OR graded) — now backed by a real submittedAt, no longer a
+  // fabricated mirror of graded. expired is its own distinct terminal bucket.
   const counts = {
     assigned,
     started: sessions.filter((s) => s.status !== 'scheduled').length,
     submitted: sessions.filter((s) => ['submitted', 'graded'].includes(s.status)).length,
     graded: graded.length,
+    expired: sessions.filter((s) => s.status === 'expired').length,
   };
 
   // Sub-feature B: byCompetency populated from graded sessions
@@ -79,7 +83,7 @@ async function recompute(institutionId, cohortId, assessmentId, deps = {}) {
   const doc = {
     institutionId, cohortId, assessmentId,
     computedAt: (deps.now && deps.now()) || new Date(),
-    counts, avgScore, integrityFlags, byCompetency,
+    counts, avgScore, gradedCount: scores.length, integrityFlags, byCompetency,
   };
   await CohortRollup.findOneAndUpdate(
     { institutionId, cohortId, assessmentId },

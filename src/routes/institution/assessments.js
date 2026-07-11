@@ -210,11 +210,13 @@ router.get('/assessments/:id/sessions', institutionAuth, async (req, res) => {
     // Sub-feature A: assigned = enrollment count (not session count)
     const assigned = await InstitutionEnrollment.countDocuments({ cohortId: assessment.cohortId, status: { $ne: 'withdrawn' } });
 
+    // Honest lifecycle buckets (Wave 3 block 2): expired is a distinct bucket.
     const counts = {
       assigned,
       started: allSessions.filter((s) => s.status !== 'scheduled').length,
       submitted: allSessions.filter((s) => ['submitted', 'graded'].includes(s.status)).length,
       graded: allSessions.filter((s) => s.status === 'graded').length,
+      expired: allSessions.filter((s) => s.status === 'expired').length,
     };
 
     // Batch-fetch enrollment + user info for name/rollNumber — no N+1
@@ -246,6 +248,10 @@ router.get('/assessments/:id/sessions', institutionAuth, async (req, res) => {
       }
       const rollNumber = (enrollment && enrollment.rollNumber) ? enrollment.rollNumber : '';
       const entry = { userId: s.userId, name, rollNumber, status: s.status };
+      // Honest per-student surfacing (Wave 3 block 2): needsReview (grade disputed
+      // by the answer-side judge) + insufficient (too little evidence to grade).
+      if (s.result && s.result.needsReview) entry.needsReview = true;
+      if (s.result && s.result.gradeStatus) entry.gradeStatus = s.result.gradeStatus;
       // TPO sees scores immediately — this endpoint is institution-authenticated
       // (placement office only). The anti-anxiety/anti-cheat hold-back applies to the
       // STUDENT-facing reveal, not the TPO dashboard.
@@ -301,6 +307,10 @@ router.get('/assessments/:id/sessions/:userId', institutionAuth, async (req, res
       startedAt: session.startedAt || null,
       submittedAt: session.submittedAt || null,
       gradedAt: session.gradedAt || null,
+      deadlineAt: session.deadlineAt || null,
+      // Honest grade surfacing (Wave 3 block 2).
+      needsReview: !!result.needsReview,
+      gradeStatus: result.gradeStatus || null,
       integrity: result.integrity != null ? result.integrity : null,
       raw: result.raw != null ? result.raw : null,
     };

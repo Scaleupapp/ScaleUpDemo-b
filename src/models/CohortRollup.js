@@ -10,8 +10,13 @@ const CohortRollupSchema = new mongoose.Schema({
     started: { type: Number, default: 0 },
     submitted: { type: Number, default: 0 },
     graded: { type: Number, default: 0 },
+    // Wave 3 block 2: distinct honest bucket — ran out of time, never graded.
+    expired: { type: Number, default: 0 },
   },
   avgScore: Number,
+  // Wave 3 block 2: how many graded sessions avgScore is the mean of, so a UI
+  // can label "avg of N graded" instead of implying the whole cohort.
+  gradedCount: { type: Number, default: 0 },
   integrityFlags: { type: Number, default: 0 },
   byCompetency: [{ name: String, avgScore: Number, n: Number }],
 }, { timestamps: true });
