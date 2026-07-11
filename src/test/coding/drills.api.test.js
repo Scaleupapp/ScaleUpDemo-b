@@ -91,8 +91,13 @@ function loadController() {
  * of whether the index was already cached.
  */
 function stubCodingModels({ ArtifactBundle, MetaSkillMastery, DifficultyState, DrillAttempt }) {
-  // Default no-op DrillAttempt stub (quota check returns 0 — don't block the test)
-  const drillAttemptStub = DrillAttempt || { countDocuments: async () => 0 };
+  // Default no-op DrillAttempt stub (quota check returns 0 — don't block the test).
+  // getToday also queries recent attempts for the 7-day recent-exclusion:
+  //   DrillAttempt.find({...}).select('bundle_id').lean()  → [] by default.
+  const drillAttemptStub = DrillAttempt || {
+    countDocuments: async () => 0,
+    find: () => ({ select: () => ({ lean: async () => [] }) }),
+  };
   const indexExports = { ArtifactBundle, MetaSkillMastery, DifficultyState, DrillAttempt: drillAttemptStub };
 
   stubModule(CODING_MODELS_INDEX_PATH, indexExports);
@@ -162,6 +167,7 @@ test('drills/today controller: happy path returns 200 with bundle', async () => 
   stubCodingModels({
     ArtifactBundle: {
       findOne: () => ({ sort: () => ({ lean: async () => FAKE_BUNDLE }) }),
+      find: () => ({ lean: async () => [FAKE_BUNDLE] }),
     },
     MetaSkillMastery: {
       findOne: () => ({ lean: async () => FAKE_MASTERY }),
@@ -247,6 +253,7 @@ test('drills/today controller: returns 404 no_drill_available when no bundle mat
   stubCodingModels({
     ArtifactBundle: {
       findOne: () => ({ sort: () => ({ lean: async () => null }) }),  // no bundle
+      find: () => ({ lean: async () => [] }),                          // none eligible
     },
     MetaSkillMastery: { findOne: () => ({ lean: async () => FAKE_MASTERY }) },
     DifficultyState: {
@@ -301,6 +308,7 @@ test('drills/today controller: creates DifficultyState when none exists', async 
   stubCodingModels({
     ArtifactBundle: {
       findOne: () => ({ sort: () => ({ lean: async () => FAKE_BUNDLE }) }),
+      find: () => ({ lean: async () => [FAKE_BUNDLE] }),
     },
     MetaSkillMastery: { findOne: () => ({ lean: async () => FAKE_MASTERY }) },
     DifficultyState: {
@@ -374,6 +382,7 @@ test('drills/today controller: picks weakest axis from mastery for drill_subtype
   stubCodingModels({
     ArtifactBundle: {
       findOne: () => ({ sort: () => ({ lean: async () => FAKE_DS_BUNDLE }) }),
+      find: () => ({ lean: async () => [FAKE_DS_BUNDLE] }),
     },
     MetaSkillMastery: {
       findOne: () => ({
@@ -491,6 +500,12 @@ test('drills/today controller: never queries for refactor bundle even when refac
 
   stubCodingModels({
     ArtifactBundle: {
+      // getToday now selects via find(...).lean() (recent-exclusion + seeded
+      // shuffle), so capture the find queries to assert no 'refactor' subtype.
+      find: (query) => {
+        capturedQueries.push(query);
+        return { lean: async () => [FAKE_BUNDLE] };
+      },
       findOne: (query) => {
         capturedQueries.push(query);
         return { sort: () => ({ lean: async () => FAKE_BUNDLE }) };
