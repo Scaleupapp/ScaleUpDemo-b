@@ -43,6 +43,7 @@ test('GET /cohorts/:cohortId/analytics → 200 with competencies and atRisk', as
     AssessmentSession: {
       find: async () => [],
     },
+    Assessment: { find: async () => [] },
     InstitutionEnrollment: {
       find: async () => [],
     },
@@ -76,6 +77,7 @@ test('competencies sorted weakest-first', async () => {
   analytics._deps = {
     CohortRollup: { findOne: async () => fakeRollup },
     AssessmentSession: { find: async () => [] },
+    Assessment: { find: async () => [] },
     InstitutionEnrollment: { find: async () => [] },
     User: { find: async () => [] },
   };
@@ -125,6 +127,7 @@ test('atRisk: student with score < 40 gets reason low_score', async () => {
   analytics._deps = {
     CohortRollup: { findOne: async () => ({ byCompetency: [] }) },
     AssessmentSession: { find: async () => sessions },
+    Assessment: { find: async () => [] },
     InstitutionEnrollment: { find: async () => enrollments },
     User: { find: async () => users },
   };
@@ -162,6 +165,7 @@ test('atRisk: student with enrollment status registered gets reason not_active',
     CohortRollup: { findOne: async () => ({ byCompetency: [] }) },
     // No graded sessions for these students
     AssessmentSession: { find: async () => [] },
+    Assessment: { find: async () => [] },
     InstitutionEnrollment: { find: async () => enrollments },
     User: { find: async () => users },
   };
@@ -183,11 +187,77 @@ test('atRisk: student with enrollment status registered gets reason not_active',
   analytics._deps = null;
 });
 
+// Wave 3 block 4: did_not_finish (expired / stranded in_progress) is at-risk.
+test('atRisk: expired or stranded in_progress session → reason did_not_finish', async () => {
+  const now = Date.now();
+  const sessions = [
+    { userId: 'user-exp', cohortId: 'c1', status: 'expired' },
+    { userId: 'user-stranded', cohortId: 'c1', status: 'in_progress', assessmentId: 'a1', deadlineAt: new Date(now - 60000) },
+    { userId: 'user-active-attempt', cohortId: 'c1', status: 'in_progress', assessmentId: 'a2', deadlineAt: new Date(now + 600000) },
+  ];
+  const enrollments = [
+    { userId: 'user-exp', rollNumber: 'E1', status: 'active' },
+    { userId: 'user-stranded', rollNumber: 'E2', status: 'active' },
+    { userId: 'user-active-attempt', rollNumber: 'E3', status: 'active' },
+  ];
+  const users = [
+    { _id: 'user-exp', firstName: 'Ex', lastName: 'Pired' },
+    { _id: 'user-stranded', firstName: 'Stra', lastName: 'Nded' },
+    { _id: 'user-active-attempt', firstName: 'Still', lastName: 'Going' },
+  ];
+  analytics._deps = {
+    CohortRollup: { findOne: async () => ({ byCompetency: [] }) },
+    AssessmentSession: { find: async () => sessions },
+    Assessment: { find: async () => [{ _id: 'a1' }, { _id: 'a2' }] },
+    InstitutionEnrollment: { find: async () => enrollments },
+    User: { find: async () => users },
+  };
+  const res = await request(appAs('tpo_head'))
+    .get('/api/institution/cohorts/c1/analytics')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 200);
+  const atRisk = res.body.data.atRisk;
+  const dnf = atRisk.filter((e) => e.reason === 'did_not_finish').map((e) => e.rollNumber).sort();
+  assert.deepStrictEqual(dnf, ['E1', 'E2'], 'expired + stranded are did_not_finish');
+  assert.ok(!atRisk.find((e) => e.rollNumber === 'E3'), 'in-progress-within-deadline is NOT at risk');
+  analytics._deps = null;
+});
+
+test('atRisk: per-engine threshold — ai_judged 38 flags, objective 45 clears at default 40 (Wave 3 block 4)', async () => {
+  const sessions = [
+    { userId: 'u-iv', cohortId: 'c1', status: 'graded', gradedAt: new Date(), engine: { type: 'interview' }, result: { score: 38 } },
+    { userId: 'u-mcq', cohortId: 'c1', status: 'graded', gradedAt: new Date(), engine: { type: 'mcq' }, result: { score: 45 } },
+  ];
+  const enrollments = [
+    { userId: 'u-iv', rollNumber: 'IV', status: 'active' },
+    { userId: 'u-mcq', rollNumber: 'MC', status: 'active' },
+  ];
+  const users = [
+    { _id: 'u-iv', firstName: 'Aya', lastName: 'V' },
+    { _id: 'u-mcq', firstName: 'Ben', lastName: 'M' },
+  ];
+  analytics._deps = {
+    CohortRollup: { findOne: async () => ({ byCompetency: [] }) },
+    AssessmentSession: { find: async () => sessions },
+    Assessment: { find: async () => [] },
+    InstitutionEnrollment: { find: async () => enrollments },
+    User: { find: async () => users },
+  };
+  const res = await request(appAs('tpo_head'))
+    .get('/api/institution/cohorts/c1/analytics')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  const atRisk = res.body.data.atRisk;
+  assert.ok(atRisk.find((e) => e.rollNumber === 'IV' && e.reason === 'low_score'), 'interview 38 < 40 → low_score');
+  assert.ok(!atRisk.find((e) => e.rollNumber === 'MC'), 'mcq 45 ≥ 40 → not at risk');
+  analytics._deps = null;
+});
+
 // Test 5: no rollup → competencies returns empty array (graceful)
 test('no rollup → competencies is empty array', async () => {
   analytics._deps = {
     CohortRollup: { findOne: async () => null },
     AssessmentSession: { find: async () => [] },
+    Assessment: { find: async () => [] },
     InstitutionEnrollment: { find: async () => [] },
     User: { find: async () => [] },
   };

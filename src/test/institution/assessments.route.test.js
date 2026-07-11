@@ -39,6 +39,60 @@ test('tpo_head POST /assessments → 201, scoped to token institution, not body'
   assessments._deps = null;
 });
 
+test('POST /assessments → warns (NO_CLOSE_NO_DURATION) + on_close policy when no closesAt and no duration (Wave 3 block 3)', async () => {
+  assessments._deps = {
+    assessmentService: {
+      // No closesAt, drill has no durationSeconds config → stranding risk.
+      createAssessment: async (scope, payload) => ({ _id: 'a1', ...scope, ...payload, type: 'drill', config: { drill: {} } }),
+    },
+    authoringService: { authorDrill: async () => {} },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'drill', title: 'Open-ended' });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.reviewUnlockPolicy, 'on_close');
+  assert.ok(Array.isArray(res.body.warnings));
+  assert.strictEqual(res.body.warnings[0].code, 'NO_CLOSE_NO_DURATION');
+  assessments._deps = null;
+});
+
+test('POST /assessments → no warning + at_closesAt policy when closesAt set (Wave 3 block 3)', async () => {
+  const closesAt = new Date(Date.now() + 86400000);
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async (scope, payload) => ({ _id: 'a1', ...scope, ...payload, type: 'mcq', closesAt, config: { mcq: {} } }),
+    },
+    authoringService: { authorMcq: async () => {} },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'mcq', title: 'Round 1' });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.reviewUnlockPolicy, 'at_closesAt');
+  assert.deepStrictEqual(res.body.warnings, []);
+  assessments._deps = null;
+});
+
+test('POST /assessments → no warning when duration set even without closesAt (Wave 3 block 3)', async () => {
+  assessments._deps = {
+    assessmentService: {
+      createAssessment: async (scope, payload) => ({ _id: 'a1', ...scope, ...payload, type: 'mcq', config: { mcq: { durationSeconds: 1800 } } }),
+    },
+    authoringService: { authorMcq: async () => {} },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`)
+    .send({ cohortId: 'c1', type: 'mcq', title: 'Timed' });
+  assert.strictEqual(res.status, 201);
+  assert.strictEqual(res.body.reviewUnlockPolicy, 'on_close');
+  assert.deepStrictEqual(res.body.warnings, [], 'duration present → attempts auto-end, no strand warning');
+  assessments._deps = null;
+});
+
 test('POST /assessments → 400 VALIDATION when cohortId/type/title missing', async () => {
   const res = await request(appAs('tpo_head'))
     .post('/api/institution/assessments')
@@ -72,6 +126,8 @@ test('tpo_head POST /assessments/:id/release → 200 with status and releasedAt'
   assert.strictEqual(res.body.success, true);
   assert.strictEqual(res.body.data.status, 'released');
   assert.ok(res.body.data.releasedAt);
+  // Wave 3 block 3: release response carries the review-unlock contract.
+  assert.strictEqual(res.body.data.reviewUnlockPolicy, 'on_close', 'no closesAt on the released stub → on_close');
   assessments._deps = null;
 });
 
@@ -199,6 +255,70 @@ test('GET /assessments/:id/sessions shows score after closesAt', async () => {
   assert.strictEqual(res.status, 200);
   const { sessions } = res.body.data;
   assert.strictEqual(sessions[0].score, 88, 'score should be visible after window closes');
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/sessions → expired bucket + needsReview/gradeStatus surfaced (Wave 3 block 2)', async () => {
+  const future = new Date(Date.now() + 86400000);
+  assessments._deps = {
+    Assessment: { findOne: async () => ({ _id: 'a1', institutionId: 'i1', cohortId: 'c1', closesAt: future }) },
+    AssessmentSession: {
+      find: async () => [
+        { _id: 's1', userId: 'u1', status: 'graded', result: { score: 80, needsReview: true } },
+        { _id: 's2', userId: 'u2', status: 'graded', result: { score: null, gradeStatus: 'insufficient' } },
+        { _id: 's3', userId: 'u3', status: 'expired', result: null },
+        { _id: 's4', userId: 'u4', status: 'in_progress', result: null },
+      ],
+    },
+    InstitutionEnrollment: { countDocuments: async () => 5, find: async () => [] },
+    User: { find: async () => [] },
+  };
+
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+
+  assert.strictEqual(res.status, 200);
+  const { counts, sessions } = res.body.data;
+  assert.strictEqual(counts.assigned, 5);
+  assert.strictEqual(counts.started, 4, 'started = non-scheduled');
+  assert.strictEqual(counts.graded, 2);
+  assert.strictEqual(counts.expired, 1, 'expired is a distinct bucket');
+  assert.strictEqual(counts.submitted, 2, 'submitted excludes expired/in_progress');
+  const s1 = sessions.find((s) => s.userId === 'u1');
+  assert.strictEqual(s1.needsReview, true, 'disputed grade surfaced');
+  const s2 = sessions.find((s) => s.userId === 'u2');
+  assert.strictEqual(s2.gradeStatus, 'insufficient', 'insufficient-evidence surfaced');
+  const s3 = sessions.find((s) => s.userId === 'u3');
+  assert.strictEqual(s3.status, 'expired');
+  // Wave 3 block 3: monitor exposes the review-unlock policy (closesAt set → at_closesAt).
+  assert.strictEqual(res.body.data.reviewUnlockPolicy, 'at_closesAt');
+  assessments._deps = null;
+});
+
+test('GET /assessments/:id/sessions → integrity truth + scoreMethod (Wave 3 block 4)', async () => {
+  const future = new Date(Date.now() + 86400000);
+  assessments._deps = {
+    Assessment: { findOne: async () => ({ _id: 'a1', institutionId: 'i1', cohortId: 'c1', type: 'capstone', closesAt: future }) },
+    AssessmentSession: {
+      find: async () => [
+        { _id: 's1', userId: 'u1', status: 'graded', engine: { type: 'capstone' }, result: { score: 80, integrity: 'low' } },
+        { _id: 's2', userId: 'u2', status: 'graded', engine: { type: 'capstone' }, result: { score: 90, integrity: 'high' } },
+        { _id: 's3', userId: 'u3', status: 'scheduled', result: null },
+      ],
+    },
+    InstitutionEnrollment: { countDocuments: async () => 3, find: async () => [] },
+    User: { find: async () => [] },
+  };
+  const res = await request(appAs('viewer'))
+    .get('/api/institution/assessments/a1/sessions')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.data.scoreMethod, 'ai_judged', 'capstone → ai_judged');
+  const integ = res.body.data.integrity;
+  assert.strictEqual(integ.checkedCount, 2, 'proctored capstone sessions counted');
+  assert.strictEqual(integ.flaggedCount, 1, "one 'low' = real flag");
+  assert.strictEqual(integ.unproctoredCount, 0, 'scheduled session not counted (never started)');
   assessments._deps = null;
 });
 
@@ -1329,6 +1449,25 @@ test('GET /assessments/:id/preview → 404 when assessment not in scope', async 
   assert.strictEqual(res.status, 404);
   assert.strictEqual(res.body.success, false);
   assessments._deps = null;
+});
+
+// Wave 3 block 2: CSV surfaces expired status + needsReview + gradeStatus columns.
+test('toCsv includes needsReview + gradeStatus columns and expired status (Wave 3 block 2)', () => {
+  const { toCsv } = require('../../services/institution/assessment/assessmentReportService');
+  const csv = toCsv([
+    { rollNumber: '001', name: 'A', status: 'graded', score: 80, integrity: 'clean', submittedAt: null, gradedAt: null, needsReview: true, gradeStatus: null },
+    { rollNumber: '002', name: 'B', status: 'graded', score: null, integrity: null, submittedAt: null, gradedAt: null, needsReview: false, gradeStatus: 'insufficient' },
+    { rollNumber: '003', name: 'C', status: 'expired', score: null, integrity: null, submittedAt: null, gradedAt: null, needsReview: false, gradeStatus: null },
+  ], []);
+  const lines = csv.split('\n');
+  const header = lines[0].split(',');
+  assert.ok(header.includes('needsReview'), 'needsReview column present');
+  assert.ok(header.includes('gradeStatus'), 'gradeStatus column present');
+  const nrIdx = header.indexOf('needsReview');
+  const gsIdx = header.indexOf('gradeStatus');
+  assert.strictEqual(lines[1].split(',')[nrIdx], 'true', 'needsReview true rendered');
+  assert.strictEqual(lines[2].split(',')[gsIdx], 'insufficient', 'gradeStatus rendered');
+  assert.strictEqual(lines[3].split(',')[header.indexOf('status')], 'expired', 'expired status in CSV');
 });
 
 // toCsv escaping unit tests (no HTTP)
