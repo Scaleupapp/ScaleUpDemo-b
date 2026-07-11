@@ -115,9 +115,10 @@ router.get('/assessments', (req, res, next) => getAuth()(req, res, next), async 
         // Take-flow contract (Wave 3): the countdown values apps render. deadlineAt
         // is the authoritative per-session cutoff (null until the student starts, or
         // when the assessment has no duration cap); durationSeconds is the configured
-        // budget.
+        // budget. reviewUnlockPolicy tells the app when detailed review appears.
         durationSeconds: getConfiguredDurationSeconds(a) || null,
         deadlineAt: (session && session.deadlineAt) || null,
+        reviewUnlockPolicy: reviewService.reviewUnlockPolicy(a),
       };
     });
 

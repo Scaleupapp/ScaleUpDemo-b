@@ -2,6 +2,22 @@
 const express = require('express');
 const institutionAuth = require('../../middleware/institutionAuth');
 const { institutionScope, requireInstitutionRole } = require('../../middleware/institutionScope');
+const reviewService = require('../../services/institution/assessment/assessmentReviewService');
+const { getConfiguredDurationSeconds } = require('../../services/institution/assessment/assessmentSessionService');
+
+// Warn the TPO when an assessment can strand its cohort: no scheduled close AND
+// no per-attempt duration ⇒ attempts never auto-end and detailed review never
+// unlocks until a manual close (Wave 3 block 3).
+function buildCreateWarnings(a) {
+  const warnings = [];
+  if (!a.closesAt && !getConfiguredDurationSeconds(a)) {
+    warnings.push({
+      code: 'NO_CLOSE_NO_DURATION',
+      message: 'This assessment has no close time and no duration: student attempts never auto-end and detailed review stays locked until you manually close it.',
+    });
+  }
+  return warnings;
+}
 
 const router = express.Router();
 router._deps = null;
@@ -44,7 +60,14 @@ router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 
     if (a.type === 'interview' && typeof authoring().authorInterview === 'function') {
       authoring().authorInterview(a._id).catch((e) => console.warn('[assessments:authorInterview]', e.message));
     }
-    return res.status(201).json({ success: true, data: a });
+    // Review-unlock contract + stranding warnings (Wave 3 block 3). Additive
+    // top-level fields — existing clients that read only `data` are unaffected.
+    return res.status(201).json({
+      success: true,
+      data: a,
+      reviewUnlockPolicy: reviewService.reviewUnlockPolicy(a),
+      warnings: buildCreateWarnings(a),
+    });
   } catch (err) {
     // Sub-feature E: validation error codes
     if (err.message === 'COHORT_NOT_FOUND') return res.status(404).json({ success: false, code: 'COHORT_NOT_FOUND', message: 'Cohort not found or does not belong to this institution.' });
@@ -60,7 +83,7 @@ router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 
 router.post('/assessments/:id/release', institutionAuth, requireInstitutionRole('tpo_head', 'institution_admin'), async (req, res) => {
   try {
     const a = await svc().releaseAssessment(institutionScope(req), req.params.id, req.institution.institutionUserId);
-    return res.status(200).json({ success: true, data: { id: String(a._id), status: a.status, releasedAt: a.releasedAt } });
+    return res.status(200).json({ success: true, data: { id: String(a._id), status: a.status, releasedAt: a.releasedAt, reviewUnlockPolicy: reviewService.reviewUnlockPolicy(a) } });
   } catch (err) {
     if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Assessment not found' });
     if (err.message === 'BAD_STATUS') return res.status(409).json({ success: false, code: 'BAD_STATUS', message: 'Only a configured assessment can be released.' });
@@ -170,8 +193,16 @@ router.post('/assessments/:id/author-drill', institutionAuth, requireInstitution
 
 // List + get (any institution role)
 router.get('/assessments', institutionAuth, async (req, res) => {
-  try { return res.status(200).json({ success: true, data: await svc().listAssessments(institutionScope(req), { cohortId: req.query.cohortId }) }); }
-  catch (err) { console.error('[institution/assessments:list]', err.message); return res.status(500).json({ success: false, message: 'Could not list assessments.' }); }
+  try {
+    const list = await svc().listAssessments(institutionScope(req), { cohortId: req.query.cohortId });
+    // Expose reviewUnlockPolicy per row (additive) so the portal can label when
+    // students will see their detailed review.
+    const data = (list || []).map((a) => {
+      const o = a && typeof a.toObject === 'function' ? a.toObject() : a;
+      return { ...o, reviewUnlockPolicy: reviewService.reviewUnlockPolicy(o) };
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) { console.error('[institution/assessments:list]', err.message); return res.status(500).json({ success: false, message: 'Could not list assessments.' }); }
 });
 router.get('/assessments/:id', institutionAuth, async (req, res) => {
   try {
@@ -261,7 +292,7 @@ router.get('/assessments/:id/sessions', institutionAuth, async (req, res) => {
       return entry;
     });
 
-    return res.status(200).json({ success: true, data: { counts, sessions } });
+    return res.status(200).json({ success: true, data: { counts, sessions, reviewUnlockPolicy: reviewService.reviewUnlockPolicy(assessment) } });
   } catch (err) {
     console.error('[institution/assessments:sessions]', err.message);
     return res.status(500).json({ success: false, message: 'Could not load sessions.' });
