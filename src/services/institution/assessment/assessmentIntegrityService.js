@@ -40,8 +40,13 @@ function hasEngineSignal(session) {
 }
 
 /**
- * Classify one session: is it proctored (a real signal exists), and is that
- * signal a flag? Sessions with no real signal are neither — they are unproctored.
+ * Classify one session. Review finding I1: client-POSTed counters are
+ * SELF-reported — a student choosing to post clean zeros must never present as
+ * externally proctored. So `checked` means a genuine engine-side signal only
+ * (capstone today); client signals get their own bucket. Flags count from
+ * either source (nobody fakes a flag against themselves, and flags are sticky
+ * — see buildIngestedSignals).
+ * @returns {{ proctored: 'engine'|'client'|false, flagged: boolean }}
  */
 function classifySessionIntegrity(session) {
   const client = hasClientSignals(session);
@@ -51,30 +56,30 @@ function classifySessionIntegrity(session) {
   let flagged = false;
   if (client && session.integritySignals.flagged) flagged = true;
   if (engine && REAL_FLAG_VALUES.includes(session.result.integrity)) flagged = true;
-  return { proctored: true, flagged };
+  return { proctored: engine ? 'engine' : 'client', flagged };
 }
 
 /**
  * Summarize integrity across sessions (typically the STARTED sessions of a
  * cohort/assessment). Returns honest, non-overlapping counts.
- *   checkedCount     — sessions with a real signal
- *   flaggedCount     — of those, the ones actually flagged (== the old integrityFlags)
- *   unproctoredCount — sessions with no real signal (mcq/drill/interview today)
+ *   checkedCount        — sessions with a genuine ENGINE-side signal (capstone)
+ *   clientReportedCount — sessions whose only signal is self-reported app telemetry
+ *   flaggedCount        — of either, the ones actually flagged (== old integrityFlags)
+ *   unproctoredCount    — sessions with no signal at all
  */
 function summarizeIntegrity(sessions) {
   let checkedCount = 0;
+  let clientReportedCount = 0;
   let flaggedCount = 0;
   let unproctoredCount = 0;
   for (const s of sessions || []) {
     const { proctored, flagged } = classifySessionIntegrity(s);
-    if (proctored) {
-      checkedCount += 1;
-      if (flagged) flaggedCount += 1;
-    } else {
-      unproctoredCount += 1;
-    }
+    if (proctored === 'engine') checkedCount += 1;
+    else if (proctored === 'client') clientReportedCount += 1;
+    else unproctoredCount += 1;
+    if (flagged) flaggedCount += 1;
   }
-  return { checkedCount, flaggedCount, unproctoredCount };
+  return { checkedCount, clientReportedCount, flaggedCount, unproctoredCount };
 }
 
 // The distinct engine's score method for a set of sessions, or 'mixed' when a
@@ -107,26 +112,42 @@ function clampCounter(val, max) {
   return Math.min(Math.max(Math.floor(n), 0), max);
 }
 
-// Conservative flag rule: any paste, or more than 3 app-backgroundings.
-function signalsAreFlagged({ appBackgroundedCount = 0, pasteCount = 0 }) {
-  return pasteCount > 0 || appBackgroundedCount > 3;
+// Conservative flag rule: any paste, >3 app-backgroundings, or >5 min of
+// focus loss (review M1: focusLossSeconds was stored but inert).
+function signalsAreFlagged({ appBackgroundedCount = 0, pasteCount = 0, focusLossSeconds = 0 }) {
+  return pasteCount > 0 || appBackgroundedCount > 3 || focusLossSeconds > 300;
 }
 
 /**
  * Validate + clamp a raw ingestion body into a storable signals object.
+ *
+ * Review finding C1: signals are MONOTONIC. Counters only ratchet upward
+ * (max of previous stored value and the new snapshot) and `flagged` is sticky
+ * — once true it can never be re-POSTed back to false. A student who pastes
+ * and then re-posts zeros keeps both the counter and the flag.
+ *
+ * @param {object} body      raw request body
+ * @param {Date}   now
+ * @param {object} previous  previously stored session.integritySignals (or null)
  * @returns {{ ok: true, signals } | { ok: false, code }}
  */
-function buildIngestedSignals(body, now) {
+function buildIngestedSignals(body, now, previous) {
   const appBackgroundedCount = clampCounter(body && body.appBackgroundedCount, SIGNAL_BOUNDS.appBackgroundedCount);
   const focusLossSeconds = clampCounter(body && body.focusLossSeconds, SIGNAL_BOUNDS.focusLossSeconds);
   const pasteCount = clampCounter(body && body.pasteCount, SIGNAL_BOUNDS.pasteCount);
   if (appBackgroundedCount === null || focusLossSeconds === null || pasteCount === null) {
     return { ok: false, code: 'VALIDATION' };
   }
-  const flagged = signalsAreFlagged({ appBackgroundedCount, pasteCount });
+  const prev = previous || {};
+  const merged = {
+    appBackgroundedCount: Math.max(appBackgroundedCount, prev.appBackgroundedCount || 0),
+    focusLossSeconds: Math.max(focusLossSeconds, prev.focusLossSeconds || 0),
+    pasteCount: Math.max(pasteCount, prev.pasteCount || 0),
+  };
+  const flagged = !!prev.flagged || signalsAreFlagged(merged);
   return {
     ok: true,
-    signals: { appBackgroundedCount, focusLossSeconds, pasteCount, flagged, updatedAt: now || new Date() },
+    signals: { ...merged, flagged, updatedAt: now || new Date() },
   };
 }
 

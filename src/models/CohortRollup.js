@@ -24,6 +24,10 @@ const CohortRollupSchema = new mongoose.Schema({
   // backward-compat but now == integrity.flaggedCount (real flags only).
   integrity: {
     checkedCount: { type: Number, default: 0 },
+    // Self-reported app telemetry only — never counted as externally proctored
+    // (review I1: a student choosing to POST clean counters must not inflate
+    // the "checked" figure a TPO reads as proctoring).
+    clientReportedCount: { type: Number, default: 0 },
     flaggedCount: { type: Number, default: 0 },
     unproctoredCount: { type: Number, default: 0 },
   },

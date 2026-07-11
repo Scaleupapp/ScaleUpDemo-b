@@ -245,7 +245,9 @@ router.post('/assessments/sessions/:sessionId/integrity', (req, res, next) => ge
       return res.status(409).json({ success: false, code: 'NOT_IN_PROGRESS', message: 'Integrity signals can only be reported while the attempt is in progress.' });
     }
 
-    const built = integrityService.buildIngestedSignals(req.body || {}, new Date());
+    // Monotonic merge with what's already stored (review C1): counters ratchet
+    // upward and the flag is sticky — a re-POST of zeros can never erase either.
+    const built = integrityService.buildIngestedSignals(req.body || {}, new Date(), session.integritySignals);
     if (!built.ok) {
       return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Integrity counters must be non-negative numbers.' });
     }

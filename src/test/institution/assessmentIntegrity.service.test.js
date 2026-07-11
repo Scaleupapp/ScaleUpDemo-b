@@ -33,14 +33,16 @@ test('summarizeIntegrity: capstone proctored, mcq/interview/drill unproctored', 
   assert.strictEqual(out.unproctoredCount, 3);
 });
 
-test('summarizeIntegrity: client-ingested signals make any engine proctored + flagged', () => {
+test('summarizeIntegrity: client signals are SELF-reported — own bucket, never "checked" (review I1)', () => {
   const sessions = [
     { engine: { type: 'mcq' }, integritySignals: { pasteCount: 2, flagged: true, updatedAt: new Date() } },
     { engine: { type: 'mcq' }, integritySignals: { pasteCount: 0, appBackgroundedCount: 1, flagged: false, updatedAt: new Date() } },
     { engine: { type: 'mcq' } }, // no signals → unproctored
+    { engine: { type: 'capstone' }, result: { integrity: 'high' } }, // genuine engine signal → checked
   ];
   const out = svc.summarizeIntegrity(sessions);
-  assert.strictEqual(out.checkedCount, 2);
+  assert.strictEqual(out.checkedCount, 1, 'only the engine-signal session is checked');
+  assert.strictEqual(out.clientReportedCount, 2, 'self-reported telemetry counted separately');
   assert.strictEqual(out.flaggedCount, 1);
   assert.strictEqual(out.unproctoredCount, 1);
 });
@@ -53,7 +55,7 @@ test('buildIngestedSignals: clamps to bounds and floors', () => {
   assert.strictEqual(out.signals.appBackgroundedCount, 2, 'floored');
   assert.strictEqual(out.signals.focusLossSeconds, svc.SIGNAL_BOUNDS.focusLossSeconds, 'clamped to max');
   assert.strictEqual(out.signals.pasteCount, 0, 'negative clamped to 0');
-  assert.strictEqual(out.signals.flagged, false, '2 backgroundings, no paste → clean');
+  assert.strictEqual(out.signals.flagged, true, 'clamped-to-max focus loss (>5min) now flags (review M1)');
 });
 
 test('buildIngestedSignals: >3 backgroundings flags', () => {
@@ -74,4 +76,21 @@ test('buildIngestedSignals: non-numeric → not ok (VALIDATION)', () => {
   const out = svc.buildIngestedSignals({ pasteCount: 'x' }, new Date());
   assert.strictEqual(out.ok, false);
   assert.strictEqual(out.code, 'VALIDATION');
+});
+
+
+// ── Review fixes: C1 monotonic/sticky, I3 expired recovery ───────────────────
+
+test('buildIngestedSignals: counters ratchet upward and flags are STICKY — re-POSTing zeros erases nothing (review C1)', () => {
+  const now = new Date();
+  const first = svc.buildIngestedSignals({ pasteCount: 2 }, now);
+  assert.strictEqual(first.signals.flagged, true);
+  const wiped = svc.buildIngestedSignals({ pasteCount: 0, appBackgroundedCount: 0, focusLossSeconds: 0 }, now, first.signals);
+  assert.strictEqual(wiped.signals.pasteCount, 2, 'counter cannot go down');
+  assert.strictEqual(wiped.signals.flagged, true, 'flag cannot be erased');
+});
+
+test('buildIngestedSignals: focus loss over 5 minutes flags (review M1)', () => {
+  const out = svc.buildIngestedSignals({ focusLossSeconds: 301 }, new Date());
+  assert.strictEqual(out.signals.flagged, true);
 });

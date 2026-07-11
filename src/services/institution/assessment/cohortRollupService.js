@@ -73,7 +73,12 @@ function buildRollupDoc({ institutionId, cohortId, assessmentId, sessions, assig
   const started = sessions.filter((s) => s.status !== 'scheduled');
   const graded = sessions.filter((s) => s.status === 'graded');
   const scores = graded.map((s) => s.result && s.result.score).filter((n) => typeof n === 'number');
-  const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : undefined;
+  const scoreMethod = scoreMethodForSessions(sessions);
+  // Review I2: never serve a number that blends objective MCQ % with AI-judged
+  // scores — the cohort-wide multi-engine rollup gets no avgScore at all.
+  const avgScore = (scoreMethod !== 'mixed' && scores.length)
+    ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+    : undefined;
 
   // Integrity truth (Wave 3 block 4): checked/flagged/unproctored over the
   // STARTED sessions. integrityFlags is retained for backward-compat but now
@@ -98,7 +103,7 @@ function buildRollupDoc({ institutionId, cohortId, assessmentId, sessions, assig
     counts, avgScore, gradedCount: scores.length,
     // Per-engine score framing so UIs never cross-average objective % with
     // AI-judged scores. 'mixed' on the cohort-wide (multi-engine) rollup.
-    scoreMethod: scoreMethodForSessions(sessions),
+    scoreMethod,
     integrity, integrityFlags: integrity.flaggedCount,
     byCompetency,
   };

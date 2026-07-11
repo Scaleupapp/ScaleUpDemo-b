@@ -432,3 +432,47 @@ test('syncSession: already expired → idempotent no-op', async () => {
   assert.strictEqual(result.status, 'expired');
   assert.strictEqual(readCalled, false, 'engine not polled once expired');
 });
+
+// ── Review I3: bounded expired→graded recovery ───────────────────────────────
+const { EXPIRED_RECOVERY_GRACE_MS } = require('../../services/institution/assessment/assessmentSessionService');
+
+test('syncSession recovers an expired session to graded when the engine result lands within grace', async () => {
+  const deadline = new Date('2026-07-10T10:00:00Z');
+  const session = {
+    _id: 's1', status: 'expired', deadlineAt: deadline,
+    engine: { type: 'mcq', quizId: 'q1', sessionId: 'at1' },
+    institutionId: 'i1', cohortId: 'c1', userId: 'u1',
+    save: async function () { return this; },
+  };
+  const deps = {
+    AssessmentSession: { findById: async () => session },
+    now: () => new Date(deadline.getTime() + 60 * 1000), // 1 min past deadline
+    adapterDeps: {
+      Quiz: { findById: async () => ({ _id: 'q1' }) },
+      QuizAttempt: { findById: async () => ({ _id: 'at1', status: 'completed', percentage: 80, results: {} }) },
+    },
+    enrollmentProgressService: { markActive: async () => {} },
+    cohortRollupService: { recompute: async () => {} },
+  };
+  const out = await syncSession('s1', deps);
+  assert.strictEqual(out.status, 'graded', 'completed work within grace is graded, not discarded');
+  assert.ok(out.submittedAt, 'submittedAt stamped');
+});
+
+test('syncSession keeps an expired session terminal past the grace window', async () => {
+  const deadline = new Date('2026-07-10T10:00:00Z');
+  let adapterCalled = false;
+  const session = {
+    _id: 's2', status: 'expired', deadlineAt: deadline,
+    engine: { type: 'mcq', quizId: 'q1', sessionId: 'at1' },
+    save: async function () { return this; },
+  };
+  const deps = {
+    AssessmentSession: { findById: async () => session },
+    now: () => new Date(deadline.getTime() + EXPIRED_RECOVERY_GRACE_MS + 1000),
+    adapterDeps: { QuizAttempt: { findById: async () => { adapterCalled = true; return null; } } },
+  };
+  const out = await syncSession('s2', deps);
+  assert.strictEqual(out.status, 'expired');
+  assert.strictEqual(adapterCalled, false, 'engine not even consulted past grace');
+});
