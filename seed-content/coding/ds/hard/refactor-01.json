@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Sprinklr / Postman analytics senior round — refactor a notebook anomaly detector that leaks future data (look-ahead bias) into a causal, unit-testable pipeline before it ships to the monitoring service",
+  "brief": "A monitoring notebook flags anomalous points in a metric time series. It \"works\" on historical data but behaves differently in production, because it computes the baseline mean/std over the WHOLE series — including points AFTER the one being scored. That is look-ahead bias: in production you only have the past.\n\n```python\nimport math\n\ndef run(series, threshold=3.0):\n    n = len(series)\n    mean = sum(series) / n\n    var = sum((x - mean) ** 2 for x in series) / n   # over ALL points\n    std = math.sqrt(var)\n    flagged = []\n    for i, x in enumerate(series):\n        if std == 0:\n            continue\n        if abs((x - mean) / std) > threshold:\n            flagged.append(i)\n    return flagged\n```\n\nBecause a large spike inflates the GLOBAL std it is compared against, the current code frequently fails to flag sudden spikes. It also exposes no reusable functions.\n\n**Your tasks:**\n1. Extract `rolling_stats(series, window)` returning, per index, the `(mean, std)` of the `window` points STRICTLY BEFORE it — `None` where there is not enough history.\n2. Extract `zscore(value, mean, std)` returning `0.0` when `std == 0`.\n3. Implement `detect_anomalies(series, window=3, threshold=3.0)` that scores each point against ONLY its trailing window (causal, no look-ahead) and returns the sorted list of flagged indices.\n4. Points without `window` points of history are never flagged.\n5. Both visible tests must pass.",
+  "acceptance_criteria": [
+    "`rolling_stats`, `zscore`, and `detect_anomalies` all exist at module level and are importable",
+    "`rolling_stats(series, window)` uses only the `window` points strictly before each index and returns None where history < window",
+    "`detect_anomalies` is causal — it never uses the current point or any future point when computing the baseline",
+    "A sudden spike that the global-baseline version misses is correctly flagged by the trailing-window version",
+    "Both visible tests pass"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "anomaly.py",
+        "content": "# anomaly.py -- a single monolithic function copied out of a notebook.\n#\n# It flags points whose z-score exceeds a threshold, but it computes the mean\n# and standard deviation over the ENTIRE series -- including points that come\n# AFTER the one being scored. That is look-ahead bias: in production you only\n# have the past, so a detector that peeks at the future will behave completely\n# differently (and usually miss real, sudden spikes because the spike itself\n# inflates the global std it is being compared against).\n#\n# It also exposes no reusable functions -- you cannot unit-test the rolling\n# statistics or the scoring in isolation.\n\nimport math\n\n\ndef run(series, threshold=3.0):\n    n = len(series)\n    mean = sum(series) / n\n    var = sum((x - mean) ** 2 for x in series) / n   # population variance over ALL points\n    std = math.sqrt(var)\n    flagged = []\n    for i, x in enumerate(series):\n        if std == 0:\n            continue\n        if abs((x - mean) / std) > threshold:\n            flagged.append(i)\n    return flagged\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "anomaly.py",
+        "content": "# anomaly.py -- refactored into causal, independently testable pieces.\n#\n# rolling_stats(series, window) returns, for each index, the (mean, std) of the\n# `window` points STRICTLY BEFORE it (None when there is not enough history).\n# detect_anomalies scores each point against only its trailing window, so there\n# is no look-ahead bias.\n\nimport math\n\n\ndef rolling_stats(series, window):\n    \"\"\"Return a list of (mean, std) computed over the `window` points strictly\n    before each index. Entries with fewer than `window` prior points are None.\n\n    Args:\n        series: sequence of numbers.\n        window: number of trailing points to summarise.\n    Returns:\n        list the same length as series; each entry is (mean, std) or None.\n    Assumes:\n        window >= 1.\n    \"\"\"\n    out = []\n    for i in range(len(series)):\n        if i < window:\n            out.append(None)\n            continue\n        past = series[i - window:i]\n        mean = sum(past) / window\n        var = sum((x - mean) ** 2 for x in past) / window\n        out.append((mean, math.sqrt(var)))\n    return out\n\n\ndef zscore(value, mean, std):\n    \"\"\"Return the z-score of value given mean and std; 0.0 when std == 0.\"\"\"\n    if std == 0:\n        return 0.0\n    return (value - mean) / std\n\n\ndef detect_anomalies(series, window=3, threshold=3.0):\n    \"\"\"Flag indices whose trailing-window z-score exceeds threshold (causal).\n\n    Args:\n        series: sequence of numbers.\n        window: trailing window size for the baseline statistics.\n        threshold: absolute z-score above which a point is anomalous.\n    Returns:\n        sorted list of flagged indices.\n    Assumes:\n        Points without `window` points of history are never flagged.\n    \"\"\"\n    stats = rolling_stats(series, window)\n    flagged = []\n    for i, x in enumerate(series):\n        s = stats[i]\n        if s is None:\n            continue\n        mean, std = s\n        if abs(zscore(x, mean, std)) > threshold:\n            flagged.append(i)\n    return flagged\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "functions_exist_and_are_causal_api",
+      "command": "python -c \"\nimport anomaly\nfor fn in ['rolling_stats', 'zscore', 'detect_anomalies']:\n    assert callable(getattr(anomaly, fn, None)), fn + ' missing'\nstats = anomaly.rolling_stats([10, 12, 11, 13, 50, 12, 11], 3)\nassert stats[0] is None and stats[1] is None and stats[2] is None, 'insufficient-history entries must be None'\nassert stats[3] is not None, 'index 3 should have stats'\nprint('PASS')\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": [
+        "PASS"
+      ]
+    },
+    {
+      "name": "trailing_window_catches_spike_global_misses",
+      "command": "python -c \"\nimport anomaly\nseries = [10, 12, 11, 13, 50, 12, 11]\nflagged = anomaly.detect_anomalies(series, window=3, threshold=3.0)\nassert flagged == [4], 'expected [4], got ' + repr(flagged)\nprint('PASS')\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": [
+        "PASS"
+      ]
+    }
+  ],
+  "hidden_tests": [],
+  "seeded_mistakes": [
+    {
+      "location": "anomaly.py",
+      "bug_description": "Keeps computing the baseline over the whole series (or over a window that INCLUDES the current point, `series[i-window:i+1]`) instead of strictly-prior points, so the look-ahead bias survives the refactor and the spike at index 4 is not flagged.",
+      "why_compass_might_suggest_it": "Off-by-one slice boundaries are easy to get wrong, and \"include the current point in its own window\" feels natural. The model preserves the original global-statistics idea because that is what the starter did.",
+      "detection_signals": [
+        "trailing_window_catches_spike_global_misses returns [] or a different index set",
+        "The window slice is `series[i-window:i+1]` or `series` (whole) rather than `series[i-window:i]`"
+      ]
+    },
+    {
+      "location": "anomaly.py",
+      "bug_description": "Forgets the insufficient-history guard: computes stats for early indices with fewer than `window` prior points (or pads with zeros), so `rolling_stats` returns tuples instead of None for the first `window` entries and early points get spuriously flagged.",
+      "why_compass_might_suggest_it": "Handling the warm-up region is an edge case that is invisible on the happy path; the model writes the general case and never special-cases the start of the series.",
+      "detection_signals": [
+        "functions_exist_and_are_causal_api fails because stats[0..2] are not None",
+        "Early indices appear in the flagged list"
+      ]
+    },
+    {
+      "location": "anomaly.py",
+      "bug_description": "Removes the std == 0 guard in `zscore`, so a flat trailing window (all equal values) raises ZeroDivisionError instead of returning 0.0.",
+      "why_compass_might_suggest_it": "The starter had the guard inline; when the logic is split into a helper the guard is easy to drop, and the happy-path test data never exercises a perfectly flat window.",
+      "detection_signals": [
+        "ZeroDivisionError raised when a trailing window is constant",
+        "`zscore` has no `if std == 0` branch"
+      ]
+    }
+  ],
+  "rubric_anchors": [
+    {
+      "dimension": "code_quality",
+      "check": "`rolling_stats`, `zscore`, `detect_anomalies` are top-level importable functions with the specified signatures and docstrings",
+      "weight": 0.25
+    },
+    {
+      "dimension": "correctness",
+      "check": "The baseline uses strictly-prior points (`series[i-window:i]`) — causal, no look-ahead — and the spike-detection visible test passes with flagged == [4]",
+      "weight": 0.3
+    },
+    {
+      "dimension": "correctness",
+      "check": "Insufficient-history indices return None / are never flagged, and a constant window does not raise (zscore std==0 → 0.0)",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt named the look-ahead bias explicitly and required a strictly-trailing window with a warm-up guard — not just \"split into functions\"",
+      "weight": 0.2
+    }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Names the defect precisely: \"the baseline must use only points strictly before index i — series[i-window:i], not series[i-window:i+1]\"",
+      "Specifies the warm-up rule: \"indices with fewer than window prior points return None and are never flagged\"",
+      "Requires a std==0 guard so a flat window returns z-score 0.0 instead of dividing by zero"
+    ],
+    "common_verification_traps": [
+      "Testing only with a series where the spike is also caught by the global method — you must pick data where the global std hides the spike",
+      "Not testing the warm-up region, so an off-by-one that flags early points slips through"
+    ],
+    "decomposition_reference": []
+  },
+  "difficulty_signals": {
+    "token_count": 200,
+    "branching_complexity": 4,
+    "edge_cases": 6,
+    "known_hard_patterns": [
+      "look-ahead bias / causal windowing",
+      "trailing-window statistics",
+      "warm-up region + divide-by-zero guards"
+    ]
+  }
+}

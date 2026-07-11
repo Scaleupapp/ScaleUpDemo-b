@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Sarvam / Google DeepMind applied-AI senior round — design an LLM-as-judge: write the prompt that gets a model to build a RAG faithfulness grader that is deterministic, citation-grounded, and not fooled by length or world-knowledge",
+  "brief": "You are building an offline evaluator that scores whether a RAG system's answers are FAITHFUL to their retrieved context (grounded, not hallucinated). The evaluator itself uses an LLM as a judge — which means it inherits the LLM's failure modes (miscalibration, position/length bias, non-determinism) unless the design controls for them. You need an LLM to generate `faithfulness_judge.py`.\n\nThe module exposes `judge_faithfulness(question, answer, contexts, call_llm) -> dict` where `call_llm` is INJECTED (so it is testable with a stub, not bound to a provider). The generated code must:\n\n**Decompose into atomic claims:** grade the answer claim-by-claim, not as a blob.\n\n**Per-claim grounding verdict with citations:** label each claim `supported`/`contradicted`/`not_in_context` using ONLY the contexts, returning the citing context index; a claim with no citable passage cannot be `supported`. Judge grounding-in-context, NOT real-world truth.\n\n**Bias + determinism controls:** temperature 0, no leaking of the desired conclusion, no length bias, strict-JSON output.\n\n**Score computed in Python:** final score = supported / total claims computed in code — NOT an overall score asked from the LLM (which is poorly calibrated).\n\n**Defensive parsing:** strip fences, retry once on parse failure, return a null score with an error rather than fabricating one.\n\n**Your task:** Write the prompt you would send to an LLM to generate this module. You are NOT writing the module — you are writing the instruction, precise enough that the resulting judge is deterministic, auditable, and bias-resistant.",
+  "acceptance_criteria": [
+    "Prompt requires decomposing the answer into atomic claims and grading per claim, not the answer as a whole",
+    "Prompt requires a per-claim verdict (supported/contradicted/not_in_context) grounded ONLY in the provided contexts with a returned citation index, and states that faithfulness is grounding-in-context not real-world truth",
+    "Prompt requires determinism (temperature 0) and bias controls (no leaked conclusion, no length bias, strict-JSON output)",
+    "Prompt requires the final score to be computed in Python as supported/total claims, NOT an aggregate score asked from the LLM",
+    "Prompt requires defensive JSON parsing (strip fences, retry once, null score on failure) and an injectable call_llm so the judge is testable"
+  ],
+  "reference_solution": {
+    "files": [
+      {
+        "path": "gold_prompt.txt",
+        "content": "Generate a Python module `faithfulness_judge.py` that uses an LLM to grade whether a RAG answer is FAITHFUL to (grounded in) its retrieved context. This is an evaluation harness — determinism, calibration, and bias-resistance matter more than eloquence.\n\nSignature: `judge_faithfulness(question: str, answer: str, contexts: list[str], call_llm) -> dict`, where `call_llm(system: str, user: str) -> str` is an injected function that returns the model's raw text (so the judge is testable with a stub — do NOT hardcode a provider/client).\n\n=== 1. CLAIM DECOMPOSITION ===\n- First prompt the LLM to break the ANSWER into a list of atomic factual claims (one verifiable statement each). Grade faithfulness per claim, not on the answer as a blob — a single unsupported sentence should not sink an otherwise grounded answer, and vice versa.\n\n=== 2. PER-CLAIM GROUNDING VERDICT ===\n- For each claim, ask the LLM to label it `supported` / `contradicted` / `not_in_context` using ONLY the provided contexts, and to return the index (or indices) of the supporting context passage as a citation. A claim with no citable passage is `not_in_context`, never `supported`.\n- Instruct the judge to ignore whether a claim is true in the real world — faithfulness is grounding IN THE CONTEXT, not global correctness.\n\n=== 3. BIAS + DETERMINISM CONTROLS ===\n- Set temperature 0 (or state it must be deterministic) so re-running yields the same verdicts.\n- Do NOT reveal the desired conclusion or any score in the prompt. Do NOT let answer length bias the grade (a longer answer is not more faithful).\n- Require the model to return STRICT JSON only (no markdown fences, no prose): a schema you define with `claims: [{text, verdict, citation_context_indices}]`.\n\n=== 4. SCORE = CODE, NOT LLM ===\n- Compute the final faithfulness score in PYTHON as (# supported claims) / (# total claims) — do NOT ask the LLM for an overall 0-1 score. LLM-produced aggregate scores are poorly calibrated; the deterministic ratio is auditable. Return 1.0 for an answer with zero claims (nothing unfaithful was asserted) and document that choice.\n\n=== 5. ROBUST PARSING ===\n- Parse the JSON defensively: strip accidental code fences, and if JSON parsing fails, retry the call ONCE; if it still fails, return `{\"score\": None, \"error\": \"unparseable\", \"claims\": []}` rather than crashing. Never fabricate a score.\n\n=== OUTPUT ===\nReturn `{\"score\": float|None, \"claims\": [...], \"supported\": int, \"total\": int}`. Provide the two prompt strings (decomposition + grounding) as constants, the JSON schema, the code-side scoring, and the defensive parsing. Return only the module."
+      }
+    ]
+  },
+  "visible_tests": [],
+  "hidden_tests": [],
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt asks the LLM for an overall faithfulness score directly (\"rate faithfulness 0-1\"), rather than decomposing into claims and computing supported/total in code — LLM aggregate scores are poorly calibrated and non-reproducible, so the same answer gets different scores across runs and the metric is not auditable.",
+      "why_compass_might_suggest_it": "Asking the model for \"a score\" is the shortest path and mirrors how many naive eval scripts are written; the insight that aggregation belongs in deterministic code is an evaluation-engineering lesson the model will not volunteer.",
+      "detection_signals": [
+        "Prompt asks the LLM to return an overall/aggregate faithfulness score",
+        "Prompt does not compute score = supported / total in Python"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt does not scope the judgment to the provided context, so the LLM grades whether each claim is TRUE in the real world (using its own knowledge) instead of whether it is GROUNDED in the retrieved passages — a factually-correct but ungrounded (hallucinated-source) answer is scored faithful.",
+      "why_compass_might_suggest_it": "Truth-checking is the model's default reflex when asked to \"verify claims\"; the distinction between global correctness and grounding-in-context is precise and must be stated.",
+      "detection_signals": [
+        "Prompt does not say \"using ONLY the provided contexts\" or \"grounding, not real-world truth\"",
+        "Verdicts rely on world knowledge; a claim absent from context is marked supported"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt omits determinism and defensive-parsing requirements, so the judge runs at default temperature (verdicts vary run to run) and crashes when the model wraps its JSON in ```json fences or emits trailing prose.",
+      "why_compass_might_suggest_it": "Temperature and output-parsing are operational concerns that do not feel like \"the task\"; a learner focused on the rubric forgets that an eval harness must be reproducible and robust to messy model output.",
+      "detection_signals": [
+        "Prompt does not mention temperature 0 / determinism",
+        "Prompt does not require strict-JSON output or defensive parsing with a retry"
+      ]
+    }
+  ],
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt requires atomic-claim decomposition with per-claim supported/contradicted/not_in_context verdicts grounded ONLY in the contexts, with citation indices",
+      "weight": 0.3
+    },
+    {
+      "dimension": "correctness",
+      "check": "Prompt mandates the score be computed in Python as supported/total claims (not an LLM aggregate) and defines the strict-JSON claim schema",
+      "weight": 0.25
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Prompt specifies determinism (temp 0), bias controls (no leaked conclusion, no length bias), and defensive parsing (strip fences, retry once, null score on failure)",
+      "weight": 0.25
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt requires an injected call_llm so the judge is provider-agnostic and unit-testable with a stub, and distinguishes grounding-in-context from real-world truth",
+      "weight": 0.2
+    }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Splits the task: \"decompose the answer into atomic claims, then label each supported/contradicted/not_in_context using ONLY the contexts, with a citation index\"",
+      "States \"faithfulness = grounding in the provided context, NOT whether the claim is true in general\"",
+      "Moves aggregation to code: \"compute score = supported/total in Python; do not ask the model for an overall score\"",
+      "Requires temperature 0, strict-JSON output, defensive parsing with one retry, and an injected call_llm for testability"
+    ],
+    "common_verification_traps": [
+      "Accepting a single overall score from the LLM and never checking reproducibility — re-running yields a different number",
+      "Testing only with answers whose claims happen to be world-true, so the grounding-vs-truth confusion never surfaces",
+      "Not feeding messy model output (code fences, trailing prose) so the missing defensive parsing never crashes in the test but does in production"
+    ],
+    "decomposition_reference": []
+  },
+  "difficulty_signals": {
+    "token_count": 235,
+    "branching_complexity": 5,
+    "edge_cases": 7,
+    "known_hard_patterns": [
+      "claim-level faithfulness decomposition",
+      "grounding-in-context vs world-truth",
+      "code-side score aggregation over LLM self-scoring",
+      "determinism + defensive JSON parsing",
+      "dependency-injected LLM for testability"
+    ]
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "swe",
+  "language": "javascript",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Razorpay / Stripe-style backend senior round — practical design: write the exact prompt that gets an LLM to produce a webhook receiver that is safe against forged, replayed, duplicated, and out-of-order deliveries",
+  "brief": "You are hardening the payments service's webhook ingestion. Third-party payment webhooks are hostile input: they can be forged, replayed, delivered more than once (at-least-once semantics), and arrive out of order. You need an LLM to generate a `POST /webhooks/payments` Express handler that is correct against ALL four hazards.\n\nThe generated handler must:\n\n**Signature verification (HMAC):** verify an `X-Signature: t=<ts>,v1=<hmac>` header by computing HMAC-SHA256 over `` `${t}.${rawBody}` `` with `process.env.WEBHOOK_SECRET`, compared in constant time (`crypto.timingSafeEqual`). It must verify the RAW body bytes (before JSON parsing), which means the route needs `express.raw`.\n\n**Replay protection:** reject signatures whose timestamp is more than 300s from now.\n\n**Idempotency:** claim each event `id` atomically with Redis `SET NX EX 86400`; a duplicate returns 200 `{status:\"duplicate\"}` and is not reprocessed.\n\n**Ordered processing:** per `resourceId`, track the last `sequence`; an event whose `sequence` is `<=` the stored value is ACKed as stale (200) without being applied, so an older delivery can never overwrite newer state.\n\n**Response contract:** 2xx for anything durably accepted (processed/duplicate/stale) so retries stop; non-2xx only for signature/timestamp failures.\n\n**Your task:** Write the prompt you would send to an LLM coding assistant to generate this handler. You are NOT writing the handler — you are writing the instruction, precise enough that the generated code is safe to ship with minor review. The business effect can be stubbed as `applyPaymentEvent(event)`.",
+  "acceptance_criteria": [
+    "Prompt specifies HMAC-SHA256 over `${t}.${rawBody}` with the secret from env, constant-time comparison via crypto.timingSafeEqual, and verification against the RAW body (express.raw) before JSON parsing",
+    "Prompt specifies replay protection: reject timestamps more than a stated tolerance (e.g. 300s) from the server clock",
+    "Prompt specifies idempotency via an atomic Redis SET NX EX on the event id, with a 200 duplicate response that skips reprocessing",
+    "Prompt specifies per-resource ordering using a stored last-sequence, ACKing stale (<= stored) events without applying them",
+    "Prompt specifies the 2xx-vs-non-2xx contract so the provider retries only the cases that should be retried"
+  ],
+  "reference_solution": {
+    "files": [
+      {
+        "path": "gold_prompt.txt",
+        "content": "Using Node.js + Express (and ioredis for Redis), generate a SINGLE Express route handler for:\n\n    POST /webhooks/payments\n\nthat securely ingests payment webhooks from a third-party provider. It must satisfy ALL of the following.\n\n=== 1. SIGNATURE VERIFICATION (HMAC) ===\n- The provider signs each request. Read the signature from the `X-Signature` header (format: `t=<unix_ts>,v1=<hex_hmac>`) and the raw request body.\n- Compute HMAC-SHA256 over the string `\\`${t}.${rawBody}\\`` using the secret in `process.env.WEBHOOK_SECRET`.\n- Compare using `crypto.timingSafeEqual` (constant time) — NOT `===`. On mismatch respond 401.\n- IMPORTANT: verify against the RAW request body bytes, before any JSON parsing/re-serialisation, so whitespace/key-order changes do not break the signature. Use `express.raw({ type: 'application/json' })` for this route.\n\n=== 2. REPLAY PROTECTION ===\n- Reject requests whose signature timestamp `t` is more than 300 seconds (5 min) from the server clock (either direction) with 400. This bounds replay windows even if a signature leaks.\n\n=== 3. IDEMPOTENCY ===\n- Every event has an `id` (string) in the parsed body. Use Redis `SET key value NX EX 86400` on `webhook:seen:<id>` to atomically claim the event.\n- If the key already existed (SET NX returns null), this is a duplicate delivery: respond 200 with `{ \"status\": \"duplicate\" }` and do NOT process it again. Providers retry aggressively; at-least-once delivery is normal.\n\n=== 4. ORDERED PROCESSING PER RESOURCE ===\n- Events carry `resourceId` and a monotonically increasing `sequence` integer. Out-of-order deliveries happen.\n- Track the last processed sequence per resource in Redis hash `webhook:seq` field `<resourceId>`. If the incoming `sequence` is <= the stored one, ACK it (200 `{ \"status\": \"stale\" }`) without applying it — never let an older event overwrite newer state.\n- Only when `sequence` is greater do you apply the event and update the stored sequence.\n\n=== 5. RESPONSE + ERROR CONTRACT ===\n- Success (new event applied): 200 `{ \"status\": \"processed\", \"id\": \"<id>\" }`.\n- All handler logic wrapped in try/catch; on unexpected error respond 500 `{ \"status\": \"error\" }` and log — never leak stack traces.\n- Return 2xx for anything you have durably accepted (processed/duplicate/stale) so the provider stops retrying; reserve non-2xx for signature/timestamp/validation failures you WANT retried or dropped.\n\n=== SCOPE ===\n- Stub the actual business effect with a function `applyPaymentEvent(event)` I will implement later.\n- Return only the handler + its imports and the `express.raw` wiring for this route. No app.listen."
+      }
+    ]
+  },
+  "visible_tests": [],
+  "hidden_tests": [],
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt asks to \"verify the HMAC signature\" but does not say to verify against the RAW body before parsing — the LLM verifies HMAC over `JSON.stringify(req.body)`, which re-serialises with different whitespace/key order than the provider signed, so every real webhook fails signature and legitimate events are rejected.",
+      "why_compass_might_suggest_it": "Express's default `express.json()` gives you `req.body` already parsed, and re-stringifying it is the obvious way to \"get the body\". The subtlety that HMAC must run over the exact bytes the sender signed is easy to miss.",
+      "detection_signals": [
+        "Prompt does not mention express.raw, rawBody, or \"before JSON parsing\"",
+        "Generated handler computes HMAC over JSON.stringify(req.body)"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt specifies idempotency as \"check if the id exists in Redis, and if not, store it\" as two separate operations rather than an atomic SET NX — under concurrent duplicate deliveries both requests pass the check before either writes, and the event is processed twice.",
+      "why_compass_might_suggest_it": "The read-then-write mental model is the natural way to express \"have I seen this before?\"; the race only appears under concurrency, which is invisible when reasoning about a single request.",
+      "detection_signals": [
+        "Prompt says \"GET the key, if absent SET it\" instead of an atomic SET NX",
+        "Generated handler has a separate exists() check followed by a set()"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt omits the ordering requirement (or says only \"process the event\"), so the LLM applies every event in arrival order — an out-of-order or retried older delivery overwrites newer state, corrupting the resource.",
+      "why_compass_might_suggest_it": "Ordering is an at-least-once-delivery hazard that only bites in distributed systems; a learner focused on auth and dedup forgets that deliveries are not ordered.",
+      "detection_signals": [
+        "Prompt does not mention sequence, resourceId ordering, or \"stale\" events",
+        "Generated handler applies events without comparing to a stored last sequence"
+      ]
+    }
+  ],
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt pins the exact HMAC construction (SHA256 over `${t}.${rawBody}`, env secret, timingSafeEqual) AND that it must run over the raw body via express.raw before parsing",
+      "weight": 0.3
+    },
+    {
+      "dimension": "correctness",
+      "check": "Prompt requires atomic idempotency (SET NX EX) and per-resource ordering (stored last sequence, stale events ACKed without applying) — the two distributed-systems hazards",
+      "weight": 0.3
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt defines the full response contract: 2xx for processed/duplicate/stale, non-2xx only for signature/timestamp/validation, with a replay-window tolerance",
+      "weight": 0.2
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt scopes the output (stub applyPaymentEvent, no app.listen) so the model returns a focused, reviewable handler",
+      "weight": 0.2
+    }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Names the raw-body requirement explicitly: \"compute HMAC over the raw bytes via express.raw, not JSON.stringify(req.body)\"",
+      "Requires atomic dedup: \"SET key NX EX 86400; if it returns null it is a duplicate\" — not a separate exists-check",
+      "Specifies ordering: \"track last sequence per resourceId; ACK events with sequence <= stored as stale without applying\"",
+      "Defines the 2xx/non-2xx retry contract so the provider stops retrying durably-accepted events"
+    ],
+    "common_verification_traps": [
+      "Testing only a valid signed request and never a re-serialised body — the JSON.stringify HMAC bug passes until a real provider payload arrives",
+      "Sending duplicates sequentially (which a naive exists-check survives) instead of concurrently, hiding the non-atomic dedup race",
+      "Never sending an out-of-order delivery, so the missing ordering guard is never exercised"
+    ],
+    "decomposition_reference": []
+  },
+  "difficulty_signals": {
+    "token_count": 220,
+    "branching_complexity": 5,
+    "edge_cases": 7,
+    "known_hard_patterns": [
+      "raw-body HMAC verification",
+      "atomic idempotency (SET NX)",
+      "per-resource ordering under at-least-once delivery",
+      "replay-window bounding"
+    ]
+  }
+}

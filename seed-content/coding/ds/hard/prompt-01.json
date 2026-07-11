@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "prompt",
+  "role_track": "ds",
+  "language": "python",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Sprinklr / Meesho data-science senior round — take-home design: write the prompt that gets an LLM to produce a churn training pipeline with zero temporal leakage, the single most common way DS take-homes fail review",
+  "brief": "You are building a monthly customer-churn model. The hard part is not the estimator — it is avoiding leakage, which is subtle and silently inflates offline metrics that then collapse in production. You need an LLM to generate `train_churn.py` that is correct on the TIME dimension.\n\nThe data is one row per (customer_id, snapshot_month) with engineered features and a `churned_next_month` target. The generated script must:\n\n**Time-based split:** train on the earliest 70% of months, test on the latest 30% — a temporal cut on a month boundary, never a random `train_test_split`, with an assertion that all train months precede all test months.\n\n**Fit-on-train-only preprocessing:** any transformer that learns statistics (scaler, imputer, encoder, PCA) is fit on the training fold ONLY and applied to test — enforced structurally with an sklearn `Pipeline`, not fit on the full dataset.\n\n**No target leakage in features:** an explicit allow-list of feature columns (never \"all columns except the target\"), excluding anything only knowable after the target month.\n\n**Time-respecting validation:** `TimeSeriesSplit`, not `KFold`, for any CV/search.\n\n**Honest evaluation:** ROC-AUC and PR-AUC on the temporal test set, PR-AUC primary because churn is imbalanced, plus a printed leakage self-check.\n\n**Your task:** Write the prompt you would send to an LLM to generate this pipeline. You are NOT writing the pipeline — you are writing the instruction, precise enough that the result would survive a senior DS review for leakage.",
+  "acceptance_criteria": [
+    "Prompt requires a temporal (time-ordered) train/test split on a month boundary and forbids random train_test_split, with an assertion that train months precede test months",
+    "Prompt requires preprocessing (scaler/imputer/encoder) to be fit on the training fold ONLY, enforced via an sklearn Pipeline rather than fit on the full dataset",
+    "Prompt requires an explicit feature allow-list and calls out excluding columns only knowable after the target month (target leakage)",
+    "Prompt requires TimeSeriesSplit (not KFold) for any cross-validation or hyperparameter search",
+    "Prompt requires PR-AUC as the primary metric (churn is imbalanced) alongside ROC-AUC on a held-out temporal test set"
+  ],
+  "reference_solution": {
+    "files": [
+      {
+        "path": "gold_prompt.txt",
+        "content": "Using Python with pandas and scikit-learn, generate a single, runnable training script `train_churn.py` for a monthly customer-churn model. Correctness on the time dimension matters more than model accuracy — a leaky pipeline is worse than useless.\n\n=== DATA ===\n- Input: a DataFrame `df` with one row per (customer_id, snapshot_month) and columns: `customer_id`, `snapshot_month` (datetime, monthly), engineered features, and `churned_next_month` (0/1 target). Assume df is already loaded.\n\n=== 1. TIME-BASED SPLIT (NO SHUFFLE) ===\n- Split TEMPORALLY, never randomly: train on the earliest 70% of snapshot_month values, test on the latest 30%. A random train_test_split leaks the future into the past. Sort by snapshot_month and cut on a month boundary so no single month straddles the split.\n- Assert that max(train.snapshot_month) < min(test.snapshot_month) and print both boundaries.\n\n=== 2. FIT PREPROCESSING ON TRAIN ONLY ===\n- Any transformer that learns statistics (StandardScaler, imputers, target/category encoders, PCA) MUST be fit on the training fold ONLY and then applied to test. Do NOT fit on the full dataset. Build this as an sklearn `Pipeline` (or ColumnTransformer + Pipeline) so fit/transform boundaries are enforced structurally — fit(X_train) then transform(X_test).\n\n=== 3. NO TARGET LEAKAGE IN FEATURES ===\n- Explicitly exclude any column that is derived from, or only knowable after, the target month (e.g. `cancelled_date`, `refund_after_churn`, next-month aggregates). List the feature columns by an allow-list, never \"all columns except the target\", so a leaky column cannot sneak in silently.\n\n=== 4. VALIDATION THAT RESPECTS TIME ===\n- For any cross-validation or hyperparameter search, use `TimeSeriesSplit` (expanding window), NOT KFold. Each validation fold must be strictly later than its training fold.\n\n=== 5. HONEST EVALUATION ===\n- Report ROC-AUC and PR-AUC (average_precision) on the held-out temporal test set. Because churn is imbalanced, also report the positive rate and treat PR-AUC as the primary metric.\n- Print a one-line leakage self-check summarising: split boundaries, that the scaler was fit on train only, and the feature allow-list used.\n\n=== OUTPUT ===\nReturn the full `train_churn.py`. Use a fixed random_state where randomness remains (e.g. the estimator). Keep it a single readable script with functions: `temporal_split(df)`, `build_pipeline(feature_cols)`, `evaluate(pipe, X_test, y_test)`, and `main(df)`."
+      }
+    ]
+  },
+  "visible_tests": [],
+  "hidden_tests": [],
+  "seeded_mistakes": [
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt says \"split the data into train and test\" without specifying a TIME-based split, so the LLM uses train_test_split(shuffle=True) — future rows leak into the training fold and offline AUC is wildly optimistic versus production.",
+      "why_compass_might_suggest_it": "train_test_split is the canonical sklearn idiom the model has seen thousands of times; without an explicit temporal constraint it defaults to random shuffling.",
+      "detection_signals": [
+        "Prompt does not contain \"time\", \"temporal\", \"snapshot_month\", or \"TimeSeriesSplit\"",
+        "Generated script calls train_test_split without shuffle=False and without a date cut"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt asks to \"scale the features\" but does not specify fit-on-train-only, so the LLM calls scaler.fit_transform(X) on the FULL dataset before splitting — the test fold's statistics leak into training via the shared scaler.",
+      "why_compass_might_suggest_it": "Scaling the whole dataset up front is the pattern in most tutorial notebooks; the fit/transform boundary is a discipline that must be requested explicitly or wrapped in a Pipeline.",
+      "detection_signals": [
+        "Prompt does not mention \"fit on train only\" or \"Pipeline\"",
+        "Generated script fits the scaler before the split, or on the concatenated X"
+      ]
+    },
+    {
+      "location": "common_pitfalls",
+      "bug_description": "Prompt defines features as \"all columns except the target\" rather than an allow-list, so a post-outcome column (e.g. cancelled_date, refund_after_churn) is silently included and the model learns to \"predict\" churn from a consequence of churn.",
+      "why_compass_might_suggest_it": "\"Everything except y\" is the least-effort feature selection and reads as reasonable; the model has no way to know which columns are post-target without being told to allow-list.",
+      "detection_signals": [
+        "Prompt does not require an explicit feature allow-list",
+        "Prompt has no instruction to exclude columns only knowable after the target month"
+      ]
+    }
+  ],
+  "rubric_anchors": [
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Prompt mandates a temporal split (earliest 70% train / latest 30% test on a month boundary) and forbids random splitting, with an assertion that train months precede test months",
+      "weight": 0.3
+    },
+    {
+      "dimension": "correctness",
+      "check": "Prompt requires fit-on-train-only preprocessing via an sklearn Pipeline AND an explicit feature allow-list that excludes post-target columns — the two leakage vectors",
+      "weight": 0.3
+    },
+    {
+      "dimension": "verification_discipline",
+      "check": "Prompt requires TimeSeriesSplit for CV and a printed leakage self-check (split boundaries, scaler-fit scope, allow-list) so leakage is auditable",
+      "weight": 0.2
+    },
+    {
+      "dimension": "reflection_quality",
+      "check": "Prompt requires PR-AUC as the primary metric given class imbalance, reported on a held-out temporal test set alongside ROC-AUC",
+      "weight": 0.2
+    }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "Says \"split temporally on snapshot_month, earliest 70% train / latest 30% test — never train_test_split with shuffle\" and asks for an assertion that all train months precede all test months",
+      "Requires \"fit every learned transformer on the training fold only, enforced with an sklearn Pipeline\" instead of scaling the full dataset",
+      "Demands an explicit feature allow-list and names example post-target columns to exclude",
+      "Specifies TimeSeriesSplit for CV and PR-AUC as the primary imbalanced-class metric"
+    ],
+    "common_verification_traps": [
+      "Trusting a high offline ROC-AUC without checking HOW the split was made — a leaky split produces beautiful, meaningless numbers",
+      "Checking that a scaler is used but not WHERE it was fit — fit_transform on the full X leaks silently",
+      "Reviewing the model code but not the feature list, so a post-outcome column passes unnoticed"
+    ],
+    "decomposition_reference": []
+  },
+  "difficulty_signals": {
+    "token_count": 230,
+    "branching_complexity": 5,
+    "edge_cases": 7,
+    "known_hard_patterns": [
+      "temporal train/test split",
+      "fit-on-train-only via Pipeline",
+      "target-leakage allow-list",
+      "TimeSeriesSplit vs KFold",
+      "PR-AUC for imbalance"
+    ]
+  }
+}
