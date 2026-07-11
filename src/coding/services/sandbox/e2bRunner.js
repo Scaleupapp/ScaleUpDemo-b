@@ -35,9 +35,17 @@ function withTimeout(promise, ms, label) {
 }
 
 async function runInTempDir({ files, command, timeout_ms = DEFAULT_TIMEOUT_MS, language = 'javascript' }) {
+  // Fail LOUD on missing credentials: swallowing this into exit_code:1 would
+  // silently grade every refactor drill's correctness as 0 (review finding I2).
+  // A thrown error fails the grading job → retry → honest 'failed' status + alert.
+  if (!process.env.E2B_API_KEY) {
+    throw new Error('e2bRunner: E2B_API_KEY is not set — refusing to grade against a dead sandbox');
+  }
   const adapter = getSandboxAdapter();
   let sandboxId = null;
   try {
+    // Provision/infra failures THROW (fail-loud) — they are never a verdict on
+    // the student's code.
     const provisioned = await withTimeout(
       adapter.provision({
         image: language,
@@ -50,25 +58,26 @@ async function runInTempDir({ files, command, timeout_ms = DEFAULT_TIMEOUT_MS, l
     );
     sandboxId = provisioned.sandboxId;
 
-    const r = await withTimeout(
-      adapter.runCommand(sandboxId, command, { timeoutMs: timeout_ms }),
-      timeout_ms + 30_000,
-      'sandbox command'
-    );
-    return {
-      exit_code: typeof r.exitCode === 'number' ? r.exitCode : 1,
-      stdout: r.stdout || '',
-      stderr: r.stderr || '',
-      timed_out: false,
-    };
-  } catch (err) {
-    const timedOut = /exceeded \d+ms/.test(err.message || '');
-    return {
-      exit_code: 1,
-      stdout: '',
-      stderr: `sandbox error: ${err.message}`,
-      timed_out: timedOut,
-    };
+    try {
+      const r = await withTimeout(
+        adapter.runCommand(sandboxId, command, { timeoutMs: timeout_ms }),
+        timeout_ms + 30_000,
+        'sandbox command'
+      );
+      return {
+        exit_code: typeof r.exitCode === 'number' ? r.exitCode : 1,
+        stdout: r.stdout || '',
+        stderr: r.stderr || '',
+        timed_out: false,
+      };
+    } catch (err) {
+      // A command-side timeout is a legitimate grading signal (student code
+      // hung) — same contract localSandbox had. Anything else is infra → throw.
+      if (/sandbox command exceeded \d+ms/.test(err.message || '')) {
+        return { exit_code: 1, stdout: '', stderr: `sandbox error: ${err.message}`, timed_out: true };
+      }
+      throw err;
+    }
   } finally {
     if (sandboxId) {
       await withTimeout(adapter.destroy(sandboxId), 30_000, 'sandbox destroy').catch(() => {});

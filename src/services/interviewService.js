@@ -201,6 +201,18 @@ class InterviewService {
       console.warn('[interviewService] user-context lookup failed:', err.message);
     }
 
+    // Institution assessments supply a QA-vetted question plan — the live
+    // interviewer must ASK those questions (not improvise around them), so the
+    // grader's expected-answer anchors line up with what was actually asked.
+    // Absent (all D2C interviews) this block is empty ⇒ prompt byte-identical.
+    const plannedQuestionBlock = (Array.isArray(expectedAnswers) && expectedAnswers.length > 0)
+      ? `\n\nVETTED QUESTION PLAN (institution assessment — ask exactly these primary questions, in order):\n`
+        + expectedAnswers.map((q, i) => `${i + 1}. ${(q && q.question) ? String(q.question).trim() : String(q)}`).join('\n')
+        + `\n- Ask each planned question above in order, one at a time, in your natural conversational phrasing.
+- Brief follow-ups to probe an answer are allowed; always return to the next planned question.
+- Do NOT invent replacement primary questions while planned questions remain — the plan overrides the "generate unique questions" rule above.`
+      : '';
+
     // Build Gemini system instruction
     const systemInstruction = `You are a professional ${typeLabel} interviewer conducting a mock interview.
 Role being interviewed for: ${targetRole || 'General'}
@@ -226,7 +238,7 @@ Previously asked questions to AVOID (from past sessions):
 ${prevQuestionsStr}
 
 INTERVIEW TYPE GUIDELINES:
-${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBlock}${learnerContextBlock}${context ? `\n\nGround your questions in this syllabus/context:\n${context}` : ''}`;
+${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBlock}${learnerContextBlock}${context ? `\n\nGround your questions in this syllabus/context:\n${context}` : ''}${plannedQuestionBlock}`;
 
     // Create session
     const session = await InterviewSession.create({

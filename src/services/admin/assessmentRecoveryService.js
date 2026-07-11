@@ -121,10 +121,21 @@ async function regradeSession(sessionId, deps = {}) {
         { $set: { status: 'submitted' }, $unset: { failure_reason: '' } }
       );
     }
+    // Idempotent jobId: a double-clicked regrade must not enqueue two grading
+    // jobs (double LLM spend + racing result writes) — review finding I3.
+    // Clear any finished job occupying the id first (same pattern as capstone).
+    const drillJobId = `regrade:drill:${engineSessionId}`;
+    try {
+      const existing = await workers.drillGraderQueue.getJob(drillJobId);
+      if (existing) {
+        const state = await existing.getState();
+        if (['completed', 'failed'].includes(state)) await existing.remove();
+      }
+    } catch (_) { /* best-effort — add() below still carries the jobId guard */ }
     await workers.drillGraderQueue.add('grade', {
       drillAttemptId: String(engineSessionId),
       drill_subtype: attempt.drill_subtype,
-    });
+    }, { jobId: drillJobId });
     return { engine: 'drill', action: 'requeued' };
   }
 
@@ -140,9 +151,18 @@ async function regradeSession(sessionId, deps = {}) {
     } else if (!['completed', 'evaluated'].includes(iv.status)) {
       throw new Error('UNSUPPORTED_ENGINE_STATE');
     }
+    const ivJobId = `regrade:interview:${engineSessionId}`;
+    try {
+      const existing = await interviewEvaluationQueue.getJob(ivJobId);
+      if (existing) {
+        const state = await existing.getState();
+        if (['completed', 'failed'].includes(state)) await existing.remove();
+      }
+    } catch (_) { /* best-effort */ }
     await interviewEvaluationQueue.add('evaluate', { sessionId: String(engineSessionId) }, {
       attempts: 3,
       backoff: { type: 'exponential', delay: 5000 },
+      jobId: ivJobId,
     });
     return { engine: 'interview', action: 'requeued' };
   }

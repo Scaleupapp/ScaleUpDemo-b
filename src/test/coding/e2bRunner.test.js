@@ -11,6 +11,7 @@
 
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'stub';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'stub';
+process.env.E2B_API_KEY = process.env.E2B_API_KEY || 'stub-e2b-key';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -67,11 +68,11 @@ test('e2bRunner: failing command maps exitCode → exit_code', async () => {
   commandResult = { exitCode: 0, stdout: 'ok', stderr: '', durationMs: 1 };
 });
 
-test('e2bRunner: provision failure fails closed (exit 1, never throws)', async () => {
+test('e2bRunner: provision/infra failure THROWS (fail-loud) — never a silent exit-1 grade', async () => {
+  // Review finding I2: an infra failure mapped to exit_code:1 silently graded
+  // refactor drills as 0. Infra errors must fail the grading job instead.
   provisionError = new Error('e2b down');
-  const r = await runInTempDir({ files: [], command: 'x' });
-  assert.equal(r.exit_code, 1);
-  assert.match(r.stderr, /e2b down/);
+  await assert.rejects(() => runInTempDir({ files: [], command: 'x' }), /e2b down/);
   provisionError = null;
 });
 
@@ -99,3 +100,18 @@ test('llmRouter: drill graders pin the haiku ALIAS (no dated snapshot)', () => {
     assert.ok(!/\d{8}/.test(table[task].model), 'no dated pin');
   }
 });
+
+test('runInTempDir fails LOUD (throws) when E2B_API_KEY is missing — never a silent 0 grade', async () => {
+  const saved = process.env.E2B_API_KEY;
+  delete process.env.E2B_API_KEY;
+  try {
+    const { runInTempDir } = require('../../coding/services/sandbox/e2bRunner');
+    await assert.rejects(
+      () => runInTempDir({ files: [], command: 'echo hi' }),
+      /E2B_API_KEY is not set/
+    );
+  } finally {
+    process.env.E2B_API_KEY = saved;
+  }
+});
+
