@@ -32,6 +32,20 @@ const AssessmentSessionSchema = new mongoose.Schema({
     gradeStatus: String,
     raw: mongoose.Schema.Types.Mixed, // small summary copied from the engine result
   },
+  // Client-reported take-flow integrity signals (Wave 3 block 4). Undefined until
+  // the app POSTs them; presence marks the session as PROCTORED (a real signal)
+  // for the integrity rollup. `flagged` is derived conservatively at ingestion:
+  // any paste OR more than 3 app-backgroundings ⇒ 'minor_flags'.
+  integritySignals: {
+    type: new mongoose.Schema({
+      appBackgroundedCount: { type: Number, default: 0 },
+      focusLossSeconds: { type: Number, default: 0 },
+      pasteCount: { type: Number, default: 0 },
+      flagged: { type: Boolean, default: false },
+      updatedAt: { type: Date },
+    }, { _id: false }),
+    default: undefined,
+  },
 }, { timestamps: true });
 
 // One attempt per student per assessment — enforces single attempt.

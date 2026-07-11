@@ -11,6 +11,10 @@
 // correct fix with no new read-path cost. (The extra work is one find + one
 // upsert per grade; the alternative would re-scan on every dashboard load.)
 
+const {
+  summarizeIntegrity, scoreMethodForSessions,
+} = require('./assessmentIntegrityService');
+
 // byCompetency reads each session's OWN engine type, so a cohort-wide rollup that
 // mixes engines aggregates each session under its correct shape.
 function computeByCompetency(gradedSessions) {
@@ -66,16 +70,21 @@ function computeByCompetency(gradedSessions) {
 // Build the rollup document for one scope (a single assessment, or the whole
 // cohort when assessmentId is null). Pure — takes the already-fetched sessions.
 function buildRollupDoc({ institutionId, cohortId, assessmentId, sessions, assigned, now }) {
+  const started = sessions.filter((s) => s.status !== 'scheduled');
   const graded = sessions.filter((s) => s.status === 'graded');
   const scores = graded.map((s) => s.result && s.result.score).filter((n) => typeof n === 'number');
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : undefined;
-  const integrityFlags = graded.filter((s) => s.result && ['low', 'suspicious', 'minor_flags'].includes(s.result.integrity)).length;
+
+  // Integrity truth (Wave 3 block 4): checked/flagged/unproctored over the
+  // STARTED sessions. integrityFlags is retained for backward-compat but now
+  // derives ONLY from real flags (== integrity.flaggedCount) — no fabrication.
+  const integrity = summarizeIntegrity(started);
 
   // Honest lifecycle buckets (Wave 3 block 2). submitted = reached submission
   // (submitted OR graded) — backed by a real submittedAt. expired is distinct.
   const counts = {
     assigned,
-    started: sessions.filter((s) => s.status !== 'scheduled').length,
+    started: started.length,
     submitted: sessions.filter((s) => ['submitted', 'graded'].includes(s.status)).length,
     graded: graded.length,
     expired: sessions.filter((s) => s.status === 'expired').length,
@@ -86,7 +95,12 @@ function buildRollupDoc({ institutionId, cohortId, assessmentId, sessions, assig
   return {
     institutionId, cohortId, assessmentId,
     computedAt: now,
-    counts, avgScore, gradedCount: scores.length, integrityFlags, byCompetency,
+    counts, avgScore, gradedCount: scores.length,
+    // Per-engine score framing so UIs never cross-average objective % with
+    // AI-judged scores. 'mixed' on the cohort-wide (multi-engine) rollup.
+    scoreMethod: scoreMethodForSessions(sessions),
+    integrity, integrityFlags: integrity.flaggedCount,
+    byCompetency,
   };
 }
 

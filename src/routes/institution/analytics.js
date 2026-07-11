@@ -2,13 +2,23 @@
 const express = require('express');
 const institutionAuth = require('../../middleware/institutionAuth');
 const { institutionScope } = require('../../middleware/institutionScope');
+const { scoreMethodForEngine } = require('../../services/institution/assessment/assessmentIntegrityService');
 
 const router = express.Router();
 router._deps = null;
 
+// Per-engine at-risk score thresholds (Wave 3 block 4). Keyed by scoreMethod so
+// objective (mcq) and ai_judged (interview/capstone/drill) are compared within
+// their own bucket — never cross-averaged. Env-overridable.
+const AT_RISK_THRESHOLDS = {
+  objective: Number(process.env.AT_RISK_THRESHOLD_OBJECTIVE) || 40,
+  ai_judged: Number(process.env.AT_RISK_THRESHOLD_AI_JUDGED) || 40,
+};
+
 // Dependency injection helpers
 function getCohortRollupModel() { return (router._deps && router._deps.CohortRollup) || require('../../models/CohortRollup'); }
 function getAssessmentSessionModel() { return (router._deps && router._deps.AssessmentSession) || require('../../models/AssessmentSession'); }
+function getAssessmentModel() { return (router._deps && router._deps.Assessment) || require('../../models/Assessment'); }
 function getEnrollmentModel() { return (router._deps && router._deps.InstitutionEnrollment) || require('../../models/InstitutionEnrollment'); }
 function getUserModel() { return (router._deps && router._deps.User) || require('../../models/User'); }
 
@@ -17,10 +27,14 @@ function getUserModel() { return (router._deps && router._deps.User) || require(
 //   competencies: [{name, avgScore, n}] — from latest cohort-wide CohortRollup, sorted
 //                 weakest-first (ascending avgScore).
 //   atRisk: [{studentName, rollNumber?, reason}] — deterministic rule, capped at 25.
-//     Rule 1 (low_score):  latest graded AssessmentSession for this cohort has
-//                          result.score < 40.
-//     Rule 2 (not_active): enrollment status is 'registered' (not yet 'active').
-//     A student only appears once (low_score takes precedence if both apply).
+//     Rule 1 (low_score):      latest graded session scores below the PER-ENGINE
+//                              threshold (objective vs ai_judged bucket, never
+//                              cross-averaged).
+//     Rule 2 (did_not_finish): the student has a stranded attempt — an expired
+//                              session, or an in_progress session past its
+//                              deadlineAt or the assessment's closesAt.
+//     Rule 3 (not_active):     enrollment status is 'registered' (not yet 'active').
+//     A student appears once; precedence low_score > did_not_finish > not_active.
 router.get('/cohorts/:cohortId/analytics', institutionAuth, async (req, res) => {
   try {
     const scope = institutionScope(req);
@@ -48,20 +62,39 @@ router.get('/cohorts/:cohortId/analytics', institutionAuth, async (req, res) => 
     const competencies = [...rawByComp].sort((a, b) => (a.avgScore ?? 0) - (b.avgScore ?? 0));
 
     // ── 2. At-risk students ───────────────────────────────────────────────────
-    // Fetch all graded AssessmentSessions for this cohort (scoped to institution)
-    const sessionsQuery = AssessmentSession.find({ ...scope, cohortId, status: 'graded' });
-    const gradedSessions = typeof sessionsQuery.lean === 'function'
+    // Fetch ALL sessions for this cohort (not just graded) so we can also catch
+    // students who never finished (expired / stranded in_progress).
+    const AssessmentModel = getAssessmentModel();
+    const sessionsQuery = AssessmentSession.find({ ...scope, cohortId });
+    const allSessions = typeof sessionsQuery.lean === 'function'
       ? await sessionsQuery.lean()
       : await sessionsQuery;
 
-    // Build a map: userId → latest graded session (by gradedAt)
-    const latestSessionByUser = {};
-    for (const s of gradedSessions) {
+    // closesAt per assessment — to detect an in_progress session past its window.
+    const assessmentsQuery = AssessmentModel.find({ ...scope, cohortId });
+    const assessmentDocs = typeof assessmentsQuery.lean === 'function'
+      ? await assessmentsQuery.lean()
+      : await assessmentsQuery;
+    const closesAtByAssessment = {};
+    for (const a of assessmentDocs) { closesAtByAssessment[String(a._id)] = a.closesAt || null; }
+
+    const now = new Date();
+
+    // Build maps: latest graded session (for low_score) + did-not-finish set.
+    const latestGradedByUser = {};
+    const didNotFinishUsers = new Set();
+    for (const s of allSessions) {
       const uid = String(s.userId);
-      const existing = latestSessionByUser[uid];
-      const sAt = s.gradedAt ? new Date(s.gradedAt) : new Date(0);
-      if (!existing || sAt > new Date(existing.gradedAt || 0)) {
-        latestSessionByUser[uid] = s;
+      if (s.status === 'graded') {
+        const existing = latestGradedByUser[uid];
+        const sAt = s.gradedAt ? new Date(s.gradedAt) : new Date(0);
+        if (!existing || sAt > new Date(existing.gradedAt || 0)) latestGradedByUser[uid] = s;
+      } else if (s.status === 'expired') {
+        didNotFinishUsers.add(uid);
+      } else if (s.status === 'in_progress') {
+        const past = (s.deadlineAt && now > new Date(s.deadlineAt))
+          || (closesAtByAssessment[String(s.assessmentId)] && now > new Date(closesAtByAssessment[String(s.assessmentId)]));
+        if (past) didNotFinishUsers.add(uid);
       }
     }
 
@@ -81,13 +114,18 @@ router.get('/cohorts/:cohortId/analytics', institutionAuth, async (req, res) => 
 
       let reason = null;
 
-      // Rule 1: latest graded session score < 40
-      const latestSession = latestSessionByUser[uid];
-      if (latestSession && typeof latestSession.result?.score === 'number' && latestSession.result.score < 40) {
-        reason = 'low_score';
+      // Rule 1: latest graded session below the PER-ENGINE threshold.
+      const latestSession = latestGradedByUser[uid];
+      if (latestSession && typeof latestSession.result?.score === 'number') {
+        const method = scoreMethodForEngine(latestSession.engine && latestSession.engine.type);
+        const threshold = AT_RISK_THRESHOLDS[method] != null ? AT_RISK_THRESHOLDS[method] : 40;
+        if (latestSession.result.score < threshold) reason = 'low_score';
       }
 
-      // Rule 2: enrollment not yet active
+      // Rule 2: stranded/abandoned attempt.
+      if (!reason && didNotFinishUsers.has(uid)) reason = 'did_not_finish';
+
+      // Rule 3: enrollment not yet active
       if (!reason && enrollment.status === 'registered') {
         reason = 'not_active';
       }

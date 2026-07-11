@@ -20,6 +20,7 @@ const realAuth = require('../../middleware/auth');
 const { getAdapter: realGetAdapter } = require('../../services/institution/assessment/engineAdapters');
 const reviewService = require('../../services/institution/assessment/assessmentReviewService');
 const { getConfiguredDurationSeconds } = require('../../services/institution/assessment/assessmentSessionService');
+const integrityService = require('../../services/institution/assessment/assessmentIntegrityService');
 
 const router = express.Router();
 router._deps = null;
@@ -208,6 +209,58 @@ router.post('/assessments/sessions/:sessionId/sync', (req, res, next) => getAuth
     if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Session not found.' });
     console.error('[studentAssessments:sync]', err.message);
     return res.status(500).json({ success: false, message: 'Could not sync session.' });
+  }
+});
+
+// POST /assessments/sessions/:sessionId/integrity — ingest take-flow integrity
+// counters from the student app (Wave 3 block 4).
+//
+// MOBILE CONTRACT (implementers read this):
+//   Method/path : POST /api/v2/me/assessments/sessions/:sessionId/integrity
+//   Auth        : D2C bearer; the caller MUST own the session (else 404).
+//   When        : only while the session is in_progress (else 409 NOT_IN_PROGRESS).
+//   Body (JSON) : { appBackgroundedCount?, focusLossSeconds?, pasteCount? }
+//                 - all optional, non-negative integers; the POST is a full
+//                   SNAPSHOT (latest cumulative counters), not a delta.
+//                 - each is clamped to [0, max] (max: 10000 / 86400 / 10000).
+//                 - a present-but-non-numeric value → 400 VALIDATION.
+//   Effect      : stored on session.integritySignals; marks the session PROCTORED
+//                 for the integrity rollup. Conservative flag: any paste OR >3
+//                 app-backgroundings ⇒ flagged 'minor_flags'.
+//   Response    : { success, data: { integritySignals: { appBackgroundedCount,
+//                   focusLossSeconds, pasteCount, flagged } } }
+//   Idempotent  : yes — re-POST overwrites with the newest snapshot.
+router.post('/assessments/sessions/:sessionId/integrity', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { sessionId } = req.params;
+    const AssessmentSession = getAssessmentSession();
+
+    const session = await AssessmentSession.findById(sessionId);
+    // Ownership check (404 hides existence from non-owners), same as sync/review.
+    if (!session || String(session.userId) !== String(userId)) {
+      return res.status(404).json({ success: false, message: 'Session not found.' });
+    }
+    if (session.status !== 'in_progress') {
+      return res.status(409).json({ success: false, code: 'NOT_IN_PROGRESS', message: 'Integrity signals can only be reported while the attempt is in progress.' });
+    }
+
+    const built = integrityService.buildIngestedSignals(req.body || {}, new Date());
+    if (!built.ok) {
+      return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Integrity counters must be non-negative numbers.' });
+    }
+
+    session.integritySignals = built.signals;
+    await session.save();
+
+    const { appBackgroundedCount, focusLossSeconds, pasteCount, flagged } = built.signals;
+    return res.status(200).json({
+      success: true,
+      data: { integritySignals: { appBackgroundedCount, focusLossSeconds, pasteCount, flagged } },
+    });
+  } catch (err) {
+    console.error('[studentAssessments:integrity]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not record integrity signals.' });
   }
 });
 

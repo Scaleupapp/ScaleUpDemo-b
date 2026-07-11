@@ -17,6 +17,16 @@ const CohortRollupSchema = new mongoose.Schema({
   // Wave 3 block 2: how many graded sessions avgScore is the mean of, so a UI
   // can label "avg of N graded" instead of implying the whole cohort.
   gradedCount: { type: Number, default: 0 },
+  // Wave 3 block 4: per-engine score framing ('objective' | 'ai_judged' |
+  // 'mixed' on the cohort-wide rollup) so UIs never cross-average.
+  scoreMethod: { type: String },
+  // Wave 3 block 4: honest integrity accounting. integrityFlags kept for
+  // backward-compat but now == integrity.flaggedCount (real flags only).
+  integrity: {
+    checkedCount: { type: Number, default: 0 },
+    flaggedCount: { type: Number, default: 0 },
+    unproctoredCount: { type: Number, default: 0 },
+  },
   integrityFlags: { type: Number, default: 0 },
   byCompetency: [{ name: String, avgScore: Number, n: Number }],
 }, { timestamps: true });

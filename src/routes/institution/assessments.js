@@ -4,6 +4,7 @@ const institutionAuth = require('../../middleware/institutionAuth');
 const { institutionScope, requireInstitutionRole } = require('../../middleware/institutionScope');
 const reviewService = require('../../services/institution/assessment/assessmentReviewService');
 const { getConfiguredDurationSeconds } = require('../../services/institution/assessment/assessmentSessionService');
+const integrityService = require('../../services/institution/assessment/assessmentIntegrityService');
 
 // Warn the TPO when an assessment can strand its cohort: no scheduled close AND
 // no per-attempt duration ⇒ attempts never auto-end and detailed review never
@@ -292,7 +293,17 @@ router.get('/assessments/:id/sessions', institutionAuth, async (req, res) => {
       return entry;
     });
 
-    return res.status(200).json({ success: true, data: { counts, sessions, reviewUnlockPolicy: reviewService.reviewUnlockPolicy(assessment) } });
+    // Integrity truth + per-engine score framing (Wave 3 block 4).
+    const integrity = integrityService.summarizeIntegrity(allSessions.filter((s) => s.status !== 'scheduled'));
+    return res.status(200).json({
+      success: true,
+      data: {
+        counts, sessions,
+        reviewUnlockPolicy: reviewService.reviewUnlockPolicy(assessment),
+        scoreMethod: integrityService.scoreMethodForEngine(assessment.type),
+        integrity,
+      },
+    });
   } catch (err) {
     console.error('[institution/assessments:sessions]', err.message);
     return res.status(500).json({ success: false, message: 'Could not load sessions.' });
