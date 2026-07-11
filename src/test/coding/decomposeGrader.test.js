@@ -241,7 +241,9 @@ test('decomposeGrader [B]: grade() returns overall_score === 42 for 2 vague step
   capturedUpdate = null;
 
   const result = await grade({ drillAttemptId: attemptId });
-  assert.strictEqual(result.overall_score, 42, `expected overall_score 42, got ${result.overall_score}`);
+  // Code-side recompute: dims 3,5,2,5 → mean 3.75 → 38 (LLM self-reported 42 — drift caught).
+  assert.strictEqual(result.overall_score, 38, `expected code-recomputed 38, got ${result.overall_score}`);
+  assert.strictEqual(result.llm_overall_score, 42, 'llm_overall_score retains the LLM number');
 });
 
 test('decomposeGrader [B]: saved grade.overall_score === 42', async () => {
@@ -277,7 +279,8 @@ test('decomposeGrader [B]: saved grade.overall_score === 42', async () => {
 
   await grade({ drillAttemptId: attemptId });
   assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
-  assert.strictEqual(capturedUpdate.grade.overall_score, 42);
+  assert.strictEqual(capturedUpdate.grade.overall_score, 38);
+  assert.strictEqual(capturedUpdate.grade.integrity_confidence, 'unverified');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -418,7 +421,8 @@ test('decomposeGrader: handles LLM response wrapped in ```json fences (regressio
   capturedUpdate = null;
 
   const result = await grade({ drillAttemptId: attemptId });
-  assert.strictEqual(result.overall_score, 72, 'fenced JSON: overall_score should be 72');
+  // dims 7,8,6,7 → mean 7 → 70 (LLM self-reported 72).
+  assert.strictEqual(result.overall_score, 70, 'fenced JSON: code-recomputed overall_score should be 70');
   assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
-  assert.strictEqual(capturedUpdate.grade.overall_score, 72, 'fenced JSON: saved overall_score should be 72');
+  assert.strictEqual(capturedUpdate.grade.overall_score, 70, 'fenced JSON: saved overall_score should be 70');
 });

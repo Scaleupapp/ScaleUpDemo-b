@@ -10,9 +10,12 @@
 
 const { ArtifactBundle, DrillAttempt } = require('../../models');
 const { llmCall }              = require('../llmRouter');
-const { flattenRubric }        = require('./rubric');
+const { flattenRubric, recomputeEqualWeighted } = require('./rubric');
 const { parseLLMJson }         = require('./parseLLMJson');
 const { applyPostGradeUpdates } = require('./postGradeHooks');
+
+// The four scored dimensions (prompt states 25% each), equal-weighted here.
+const DECOMPOSE_DIMENSIONS = ['granularity', 'ordering', 'verification_checkpoints', 'ai_handoff_appropriateness'];
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -71,18 +74,23 @@ async function grade({ drillAttemptId }) {
     taskId:   'drill_grade_decompose',
     system:   SYSTEM,
     messages: [{ role: 'user', content: userMsg }],
+    temperature: 0, // deterministic grading (spec §Answer-side deterministic core)
   });
 
   const parsed = parseLLMJson(res.content);
 
+  // Code-side recompute: overall = equal-weighted mean of the four dims × 10.
+  const overall_score = recomputeEqualWeighted(parsed.rubric, DECOMPOSE_DIMENSIONS);
+
   await DrillAttempt.findByIdAndUpdate(drillAttemptId, {
     status: 'graded',
     grade: {
-      overall_score:        parsed.overall_score,
+      overall_score,
       rubric_breakdown:     flattenRubric(parsed.rubric),
       what_to_try_next:     parsed.what_to_try_next,
       what_you_missed:      Array.isArray(parsed.what_you_missed) ? parsed.what_you_missed : [],
-      integrity_confidence: 'high',
+      // No proctoring/integrity signals exist for drills — 'high' was a lie.
+      integrity_confidence: 'unverified',
       graded_at:            new Date(),
       grader_model:         res._meta.model,
     },
@@ -94,10 +102,10 @@ async function grade({ drillAttemptId }) {
     userId:       attempt.user_id,
     roleTrack:    bundle.role_track,
     drillSubtype: bundle.drill_subtype,
-    score:        parsed.overall_score,
+    score:        overall_score,
   });
 
-  return parsed;
+  return { ...parsed, overall_score, llm_overall_score: parsed.overall_score };
 }
 
 module.exports = { grade };

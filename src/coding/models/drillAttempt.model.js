@@ -30,7 +30,7 @@ const DrillAttemptSchema = new mongoose.Schema({
       detail: String,
       reference: String,
     }],
-    integrity_confidence: { type: String, enum: ['high', 'medium', 'low'] },
+    integrity_confidence: { type: String, enum: ['high', 'medium', 'low', 'unverified'] },
     graded_at: Date,
     grader_model: String,
   },

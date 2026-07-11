@@ -79,7 +79,7 @@ function getModelForTask(taskId) {
  * @param {Array}   [opts.tools]     — extra tools to merge with the routing-table defaults
  * @returns {Promise<{content, usage, _meta: {taskId, provider, model, duration_ms}}>}
  */
-async function llmCall({ taskId, system, messages, prompt, tools: extraTools, max_tokens }) {
+async function llmCall({ taskId, system, messages, prompt, tools: extraTools, max_tokens, temperature }) {
   const { provider, model, tools: defaultTools = [], max_tokens: routedMaxTokens } = getModelForTask(taskId);
   const tools = [...defaultTools, ...(extraTools || [])];
   // Caller override wins, else the routing-table cap, else the client default.
@@ -89,7 +89,13 @@ async function llmCall({ taskId, system, messages, prompt, tools: extraTools, ma
   let result;
 
   if (provider === 'anthropic') {
-    result = await anthropic.call({ model, system, messages, tools, ...(maxTokens ? { max_tokens: maxTokens } : {}) });
+    result = await anthropic.call({
+      model, system, messages, tools,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      // Grading callers pass temperature: 0 for deterministic scores. Only
+      // forwarded when a number (including 0); undefined ⇒ provider default.
+      ...(typeof temperature === 'number' ? { temperature } : {}),
+    });
   } else if (provider === 'google') {
     result = await gemini.call({ model, system, prompt: prompt || messages, tools });
   } else {

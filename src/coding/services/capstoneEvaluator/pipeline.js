@@ -155,9 +155,29 @@ async function evaluate({ sessionId }) {
     hidden_total: harness.hidden.length,
     lint_passed: !!harness.lint?.passed,
   };
+
+  // ── Deterministic core (spec §Answer-side) ─────────────────────────────────
+  // (a) correctness is derived from the harness pass-ratio, NOT the LLM.
+  // (b) overall_score is recomputed in code from Σ dim×10×weight. The LLM's
+  //     self-reported overall_score is kept ONLY as drift telemetry.
+  const dimension_scores = { ...scored.dimension_scores };
+  const derivedCorrectness = scorer.deriveCorrectnessFromHarness(harness);
+  if (derivedCorrectness != null) dimension_scores.correctness = derivedCorrectness;
+  const codeOverall = scorer.computeOverallScore(dimension_scores, scorer.RUBRIC_WEIGHTS);
+  const llmOverall = Math.round(Number(scored.overall_score) || 0);
+  const scoreDrift = Math.abs(codeOverall - llmOverall);
+  if (scoreDrift > 10) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[capstoneEvaluator] score drift for session=${sessionId}: code=${codeOverall} llm=${llmOverall} (Δ${scoreDrift})`
+    );
+  }
+
   const result = {
-    overall_score: Math.round(scored.overall_score),
-    dimension_scores: scored.dimension_scores,
+    overall_score: codeOverall,
+    llm_overall_score: llmOverall,
+    score_drift: scoreDrift,
+    dimension_scores,
     dimension_feedback: scored.dimension_feedback || null,
     overall_rationale: typeof scored.overall_rationale === 'string' ? scored.overall_rationale : '',
     test_summary,

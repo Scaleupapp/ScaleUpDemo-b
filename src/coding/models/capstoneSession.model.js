@@ -82,6 +82,10 @@ const RubricWeightsSchema = new mongoose.Schema(
 const SessionResultSchema = new mongoose.Schema(
   {
     overall_score: Number,
+    // Code-recomputed overall (Σ dim×10×weight) is authoritative in `overall_score`.
+    // The LLM's self-reported overall is retained here purely as drift telemetry.
+    llm_overall_score: Number,
+    score_drift: Number,
     dimension_scores: DimensionScoresSchema,
     // Per-dimension why + how-to-improve (grading-transparency). Forward-only:
     // sessions graded before this field shipped will have it null — clients
