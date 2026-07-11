@@ -1,6 +1,8 @@
 require('dotenv').config();
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'stub';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'stub';
+// Disable the answer-side judge here — these tests exercise the grader dispatch.
+process.env.GRADE_JUDGE_SAMPLE_RATE = '0';
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');

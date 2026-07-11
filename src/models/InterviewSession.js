@@ -79,6 +79,14 @@ const interviewSessionSchema = new mongoose.Schema({
       flags: [String],
       recommendation: String,
     },
+    // Answer-side LLM-as-judge (spec §Answer-side #3): set when an independent
+    // cross-family judge still disagrees > 15 pts after one auto re-grade.
+    // Surfaced to admin/TPO ("under review") instead of a trusted number.
+    needsReview: { type: Boolean, default: false },
+    judgeOverall: { type: Number },
+    judgeDisagreement: { type: Number },
+    // 'insufficient' when the transcript is too thin to grade (min-transcript gate).
+    gradeStatus: { type: String, enum: ['graded', 'insufficient'] },
   },
 }, { timestamps: true });
 

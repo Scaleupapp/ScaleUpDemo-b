@@ -104,6 +104,12 @@ const SessionResultSchema = new mongoose.Schema(
     // Anchor drift detection (spec §8.3). If any anchor disagrees with the
     // evaluator by > 2 points, this flips true and the result is re-flagged.
     anchor_drift_detected: { type: Boolean, default: false },
+    // Answer-side LLM-as-judge (spec §Answer-side #3). needs_review is set when
+    // the independent judge still disagrees > 15 pts after one auto re-grade;
+    // surfaced to admin/TPO ("under review") instead of a trusted number.
+    needs_review: { type: Boolean, default: false },
+    judge_overall: Number,
+    judge_disagreement: Number,
     evaluator_model: String,
     graded_at: Date,
     // LLM's narrative explanation of why these scores. Cites specific files,

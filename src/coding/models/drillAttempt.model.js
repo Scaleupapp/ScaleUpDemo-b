@@ -31,6 +31,11 @@ const DrillAttemptSchema = new mongoose.Schema({
       reference: String,
     }],
     integrity_confidence: { type: String, enum: ['high', 'medium', 'low', 'unverified'] },
+    // Answer-side LLM-as-judge (spec §Answer-side #3): set when the independent
+    // judge still disagrees > 15 pts after one auto re-grade.
+    needs_review: { type: Boolean, default: false },
+    judge_overall: Number,
+    judge_disagreement: Number,
     graded_at: Date,
     grader_model: String,
   },

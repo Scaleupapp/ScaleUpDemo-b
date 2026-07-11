@@ -137,7 +137,7 @@ const capstone = {
     const CapstoneSession = deps.CapstoneSession || require('../../../coding/models/capstoneSession.model');
     const s = await CapstoneSession.findById(session.engine.sessionId);
     if (!s || s.status !== 'graded' || !s.result) return { done: false };
-    return { done: true, score: s.result.overall_score, integrity: s.result.integrity_confidence, raw: { dimension_scores: s.result.dimension_scores } };
+    return { done: true, score: s.result.overall_score, integrity: s.result.integrity_confidence, needsReview: !!s.result.needs_review, raw: { dimension_scores: s.result.dimension_scores } };
   },
   async getStartMeta(session, deps = {}) {
     const pairingService = deps.pairingService || require('../../../coding/services/pairingService');
@@ -222,6 +222,7 @@ const drill = {
       done: true,
       score: attempt.grade.overall_score,
       integrity: attempt.grade.integrity_confidence,
+      needsReview: !!attempt.grade.needs_review,
       raw: {
         rubric_breakdown: attempt.grade.rubric_breakdown,
         what_you_missed: attempt.grade.what_you_missed,

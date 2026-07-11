@@ -14,6 +14,7 @@ const { llmCall }              = require('../llmRouter');
 const { flattenRubric, recomputeEqualWeighted } = require('./rubric');
 const { parseLLMJson }         = require('./parseLLMJson');
 const { applyPostGradeUpdates } = require('./postGradeHooks');
+const { judgeDrillGrade }       = require('./judgeHook');
 
 // The four scored dimensions, equal-weighted for the code-side overall recompute.
 const PROMPT_DIMENSIONS = ['specificity', 'constraints', 'edge_cases', 'output_fidelity'];
@@ -87,15 +88,26 @@ async function grade({ drillAttemptId }) {
   // LLM's self-reported overall_score is NOT trusted for the stored number.
   const overall_score = recomputeEqualWeighted(parsed.rubric, PROMPT_DIMENSIONS);
 
+  // ── Answer-side judge (best-effort; skipped when GRADE_JUDGE_SAMPLE_RATE=0) ──
+  const regrade = async () => {
+    const r2 = await llmCall({ taskId: 'drill_grade_prompt', system: SYSTEM, messages: [{ role: 'user', content: userMsg }], temperature: 0 });
+    return { overall: recomputeEqualWeighted(parseLLMJson(r2.content).rubric, PROMPT_DIMENSIONS) };
+  };
+  const judged = await judgeDrillGrade({ overallScore: overall_score, rubric: parsed.rubric, submission: attempt.submission, regrade });
+  const finalScore = judged.overall_score;
+
   await DrillAttempt.findByIdAndUpdate(drillAttemptId, {
     status: 'graded',
     grade: {
-      overall_score,
+      overall_score:        finalScore,
       rubric_breakdown:     flattenRubric(parsed.rubric),
       what_to_try_next:     parsed.what_to_try_next,
       what_you_missed:      Array.isArray(parsed.what_you_missed) ? parsed.what_you_missed : [],
       // No proctoring/integrity signals exist for drills — 'high' was a lie.
       integrity_confidence: 'unverified',
+      needs_review:         judged.needs_review,
+      judge_overall:        judged.judge_overall,
+      judge_disagreement:   judged.judge_disagreement,
       graded_at:            new Date(),
       grader_model:         res._meta.model,
     },
@@ -107,11 +119,11 @@ async function grade({ drillAttemptId }) {
     userId:       attempt.user_id,
     roleTrack:    bundle.role_track,
     drillSubtype: bundle.drill_subtype,
-    score:        overall_score,
+    score:        finalScore,
   });
 
-  // Return the code-recomputed overall; retain the LLM's number as telemetry.
-  return { ...parsed, overall_score, llm_overall_score: parsed.overall_score };
+  // Return the (judge-reconciled) code-recomputed overall; retain the LLM number.
+  return { ...parsed, overall_score: finalScore, llm_overall_score: parsed.overall_score, needs_review: judged.needs_review };
 }
 
 module.exports = { grade };
