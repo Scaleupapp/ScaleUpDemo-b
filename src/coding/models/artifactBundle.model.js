@@ -69,6 +69,9 @@ const ArtifactBundleSchema = new mongoose.Schema({
   status: { type: String, enum: ['draft', 'validated', 'active', 'retired'], default: 'draft' },
   generated_by: {
     generator_model: String,
+    // Set when hidden tests came from the independent cross-family model
+    // (hidden_test_generator route); null/absent = author's own tests.
+    hidden_test_model: String,
     validator_model: String,
     validated_at: Date,
     human_reviewed: { type: Boolean, default: false },

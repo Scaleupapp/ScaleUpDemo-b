@@ -72,6 +72,76 @@ function extractJson(content) {
 // The six meta-skill dimensions a rubric_anchor may target.
 const RUBRIC_DIMS = ['correctness', 'code_quality', 'ai_pair_effectiveness', 'verification_discipline', 'decomposition', 'reflection_quality'];
 
+// ── Independent hidden-test generation (Wave 2 block 5) ──────────────────────
+// Hidden tests authored by the SAME model that wrote the reference solution
+// share its blind spots — a bug the author didn't think of won't be tested
+// either. Route hidden tests through the previously-dead `hidden_test_generator`
+// task (a DIFFERENT model family per the llmRouter table). Fail-open: on any
+// error the draft keeps its own hidden tests — the validator still executes
+// everything in the sandbox, so the hard gates are unaffected.
+
+/** Normalise Gemini ({content:{parts}}) or Anthropic ({content:[...]}) to text. */
+function contentToText(res) {
+  const c = res && res.content;
+  if (c && Array.isArray(c.parts)) return c.parts.map((p) => p.text || '').join('');
+  if (Array.isArray(c)) return (c.find((b) => b && (b.type === 'text' || b.text)) || {}).text || '';
+  if (typeof c === 'string') return c;
+  return '';
+}
+
+const HIDDEN_TEST_SYSTEM =
+  'You write ADVERSARIAL hidden test specs for a coding exercise you did NOT author. ' +
+  'You see the brief, acceptance criteria, starter repo, visible tests, and the reference solution. ' +
+  'Produce hidden tests that a plausible-but-wrong solution would fail even while passing the visible tests: ' +
+  'edge cases, boundary values, error paths, subtle correctness traps. Each test must be runnable in a clean ' +
+  'sandbox with the project\'s own toolchain (same test runner the visible tests use), reference only files ' +
+  'that exist in the starter repo or that the test itself provides inline via the command, and must PASS ' +
+  'against the reference solution. Return ONLY strict JSON: ' +
+  '{"hidden_tests":[{"name":"...","command":"...","expected_exit_code":0}]}';
+
+async function generateIndependentHiddenTests(draft, { minCount = 3 } = {}) {
+  const prompt = [
+    HIDDEN_TEST_SYSTEM,
+    '',
+    'EXERCISE:',
+    JSON.stringify({
+      language: draft.language,
+      difficulty: draft.difficulty,
+      brief: draft.brief,
+      acceptance_criteria: draft.acceptance_criteria,
+      starter_repo: draft.starter_repo,
+      visible_tests: draft.visible_tests,
+      reference_solution: draft.reference_solution,
+      author_hidden_tests_count: (draft.hidden_tests || []).length,
+    }),
+    '',
+    `Produce at least ${Math.max(minCount, (draft.hidden_tests || []).length)} hidden tests. Return only the JSON.`,
+  ].join('\n');
+
+  const res = await llmCall({ taskId: 'hidden_test_generator', prompt });
+  const text = contentToText(res)
+    .replace(/```(?:json)?\s*/g, '')
+    .replace(/```\s*$/g, '')
+    .trim();
+  const parsed = JSON.parse(text);
+  const tests = Array.isArray(parsed && parsed.hidden_tests) ? parsed.hidden_tests : [];
+  const cleaned = tests
+    .filter((t) => t && typeof t.name === 'string' && t.name.trim() && typeof t.command === 'string' && t.command.trim())
+    .map((t) => ({
+      name: t.name.trim(),
+      command: t.command.trim(),
+      expected_exit_code: Number.isFinite(Number(t.expected_exit_code)) ? Number(t.expected_exit_code) : 0,
+      ...(Array.isArray(t.expected_output_contains) ? { expected_output_contains: t.expected_output_contains } : {}),
+    }));
+  // De-collide with visible test names (checkTestsDistinct is a hard gate).
+  const visibleNames = new Set((draft.visible_tests || []).map((t) => t.name));
+  const deduped = cleaned.filter((t) => !visibleNames.has(t.name));
+  if (deduped.length < minCount) {
+    throw new Error(`independent hidden-test generation produced only ${deduped.length} usable tests`);
+  }
+  return deduped;
+}
+
 // ── Difficulty contract ─────────────────────────────────────────────────────
 // Difficulty was previously a bare label with no teeth — the same quantitative
 // bar was set for easy and hard, so "hard" problems came out too easy. This
@@ -358,6 +428,22 @@ Generate a complete ArtifactBundle now. Return only the JSON.`;
 
   const draft = sanitizeDraft(extractJson(res.content));
 
+  // Capstone hidden tests come from the INDEPENDENT model (different family
+  // than the solution author) so the author's blind spots aren't baked into
+  // the test suite. Fail-open: on error, keep the author's own hidden tests —
+  // the sandbox validator still hard-gates everything either way.
+  let hiddenTestModel = null;
+  if (type === 'capstone') {
+    try {
+      const diffSpecMin = (DIFFICULTY_SPEC[difficulty] || DIFFICULTY_SPEC.medium).min_hidden_tests || 3;
+      draft.hidden_tests = await generateIndependentHiddenTests(draft, { minCount: diffSpecMin });
+      hiddenTestModel = require('./llmRouter').getModelForTask('hidden_test_generator').model;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[contentGenerator] independent hidden-test generation failed, keeping author tests:', err.message);
+    }
+  }
+
   // Stamp + hash + validate
   draft.content_hash = computeContentHash(draft);
 
@@ -369,6 +455,8 @@ Generate a complete ArtifactBundle now. Return only the JSON.`;
 
   value.generated_by = {
     generator_model: res._meta.model,
+    // Non-null when hidden tests came from the independent (cross-family) model.
+    hidden_test_model: hiddenTestModel,
     validator_model: null,
     validated_at: null,
     human_reviewed: false,
@@ -410,5 +498,6 @@ module.exports = {
   extractJson,
   checkDifficultyConformance,
   difficultyContractBlock,
+  generateIndependentHiddenTests,
   DIFFICULTY_SPEC,
 };

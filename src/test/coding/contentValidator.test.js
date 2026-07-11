@@ -29,21 +29,37 @@ llmRouter.llmCall = async () => {
 };
 
 // ── Sandbox stub — patched before the service is loaded ──────────────────────
-
-const sandbox = require('../../coding/services/sandbox/localSandbox');
+// The validator runs tests in the e2b sandbox via adapterFactory. Stub the
+// factory (require.cache, installed BEFORE contentValidator loads) with a fake
+// adapter whose runCommand consults `sandboxMode`.
 
 /**
- * Controls what runInTempDir returns.
- * - 'pass'   → { exit_code: 0, stdout: '', stderr: '', timed_out: false }
- * - 'fail'   → { exit_code: 1, stdout: '', stderr: 'err', timed_out: false }
- * - a function → called with (opts) and returns the result directly
+ * Controls what each sandbox test run returns.
+ * - 'pass'   → exit 0
+ * - 'fail'   → exit 1
+ * - a function → called with ({ command }) returning { exit_code, stdout, stderr, timed_out }
  */
 let sandboxMode = 'pass';
 
-sandbox.runInTempDir = async (opts) => {
-  if (typeof sandboxMode === 'function') return sandboxMode(opts);
-  if (sandboxMode === 'pass') return { exit_code: 0, stdout: '', stderr: '', timed_out: false };
-  return { exit_code: 1, stdout: '', stderr: 'err', timed_out: false };
+const fakeAdapter = {
+  provision: async () => ({ sandboxId: 'sb-test', provisionMs: 1 }),
+  runCommand: async (_id, command) => {
+    let r;
+    if (typeof sandboxMode === 'function') r = await sandboxMode({ command });
+    else if (sandboxMode === 'pass') r = { exit_code: 0, stdout: '', stderr: '', timed_out: false };
+    else r = { exit_code: 1, stdout: '', stderr: 'err', timed_out: false };
+    return { exitCode: r.exit_code, stdout: r.stdout || '', stderr: r.stderr || '', durationMs: 1 };
+  },
+  destroy: async () => {},
+  isAlive: async () => true,
+};
+
+const adapterFactoryPath = require.resolve('../../coding/services/sandbox/adapterFactory');
+require.cache[adapterFactoryPath] = {
+  id: adapterFactoryPath,
+  filename: adapterFactoryPath,
+  loaded: true,
+  exports: { getSandboxAdapter: () => fakeAdapter },
 };
 
 // ── Model stubs ───────────────────────────────────────────────────────────────
@@ -62,6 +78,12 @@ ArtifactBundle.findById = (id) => ({
 
 ArtifactBundle.findByIdAndUpdate = async (id, update) => {
   capturedUpdate = { id, update };
+  return {};
+};
+
+// The validator stamps via a conditional findOneAndUpdate (draft-only guard).
+ArtifactBundle.findOneAndUpdate = async (filter, update) => {
+  capturedUpdate = { filter, update };
   return {};
 };
 
@@ -166,14 +188,16 @@ test('validate: happy path — all checks pass → status updated to validated',
   const result = await validate({ bundle_id: BUNDLE_ID });
 
   assert.strictEqual(result.ok, true, `expected ok:true, got: ${JSON.stringify(result)}`);
-  assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
-  assert.strictEqual(capturedUpdate.update.status, 'validated',
+  assert.ok(capturedUpdate, 'findOneAndUpdate should have been called');
+  const set = capturedUpdate.update.$set;
+  assert.strictEqual(set.status, 'validated',
     `expected status to be updated to "validated", got: ${JSON.stringify(capturedUpdate.update)}`);
-  assert.ok(capturedUpdate.update['generated_by.validated_at'] instanceof Date,
-    'validated_at should be a Date');
-  assert.ok(
-    typeof capturedUpdate.update['generated_by.validator_model'] === 'string',
-    'validator_model should be set',
+  assert.ok(set['generated_by.validated_at'] instanceof Date, 'validated_at should be a Date');
+  // validator_model must come from the routing table, not a hardcoded string.
+  assert.strictEqual(
+    set['generated_by.validator_model'],
+    llmRouter.getModelForTask('content_validator_cross').model,
+    'validator_model should be sourced from llmRouter',
   );
 });
 
@@ -308,4 +332,99 @@ test('pushToHumanReview: creates HumanReviewQueue doc with correct fields', asyn
     ['reference_solution_passes: tests failed', 'semantic_consistency: difficulty mismatch'],
   );
   assert.strictEqual(capturedCreate.status, 'pending');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. checkSeededMistakesFail — real mechanical checks (Wave 2 block 5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('validate: seeded_mistake location referencing a non-existent file → { ok: false }', async () => {
+  stubBundle = {
+    ...COMPLETE_BUNDLE,
+    seeded_mistakes: [{ location: 'ghost.py:3', bug_description: 'Imaginary bug' }],
+  };
+  stubFindOne = null;
+  // Reference passes (calls 1-2), corrupted fails (3-4). Seeded check rejects
+  // on the referential check BEFORE any sandbox run.
+  sandboxMode = (opts) => {
+    sandboxMode._call = (sandboxMode._call || 0) + 1;
+    if (sandboxMode._call <= 2) return Promise.resolve({ exit_code: 0, stdout: '', stderr: '', timed_out: false });
+    return Promise.resolve({ exit_code: 1, stdout: '', stderr: 'err', timed_out: false });
+  };
+  sandboxMode._call = 0;
+  stubLlmResponse = {
+    content: { parts: [{ text: JSON.stringify({ difficulty_matches: true, brief_unambiguous: true, notes: 'ok' }) }] },
+  };
+
+  const result = await validate({ bundle_id: BUNDLE_ID });
+  assert.strictEqual(result.ok, false, `expected ok:false, got: ${JSON.stringify(result)}`);
+  assert.ok(
+    result.errors.some(e => e.includes('seeded_mistakes_fail') && e.includes('ghost.py:3')),
+    `expected seeded location error, got: ${JSON.stringify(result.errors)}`,
+  );
+});
+
+test('validate: seeded_mistake line out of range → { ok: false }', async () => {
+  stubBundle = {
+    ...COMPLETE_BUNDLE,
+    seeded_mistakes: [{ location: 'starter.py:99', bug_description: 'Bug on a line that does not exist' }],
+  };
+  stubFindOne = null;
+  sandboxMode = (opts) => {
+    sandboxMode._call = (sandboxMode._call || 0) + 1;
+    if (sandboxMode._call <= 2) return Promise.resolve({ exit_code: 0, stdout: '', stderr: '', timed_out: false });
+    return Promise.resolve({ exit_code: 1, stdout: '', stderr: 'err', timed_out: false });
+  };
+  sandboxMode._call = 0;
+
+  const result = await validate({ bundle_id: BUNDLE_ID });
+  assert.strictEqual(result.ok, false);
+  assert.ok(
+    result.errors.some(e => e.includes('out of range')),
+    `expected out-of-range error, got: ${JSON.stringify(result.errors)}`,
+  );
+});
+
+test('validate: starter passes ALL tests despite seeded_mistakes → { ok: false }', async () => {
+  stubBundle = { ...COMPLETE_BUNDLE };
+  stubFindOne = null;
+  // Reference passes (1-2), corrupted fails (3-4), seeded/starter run PASSES
+  // (5-6) → the "buggy" starter is not detectably buggy → reject.
+  sandboxMode = (opts) => {
+    sandboxMode._call = (sandboxMode._call || 0) + 1;
+    if (sandboxMode._call <= 2) return Promise.resolve({ exit_code: 0, stdout: '', stderr: '', timed_out: false });
+    if (sandboxMode._call <= 4) return Promise.resolve({ exit_code: 1, stdout: '', stderr: 'err', timed_out: false });
+    return Promise.resolve({ exit_code: 0, stdout: '', stderr: '', timed_out: false });
+  };
+  sandboxMode._call = 0;
+  stubLlmResponse = {
+    content: { parts: [{ text: JSON.stringify({ difficulty_matches: true, brief_unambiguous: true, notes: 'ok' }) }] },
+  };
+
+  const result = await validate({ bundle_id: BUNDLE_ID });
+  assert.strictEqual(result.ok, false, `expected ok:false, got: ${JSON.stringify(result)}`);
+  assert.ok(
+    result.errors.some(e => e.includes('seeded_mistakes')),
+    `expected seeded_mistakes error, got: ${JSON.stringify(result.errors)}`,
+  );
+});
+
+test('validate: no seeded_mistakes → seeded check skipped, bundle validates', async () => {
+  stubBundle = { ...COMPLETE_BUNDLE, seeded_mistakes: [] };
+  stubFindOne = null;
+  capturedUpdate = null;
+  sandboxMode = (opts) => {
+    sandboxMode._call = (sandboxMode._call || 0) + 1;
+    if (sandboxMode._call <= 2) return Promise.resolve({ exit_code: 0, stdout: '', stderr: '', timed_out: false });
+    return Promise.resolve({ exit_code: 1, stdout: '', stderr: 'err', timed_out: false });
+  };
+  sandboxMode._call = 0;
+  stubLlmResponse = {
+    content: { parts: [{ text: JSON.stringify({ difficulty_matches: true, brief_unambiguous: true, notes: 'ok' }) }] },
+  };
+
+  const result = await validate({ bundle_id: BUNDLE_ID });
+  assert.strictEqual(result.ok, true, `expected ok:true, got: ${JSON.stringify(result)}`);
+  const seeded = result.results.find(r => r.name === 'seeded_mistakes_fail');
+  assert.strictEqual(seeded.skipped, true, 'seeded check should be skipped with no mistakes');
 });
