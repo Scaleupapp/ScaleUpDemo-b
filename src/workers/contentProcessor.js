@@ -1,4 +1,5 @@
 const openai = require('../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const Content = require('../models/Content');
 
 const CONTENT_ANALYSIS_PROMPT = `You are an educational content analyzer. Analyze the following content and extract:
@@ -29,7 +30,7 @@ async function processContent(job) {
     const contentText = content.ocrText || content.transcript || content.description || '';
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: OPENAI_CHAT_MODEL,
       messages: [
         { role: 'system', content: CONTENT_ANALYSIS_PROMPT },
         { role: 'user', content: `Title: ${content.title}\nDomain: ${content.domain}\nTopics: ${content.topics.join(', ')}\nContent:\n${contentText.slice(0, 15000)}` },

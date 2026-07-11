@@ -77,6 +77,15 @@ async function releaseAssessment(scope, id, releasedBy, deps) {
     if (authoringStatus === 'failed') throw new Error('AUTHORING_FAILED');
     if (!(mcq.questions && mcq.questions.length)) throw new Error('NO_QUESTIONS');
   }
+  // Interview assessments honour the question-plan authoring gate (Wave 2):
+  // failed => terminal TPO action needed; generating => transient. Assessments
+  // created before the gate existed have no authoring at all — still releasable.
+  if (a.type === 'interview') {
+    const iv = (a.config && a.config.interview) || {};
+    const ivStatus = iv.authoring && iv.authoring.status;
+    if (ivStatus === 'failed') throw new Error('AUTHORING_FAILED');
+    if (ivStatus === 'generating') throw new Error('NO_QUESTIONS');
+  }
   // Capstone assessments must have a bundle generated before release
   if (a.type === 'capstone' && !(a.config && a.config.capstone && a.config.capstone.bundleId)) {
     throw new Error('NO_BUNDLE');

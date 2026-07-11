@@ -175,6 +175,7 @@ async function score({
       taskId: 'capstone_evaluator', // routing table key — strict shares the same model
       system,
       messages: [{ role: 'user', content: userMsg }],
+      temperature: 0, // deterministic grading (spec §Answer-side deterministic core)
     });
   } catch (err) {
     outcome = err.name === 'AbortError' ? 'timeout' : 'error';
@@ -285,4 +286,45 @@ function validate(parsed) {
   }
 }
 
-module.exports = { score, SYSTEM_NORMAL, DIMENSIONS, RUBRIC_WEIGHTS, normalizeFeedback };
+/**
+ * Code-side recompute of the overall 0-100 score from the six dimension
+ * scores (0-10) and their weights. This is the AUTHORITATIVE number on the
+ * primary grading path — the LLM's self-reported overall_score is retained
+ * only as drift telemetry (spec §Answer-side deterministic core:
+ * "ALL weighted overall scores recomputed in code (Σ dim×weight)").
+ *
+ * @param {Object.<string, number>} dimScores
+ * @param {Object.<string, number>} [weights=RUBRIC_WEIGHTS]
+ * @returns {number} integer 0-100
+ */
+function computeOverallScore(dimScores = {}, weights = RUBRIC_WEIGHTS) {
+  const sum = Object.entries(weights).reduce(
+    (s, [k, w]) => s + (Number(dimScores[k]) || 0) * 10 * w,
+    0
+  );
+  return Math.round(sum);
+}
+
+/**
+ * Derive the `correctness` dimension (0-10) from the deterministic final
+ * harness pass-ratio over visible + hidden tests — NOT the LLM's opinion
+ * (spec §Answer-side: "Capstone correctness derived from harness pass-ratio").
+ *
+ * Returns null when there are no tests to run (caller keeps the LLM value).
+ *
+ * @param {{ visible?: Array<{passed:boolean}>, hidden?: Array<{passed:boolean}> }} harness
+ * @returns {number|null} 0-10 or null when undecidable
+ */
+function deriveCorrectnessFromHarness(harness = {}) {
+  const visible = Array.isArray(harness.visible) ? harness.visible : [];
+  const hidden = Array.isArray(harness.hidden) ? harness.hidden : [];
+  const total = visible.length + hidden.length;
+  if (total === 0) return null;
+  const passed = visible.filter((t) => t && t.passed).length + hidden.filter((t) => t && t.passed).length;
+  return (passed / total) * 10;
+}
+
+module.exports = {
+  score, SYSTEM_NORMAL, DIMENSIONS, RUBRIC_WEIGHTS, normalizeFeedback,
+  computeOverallScore, deriveCorrectnessFromHarness,
+};

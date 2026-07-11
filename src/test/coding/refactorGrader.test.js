@@ -42,8 +42,9 @@ llmRouter.llmCall = async () => STUB_LLM_RESPONSE;
 // ── Sandbox stub — default returns passing result ─────────────────────────────
 // We require the sandbox module first so that when refactorGrader requires it
 // it gets the same cached module instance. We then replace runInTempDir.
+// (Wave 2 block 7: refactor grading runs in the e2b sandbox, not localSandbox.)
 
-const sbx = require('../../coding/services/sandbox/localSandbox');
+const sbx = require('../../coding/services/sandbox/e2bRunner');
 sbx.runInTempDir = async () => ({ exit_code: 0, stdout: 'ok', stderr: '', timed_out: false });
 
 // ── Model stubs ───────────────────────────────────────────────────────────────

@@ -16,13 +16,18 @@ const client = require('../../config/anthropic');
  * @param {Array}  opts.messages
  * @param {Array}  [opts.tools]
  * @param {number} [opts.max_tokens=4096]
+ * @param {number} [opts.temperature]  — grading calls pass 0 for determinism;
+ *                                        omitted ⇒ provider default (1.0)
  * @returns {Promise<{content: Array, usage: object, stop_reason: string}>}
  */
-async function call({ model, system, messages, tools, max_tokens = 4096 }) {
+async function call({ model, system, messages, tools, max_tokens = 4096, temperature }) {
   const req = { model, system, messages, max_tokens };
   // Only include `tools` when there's at least one — the API rejects an empty
   // array, and forwarding undefined/[] would otherwise surface as a 400.
   if (Array.isArray(tools) && tools.length > 0) req.tools = tools;
+  // Only forward temperature when explicitly set (including 0) — leaving it
+  // undefined preserves the provider default for non-grading callers.
+  if (typeof temperature === 'number') req.temperature = temperature;
   const res = await client.messages.create(req);
   return { content: res.content, usage: res.usage, stop_reason: res.stop_reason };
 }

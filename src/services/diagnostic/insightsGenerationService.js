@@ -1,10 +1,11 @@
 'use strict';
 
 const openai = require('../../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../../config/openaiModels');
 const calibration = require('../../utils/calibration');
 
 const DEFAULT_TIMEOUT_MS = 15000;
-const MODEL = 'gpt-4o';
+const MODEL = OPENAI_CHAT_MODEL;
 
 const INSIGHTS_JSON_SCHEMA = {
   name: 'diagnostic_insights',

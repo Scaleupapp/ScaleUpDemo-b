@@ -189,15 +189,60 @@ async function checkNonSolutionFails(bundle) {
 }
 
 /**
- * Check 4: seeded_mistakes each fail the tests when applied.
- * Phase A: skipped — mechanical application requires structured before/after snippets
- * which are added in Phase B. Gemini semantic check (check 6/7) covers these indirectly.
+ * Check 4: seeded_mistakes are REAL, mechanically confirmed (Wave 2 block 5 —
+ * no longer a no-op stub). Two parts:
+ *
+ *  (a) Referential ground truth (pure): every seeded location ("file[:line]")
+ *      must point at an existing file (starter_repo or reference_solution) and,
+ *      when a line is given, a line that exists in that file.
+ *  (b) Behavioural ground truth (sandbox): seeded mistakes live IN the starter
+ *      code (they're the landmines the learner must catch/fix), so the starter
+ *      — executed as-is against the full visible+hidden suite — must FAIL. If
+ *      the "buggy" starter passes everything, the seeded mistakes are fiction
+ *      (or the tests cannot detect them) and the bundle is rejected.
  */
 async function checkSeededMistakesFail(bundle) {
   const seeded = bundle.seeded_mistakes || [];
   if (seeded.length === 0) return { ok: true, skipped: true };
-  // Phase B will apply each seeded_mistake programmatically and re-run tests.
-  return { ok: true, skipped: true, note: 'mechanical seeded_mistake application is Phase B' };
+
+  // (a) Locations must reference real files/lines.
+  const knownFiles = new Map();
+  for (const f of (bundle.starter_repo?.files || [])) knownFiles.set(f.path, f);
+  for (const f of (bundle.reference_solution?.files || [])) {
+    if (!knownFiles.has(f.path)) knownFiles.set(f.path, f);
+  }
+  for (const m of seeded) {
+    const loc = String(m.location || '');
+    const idx = loc.lastIndexOf(':');
+    const hasLine = idx > 0 && /^\d+$/.test(loc.slice(idx + 1));
+    const file = hasLine ? loc.slice(0, idx) : loc;
+    const line = hasLine ? parseInt(loc.slice(idx + 1), 10) : null;
+    const f = knownFiles.get(file);
+    if (!f) {
+      return { ok: false, error: `seeded_mistake location "${loc}" does not reference any bundle file` };
+    }
+    if (line != null) {
+      const lineCount = String(f.content || '').split('\n').length;
+      if (line < 1 || line > lineCount) {
+        return { ok: false, error: `seeded_mistake location "${loc}" is out of range (${file} has ${lineCount} lines)` };
+      }
+    }
+  }
+
+  // (b) The buggy starter must fail the suite.
+  const starterFiles = bundle.starter_repo?.files || [];
+  if (starterFiles.length === 0) return { ok: true, skipped: true, note: 'no starter_repo to execute' };
+  const allTests = [...(bundle.visible_tests || []), ...(bundle.hidden_tests || [])];
+  if (allTests.length === 0) return { ok: true, skipped: true, note: 'no tests to execute' };
+
+  const { allPass } = await runTestsOn(starterFiles, allTests, bundle.language);
+  if (allPass) {
+    return {
+      ok: false,
+      error: 'starter code passes ALL tests despite declared seeded_mistakes — the ground-truth bugs are undetectable or fictional',
+    };
+  }
+  return { ok: true };
 }
 
 /**
@@ -273,14 +318,17 @@ Return STRICT JSON: { difficulty_matches: boolean, brief_unambiguous: boolean, n
     return { ok: false, error: `validator returned non-JSON: ${text.slice(0, 200)}` };
   }
 
-  // ADVISORY ONLY — never blocks validation. The HARD guarantee is the sandbox
-  // proof (reference solution passes every visible+hidden test; corrupted code
-  // fails). Difficulty labelling and minor brief ambiguity are subjective, and
-  // the dedicated cross-check gate (crossCheckCapstone) makes the final quality
-  // call on GENUINE defects. Failing the deterministic validation on style nits
-  // here just burned retries and made generation impossible to pass.
+  // Difficulty conformance is BLOCKING (Wave 2 block 5 / spec: "difficulty-
+  // conformance gate becomes BLOCKING"): a "hard" that grades like an "easy"
+  // corrupts every difficulty-scoped consumer (drill selection, capstone
+  // scoring bars, TPO reporting). The retry loop passes the cross-model's
+  // notes back to the generator as critique, so a mislabel is fixable.
+  if (parsed.difficulty_matches === false) {
+    return { ok: false, error: `difficulty mismatch: ${parsed.notes || 'stated difficulty does not match actual complexity'}` };
+  }
+  // Brief clarity stays advisory — subjective, and the cross-check gate
+  // (crossCheckCapstone) makes the final quality call on genuine defects.
   const advisory = [];
-  if (parsed.difficulty_matches === false) advisory.push(`difficulty: ${parsed.notes || 'may be mislabelled'}`);
   if (parsed.brief_unambiguous === false) advisory.push(`clarity: ${parsed.notes || 'could be clearer'}`);
   return { ok: true, advisory: advisory.length ? advisory : undefined };
 }
@@ -344,7 +392,9 @@ async function validate({ bundle_id }) {
   // 'validated' (that would, e.g., demote a live 'active' bundle out of the
   // attemptable library). If it's no longer 'draft', the validation result
   // still returns ok — we just don't clobber the newer status.
-  const validator_model = 'gemini-2.5-pro';
+  // Attribution comes from the routing table, not a hardcoded string — a model
+  // swap in llmRouter must never leave stale attribution on validated bundles.
+  const validator_model = require('./llmRouter').getModelForTask('content_validator_cross').model;
   await ArtifactBundle.findOneAndUpdate(
     { _id: bundle_id, status: 'draft' },
     {

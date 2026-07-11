@@ -42,6 +42,7 @@ const SCANNED_PDF_THRESHOLD = 50;
  */
 async function defaultFileExtract(buffer, filename) {
   const { Readable } = require('stream');
+const { OPENAI_CHAT_MODEL } = require('../../../config/openaiModels');
   const openai = require('../../../config/openai');
 
   // openai.files.create requires a ReadableStream (Node Readable) plus name/type hints
@@ -55,7 +56,7 @@ async function defaultFileExtract(buffer, filename) {
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: OPENAI_CHAT_MODEL,
       messages: [
         {
           role: 'system',
@@ -86,7 +87,7 @@ async function defaultVisionOcr(buffer, mimeType) {
   const openai = require('../../../config/openai');
   const base64 = buffer.toString('base64');
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: OPENAI_CHAT_MODEL,
     messages: [
       {
         role: 'system',

@@ -118,6 +118,9 @@ class AssessmentEvaluationService {
         userPrompt: JSON.stringify(evaluationContext),
         temperature: 0.2,
         maxTokens: 4000,
+        // Preserve prior behaviour: this path already null-guards each field of
+        // the returned object, so keep the lenient {text} fallback rather than throw.
+        lenient: true,
       });
 
       if (!evaluation || typeof evaluation === 'string') {

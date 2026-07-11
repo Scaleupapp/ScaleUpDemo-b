@@ -31,9 +31,9 @@ const ROUTING_TABLE = {
   content_validator_cross:   { provider: 'google',    model: 'gemini-2.5-pro' },
   capstone_quality_cross:    { provider: 'google',    model: 'gemini-2.5-pro' },
   reference_solution_solver: { provider: 'anthropic', model: 'claude-opus-4-7', max_tokens: 16000 },
-  drill_grade_prompt:        { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
-  drill_grade_verify:        { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
-  drill_grade_decompose:     { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  drill_grade_prompt:        { provider: 'anthropic', model: 'claude-haiku-4-5' },
+  drill_grade_verify:        { provider: 'anthropic', model: 'claude-haiku-4-5' },
+  drill_grade_decompose:     { provider: 'anthropic', model: 'claude-haiku-4-5' },
   drill_grade_refactor:      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
   capstone_evaluator:        { provider: 'anthropic', model: 'claude-sonnet-4-6', max_tokens: 8000 },
   seeded_mistake_generator:  { provider: 'anthropic', model: 'claude-opus-4-7', max_tokens: 8000 },
@@ -79,7 +79,7 @@ function getModelForTask(taskId) {
  * @param {Array}   [opts.tools]     — extra tools to merge with the routing-table defaults
  * @returns {Promise<{content, usage, _meta: {taskId, provider, model, duration_ms}}>}
  */
-async function llmCall({ taskId, system, messages, prompt, tools: extraTools, max_tokens }) {
+async function llmCall({ taskId, system, messages, prompt, tools: extraTools, max_tokens, temperature }) {
   const { provider, model, tools: defaultTools = [], max_tokens: routedMaxTokens } = getModelForTask(taskId);
   const tools = [...defaultTools, ...(extraTools || [])];
   // Caller override wins, else the routing-table cap, else the client default.
@@ -89,7 +89,13 @@ async function llmCall({ taskId, system, messages, prompt, tools: extraTools, ma
   let result;
 
   if (provider === 'anthropic') {
-    result = await anthropic.call({ model, system, messages, tools, ...(maxTokens ? { max_tokens: maxTokens } : {}) });
+    result = await anthropic.call({
+      model, system, messages, tools,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      // Grading callers pass temperature: 0 for deterministic scores. Only
+      // forwarded when a number (including 0); undefined ⇒ provider default.
+      ...(typeof temperature === 'number' ? { temperature } : {}),
+    });
   } else if (provider === 'google') {
     result = await gemini.call({ model, system, prompt: prompt || messages, tools });
   } else {

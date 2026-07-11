@@ -61,6 +61,17 @@ function getQueue() {
  */
 async function enqueueEvaluation(sessionId) {
   const q = getQueue();
+  // If a previous run EXHAUSTED its retries, the failed job still occupies the
+  // idempotent jobId and q.add() would silently no-op — the session could then
+  // never be re-graded (Wave 2 block 6). Clear a failed/completed job first;
+  // active/waiting jobs are left alone so in-flight grading is never disturbed.
+  try {
+    const existing = await q.getJob(`capstone-eval-${sessionId}`);
+    if (existing) {
+      const state = await existing.getState();
+      if (state === 'failed' || state === 'completed') await existing.remove();
+    }
+  } catch (_) { /* best-effort — fall through to add */ }
   return q.add(
     'evaluate',
     { sessionId: String(sessionId) },
@@ -108,6 +119,15 @@ function startCapstoneEvalWorker() {
         `[capstone-eval] EXHAUSTED for session=${job.data.sessionId} after ${job.attemptsMade} attempts:`,
         err.message
       );
+      // Stranding fix (Wave 2 block 6): a session left in 'evaluating' after
+      // the final retry would show "grading…" forever. Revert to 'submitted'
+      // (direct conditional update — the state machine has no evaluating→
+      // submitted edge by design) so the ops path (sandbox-gc re-enqueue /
+      // admin regrade) can pick it up from a known state.
+      void revertEvaluatingToSubmitted(job.data.sessionId).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error(`[capstone-eval] could not revert session ${job.data.sessionId}: ${e.message}`);
+      });
       void alerts.fire({
         category: 'worker.job-exhausted',
         severity: 'error',
@@ -127,8 +147,34 @@ function startCapstoneEvalWorker() {
   return { worker, queue: getQueue() };
 }
 
+/**
+ * Revert a stuck 'evaluating' session to 'submitted' (recovery path only).
+ * Conditional on current status so a concurrent successful grade wins.
+ */
+async function revertEvaluatingToSubmitted(sessionId) {
+  const CapstoneSession = require('../models/capstoneSession.model');
+  return CapstoneSession.findOneAndUpdate(
+    { _id: sessionId, status: 'evaluating' },
+    { $set: { status: 'submitted' } },
+    { new: true }
+  );
+}
+
+/**
+ * Remove a (completed/failed) evaluation job so the idempotent jobId can be
+ * re-enqueued — used by the admin regrade endpoint. Best-effort.
+ */
+async function removeEvaluationJob(sessionId) {
+  const q = getQueue();
+  const job = await q.getJob(`capstone-eval-${sessionId}`);
+  if (job) await job.remove();
+  return !!job;
+}
+
 module.exports = {
   enqueueEvaluation,
   startCapstoneEvalWorker,
+  revertEvaluatingToSubmitted,
+  removeEvaluationJob,
   QUEUE_NAME,
 };

@@ -1,4 +1,5 @@
 const openai = require('../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const Content = require('../models/Content');
 const Conversation = require('../models/Conversation');
 const ApiError = require('../utils/apiError');
@@ -194,7 +195,7 @@ class AiTutorService {
 
     // Call GPT-4o
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: OPENAI_CHAT_MODEL,
       messages,
       temperature: 0.5,
       max_tokens: 1000,

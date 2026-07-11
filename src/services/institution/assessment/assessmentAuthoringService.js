@@ -414,6 +414,114 @@ async function regenerateQuestion(assessmentId, qIndex, deps = {}) {
 }
 
 /**
+ * Author (plan) the interview question set for an assessment (Wave 2 block 4).
+ *
+ * Mirrors the authorMcq honest-status pattern: generate the planned question
+ * set + expected-answer outlines, run set-level lint + LLM-as-judge (reject ⇒
+ * regenerate once), persist config.interview.authoring = { status, error,
+ * questionPlan }. The release gate honours the status; the outlines double as
+ * grading anchors (threaded via engineAdapters → InterviewSession.expectedAnswers).
+ *
+ * @param {string|ObjectId} assessmentId
+ * @param {object}          deps - injectable: { Assessment, AssessmentSource,
+ *                                   interviewPlanService, aiProvider }
+ * @returns {Promise<Assessment|null>} null if not interview type
+ */
+async function authorInterview(assessmentId, deps = {}) {
+  const Assessment = getModel(deps);
+  const planService = deps.interviewPlanService || require('./interviewPlanService');
+
+  const assessment = await Assessment.findById(assessmentId);
+  if (!assessment) throw new Error('NOT_FOUND');
+  if (assessment.type !== 'interview') return null;
+
+  const cfg = (assessment.config && assessment.config.interview) || {};
+
+  // Honest status up-front so the release gate never lies.
+  assessment.config.interview.authoring = { status: 'generating', error: null, questionPlan: null };
+  assessment.markModified('config');
+  try { await assessment.save(); } catch (_) { /* best-effort early status */ }
+
+  try {
+    // Grounding context from the AssessmentSource (same limit as serving).
+    let context = '';
+    if (cfg.sourceId) {
+      const AssessmentSource = getAssessmentSource(deps);
+      try {
+        const source = await AssessmentSource.findById(cfg.sourceId);
+        if (source && source.status === 'ready' && source.extractedText) {
+          context = source.extractedText.slice(0, 4000);
+        }
+      } catch (e) { console.warn('[authorInterview] source lookup failed:', e.message); }
+    }
+
+    const plan = await planService.buildQuestionPlan(
+      {
+        interviewType: cfg.interviewType,
+        targetRole: cfg.targetRole,
+        targetCompany: cfg.targetCompany,
+        difficulty: cfg.difficulty || 'moderate',
+        context,
+      },
+      { aiProvider: deps.aiProvider }
+    );
+
+    if (plan.ok) {
+      assessment.config.interview.authoring = {
+        status: 'ready',
+        error: null,
+        questionPlan: {
+          questions: plan.questions,
+          judge: plan.judge || null,
+          lint: plan.lint || null,
+          rounds: plan.rounds,
+        },
+      };
+      await persistInterviewConfig(Assessment, assessment, { requireUnreleased: true });
+    } else {
+      assessment.config.interview.authoring = {
+        status: 'failed',
+        error: plan.error || 'question plan failed QA',
+        questionPlan: null,
+      };
+      await persistInterviewConfig(Assessment, assessment, { requireUnreleased: false });
+    }
+  } catch (err) {
+    if (err && err.message === 'RELEASED') {
+      console.warn('[authorInterview] skipped persist — assessment was released mid-authoring');
+      throw err;
+    }
+    try {
+      assessment.config.interview.authoring = {
+        status: 'failed',
+        error: `authoring crashed: ${err && err.message}`,
+        questionPlan: null,
+      };
+      await persistInterviewConfig(Assessment, assessment, { requireUnreleased: false });
+    } catch (persistErr) {
+      console.warn('[authorInterview] could not persist failed status:', persistErr.message);
+    }
+    throw err;
+  }
+
+  return assessment;
+}
+
+/** Same atomic conditional persist as persistMcqConfig, scoped to config.interview. */
+async function persistInterviewConfig(Assessment, assessment, { requireUnreleased }) {
+  if (Assessment && typeof Assessment.updateOne === 'function') {
+    const filter = { _id: assessment._id };
+    if (requireUnreleased) filter.status = { $nin: ['released', 'closed'] };
+    const res = await Assessment.updateOne(filter, { $set: { 'config.interview': assessment.config.interview } });
+    const matched = res ? (res.matchedCount ?? res.n ?? res.modifiedCount ?? 0) : 0;
+    if (requireUnreleased && !matched) throw new Error('RELEASED');
+    return;
+  }
+  assessment.markModified('config');
+  await assessment.save();
+}
+
+/**
  * Author (generate) a capstone bundle for an assessment.
  *
  * Calls requestGeneration to create + enqueue a CapstoneGenerationRequest,
@@ -604,4 +712,4 @@ async function authorDrill(assessmentId, deps = {}) {
   return assessment;
 }
 
-module.exports = { authorMcq, authorCapstone, authorDrill, regenerateQuestion, _helpers: { buildGroundingText, accumulateReport } };
+module.exports = { authorMcq, authorInterview, authorCapstone, authorDrill, regenerateQuestion, _helpers: { buildGroundingText, accumulateReport } };

@@ -109,4 +109,36 @@ router.get('/connections', async (req, res) => {
   } catch (e) { console.error('[admin/connections]', e.message); return res.status(500).json({ success: false }); }
 });
 
+// ── Wave 2 block 6 — stuck-grading inventory + per-session regrade ───────────
+// Auth: enforced by router.use(auth, rbac('admin')) at the top of this file.
+
+// GET /api/v1/admin/assessments/stuck?thresholdMinutes=15
+router.get('/assessments/stuck', async (req, res) => {
+  try {
+    const recovery = require('../services/admin/assessmentRecoveryService');
+    const data = await recovery.findStuck({ thresholdMinutes: req.query.thresholdMinutes });
+    return res.json({ success: true, data });
+  } catch (e) {
+    console.error('[admin/assessments/stuck]', e.message);
+    return res.status(500).json({ success: false, message: 'Could not list stuck assessments.' });
+  }
+});
+
+// POST /api/v1/admin/assessments/sessions/:id/regrade — :id is an institution
+// AssessmentSession id; resets the underlying engine session and re-enqueues
+// its grading job.
+router.post('/assessments/sessions/:id/regrade', async (req, res) => {
+  try {
+    const recovery = require('../services/admin/assessmentRecoveryService');
+    const data = await recovery.regradeSession(req.params.id);
+    return res.json({ success: true, data });
+  } catch (e) {
+    if (e.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Session not found.' });
+    if (e.message === 'UNSUPPORTED_ENGINE') return res.status(409).json({ success: false, code: 'UNSUPPORTED_ENGINE', message: 'This engine grades synchronously — nothing to regrade.' });
+    if (e.message === 'UNSUPPORTED_ENGINE_STATE') return res.status(409).json({ success: false, code: 'UNSUPPORTED_ENGINE_STATE', message: 'Engine session is not in a regradable state.' });
+    console.error('[admin/assessments/regrade]', e.message);
+    return res.status(500).json({ success: false, message: 'Could not regrade the session.' });
+  }
+});
+
 module.exports = router;

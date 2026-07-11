@@ -76,7 +76,15 @@ async function syncSession(sessionId, deps = {}) {
 
   session.status = 'graded';
   session.gradedAt = (deps.now && deps.now()) || new Date();
-  session.result = { score: r.score, integrity: r.integrity, raw: r.raw };
+  session.result = {
+    score: r.score,
+    integrity: r.integrity,
+    // Answer-side judge flag + insufficient-evidence marker (Wave 2). Both
+    // optional — engines that don't emit them leave the fields unset.
+    ...(r.needsReview !== undefined ? { needsReview: !!r.needsReview } : {}),
+    ...(r.status && r.status !== 'graded' ? { gradeStatus: r.status } : {}),
+    raw: r.raw,
+  };
   await session.save();
 
   // Advance enrollment → active (best-effort; engines already fed readiness/mastery).

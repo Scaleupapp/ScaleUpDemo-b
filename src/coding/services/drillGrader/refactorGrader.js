@@ -4,22 +4,23 @@
  * Refactor Drill grader — sandbox-aware.
  *
  * Runs the bundle's visible_tests against the learner's refactored_code.files
- * inside the local sandbox to determine correctness deterministically, then
- * asks the LLM to score readability_gain and ai_usage_judgment.
+ * inside the e2b sandbox (Wave 2 block 7 — the old localSandbox executed
+ * model-influenced commands via `sh -c` on the API host) to determine
+ * correctness deterministically, then asks the LLM to score readability_gain
+ * and ai_usage_judgment.
  *
  * Score blend:
  *   overall_score = round((correctness * 0.5 + readability_gain * 0.25 + ai_usage_judgment * 0.25) * 10)
  *
  * All dimensions are on a 0-10 scale; overall_score is 0-100.
  *
- * Note: Phase B will replace localSandbox with a managed cloud sandbox.
  */
 
 const { ArtifactBundle, DrillAttempt } = require('../../models');
 const { llmCall }              = require('../llmRouter');
 const { flattenRubric }        = require('./rubric');
 const { parseLLMJson }         = require('./parseLLMJson');
-const sandbox                  = require('../sandbox/localSandbox');
+const sandbox                  = require('../sandbox/e2bRunner');
 const { applyPostGradeUpdates } = require('./postGradeHooks');
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -54,7 +55,7 @@ Return at most 5 entries in what_you_missed. Return an empty array if nothing si
 /**
  * Grade a submitted Refactor Drill attempt.
  *
- * Runs visible_tests inside the local sandbox to compute a deterministic
+ * Runs visible_tests inside the e2b sandbox to compute a deterministic
  * correctness score, then calls the LLM for readability_gain and
  * ai_usage_judgment.
  *
@@ -81,7 +82,7 @@ async function grade({ drillAttemptId }) {
   let passed = 0;
   if (tests.length > 0) {
     const testResults = await Promise.all(
-      tests.map(t => sandbox.runInTempDir({ files, command: t.command, timeout_ms: 15000 }))
+      tests.map(t => sandbox.runInTempDir({ files, command: t.command, timeout_ms: 15000, language: bundle.language }))
     );
 
     passed = testResults.filter((r, i) => {
@@ -113,6 +114,7 @@ async function grade({ drillAttemptId }) {
     taskId:   'drill_grade_refactor',
     system:   SYSTEM,
     messages: [{ role: 'user', content: userMsg }],
+    temperature: 0, // deterministic grading (spec §Answer-side deterministic core)
   });
 
   const parsed = parseLLMJson(res.content);
@@ -142,7 +144,8 @@ async function grade({ drillAttemptId }) {
       rubric_breakdown:     flattenRubric(fullRubric),
       what_to_try_next:     parsed.what_to_try_next,
       what_you_missed:      Array.isArray(parsed.what_you_missed) ? parsed.what_you_missed : [],
-      integrity_confidence: 'high',
+      // No proctoring/integrity signals exist for drills — 'high' was a lie.
+      integrity_confidence: 'unverified',
       graded_at:            new Date(),
       grader_model:         res._meta.model,
     },

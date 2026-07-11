@@ -12,6 +12,7 @@ const finalHarness = require('./finalHarness');
 const compassLog = require('./compassLog');
 const scorer = require('./scorer');
 const anchorDrift = require('./anchorDrift');
+const gradeJudge = require('../../../services/grading/gradeJudgeService');
 
 /**
  * Capstone evaluator pipeline — the function the BullMQ worker calls.
@@ -155,9 +156,29 @@ async function evaluate({ sessionId }) {
     hidden_total: harness.hidden.length,
     lint_passed: !!harness.lint?.passed,
   };
+
+  // ── Deterministic core (spec §Answer-side) ─────────────────────────────────
+  // (a) correctness is derived from the harness pass-ratio, NOT the LLM.
+  // (b) overall_score is recomputed in code from Σ dim×10×weight. The LLM's
+  //     self-reported overall_score is kept ONLY as drift telemetry.
+  const dimension_scores = { ...scored.dimension_scores };
+  const derivedCorrectness = scorer.deriveCorrectnessFromHarness(harness);
+  if (derivedCorrectness != null) dimension_scores.correctness = derivedCorrectness;
+  const codeOverall = scorer.computeOverallScore(dimension_scores, scorer.RUBRIC_WEIGHTS);
+  const llmOverall = Math.round(Number(scored.overall_score) || 0);
+  const scoreDrift = Math.abs(codeOverall - llmOverall);
+  if (scoreDrift > 10) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[capstoneEvaluator] score drift for session=${sessionId}: code=${codeOverall} llm=${llmOverall} (Δ${scoreDrift})`
+    );
+  }
+
   const result = {
-    overall_score: Math.round(scored.overall_score),
-    dimension_scores: scored.dimension_scores,
+    overall_score: codeOverall,
+    llm_overall_score: llmOverall,
+    score_drift: scoreDrift,
+    dimension_scores,
     dimension_feedback: scored.dimension_feedback || null,
     overall_rationale: typeof scored.overall_rationale === 'string' ? scored.overall_rationale : '',
     test_summary,
@@ -168,9 +189,49 @@ async function evaluate({ sessionId }) {
     integrity_confidence: scored.integrity_confidence,
     anchor_drift_detected: drift.driftDetected,
     evaluator_model: scored.evaluator_model,
+    needs_review: false,
     graded_at: new Date(),
     evidence_notes: typeof scored.evidence_notes === 'string' ? scored.evidence_notes : '',
   };
+
+  // ── Answer-side LLM-as-judge (best-effort; never bricks a grade) ────────────
+  // An independent (cross-family) judge audits the overall against the evidence.
+  // On >15-pt disagreement we auto re-grade once (strict re-score → recompute);
+  // still divergent ⇒ needs_review. Coverage knob: GRADE_JUDGE_SAMPLE_RATE.
+  try {
+    const evidence = [
+      `Diff: files_changed=${diff.files_changed} +${diff.lines_added}/-${diff.lines_removed}`,
+      `Tests: visible ${test_summary.visible_passed}/${test_summary.visible_total}, hidden ${test_summary.hidden_passed}/${test_summary.hidden_total}, lint ${test_summary.lint_passed ? 'clean' : 'issues'}`,
+      `Rationale: ${result.overall_rationale || '(none)'}`,
+    ].join('\n');
+    const capstoneRegrade = async () => {
+      const s = await scorer.score({
+        bundle, diff, harness, compassLog: compass,
+        voiceTranscript: session.voice_reflection_transcript || null,
+        mode: 'strict', rubricAnchors: bundle.rubric_anchors || [], actor,
+      });
+      const ds = { ...s.dimension_scores };
+      const dc = scorer.deriveCorrectnessFromHarness(harness);
+      if (dc != null) ds.correctness = dc;
+      return { overall: scorer.computeOverallScore(ds, scorer.RUBRIC_WEIGHTS) };
+    };
+    const verdict = await gradeJudge.reconcile({
+      engine: 'capstone',
+      evidence,
+      rubric: scorer.RUBRIC_WEIGHTS,
+      graderResult: { overall: codeOverall, dimensions: dimension_scores },
+      regrade: capstoneRegrade,
+    });
+    if (verdict.sampled) {
+      if (typeof verdict.finalOverall === 'number') result.overall_score = Math.round(verdict.finalOverall);
+      result.needs_review = !!verdict.needsReview;
+      result.judge_overall = verdict.judgeOverall;
+      result.judge_disagreement = verdict.disagreement;
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[capstoneEvaluator] grade judge failed for session=${sessionId}: ${err.message}`);
+  }
 
   await CapstoneSession.findByIdAndUpdate(sessionId, { $set: { result } });
   const graded = await stateMachine.transition(sessionId, 'graded');

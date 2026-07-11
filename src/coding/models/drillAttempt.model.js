@@ -11,7 +11,10 @@ const DrillAttemptSchema = new mongoose.Schema({
     required: true,
     index: true,  // we query by this in calibration matching
   },
-  status: { type: String, enum: ['scheduled', 'in_progress', 'submitted', 'graded'], default: 'scheduled' },
+  // 'failed' = grading exhausted its retries (Wave 2 block 6) — surfaced to the
+  // student instead of an eternal 202 poll; recoverable via admin regrade.
+  status: { type: String, enum: ['scheduled', 'in_progress', 'submitted', 'graded', 'failed'], default: 'scheduled' },
+  failure_reason: String,
   started_at: Date,
   submitted_at: Date,
   time_taken_seconds: Number,
@@ -30,7 +33,12 @@ const DrillAttemptSchema = new mongoose.Schema({
       detail: String,
       reference: String,
     }],
-    integrity_confidence: { type: String, enum: ['high', 'medium', 'low'] },
+    integrity_confidence: { type: String, enum: ['high', 'medium', 'low', 'unverified'] },
+    // Answer-side LLM-as-judge (spec §Answer-side #3): set when the independent
+    // judge still disagrees > 15 pts after one auto re-grade.
+    needs_review: { type: Boolean, default: false },
+    judge_overall: Number,
+    judge_disagreement: Number,
     graded_at: Date,
     grader_model: String,
   },

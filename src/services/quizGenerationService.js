@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const openai = require('../config/openai');
 const Content = require('../models/Content');
 const Quiz = require('../models/Quiz');
@@ -424,7 +425,7 @@ class QuizGenerationService {
 
       const userPrompt = JSON.stringify(promptData) + userContextBlock + externalContext + avoidQuestionsBlock + groundingBlock;
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: OPENAI_CHAT_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -469,7 +470,7 @@ class QuizGenerationService {
         }) + groundingBlock;
 
         const contResponse = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: OPENAI_CHAT_MODEL,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: continuationPrompt },

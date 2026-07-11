@@ -37,9 +37,19 @@ const AssessmentSchema = new mongoose.Schema({
     interview: {
       interviewType: { type: String },
       targetRole: String,
+      // Threaded into both generation and grading prompts so model answers are
+      // tailored to the company (spec Wave 2 interview hardening).
+      targetCompany: String,
       difficulty: { type: String, default: 'moderate' },
       durationSeconds: { type: Number, default: 1800 },
       sourceId: { type: mongoose.Schema.Types.ObjectId, ref: 'AssessmentSource' },
+      // Question-side authoring gate (spec Wave 2 / block 4): lint + judge over
+      // the planned question set + expected-answer outlines before release.
+      authoring: {
+        status: { type: String, enum: ['generating', 'ready', 'failed'] },
+        error: String,
+        questionPlan: { type: mongoose.Schema.Types.Mixed },
+      },
     },
     drill: {
       roleTrack: String,

@@ -1,4 +1,5 @@
 const openai = require('../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const DailyChallenge = require('../models/DailyChallenge');
 const LiveEvent = require('../models/LiveEvent');
 const UserObjective = require('../models/UserObjective');
@@ -221,7 +222,7 @@ class ChallengeGenerationService {
         }
 
         const response = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: OPENAI_CHAT_MODEL,
           messages: [
             { role: 'system', content: GENERATION_PROMPT },
             { role: 'user', content: userMessage },

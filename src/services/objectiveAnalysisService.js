@@ -139,6 +139,9 @@ class ObjectiveAnalysisService {
       userPrompt: JSON.stringify(userContext),
       temperature: 0.3,
       maxTokens: 8000,
+      // Preserve prior behaviour: the caller explicitly guards on
+      // !analysis.competencies below, so keep the lenient {text} fallback.
+      lenient: true,
     });
 
     if (!analysis.competencies || !Array.isArray(analysis.competencies)) {

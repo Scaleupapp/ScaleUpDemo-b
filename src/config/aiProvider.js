@@ -7,6 +7,7 @@
  */
 
 const openai = require('./openai');
+const { OPENAI_CHAT_MODEL } = require('./openaiModels');
 const anthropic = require('./anthropic');
 
 class AIProvider {
@@ -16,7 +17,7 @@ class AIProvider {
    */
   async generateWithGPT({ systemPrompt, userPrompt, temperature = 0.7, maxTokens = 4000 }) {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: OPENAI_CHAT_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -29,9 +30,15 @@ class AIProvider {
   }
 
   /**
-   * Analyze/evaluate using Claude (for reasoning and evaluation tasks)
+   * Analyze/evaluate using Claude (for reasoning and evaluation tasks).
+   *
+   * By DEFAULT this THROWS when the response is not parseable JSON — grading
+   * callers must never silently persist an all-undefined "evaluation" from a
+   * `{ text }` fallback (spec §Answer-side #2). Callers that legitimately expect
+   * free-text prose (or that historically tolerated the fallback) pass
+   * `{ lenient: true }` to get the old `{ text }` behaviour back.
    */
-  async analyzeWithClaude({ systemPrompt, userPrompt, temperature = 0.3, maxTokens = 8000 }) {
+  async analyzeWithClaude({ systemPrompt, userPrompt, temperature = 0.3, maxTokens = 8000, lenient = false }) {
     const response = await anthropic.messages.create({
       // claude-sonnet-4-20250514 retired 2026-06-15; claude-sonnet-4-6 is the drop-in replacement
       model: 'claude-sonnet-4-6',
@@ -54,19 +61,21 @@ class AIProvider {
     if (jsonMatch) {
       try {
         return JSON.parse(jsonMatch[0]);
-      } catch (_) {
-        // Not valid JSON, return as text
+      } catch (err) {
+        if (lenient) return { text };
+        throw new Error(`analyzeWithClaude: response was not valid JSON: ${err.message} | snippet: "${text.slice(0, 200).replace(/\n/g, '\\n')}"`);
       }
     }
-    return { text };
+    if (lenient) return { text };
+    throw new Error(`analyzeWithClaude: response contained no JSON object | snippet: "${text.slice(0, 200).replace(/\n/g, '\\n')}"`);
   }
 
   /**
    * Evaluate with Claude - specifically for grading/evaluation tasks
-   * Returns structured evaluation results
+   * Returns structured evaluation results. Throws on non-JSON by default.
    */
-  async evaluateWithClaude({ systemPrompt, userPrompt, temperature = 0.2, maxTokens = 6000 }) {
-    return this.analyzeWithClaude({ systemPrompt, userPrompt, temperature, maxTokens });
+  async evaluateWithClaude({ systemPrompt, userPrompt, temperature = 0.2, maxTokens = 6000, lenient = false }) {
+    return this.analyzeWithClaude({ systemPrompt, userPrompt, temperature, maxTokens, lenient });
   }
 }
 

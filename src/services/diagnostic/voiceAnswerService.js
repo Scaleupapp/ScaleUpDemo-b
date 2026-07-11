@@ -1,4 +1,5 @@
 const openai = require('../../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../../config/openaiModels');
 const fetch = require('node-fetch');
 
 const SCORING_SCHEMA = {
@@ -71,7 +72,7 @@ async function scoreVoiceAnswer({ transcription, questionText, canonicalCompeten
   try {
     const completion = await openai.chat.completions.create(
       {
-        model: 'gpt-4o',
+        model: OPENAI_CHAT_MODEL,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           {

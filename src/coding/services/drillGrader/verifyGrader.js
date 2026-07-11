@@ -112,6 +112,7 @@ async function grade({ drillAttemptId }) {
     taskId:   'drill_grade_verify',
     system:   SYSTEM,
     messages: [{ role: 'user', content: userMsg }],
+    temperature: 0, // deterministic grading (spec §Answer-side deterministic core)
   });
 
   const parsed = parseLLMJson(res.content);
@@ -141,7 +142,8 @@ async function grade({ drillAttemptId }) {
       rubric_breakdown:     flattenRubric(fullRubric),
       what_to_try_next:     parsed.what_to_try_next,
       what_you_missed:      Array.isArray(parsed.what_you_missed) ? parsed.what_you_missed : [],
-      integrity_confidence: 'high',
+      // No proctoring/integrity signals exist for drills — 'high' was a lie.
+      integrity_confidence: 'unverified',
       graded_at:            new Date(),
       grader_model:         res._meta.model,
     },

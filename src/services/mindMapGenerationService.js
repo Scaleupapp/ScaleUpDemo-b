@@ -1,4 +1,5 @@
 const openai = require('../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const Content = require('../models/Content');
 const MindMap = require('../models/MindMap');
 const ApiError = require('../utils/apiError');
@@ -54,7 +55,7 @@ class MindMapGenerationService {
     try {
       const inputText = contentText.slice(0, 10000);
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: OPENAI_CHAT_MODEL,
         messages: [
           { role: 'system', content: MINDMAP_PROMPT },
           {

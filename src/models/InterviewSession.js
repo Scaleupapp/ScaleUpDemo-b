@@ -44,6 +44,14 @@ const interviewSessionSchema = new mongoose.Schema({
   // Gemini system instruction (generated for this session)
   systemInstruction: { type: String },
 
+  // Expected-answer outlines from the question-side authoring gate (block 4).
+  // Doubled as grading anchors so the evaluator scores against a reference.
+  expectedAnswers: [{
+    question: String,
+    outline: String,
+    _id: false,
+  }],
+
   // Conversation transcript
   transcript: [transcriptEntrySchema],
   totalQuestions: { type: Number, default: 0 },
@@ -79,6 +87,14 @@ const interviewSessionSchema = new mongoose.Schema({
       flags: [String],
       recommendation: String,
     },
+    // Answer-side LLM-as-judge (spec §Answer-side #3): set when an independent
+    // cross-family judge still disagrees > 15 pts after one auto re-grade.
+    // Surfaced to admin/TPO ("under review") instead of a trusted number.
+    needsReview: { type: Boolean, default: false },
+    judgeOverall: { type: Number },
+    judgeDisagreement: { type: Number },
+    // 'insufficient' when the transcript is too thin to grade (min-transcript gate).
+    gradeStatus: { type: String, enum: ['graded', 'insufficient'] },
   },
 }, { timestamps: true });
 

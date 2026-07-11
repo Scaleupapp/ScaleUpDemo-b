@@ -11,6 +11,9 @@
 
 process.env.OPENAI_API_KEY     = process.env.OPENAI_API_KEY     || 'stub';
 process.env.ANTHROPIC_API_KEY  = process.env.ANTHROPIC_API_KEY  || 'stub';
+// Disable the answer-side judge here — these tests exercise the grader itself.
+// Judge behaviour is covered independently in gradeJudgeService.test.js.
+process.env.GRADE_JUDGE_SAMPLE_RATE = '0';
 
 const test   = require('node:test');
 const assert = require('node:assert/strict');
@@ -95,19 +98,22 @@ const { grade } = require('../../coding/services/drillGrader/promptGrader');
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-test('promptGrader: grade() calls llmCall and returns parsed score', async () => {
+// Code-side recompute: dims 8,7,7,8 → mean 7.5 → 75 (NOT the LLM's self-reported 78).
+test('promptGrader: grade() calls llmCall and returns code-recomputed score', async () => {
   const result = await grade({ drillAttemptId: attemptId });
-  assert.strictEqual(result.overall_score, 78, 'overall_score should be 78');
+  assert.strictEqual(result.overall_score, 75, 'overall_score should be code-recomputed 75');
+  assert.strictEqual(result.llm_overall_score, 78, 'llm_overall_score retains the LLM number');
 });
 
-test('promptGrader: grade() writes status=graded and overall_score=78 back to DrillAttempt', async () => {
+test('promptGrader: grade() writes status=graded and code-recomputed overall_score back to DrillAttempt', async () => {
   // Reset and re-run so capturedUpdate is fresh
   capturedUpdate = null;
   await grade({ drillAttemptId: attemptId });
 
   assert.ok(capturedUpdate, 'findByIdAndUpdate should have been called');
   assert.strictEqual(capturedUpdate.status, 'graded', 'status should be graded');
-  assert.strictEqual(capturedUpdate.grade.overall_score, 78, 'grade.overall_score should be 78');
+  assert.strictEqual(capturedUpdate.grade.overall_score, 75, 'grade.overall_score should be 75');
+  assert.strictEqual(capturedUpdate.grade.integrity_confidence, 'unverified', 'drill integrity is unverified, not high');
 });
 
 test('promptGrader: grade() rubric_breakdown has 4 entries', async () => {
@@ -215,7 +221,7 @@ test('promptGrader: calls applyPostGradeUpdates after writing grade (regression)
 
   assert.equal(postGradeCalled, true, 'applyPostGradeUpdates should be called');
   assert.ok(postGradeArgs, 'postGradeArgs should be set');
-  assert.equal(postGradeArgs.score, 78, 'score should be passed');
+  assert.equal(postGradeArgs.score, 75, 'code-recomputed score should be passed');
   assert.equal(postGradeArgs.roleTrack, 'swe');
   assert.equal(postGradeArgs.drillSubtype, 'prompt');
 });
