@@ -11,7 +11,10 @@ const DrillAttemptSchema = new mongoose.Schema({
     required: true,
     index: true,  // we query by this in calibration matching
   },
-  status: { type: String, enum: ['scheduled', 'in_progress', 'submitted', 'graded'], default: 'scheduled' },
+  // 'failed' = grading exhausted its retries (Wave 2 block 6) — surfaced to the
+  // student instead of an eternal 202 poll; recoverable via admin regrade.
+  status: { type: String, enum: ['scheduled', 'in_progress', 'submitted', 'graded', 'failed'], default: 'scheduled' },
+  failure_reason: String,
   started_at: Date,
   submitted_at: Date,
   time_taken_seconds: Number,

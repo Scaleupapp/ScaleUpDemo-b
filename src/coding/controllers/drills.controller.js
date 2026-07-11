@@ -294,6 +294,17 @@ async function getResult(req, res) {
       return res.status(404).json({ error: 'no_attempt_found' });
     }
 
+    // Terminal failure surface (Wave 2 block 6): grading exhausted retries.
+    // 200 (not 202) so pollers stop; admin regrade can requeue the attempt.
+    if (attempt.status === 'failed') {
+      return res.status(200).json({
+        attempt_id: attempt._id,
+        status: 'failed',
+        error: 'grading_failed',
+        detail: attempt.failure_reason || 'Grading failed after multiple attempts. The team has been alerted.',
+      });
+    }
+
     if (attempt.status !== 'graded') {
       return res.status(202).json({ status: attempt.status, attempt_id: attempt._id });
     }
@@ -527,9 +538,14 @@ async function getCalibrationResult(req, res) {
     }
 
     const gradedCount = attempts.filter(a => a.status === 'graded').length;
+    const failedCount = attempts.filter(a => a.status === 'failed').length;
     let status;
     if (gradedCount === attempts.length) {
       status = 'graded';
+    } else if (failedCount > 0 && gradedCount + failedCount === attempts.length) {
+      // Terminal: nothing left in flight but at least one grade failed —
+      // surface it instead of polling 'partial' forever (Wave 2 block 6).
+      status = 'failed';
     } else if (gradedCount > 0) {
       status = 'partial';
     } else {
@@ -543,6 +559,15 @@ async function getCalibrationResult(req, res) {
       rubric_breakdown: a.grade ? a.grade.rubric_breakdown : null,
       what_you_missed: a.grade ? (a.grade.what_you_missed || []) : [],
     }));
+
+    if (status === 'failed') {
+      return res.status(200).json({
+        calibration_id,
+        status: 'failed',
+        error: 'grading_failed',
+        drills: drillsView,
+      });
+    }
 
     if (status !== 'graded') {
       return res.status(202).json({

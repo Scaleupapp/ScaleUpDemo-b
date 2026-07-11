@@ -35,6 +35,10 @@ const HARD_BUFFER_SECONDS = 30; // matches spec §12.2 (the +30s after the 60s g
 // expires_at, so the over-budget sweep below never touches it — it would block
 // the learner's next capstone forever. Reap anything stuck unstarted past this.
 const STALE_UNSTARTED_MS = 30 * 60 * 1000;
+// A session stuck in 'evaluating' longer than this has a wedged/dead eval run
+// (worker crashed mid-pipeline, redis blip after the final retry, …). Revert
+// it to 'submitted' so step 3's re-enqueue picks it up (Wave 2 block 6).
+const EVALUATING_STUCK_MS = 30 * 60 * 1000;
 
 let connection;
 let queue;
@@ -162,6 +166,35 @@ async function tick() {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[sandbox-gc] stuck-generation cleanup failed:', err.message);
+  }
+
+  // 2d. Recover stuck EVALUATING sessions (Wave 2 block 6). Conditional update
+  //     so a grade landing concurrently wins; once back in 'submitted', step 3
+  //     below re-enqueues the evaluation on its idempotent jobId.
+  summary.recoveredEvaluating = 0;
+  try {
+    const evalCutoff = new Date(Date.now() - EVALUATING_STUCK_MS);
+    const stuckEvaluating = await CapstoneSession.find({
+      status: 'evaluating',
+      updatedAt: { $lt: evalCutoff },
+    })
+      .select('_id')
+      .lean();
+    for (const s of stuckEvaluating) {
+      const reverted = await CapstoneSession.findOneAndUpdate(
+        { _id: s._id, status: 'evaluating' },
+        { $set: { status: 'submitted' } },
+        { new: true }
+      );
+      if (reverted) {
+        summary.recoveredEvaluating += 1;
+        // eslint-disable-next-line no-console
+        console.warn(`[sandbox-gc] recovered stuck evaluating session ${s._id} → submitted`);
+      }
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[sandbox-gc] stuck-evaluating recovery failed:', err.message);
   }
 
   // 3. Recover stuck submits — sessions that have been `submitted` for
