@@ -22,6 +22,20 @@ function isWindowClosed(assessment) {
 }
 
 /**
+ * The contract (Wave 3 block 3) that tells apps/portal WHEN detailed review
+ * unlocks for students:
+ *   - 'at_closesAt' — a scheduled close time exists; review unlocks when it passes
+ *     (or on an earlier manual close).
+ *   - 'on_close'    — no scheduled close; review unlocks ONLY when the TPO manually
+ *     closes the assessment. Without a manual close, review never unlocks — the
+ *     create route surfaces a warning for the both-absent case.
+ */
+function reviewUnlockPolicy(assessment) {
+  if (!assessment) return 'on_close';
+  return assessment.closesAt ? 'at_closesAt' : 'on_close';
+}
+
+/**
  * Shape the per-question review for an MCQ session.
  * @returns {Promise<{ engineType: 'mcq', questions: Array }|null>} null for non-mcq or missing data.
  */
@@ -59,4 +73,4 @@ async function buildMcqReview(session, deps = {}) {
   return { engineType: 'mcq', questions };
 }
 
-module.exports = { isWindowClosed, buildMcqReview };
+module.exports = { isWindowClosed, reviewUnlockPolicy, buildMcqReview };

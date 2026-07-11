@@ -7,6 +7,8 @@
  * No direct require() of mongoose models — deps are always injected.
  */
 
+const { scoreMethodForEngine } = require('./assessmentIntegrityService');
+
 /**
  * CSV-escape a single field value.
  * Fields containing comma, double-quote, newline (\n), or carriage return (\r)
@@ -136,12 +138,18 @@ async function buildSessionRows(assessmentId, { revealScores, cohortId }, deps) 
       userId: uid,
       name,
       rollNumber,
+      // status carries the honest terminal state incl. 'expired' (Wave 3 block 2).
       status: s.status,
       startedAt: s.startedAt || null,
       submittedAt: s.submittedAt || null,
       gradedAt: s.gradedAt || null,
       score,
       integrity: result.integrity != null ? result.integrity : null,
+      // Honest grade surfacing (Wave 3 block 2): disputed grade / insufficient evidence.
+      needsReview: !!result.needsReview,
+      gradeStatus: result.gradeStatus != null ? result.gradeStatus : null,
+      // Per-engine score framing (Wave 3 block 4): objective % vs AI-judged.
+      scoreMethod: scoreMethodForEngine(s.engine && s.engine.type),
       raw: result.raw != null ? result.raw : null,
     };
   });
@@ -159,7 +167,10 @@ async function buildSessionRows(assessmentId, { revealScores, cohortId }, deps) 
  * @returns {string} CSV text (header + data rows, separated by \n)
  */
 function toCsv(rows, competencyColumns) {
-  const fixedHeaders = ['rollNumber', 'name', 'status', 'score', 'integrity', 'submittedAt', 'gradedAt'];
+  // Additive columns appended after gradedAt (Wave 3): existing fixed columns keep
+  // their order/indices so current CSV consumers are unaffected. needsReview +
+  // gradeStatus surface honest grade state; scoreMethod tags objective vs AI-judged.
+  const fixedHeaders = ['rollNumber', 'name', 'status', 'score', 'scoreMethod', 'integrity', 'submittedAt', 'gradedAt', 'needsReview', 'gradeStatus'];
   const allHeaders = [...fixedHeaders, ...competencyColumns];
 
   const lines = [allHeaders.map(escapeCsvField).join(',')];
@@ -171,10 +182,13 @@ function toCsv(rows, competencyColumns) {
       escapeCsvField(row.status),
       // score: blank if null
       escapeCsvField(row.score == null ? '' : row.score),
+      escapeCsvField(row.scoreMethod == null ? '' : row.scoreMethod),
       escapeCsvField(row.integrity == null ? '' : row.integrity),
       // dates: ISO string or ''
       escapeCsvField(row.submittedAt ? new Date(row.submittedAt).toISOString() : ''),
       escapeCsvField(row.gradedAt ? new Date(row.gradedAt).toISOString() : ''),
+      escapeCsvField(row.needsReview ? 'true' : ''),
+      escapeCsvField(row.gradeStatus == null ? '' : row.gradeStatus),
     ];
 
     // Competency columns — look up value from row.raw across all engine shapes

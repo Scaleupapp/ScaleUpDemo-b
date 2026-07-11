@@ -129,6 +129,25 @@ test('runSyncTick: no sessions → completes without error and syncSession not c
   assert.strictEqual(syncCalled, false);
 });
 
+test('runSyncTick: per-session deadline (closesAt in future) is delegated to syncSession, not force-expired by the worker', async () => {
+  // The worker only force-expires on assessment.closesAt. A per-session
+  // duration deadline is enforced INSIDE syncSession — so a session past its
+  // own deadlineAt but with the assessment window still open must simply be
+  // routed through syncSession (which expires it), never touched by the
+  // worker's own closesAt branch.
+  const session = makeSession({ _id: 'sPerSessionDl', deadlineAt: new Date(Date.now() - 1000) });
+  const called = [];
+  const deps = {
+    AssessmentSession: { find: async () => [session] },
+    Assessment: { findById: async () => makeAssessment({ closesAt: new Date(Date.now() + 86400_000) }) },
+    syncSession: async (id) => { called.push(String(id)); },
+    now: () => new Date(),
+  };
+  await runSyncTick(deps);
+  assert.deepStrictEqual(called, [String(session._id)], 'delegated to syncSession');
+  assert.notStrictEqual(session.status, 'expired', 'worker did not force-expire; syncSession owns per-session deadline');
+});
+
 test('runSyncTick: session with no closesAt on assessment is not expired (syncSession called)', async () => {
   const session = makeSession({ _id: 'sNoDl' });
   const called = [];

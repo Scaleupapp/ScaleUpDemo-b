@@ -1,6 +1,36 @@
 'use strict';
 const { getAdapter } = require('./engineAdapters');
 
+// ── Server-side duration enforcement (Wave 3 block 1) ────────────────────────
+
+// durationSeconds lives on the engine-specific config sub-object (mcq/capstone/
+// interview). Drill has none. Returns a positive number or 0 (no cap).
+function getConfiguredDurationSeconds(assessment) {
+  if (!assessment || !assessment.type) return 0;
+  const cfg = (assessment.config && assessment.config[assessment.type]) || {};
+  const d = cfg.durationSeconds;
+  return typeof d === 'number' && d > 0 ? d : 0;
+}
+
+// How long after deadlineAt a completed engine result can still recover an
+// 'expired' session to 'graded' (review I3: the worker's 60s tick can expire a
+// session moments before a finished, late-syncing submission arrives — don't
+// discard completed work over that race). Kept short so the deadline stays real.
+const EXPIRED_RECOVERY_GRACE_MS = 10 * 60 * 1000;
+
+// deadlineAt = startedAt + durationSeconds, never beyond closesAt (min of the
+// two). Returns null when there is no positive duration (closesAt still governs
+// via the sync worker). Exported so routes/tests can reason about the contract.
+function computeDeadlineAt(startedAt, durationSeconds, closesAt) {
+  if (!durationSeconds || durationSeconds <= 0) return null;
+  let deadline = new Date(new Date(startedAt).getTime() + durationSeconds * 1000);
+  if (closesAt) {
+    const c = new Date(closesAt);
+    if (!isNaN(c.getTime()) && c < deadline) deadline = c;
+  }
+  return deadline;
+}
+
 // Start a student's single attempt: validate the assessment is released + in-window,
 // enforce single attempt, spin up the engine session, persist the AssessmentSession.
 async function startSession(userId, assessmentId, deps = {}) {
@@ -19,6 +49,11 @@ async function startSession(userId, assessmentId, deps = {}) {
   const enrollment = await Enrollment.findOne({ userId, cohortId: a.cohortId });
   if (!enrollment) throw new Error('NOT_ENROLLED');
 
+  // Server-side duration cap: persist a per-session deadline so the engine sync
+  // boundary + worker can auto-finalize a run that overruns (never beyond the
+  // assessment's own closesAt window).
+  const deadlineAt = computeDeadlineAt(now, getConfiguredDurationSeconds(a), a.closesAt);
+
   // Reserve-first: atomically claim the row before creating any engine session.
   // Concurrent starts: only one wins the unique-index write; the loser gets
   // a duplicate-key error (code 11000) and returns the winner's row without
@@ -34,6 +69,7 @@ async function startSession(userId, assessmentId, deps = {}) {
       engine: { type: a.type },
       status: 'scheduled',
       startedAt: now,
+      ...(deadlineAt ? { deadlineAt } : {}),
     });
   } catch (e) {
     if (e.code === 11000) {
@@ -68,14 +104,42 @@ async function syncSession(sessionId, deps = {}) {
   const AssessmentSession = deps.AssessmentSession || require('../../../models/AssessmentSession');
   const session = await AssessmentSession.findById(sessionId);
   if (!session) throw new Error('NOT_FOUND');
+  // Graded is terminal. Expired allows a BOUNDED recovery (review I3): the 60s
+  // worker can expire a session in the window between deadlineAt and a
+  // late-arriving engine submission whose work was actually completed — if the
+  // engine result exists within the grace window, grade it rather than discard
+  // finished work. Past the grace window, expired is terminal.
   if (session.status === 'graded') return session;
+
+  const now = (deps.now && deps.now()) || new Date();
+  if (session.status === 'expired') {
+    const deadlineMs = session.deadlineAt ? new Date(session.deadlineAt).getTime() : null;
+    if (deadlineMs === null || now.getTime() - deadlineMs > EXPIRED_RECOVERY_GRACE_MS) {
+      return session;
+    }
+    // else fall through: a completed engine result within grace recovers below.
+  }
 
   const adapter = getAdapter(session.engine.type);
   const r = await adapter.readResult(session, deps.adapterDeps || {});
-  if (!r.done) return session; // still pending
+  if (!r.done) {
+    if (session.status === 'expired') return session; // stays expired
+    // Past the per-session duration deadline with no engine result → auto-expire.
+    // The worker's tick reaches this same path, so per-session deadlines expire
+    // even when the assessment itself has no closesAt window.
+    if (session.deadlineAt && now > new Date(session.deadlineAt)) {
+      session.status = 'expired';
+      await session.save();
+    }
+    return session; // still pending (or just expired)
+  }
 
   session.status = 'graded';
-  session.gradedAt = (deps.now && deps.now()) || new Date();
+  session.gradedAt = now;
+  // Honest lifecycle (Wave 3 block 2): stamp the submission moment. Our engines
+  // surface a result only once graded, so submittedAt == gradedAt here; a truly
+  // async engine that reports submitted-before-graded would set it earlier.
+  if (!session.submittedAt) session.submittedAt = now;
   session.result = {
     score: r.score,
     integrity: r.integrity,
@@ -102,4 +166,4 @@ async function syncSession(sessionId, deps = {}) {
   return session;
 }
 
-module.exports = { startSession, syncSession };
+module.exports = { startSession, syncSession, getConfiguredDurationSeconds, computeDeadlineAt, EXPIRED_RECOVERY_GRACE_MS };

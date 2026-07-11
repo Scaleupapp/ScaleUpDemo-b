@@ -325,3 +325,88 @@ test('POST sync NOT_FOUND → 404', async () => {
   assert.strictEqual(res.status, 404);
   studentAssessments._deps = null;
 });
+
+// ── POST /assessments/sessions/:id/integrity (Wave 3 block 4) ─────────────────
+
+function makeIntegritySession(overrides = {}) {
+  return {
+    _id: 'sess1',
+    userId: STUDENT_ID,
+    status: 'in_progress',
+    save: async function () { return this; },
+    ...overrides,
+  };
+}
+
+test('POST integrity: clamps counters, flags on paste, stores + 200', async () => {
+  let saved = null;
+  const session = makeIntegritySession();
+  session.save = async function () { saved = this.integritySignals; return this; };
+  const app = makeApp({
+    auth: stubAuth(STUDENT_ID),
+    AssessmentSession: { findById: async () => session },
+  });
+  const res = await request(app)
+    .post('/api/v2/me/assessments/sessions/sess1/integrity')
+    .send({ appBackgroundedCount: 2, focusLossSeconds: 5, pasteCount: 1, extraIgnored: 9 });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.data.integritySignals.pasteCount, 1);
+  assert.strictEqual(res.body.data.integritySignals.flagged, true, 'any paste flags');
+  assert.ok(saved && saved.updatedAt, 'stored with updatedAt');
+  studentAssessments._deps = null;
+});
+
+test('POST integrity: >3 backgroundings flags; clean stays unflagged; negatives clamp to 0', async () => {
+  const app1 = makeApp({ auth: stubAuth(STUDENT_ID), AssessmentSession: { findById: async () => makeIntegritySession() } });
+  const flagged = await request(app1)
+    .post('/api/v2/me/assessments/sessions/sess1/integrity')
+    .send({ appBackgroundedCount: 4, pasteCount: 0 });
+  assert.strictEqual(flagged.body.data.integritySignals.flagged, true, '>3 backgroundings flags');
+  studentAssessments._deps = null;
+
+  const app2 = makeApp({ auth: stubAuth(STUDENT_ID), AssessmentSession: { findById: async () => makeIntegritySession() } });
+  const clean = await request(app2)
+    .post('/api/v2/me/assessments/sessions/sess1/integrity')
+    .send({ appBackgroundedCount: 2, focusLossSeconds: -50, pasteCount: 0 });
+  assert.strictEqual(clean.body.data.integritySignals.flagged, false, '≤3 backgroundings, no paste = clean');
+  assert.strictEqual(clean.body.data.integritySignals.focusLossSeconds, 0, 'negative clamped to 0');
+  studentAssessments._deps = null;
+});
+
+test('POST integrity: not the owner → 404', async () => {
+  const app = makeApp({
+    auth: stubAuth(STUDENT_ID),
+    AssessmentSession: { findById: async () => makeIntegritySession({ userId: OTHER_ID }) },
+  });
+  const res = await request(app)
+    .post('/api/v2/me/assessments/sessions/sess1/integrity')
+    .send({ pasteCount: 1 });
+  assert.strictEqual(res.status, 404);
+  studentAssessments._deps = null;
+});
+
+test('POST integrity: session not in_progress → 409 NOT_IN_PROGRESS', async () => {
+  const app = makeApp({
+    auth: stubAuth(STUDENT_ID),
+    AssessmentSession: { findById: async () => makeIntegritySession({ status: 'graded' }) },
+  });
+  const res = await request(app)
+    .post('/api/v2/me/assessments/sessions/sess1/integrity')
+    .send({ pasteCount: 1 });
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'NOT_IN_PROGRESS');
+  studentAssessments._deps = null;
+});
+
+test('POST integrity: non-numeric counter → 400 VALIDATION', async () => {
+  const app = makeApp({
+    auth: stubAuth(STUDENT_ID),
+    AssessmentSession: { findById: async () => makeIntegritySession() },
+  });
+  const res = await request(app)
+    .post('/api/v2/me/assessments/sessions/sess1/integrity')
+    .send({ pasteCount: 'lots' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.code, 'VALIDATION');
+  studentAssessments._deps = null;
+});

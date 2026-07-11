@@ -72,24 +72,105 @@ test('recompute computes correct counts and avgScore from sessions', async () =>
   assert.strictEqual(doc.integrityFlags, 0, 'no integrity flags for clean sessions');
 });
 
-test('recompute counts integrity flags correctly', async () => {
+test('recompute: expired sessions form a distinct bucket + gradedCount reflects scored sessions (Wave 3 block 2)', async () => {
   const sessions = [
-    makeSession('graded', 55, 'suspicious'),
+    makeSession('scheduled', undefined, undefined),
+    makeSession('in_progress', undefined, undefined),
+    makeSession('expired', undefined, undefined),
+    makeSession('expired', undefined, undefined),
+    makeSession('graded', 90, 'high'),
     makeSession('graded', 70, 'high'),
-    makeSession('graded', 60, 'minor_flags'),
-    makeSession('graded', 80, 'clean'),
+  ];
+  const deps = {
+    AssessmentSession: { find: async () => sessions },
+    CohortRollup: { findOneAndUpdate: async (f, u) => ({ ...u.$set }) },
+    InstitutionEnrollment: makeEnrollmentStub(8),
+    now: () => new Date(),
+  };
+  const doc = await recompute('inst1', 'cohort1', 'assess1', deps);
+  assert.strictEqual(doc.counts.expired, 2, 'expired is its own bucket');
+  assert.strictEqual(doc.counts.started, 5, 'started = non-scheduled (incl. expired)');
+  assert.strictEqual(doc.counts.graded, 2);
+  assert.strictEqual(doc.counts.submitted, 2, 'submitted does not include expired');
+  assert.strictEqual(doc.gradedCount, 2, 'gradedCount = number of scored sessions avgScore averages');
+  assert.strictEqual(doc.avgScore, 80);
+});
+
+test('recompute also writes the cohort-wide (assessmentId:null) rollup aggregating across engines (Wave 3 block 3)', async () => {
+  const perAssessment = [
+    makeSession('graded', 80, 'high', 'mcq', { competencyBreakdown: [{ competency: 'logic', percentage: 80 }] }),
+  ];
+  const allCohort = [
+    ...perAssessment,
+    makeSession('graded', 40, 'high', 'interview', { dimensions: { communication: { score: 40 } } }),
+    makeSession('expired', undefined, undefined),
+  ];
+  const upserts = [];
+  const deps = {
+    // cohort-wide find has no assessmentId key; per-assessment find does.
+    AssessmentSession: { find: async (filter) => (filter.assessmentId === undefined ? allCohort : perAssessment) },
+    CohortRollup: {
+      findOneAndUpdate: async (filter, update) => { upserts.push({ filter, doc: update.$set }); return { ...update.$set }; },
+    },
+    InstitutionEnrollment: makeEnrollmentStub(10),
+    now: () => new Date(),
+  };
+  await recompute('inst1', 'cohort1', 'assess1', deps);
+
+  const wide = upserts.find((u) => u.filter.assessmentId === null);
+  assert.ok(wide, 'cohort-wide (assessmentId:null) rollup written');
+  assert.strictEqual(wide.doc.counts.graded, 2, 'cohort-wide graded aggregates across assessments');
+  assert.strictEqual(wide.doc.counts.expired, 1);
+  assert.strictEqual(wide.doc.gradedCount, 2);
+  const names = wide.doc.byCompetency.map((c) => c.name).sort();
+  assert.deepStrictEqual(names, ['communication', 'logic'], 'byCompetency mixes each engine correctly');
+
+  const perA = upserts.find((u) => u.filter.assessmentId === 'assess1');
+  assert.ok(perA, 'per-assessment rollup still written');
+  assert.strictEqual(perA.doc.counts.graded, 1);
+});
+
+test('recompute counts integrity flags correctly — real (proctored) flags only (Wave 3 block 4)', async () => {
+  // capstone = proctored (real signal). 'suspicious' + 'minor_flags' are real flags;
+  // 'high'/'clean' are clean. integrityFlags == integrity.flaggedCount.
+  const sessions = [
+    makeSession('graded', 55, 'suspicious', 'capstone'),
+    makeSession('graded', 70, 'high', 'capstone'),
+    makeSession('graded', 60, 'minor_flags', 'capstone'),
+    makeSession('graded', 80, 'clean', 'capstone'),
   ];
 
   const deps = {
     AssessmentSession: { find: async () => sessions },
-    CohortRollup: { findOneAndUpdate: async () => ({}) },
+    CohortRollup: { findOneAndUpdate: async (f, u) => ({ ...u.$set }) },
     InstitutionEnrollment: makeEnrollmentStub(4),
     now: () => new Date(),
   };
 
   const doc = await recompute('inst1', 'cohort1', 'assess1', deps);
-  // 'suspicious' + 'minor_flags' → 2 flags; 'high' and 'clean' are fine
   assert.strictEqual(doc.integrityFlags, 2);
+  assert.strictEqual(doc.integrity.flaggedCount, 2);
+  assert.strictEqual(doc.integrity.checkedCount, 4, 'all 4 capstone sessions are proctored');
+  assert.strictEqual(doc.integrity.unproctoredCount, 0);
+  assert.strictEqual(doc.scoreMethod, 'ai_judged', 'capstone is AI-judged');
+});
+
+test('recompute: mcq/interview/drill sessions are unproctored, not fabricated flags (Wave 3 block 4)', async () => {
+  const sessions = [
+    makeSession('graded', 30, 'suspicious', 'mcq'),   // no real signal → unproctored
+    makeSession('graded', 40, 'low', 'interview'),     // transcript-guess → unproctored
+    makeSession('graded', 50, 'unverified', 'drill'),  // unverified → unproctored
+  ];
+  const deps = {
+    AssessmentSession: { find: async () => sessions },
+    CohortRollup: { findOneAndUpdate: async (f, u) => ({ ...u.$set }) },
+    InstitutionEnrollment: makeEnrollmentStub(3),
+    now: () => new Date(),
+  };
+  const doc = await recompute('inst1', 'cohort1', 'assess1', deps);
+  assert.strictEqual(doc.integrityFlags, 0, 'no fabricated flags from unproctored engines');
+  assert.strictEqual(doc.integrity.unproctoredCount, 3);
+  assert.strictEqual(doc.integrity.checkedCount, 0);
 });
 
 test('recompute calls findOneAndUpdate with correct upsert filter', async () => {

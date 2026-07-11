@@ -19,6 +19,8 @@ const express = require('express');
 const realAuth = require('../../middleware/auth');
 const { getAdapter: realGetAdapter } = require('../../services/institution/assessment/engineAdapters');
 const reviewService = require('../../services/institution/assessment/assessmentReviewService');
+const { getConfiguredDurationSeconds } = require('../../services/institution/assessment/assessmentSessionService');
+const integrityService = require('../../services/institution/assessment/assessmentIntegrityService');
 
 const router = express.Router();
 router._deps = null;
@@ -104,12 +106,22 @@ router.get('/assessments', (req, res, next) => getAuth()(req, res, next), async 
       sessionByAssessmentId[String(s.assessmentId)] = s;
     }
 
-    const data = assessments.map((a) => ({
-      assessment: a,
-      session: sessionByAssessmentId[String(a._id)] || null,
-      // Detailed per-question review unlocks for the student once the window closes.
-      windowClosed: reviewService.isWindowClosed(a),
-    }));
+    const data = assessments.map((a) => {
+      const session = sessionByAssessmentId[String(a._id)] || null;
+      return {
+        assessment: a,
+        session,
+        // Detailed per-question review unlocks for the student once the window closes.
+        windowClosed: reviewService.isWindowClosed(a),
+        // Take-flow contract (Wave 3): the countdown values apps render. deadlineAt
+        // is the authoritative per-session cutoff (null until the student starts, or
+        // when the assessment has no duration cap); durationSeconds is the configured
+        // budget. reviewUnlockPolicy tells the app when detailed review appears.
+        durationSeconds: getConfiguredDurationSeconds(a) || null,
+        deadlineAt: (session && session.deadlineAt) || null,
+        reviewUnlockPolicy: reviewService.reviewUnlockPolicy(a),
+      };
+    });
 
     return res.status(200).json({ success: true, data });
   } catch (err) {
@@ -136,12 +148,27 @@ router.post('/assessments/:id/start', (req, res, next) => getAuth()(req, res, ne
       console.warn('[studentAssessments:start] getStartMeta failed:', metaErr.message);
     }
 
+    // Take-flow contract (Wave 3): expose the countdown values so apps can render
+    // a timer. deadlineAt is authoritative (server-enforced at sync + worker);
+    // durationSeconds is the configured budget. Best-effort assessment read —
+    // a lookup failure must never fail an otherwise-successful start.
+    let durationSeconds = null;
+    try {
+      const aQuery = getAssessment().findById(assessmentId);
+      const a = typeof aQuery.lean === 'function' ? await aQuery.lean() : await aQuery;
+      if (a) durationSeconds = getConfiguredDurationSeconds(a) || null;
+    } catch (durErr) {
+      console.warn('[studentAssessments:start] durationSeconds lookup failed:', durErr.message);
+    }
+
     return res.status(201).json({
       success: true,
       data: {
         assessmentSessionId: String(session._id),
         engine: session.engine,
         meta,
+        deadlineAt: session.deadlineAt || null,
+        durationSeconds,
       },
     });
   } catch (err) {
@@ -182,6 +209,60 @@ router.post('/assessments/sessions/:sessionId/sync', (req, res, next) => getAuth
     if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Session not found.' });
     console.error('[studentAssessments:sync]', err.message);
     return res.status(500).json({ success: false, message: 'Could not sync session.' });
+  }
+});
+
+// POST /assessments/sessions/:sessionId/integrity — ingest take-flow integrity
+// counters from the student app (Wave 3 block 4).
+//
+// MOBILE CONTRACT (implementers read this):
+//   Method/path : POST /api/v2/me/assessments/sessions/:sessionId/integrity
+//   Auth        : D2C bearer; the caller MUST own the session (else 404).
+//   When        : only while the session is in_progress (else 409 NOT_IN_PROGRESS).
+//   Body (JSON) : { appBackgroundedCount?, focusLossSeconds?, pasteCount? }
+//                 - all optional, non-negative integers; the POST is a full
+//                   SNAPSHOT (latest cumulative counters), not a delta.
+//                 - each is clamped to [0, max] (max: 10000 / 86400 / 10000).
+//                 - a present-but-non-numeric value → 400 VALIDATION.
+//   Effect      : stored on session.integritySignals; marks the session PROCTORED
+//                 for the integrity rollup. Conservative flag: any paste OR >3
+//                 app-backgroundings ⇒ flagged 'minor_flags'.
+//   Response    : { success, data: { integritySignals: { appBackgroundedCount,
+//                   focusLossSeconds, pasteCount, flagged } } }
+//   Idempotent  : yes — re-POST overwrites with the newest snapshot.
+router.post('/assessments/sessions/:sessionId/integrity', (req, res, next) => getAuth()(req, res, next), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { sessionId } = req.params;
+    const AssessmentSession = getAssessmentSession();
+
+    const session = await AssessmentSession.findById(sessionId);
+    // Ownership check (404 hides existence from non-owners), same as sync/review.
+    if (!session || String(session.userId) !== String(userId)) {
+      return res.status(404).json({ success: false, message: 'Session not found.' });
+    }
+    if (session.status !== 'in_progress') {
+      return res.status(409).json({ success: false, code: 'NOT_IN_PROGRESS', message: 'Integrity signals can only be reported while the attempt is in progress.' });
+    }
+
+    // Monotonic merge with what's already stored (review C1): counters ratchet
+    // upward and the flag is sticky — a re-POST of zeros can never erase either.
+    const built = integrityService.buildIngestedSignals(req.body || {}, new Date(), session.integritySignals);
+    if (!built.ok) {
+      return res.status(400).json({ success: false, code: 'VALIDATION', message: 'Integrity counters must be non-negative numbers.' });
+    }
+
+    session.integritySignals = built.signals;
+    await session.save();
+
+    const { appBackgroundedCount, focusLossSeconds, pasteCount, flagged } = built.signals;
+    return res.status(200).json({
+      success: true,
+      data: { integritySignals: { appBackgroundedCount, focusLossSeconds, pasteCount, flagged } },
+    });
+  } catch (err) {
+    console.error('[studentAssessments:integrity]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not record integrity signals.' });
   }
 });
 
