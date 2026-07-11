@@ -9,12 +9,21 @@ const AssessmentSchema = new mongoose.Schema({
   // Engine-specific config, frozen at release. Only the sub-object matching `type` is used.
   config: {
     mcq: {
-      questions: { type: Array, default: undefined }, // frozen canonical question set (Quiz.questions shape)
+      questions: { type: Array, default: undefined }, // frozen QA-passed question POOL (Quiz.questions shape + per-item `qa`)
       totalQuestions: Number,
+      // Number of questions each student answers (sampled from the pool at serve time).
+      // Distinct from questions.length, which is the over-generated pool size.
+      questionCount: Number,
       durationSeconds: { type: Number, default: 1800 },
       assessmentType: String,
       topic: String,
       sourceId: { type: mongoose.Schema.Types.ObjectId, ref: 'AssessmentSource' },
+      // Honest authoring status — never left implying "still generating" once done.
+      authoring: {
+        status: { type: String, enum: ['generating', 'ready', 'failed'] },
+        error: String,
+        qaReport: { type: mongoose.Schema.Types.Mixed },
+      },
     },
     capstone: {
       bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },

@@ -37,6 +37,10 @@
  */
 
 const SOURCE_TEXT_LIMIT_CAPSTONE = 2000;
+const MCQ_GROUNDING_LIMIT = 6000; // chars of syllabus text injected into generation
+const MCQ_OVER_GENERATION_FACTOR = 1.5; // over-generate the servable pool
+const MCQ_MAX_ROUNDS = 3; // initial generation + 2 regeneration rounds
+const MCQ_SYLLABUS_EXCERPT_LIMIT = 2000; // judge context
 
 function getModel(deps) { return (deps && deps.Assessment) || require('../../../models/Assessment'); }
 function getQuiz(deps) { return (deps && deps.Quiz) || require('../../../models/Quiz'); }
@@ -46,6 +50,51 @@ function getQuizGenerationService(deps) {
 }
 function getAssessmentSource(deps) {
   return (deps && deps.AssessmentSource) || require('../../../models/AssessmentSource');
+}
+function getQuestionQaService(deps) {
+  return (deps && deps.questionQaService) || require('./questionQaService');
+}
+
+/**
+ * Build grounding text from a ready AssessmentSource: extractedText chunked to
+ * `limit` chars, preferring paragraphs that mention the extracted topics.
+ */
+function buildGroundingText(source, limit = MCQ_GROUNDING_LIMIT) {
+  const text = (source && source.extractedText) || '';
+  if (!text) return '';
+  if (text.length <= limit) return text;
+  const topics = ((source && source.extractedTopics) || []).map((t) => t && t.name).filter(Boolean);
+  if (topics.length === 0) return text.slice(0, limit);
+  const paras = text.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+  const scored = paras.map((p, i) => {
+    const low = p.toLowerCase();
+    const score = topics.reduce((s, t) => s + (low.includes(String(t).toLowerCase()) ? 1 : 0), 0);
+    return { p, i, score };
+  });
+  // Most-relevant-first, stable on original order for ties.
+  scored.sort((a, b) => (b.score - a.score) || (a.i - b.i));
+  let out = '';
+  for (const { p } of scored) {
+    if (out.length + p.length + 2 > limit) continue;
+    out += (out ? '\n\n' : '') + p;
+  }
+  return out || text.slice(0, limit);
+}
+
+/** Fold a per-round QA report into a cumulative authoring summary. */
+function accumulateReport(acc, report) {
+  const a = acc || { rounds: 0, totalGenerated: 0, totalPassed: 0, totalRejected: 0, rejectionReasons: {}, letterDistribution: null };
+  a.rounds += 1;
+  a.totalGenerated += report.total || 0;
+  a.totalPassed += report.passedCount || 0;
+  a.totalRejected += report.rejectedCount || 0;
+  a.letterDistribution = report.letterDistribution || a.letterDistribution;
+  for (const r of report.rejections || []) {
+    for (const reason of r.reasons || []) {
+      a.rejectionReasons[reason] = (a.rejectionReasons[reason] || 0) + 1;
+    }
+  }
+  return a;
 }
 
 /**
@@ -71,10 +120,19 @@ async function authorMcq(assessmentId, deps = {}) {
   if (assessment.type !== 'mcq') return null;
 
   const cfg = assessment.config && assessment.config.mcq ? assessment.config.mcq : {};
+  const targetCount = cfg.questionCount || cfg.totalQuestions || 10;
+  const poolTarget = Math.max(targetCount, Math.ceil(targetCount * MCQ_OVER_GENERATION_FACTOR));
+
+  // ── Honest status: mark generating up-front so the release gate never lies ──
+  assessment.config.mcq.authoring = { status: 'generating', error: null, qaReport: null };
+  assessment.markModified('config');
+  try { await assessment.save(); } catch (_) { /* best-effort early status */ }
 
   // ── Grounding: load AssessmentSource when sourceId is configured ────────────
   let transientContentId = null;
   let contentIds = undefined;
+  let groundingText = '';
+  let syllabusExcerpt = '';
 
   if (cfg.sourceId) {
     const AssessmentSource = getAssessmentSource(deps);
@@ -99,15 +157,20 @@ async function authorMcq(assessmentId, deps = {}) {
       });
       transientContentId = transient._id;
       contentIds = [transient._id];
+      // Real grounding: chunked syllabus text (most-relevant-first) into generation.
+      groundingText = buildGroundingText(source, MCQ_GROUNDING_LIMIT);
+      syllabusExcerpt = groundingText.slice(0, MCQ_SYLLABUS_EXCERPT_LIMIT);
     }
   }
 
-  // ── Disambiguate the topic with the cohort's placement-objective domain ─────
+  // ── Cohort competencies + topic-domain disambiguation ───────────────────────
   // Placement MCQs pass noObjective, so generateQuiz gets no competency context —
   // a bare topic like "RAG" is ambiguous and the LLM defaults to project status.
-  // Enrich the topic with the objective's domain so acronyms resolve correctly
-  // (e.g. "RAG" = Retrieval-Augmented Generation in a Full-stack-AI track). Best-effort.
+  // Pass the cohort ObjectiveTemplate competencies EXPLICITLY (routes generation
+  // through the competency prompt so each question emits a `competency` tag), and
+  // keep the topic-enrichment string as belt-and-suspenders disambiguation.
   let domainContext = '';
+  let competencies = [];
   try {
     const InstitutionCohort = deps.InstitutionCohort || require('../../../models/InstitutionCohort');
     const ObjectiveTemplate = deps.ObjectiveTemplate || require('../../../models/ObjectiveTemplate');
@@ -116,11 +179,14 @@ async function authorMcq(assessmentId, deps = {}) {
       ? await ObjectiveTemplate.findById(cohort.objectiveTemplateId).select('label objectiveType specifics capabilityTrack competencies')
       : null;
     if (tpl) {
+      competencies = (tpl.competencies || [])
+        .filter((c) => c && c.name)
+        .map((c) => ({ name: c.name, category: c.category, weight: c.weight }));
       const parts = [];
       if (tpl.label) parts.push(tpl.label);
       if (tpl.capabilityTrack) parts.push(`track: ${String(tpl.capabilityTrack).replace(/_/g, ' ')}`);
       if (tpl.specifics && tpl.specifics.targetRole) parts.push(`role: ${tpl.specifics.targetRole}`);
-      const comps = (tpl.competencies || []).map((c) => c.name).filter(Boolean).slice(0, 8);
+      const comps = competencies.map((c) => c.name).slice(0, 8);
       if (comps.length) parts.push(`competencies: ${comps.join(', ')}`);
       if (parts.length) domainContext = parts.join('; ');
     }
@@ -131,26 +197,61 @@ async function authorMcq(assessmentId, deps = {}) {
     ? `${baseTopic} — strictly within this technical placement domain: ${domainContext}. Interpret every term/acronym in THIS domain (e.g. "RAG" means Retrieval-Augmented Generation, NOT Red-Amber-Green project status). Do not generate project-management or generic-business questions.`
     : baseTopic;
 
-  // ── Call quizGenerationService, then delete transient Content in finally ────
-  // suppressNotification + noObjective prevent D2C side-effects.
   const quizGenerationService = getQuizGenerationService(deps);
-  const generateArgs = {
-    userId: assessment.createdBy,
-    topic: enrichedTopic,
-    questionCount: cfg.totalQuestions || 10,
-    assessmentType: cfg.assessmentType || 'mixed',
-    isSkillAssessment: true,
-    suppressNotification: true,
-    noObjective: true,
-  };
-  if (contentIds) generateArgs.contentIds = contentIds;
+  const questionQaService = getQuestionQaService(deps);
+  const Quiz = getQuiz(deps);
 
-  let quiz;
+  // ── Over-generate → 3-gate QA → regenerate rejected (max rounds) ────────────
+  // Outer try/catch: ANY crash below must persist an honest 'failed' status —
+  // never leave the release gate reporting "still generating" forever.
+  const passedPool = [];
+  let qaAcc = null;
   try {
-    quiz = await quizGenerationService.generateQuiz(generateArgs);
+  try {
+    for (let round = 0; round < MCQ_MAX_ROUNDS && passedPool.length < poolTarget; round++) {
+      const genCount = Math.max(1, poolTarget - passedPool.length);
+      const generateArgs = {
+        userId: assessment.createdBy,
+        topic: enrichedTopic,
+        questionCount: genCount,
+        assessmentType: cfg.assessmentType || 'mixed',
+        isSkillAssessment: true,
+        suppressNotification: true,
+        noObjective: true,
+      };
+      if (contentIds) generateArgs.contentIds = contentIds;
+      if (competencies.length) generateArgs.injectedCompetencies = competencies;
+      if (groundingText) generateArgs.groundingText = groundingText;
+
+      let quiz;
+      try {
+        quiz = await quizGenerationService.generateQuiz(generateArgs);
+      } catch (genErr) {
+        console.warn('[authorMcq] generateQuiz failed on round', round, genErr.message);
+        break;
+      }
+
+      const generated = (quiz && quiz.questions) || [];
+      const { passed, report } = await questionQaService.runQa(
+        generated,
+        { topic: enrichedTopic, syllabusExcerpt, round },
+        { aiProvider: deps.aiProvider }
+      );
+      qaAcc = accumulateReport(qaAcc, report);
+      for (const q of passed) {
+        if (passedPool.length >= poolTarget) break;
+        passedPool.push(q);
+      }
+
+      // Best-effort: delete the throwaway quiz so it never appears in D2C history.
+      if (quiz && quiz._id && typeof Quiz.findByIdAndDelete === 'function') {
+        try { await Quiz.findByIdAndDelete(quiz._id); } catch (e) {
+          console.warn('[assessmentAuthoring] Could not delete throwaway quiz:', e.message);
+        }
+      }
+    }
   } finally {
-    // Best-effort: delete the transient Content regardless of whether generateQuiz
-    // succeeds or throws — prevents orphaned docs in the event of LLM/network errors.
+    // Best-effort: delete the transient Content regardless of success/throw.
     if (transientContentId) {
       const Content = getContent(deps);
       try {
@@ -163,22 +264,152 @@ async function authorMcq(assessmentId, deps = {}) {
     }
   }
 
-  // Freeze questions onto the assessment config so the release gate can check them.
-  assessment.config.mcq.questions = quiz.questions;
-  assessment.config.mcq.totalQuestions = quiz.questions.length;
+  const qaReport = {
+    perStudentCount: targetCount,
+    poolTarget,
+    poolSize: passedPool.length,
+    ...(qaAcc || { rounds: 0, totalGenerated: 0, totalPassed: 0, totalRejected: 0, rejectionReasons: {}, letterDistribution: null }),
+  };
+
+  if (passedPool.length >= targetCount) {
+    // Success — freeze the QA-passed pool; students are sampled from it at serve time.
+    // requireUnreleased guards the TOCTOU window: a release landing mid-authoring
+    // must never have its live question set swapped underneath students.
+    assessment.config.mcq.questions = passedPool;
+    assessment.config.mcq.questionCount = targetCount;
+    assessment.config.mcq.totalQuestions = targetCount;
+    assessment.config.mcq.authoring = { status: 'ready', error: null, qaReport };
+    await persistMcqConfig(Assessment, assessment, { requireUnreleased: true });
+  } else {
+    // Honest failure — never leave questions implying "still generating".
+    assessment.config.mcq.authoring = {
+      status: 'failed',
+      error: `QA produced only ${passedPool.length}/${targetCount} passing questions`,
+      qaReport,
+    };
+    await persistMcqConfig(Assessment, assessment, { requireUnreleased: false });
+  }
+  } catch (err) {
+    if (err && err.message === 'RELEASED') {
+      console.warn('[authorMcq] skipped persist — assessment was released mid-authoring');
+      throw err;
+    }
+    try {
+      assessment.config.mcq.authoring = {
+        status: 'failed',
+        error: `authoring crashed: ${err && err.message}`,
+        qaReport: qaAcc || null,
+      };
+      await persistMcqConfig(Assessment, assessment, { requireUnreleased: false });
+    } catch (persistErr) {
+      console.warn('[authorMcq] could not persist failed status:', persistErr.message);
+    }
+    throw err;
+  }
+
+  return assessment;
+}
+
+/**
+ * Persist config.mcq atomically. With requireUnreleased, the write is
+ * conditional on the assessment not being released/closed (closes the
+ * regen/re-author vs release TOCTOU race) — no match ⇒ throws RELEASED.
+ * Falls back to doc.save() when the model has no updateOne (test stubs),
+ * same defensive-DI convention as Quiz.findByIdAndDelete above.
+ */
+async function persistMcqConfig(Assessment, assessment, { requireUnreleased }) {
+  if (Assessment && typeof Assessment.updateOne === 'function') {
+    const filter = { _id: assessment._id };
+    if (requireUnreleased) filter.status = { $nin: ['released', 'closed'] };
+    const res = await Assessment.updateOne(filter, { $set: { 'config.mcq': assessment.config.mcq } });
+    // Mongoose returns matchedCount; legacy drivers n; some stubs only modifiedCount.
+    const matched = res ? (res.matchedCount ?? res.n ?? res.modifiedCount ?? 0) : 0;
+    if (requireUnreleased && !matched) throw new Error('RELEASED');
+    return;
+  }
   assessment.markModified('config');
   await assessment.save();
+}
 
-  // Best-effort: delete the throwaway quiz so it never appears in D2C history.
+/**
+ * Regenerate a SINGLE authored MCQ item through the same 3 gates.
+ *
+ * Generates a small batch, runs QA, and replaces questions[qIndex] with the
+ * first passing item. Blocked once the assessment is released (frozen master).
+ *
+ * @returns {Promise<Assessment>}
+ * @throws  Error('NOT_FOUND' | 'NOT_MCQ' | 'RELEASED' | 'BAD_INDEX' | 'REGEN_FAILED')
+ */
+async function regenerateQuestion(assessmentId, qIndex, deps = {}) {
+  const Assessment = getModel(deps);
+  const assessment = await Assessment.findById(assessmentId);
+  if (!assessment) throw new Error('NOT_FOUND');
+  if (assessment.type !== 'mcq') throw new Error('NOT_MCQ');
+  if (assessment.status === 'released' || assessment.status === 'closed') throw new Error('RELEASED');
+
+  const cfg = (assessment.config && assessment.config.mcq) || {};
+  const questions = Array.isArray(cfg.questions) ? cfg.questions : [];
+  const idx = Number(qIndex);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= questions.length) throw new Error('BAD_INDEX');
+
+  const quizGenerationService = getQuizGenerationService(deps);
+  const questionQaService = getQuestionQaService(deps);
   const Quiz = getQuiz(deps);
-  if (typeof Quiz.findByIdAndDelete === 'function') {
+
+  const baseTopic = cfg.topic || assessment.title;
+
+  let competencies = [];
+  try {
+    const InstitutionCohort = deps.InstitutionCohort || require('../../../models/InstitutionCohort');
+    const ObjectiveTemplate = deps.ObjectiveTemplate || require('../../../models/ObjectiveTemplate');
+    const cohort = assessment.cohortId ? await InstitutionCohort.findById(assessment.cohortId).select('objectiveTemplateId') : null;
+    const tpl = cohort && cohort.objectiveTemplateId
+      ? await ObjectiveTemplate.findById(cohort.objectiveTemplateId).select('competencies')
+      : null;
+    if (tpl) competencies = (tpl.competencies || []).filter((c) => c && c.name).map((c) => ({ name: c.name, category: c.category, weight: c.weight }));
+  } catch (_) { /* best-effort */ }
+
+  const BATCH = 3;
+  let replacement = null;
+  for (let round = 0; round < MCQ_MAX_ROUNDS && !replacement; round++) {
+    const generateArgs = {
+      userId: assessment.createdBy,
+      topic: baseTopic,
+      questionCount: BATCH,
+      assessmentType: cfg.assessmentType || 'mixed',
+      isSkillAssessment: true,
+      suppressNotification: true,
+      noObjective: true,
+    };
+    if (competencies.length) generateArgs.injectedCompetencies = competencies;
+
+    let quiz;
     try {
-      await Quiz.findByIdAndDelete(quiz._id);
-    } catch (e) {
-      console.warn('[assessmentAuthoring] Could not delete throwaway quiz:', e.message);
+      quiz = await quizGenerationService.generateQuiz(generateArgs);
+    } catch (genErr) {
+      console.warn('[regenerateQuestion] generateQuiz failed:', genErr.message);
+      break;
+    }
+    const generated = (quiz && quiz.questions) || [];
+    const { passed } = await questionQaService.runQa(
+      generated,
+      { topic: baseTopic, round },
+      { aiProvider: deps.aiProvider }
+    );
+    if (passed.length > 0) replacement = passed[0];
+
+    if (quiz && quiz._id && typeof Quiz.findByIdAndDelete === 'function') {
+      try { await Quiz.findByIdAndDelete(quiz._id); } catch (_) { /* best-effort */ }
     }
   }
 
+  if (!replacement) throw new Error('REGEN_FAILED');
+
+  questions[idx] = replacement;
+  assessment.config.mcq.questions = questions;
+  // Atomic + conditional: a release landing between the status check above and
+  // this write must win — the swap is rejected (throws RELEASED).
+  await persistMcqConfig(Assessment, assessment, { requireUnreleased: true });
   return assessment;
 }
 
@@ -373,4 +604,4 @@ async function authorDrill(assessmentId, deps = {}) {
   return assessment;
 }
 
-module.exports = { authorMcq, authorCapstone, authorDrill };
+module.exports = { authorMcq, authorCapstone, authorDrill, regenerateQuestion, _helpers: { buildGroundingText, accumulateReport } };

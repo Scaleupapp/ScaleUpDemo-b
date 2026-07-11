@@ -1459,3 +1459,76 @@ test('POST /assessments/:id/author-drill → 404 when assessment not found', asy
   assert.strictEqual(res.status, 404);
   assessments._deps = null;
 });
+
+// ── Wave 1: honest release status + single-item regeneration + release lock ────
+
+test('POST /assessments/:id/release → 409 AUTHORING_FAILED when authoring failed', async () => {
+  assessments._deps = {
+    assessmentService: {
+      releaseAssessment: async () => { throw new Error('AUTHORING_FAILED'); },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a1/release')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'AUTHORING_FAILED');
+  assessments._deps = null;
+});
+
+test('POST /assessments/:id/author-mcq → 409 ALREADY_RELEASED once released', async () => {
+  let authorCalled = false;
+  assessments._deps = {
+    Assessment: { findOne: async () => ({ _id: 'a1', status: 'released' }) },
+    authoringService: { authorMcq: async () => { authorCalled = true; } },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a1/author-mcq')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'ALREADY_RELEASED');
+  assert.strictEqual(authorCalled, false, 're-author must not run on a released assessment');
+  assessments._deps = null;
+});
+
+test('POST /assessments/:id/questions/:qIndex/regenerate → 200 regenerates one item', async () => {
+  let regenArgs = null;
+  assessments._deps = {
+    Assessment: { findOne: async () => ({ _id: 'a1', status: 'configured' }) },
+    authoringService: {
+      regenerateQuestion: async (id, qIndex) => {
+        regenArgs = { id: String(id), qIndex };
+        return { config: { mcq: { questions: [{}, {}, {}] } } };
+      },
+    },
+  };
+  const res = await request(appAs('tpo_coordinator'))
+    .post('/api/institution/assessments/a1/questions/2/regenerate')
+    .set('Authorization', `Bearer ${tok('tpo_coordinator')}`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.data.qIndex, 2);
+  assert.strictEqual(regenArgs.qIndex, '2');
+  assessments._deps = null;
+});
+
+test('POST /assessments/:id/questions/:qIndex/regenerate → 409 ALREADY_RELEASED', async () => {
+  assessments._deps = {
+    Assessment: { findOne: async () => ({ _id: 'a1', status: 'released' }) },
+    authoringService: {
+      regenerateQuestion: async () => { throw new Error('RELEASED'); },
+    },
+  };
+  const res = await request(appAs('tpo_head'))
+    .post('/api/institution/assessments/a1/questions/0/regenerate')
+    .set('Authorization', `Bearer ${tok('tpo_head')}`);
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.code, 'ALREADY_RELEASED');
+  assessments._deps = null;
+});
+
+test('POST /assessments/:id/questions/:qIndex/regenerate → 403 for viewer role', async () => {
+  const res = await request(appAs('viewer'))
+    .post('/api/institution/assessments/a1/questions/0/regenerate')
+    .set('Authorization', `Bearer ${tok('viewer')}`);
+  assert.strictEqual(res.status, 403);
+});
