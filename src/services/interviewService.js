@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const path = require('path');
 const os = require('os');
 const { pipeline } = require('stream/promises');
@@ -778,7 +779,7 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
 
     // 8. Call GPT-4o for next question
     const chatResponse = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: OPENAI_CHAT_MODEL,
       messages,
       temperature: 0.7,
       max_tokens: 1024,

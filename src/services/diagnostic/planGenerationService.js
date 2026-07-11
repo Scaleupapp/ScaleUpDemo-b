@@ -1,4 +1,5 @@
 const openai = require('../../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../../config/openaiModels');
 const taskCatalogService = require('../plan/taskCatalogService');
 const externalContentJudgeService = require('../plan/externalContentJudgeService');
 const { predictTaskImpact } = require('../v2/predictedImpactService');
@@ -42,7 +43,7 @@ const BUFFER_FACTOR = 0.85;
 const OVERESTIMATES_BUMP = 1.20;
 const FUTURE_PROOFING_MIN_SHARE = 0.08;
 const PLAN_LLM_TIMEOUT_MS = 60_000;
-const LLM_MODEL = 'gpt-4o';
+const LLM_MODEL = OPENAI_CHAT_MODEL;
 
 const SYSTEM_PROMPT = `You are an expert learning-plan designer for ScaleUp, an India-first learning platform.
 Generate a personalized weekly schedule that respects the user's diagnostic results, timeline, and weekly hours.

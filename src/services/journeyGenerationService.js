@@ -1,4 +1,5 @@
 const openai = require('../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const UserObjective = require('../models/UserObjective');
 const KnowledgeProfile = require('../models/KnowledgeProfile');
 const ConsumptionGraph = require('../models/ConsumptionGraph');
@@ -103,7 +104,7 @@ class JourneyGenerationService {
     }
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: OPENAI_CHAT_MODEL,
       messages: [
         { role: 'system', content: JOURNEY_SYSTEM_PROMPT },
         { role: 'user', content: JSON.stringify(promptData) },

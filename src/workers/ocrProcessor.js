@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const path = require('path');
 const os = require('os');
 const { pipeline } = require('stream/promises');
@@ -79,7 +80,7 @@ async function processOCR(job) {
         const mimeType = mimeMap[ext] || 'image/jpeg';
 
         const response = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: OPENAI_CHAT_MODEL,
           messages: [
             { role: 'system', content: 'You are an OCR assistant. Extract ALL text from the provided image. Preserve structure, headings, bullet points. For handwritten text, do your best to accurately transcribe. Return only the extracted text.' },
             { role: 'user', content: [
@@ -99,7 +100,7 @@ async function processOCR(job) {
         });
 
         const response = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: OPENAI_CHAT_MODEL,
           messages: [
             { role: 'system', content: 'You are an OCR assistant. Extract ALL text from the provided document. Preserve structure, headings, bullet points. For handwritten text, do your best to accurately transcribe. Return only the extracted text.' },
             { role: 'user', content: [

@@ -1,4 +1,5 @@
 const openai = require('../config/openai');
+const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
 const Content = require('../models/Content');
 const FlashcardSet = require('../models/FlashcardSet');
 const ApiError = require('../utils/apiError');
@@ -51,7 +52,7 @@ class FlashcardGenerationService {
     try {
       const inputText = contentText.slice(0, 10000); // Limit input
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: OPENAI_CHAT_MODEL,
         messages: [
           { role: 'system', content: FLASHCARD_PROMPT },
           {

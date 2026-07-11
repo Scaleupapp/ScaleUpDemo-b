@@ -41,7 +41,8 @@ function buildTargetKey(objectiveType, specifics = {}) {
 }
 
 const TAXONOMY_LLM_TIMEOUT_MS = 30_000;
-const LLM_MODEL = 'gpt-4o';
+const { OPENAI_CHAT_MODEL } = require('../../config/openaiModels');
+const LLM_MODEL = OPENAI_CHAT_MODEL;
 
 const TAXONOMY_RESPONSE_SCHEMA = {
   type: 'json_schema',

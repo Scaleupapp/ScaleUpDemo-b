@@ -7,6 +7,7 @@
  */
 
 const openai = require('./openai');
+const { OPENAI_CHAT_MODEL } = require('./openaiModels');
 const anthropic = require('./anthropic');
 
 class AIProvider {
@@ -16,7 +17,7 @@ class AIProvider {
    */
   async generateWithGPT({ systemPrompt, userPrompt, temperature = 0.7, maxTokens = 4000 }) {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: OPENAI_CHAT_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
