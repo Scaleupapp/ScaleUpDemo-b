@@ -3,20 +3,107 @@
 // Each adapter exposes start(assessment, userId, deps) and readResult(session, deps).
 // `deps` injects models/services for testing.
 
+const { _helpers: qaHelpers } = require('./questionQaService');
+
+// ── Deterministic per-student sampling + shuffle ──────────────────────────────
+// A student's served set is a DETERMINISTIC function of (userId, assessmentId):
+// re-entry yields the identical sample + question order + option order, so a
+// resumed attempt is stable while different students see different variants.
+
+const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+/** xmur3 string hash → 32-bit seed. */
+function xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function () {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+
+/** mulberry32 PRNG from a 32-bit seed → deterministic float in [0,1). */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makeRng(seedStr) {
+  return mulberry32(xmur3(String(seedStr))());
+}
+
+/** Fisher-Yates in place using an injected rng. */
+function shuffleInPlace(arr, rng) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+  return arr;
+}
+
+/** Shuffle a question's options and remap the key label to its new position. */
+function shuffleOptions(q, rng) {
+  const clone = { ...q };
+  delete clone.qa; // internal QA metadata never reaches the served quiz
+  const opts = Array.isArray(q.options) ? q.options : null;
+  if (!opts || opts.length === 0) return clone;
+
+  const { keyIndex } = qaHelpers.normalizeQuestion(q);
+  const indexed = opts.map((o, i) => ({ o, isKey: i === keyIndex }));
+  shuffleInPlace(indexed, rng);
+
+  clone.options = indexed.map((entry, i) => {
+    const label = OPTION_LETTERS[i] || String.fromCharCode(65 + i);
+    if (entry.o && typeof entry.o === 'object') return { ...entry.o, label };
+    return entry.o; // string options carry their position implicitly
+  });
+
+  if (keyIndex >= 0) {
+    const newKeyPos = indexed.findIndex((e) => e.isKey);
+    clone.correctAnswer = OPTION_LETTERS[newKeyPos] || String.fromCharCode(65 + newKeyPos);
+  }
+  return clone;
+}
+
+/**
+ * Deterministically sample `count` questions from `pool`, shuffle their order,
+ * and shuffle each question's options (with key remap). Frozen pool untouched.
+ */
+function buildServedQuestions(pool, count, seedStr) {
+  const list = Array.isArray(pool) ? pool : [];
+  const n = Math.min(count, list.length);
+  const rng = makeRng(seedStr);
+  const idxs = shuffleInPlace(list.map((_, i) => i), rng).slice(0, n);
+  return idxs.map((i) => shuffleOptions(list[i], rng));
+}
+
 const mcq = {
-  // Clone the frozen canonical question set into a per-student Quiz, then open an attempt.
+  // Sample a per-student servable set from the frozen QA-passed pool, then open an attempt.
   async start(assessment, userId, deps = {}) {
     const Quiz = deps.Quiz || require('../../../models/Quiz');
     const QuizAttempt = deps.QuizAttempt || require('../../../models/QuizAttempt');
     const cfg = (assessment.config && assessment.config.mcq) || {};
+    const pool = Array.isArray(cfg.questions) ? cfg.questions : [];
+    const perStudentCount = cfg.questionCount || cfg.totalQuestions || pool.length;
+    const seed = `${userId}:${assessment._id}`;
+    const served = buildServedQuestions(pool, perStudentCount, seed);
     const quiz = await Quiz.create({
       userId,
       title: assessment.title,
       type: 'competency_assessment',
       assessmentType: cfg.assessmentType || 'mixed',
       topic: cfg.topic,
-      questions: cfg.questions || [],
-      totalQuestions: cfg.totalQuestions || (cfg.questions ? cfg.questions.length : 0),
+      questions: served,
+      totalQuestions: served.length,
       status: 'in_progress',
       source: 'institution_assessment',
       assessmentId: assessment._id,
@@ -158,4 +245,4 @@ function getAdapter(type) {
   return a;
 }
 
-module.exports = { getAdapter };
+module.exports = { getAdapter, _helpers: { buildServedQuestions, shuffleOptions, makeRng, shuffleInPlace } };
