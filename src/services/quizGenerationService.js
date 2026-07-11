@@ -8,6 +8,10 @@ const UserObjective = require('../models/UserObjective');
 const userContextService = require('./userContextService');
 const { notificationQueue } = require('../config/queue');
 const { DIFFICULTY_MIX } = require('../utils/constants');
+// Gate-1 deterministic lint (pure code, no LLM). Runs on EVERY quiz generation
+// — D2C included — to drop malformed/leaky/duplicate items so the existing
+// top-up loop replaces them. Requiring this module is cheap (no client init).
+const questionQaService = require('./institution/assessment/questionQaService');
 
 const QUIZ_SYSTEM_PROMPT = `You are an expert educational assessment creator. Your quizzes must actually test understanding — not be trivially solvable by elimination.
 
@@ -129,7 +133,14 @@ const TRIGGER_TO_QUIZ_TYPE = {
 
 class QuizGenerationService {
 
-  async generateQuiz({ triggerId, userId, topic, contentIds, type, questionCount: requestedCount, objectiveId, assessmentType, isSkillAssessment, suppressNotification, noObjective, source, weekNumber }) {
+  async generateQuiz({ triggerId, userId, topic, contentIds, type, questionCount: requestedCount, objectiveId, assessmentType, isSkillAssessment, suppressNotification, noObjective, source, weekNumber, injectedCompetencies, groundingText }) {
+    // ── Institution-only additive params (never passed by D2C callers) ─────────
+    //   injectedCompetencies: [{ name, category, weight }] — forces the
+    //     competency prompt path so each question emits a `competency` tag even
+    //     when noObjective is set (placement MCQs have no UserObjective).
+    //   groundingText: syllabus/JD excerpt injected into the prompt so items are
+    //     answerable from the source domain.
+    //   When both are absent the method behaves byte-identically to before.
     const quizType = isSkillAssessment ? 'competency_assessment' : (TRIGGER_TO_QUIZ_TYPE[type] || 'topic_consolidation');
 
     // Resolve content — contentIds may be empty for on-demand topic quizzes
@@ -232,6 +243,27 @@ class QuizGenerationService {
       }
     } catch (e) {
       console.log('[QuizGeneration] Could not load objective context:', e.message);
+    }
+
+    // Institution authoring: when the caller injects competencies explicitly and
+    // no objective-derived context was resolved, build a competency context from
+    // them. This routes generation through COMPETENCY_QUIZ_SYSTEM_PROMPT so each
+    // question is tagged with a `competency` (needed for competencyBreakdown /
+    // rollups / CSV). Additive: D2C callers never pass injectedCompetencies.
+    if (!competencyContext && Array.isArray(injectedCompetencies) && injectedCompetencies.length > 0) {
+      linkedCompetencies = injectedCompetencies.map((c) => c.name).filter(Boolean);
+      competencyContext = {
+        objectiveType: 'placement_assessment',
+        specifics: {},
+        competencies: injectedCompetencies
+          .filter((c) => c && c.name)
+          .map((c) => ({
+            name: c.name,
+            category: c.category || 'core',
+            weight: c.weight,
+            currentLevel: level,
+          })),
+      };
     }
 
     // Choose system prompt based on whether we have competency context
@@ -370,6 +402,13 @@ class QuizGenerationService {
       console.warn('[quizGeneration] C2O external-context lookup failed:', err.message);
     }
 
+    // Institution grounding: inject the syllabus/JD excerpt so items are
+    // answerable from the source domain. Additive — empty for D2C callers.
+    let groundingBlock = '';
+    if (groundingText && String(groundingText).trim()) {
+      groundingBlock = `\n\nSYLLABUS / SOURCE MATERIAL — the assessment must be answerable from THIS domain. Ground every question in the concepts, terminology, and scope below. Do NOT drift to unrelated interpretations of any term.\n${String(groundingText).slice(0, 6000)}`;
+    }
+
     let questions;
     try {
       // Scale max_tokens based on question complexity:
@@ -383,7 +422,7 @@ class QuizGenerationService {
 
       console.log(`[QuizGeneration] Calling OpenAI for topic="${topic}", questionCount=${questionCount}, assessmentType=${effectiveAssessmentType || 'mixed'}, contentCount=${conceptData.length}, competencyAware=${!!competencyContext}, maxTokens=${maxTokens}`);
 
-      const userPrompt = JSON.stringify(promptData) + userContextBlock + externalContext + avoidQuestionsBlock;
+      const userPrompt = JSON.stringify(promptData) + userContextBlock + externalContext + avoidQuestionsBlock + groundingBlock;
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
@@ -402,6 +441,17 @@ class QuizGenerationService {
         throw new Error(`OpenAI returned invalid quiz data: no questions array`);
       }
 
+      // Gate-1 lint (pure code): drop malformed/leaky/duplicate items. The
+      // top-up loop below refills any dropped slots. Applies to every caller.
+      {
+        const before = questions.length;
+        const g1 = questionQaService.gate1Filter(questions, { topic });
+        questions = g1.kept;
+        if (g1.dropped.length > 0) {
+          console.log(`[QuizGeneration] Gate-1 dropped ${g1.dropped.length}/${before} question(s): ${g1.dropped.map((d) => d.reason).join(', ')}`);
+        }
+      }
+
       console.log(`[QuizGeneration] OpenAI returned ${questions.length}/${questionCount} questions for topic="${topic}"`);
 
       // If we got fewer questions than requested, make follow-up calls for the remainder
@@ -416,7 +466,7 @@ class QuizGenerationService {
           ...promptData,
           questionCount: remaining,
           note: `You already generated ${questions.length} questions. Generate exactly ${remaining} MORE unique questions on the same topic "${topic}". Do NOT repeat any of these existing questions: ${questions.map((q, i) => `Q${i+1}: ${q.questionText.substring(0, 60)}`).join('; ')}`,
-        });
+        }) + groundingBlock;
 
         const contResponse = await openai.chat.completions.create({
           model: 'gpt-4o',
@@ -437,7 +487,16 @@ class QuizGenerationService {
           break;
         }
 
-        questions.push(...newQuestions);
+        // Gate-1 lint the new batch against the already-kept set (dedup scoped
+        // to this quiz) — accepted items are appended, rejects await the next round.
+        {
+          const g1 = questionQaService.gate1Filter(newQuestions, { topic, existing: questions });
+          const acceptedCount = g1.kept.length - questions.length;
+          questions = g1.kept;
+          if (g1.dropped.length > 0) {
+            console.log(`[QuizGeneration] Gate-1 (continuation ${attempt}) dropped ${g1.dropped.length}, kept ${acceptedCount}`);
+          }
+        }
         console.log(`[QuizGeneration] After continuation ${attempt}: ${questions.length}/${questionCount} questions`);
       }
 
