@@ -107,6 +107,7 @@ router.post('/assessments/:id/questions/:qIndex/regenerate', institutionAuth, re
     const updated = await authoring().regenerateQuestion(a._id, req.params.qIndex);
     return res.status(200).json({ success: true, data: { qIndex: Number(req.params.qIndex), status: 'regenerated', questionCount: (updated.config.mcq.questions || []).length } });
   } catch (err) {
+    if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Assessment not found' });
     if (err.message === 'NOT_MCQ') return res.status(400).json({ success: false, code: 'NOT_MCQ', message: 'Only MCQ assessments have per-question regeneration.' });
     if (err.message === 'RELEASED') return res.status(409).json({ success: false, code: 'ALREADY_RELEASED', message: 'A released assessment cannot be edited.' });
     if (err.message === 'BAD_INDEX') return res.status(400).json({ success: false, code: 'BAD_INDEX', message: 'Question index out of range.' });

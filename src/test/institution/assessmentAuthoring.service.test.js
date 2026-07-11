@@ -1089,3 +1089,40 @@ test('regenerateQuestion throws REGEN_FAILED when QA never yields a passing item
   };
   await assert.rejects(() => regenerateQuestion('assessR', 0, deps), (e) => { assert.strictEqual(e.message, 'REGEN_FAILED'); return true; });
 });
+
+// ---------------------------------------------------------------------------
+// Review fixes: crash honesty (I-1) + regen-vs-release TOCTOU guard (I-2)
+// ---------------------------------------------------------------------------
+
+test('authorMcq persists FAILED status and rethrows when QA crashes (never stuck generating)', async () => {
+  const assessment = makeAssessment();
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    quizGenerationService: { generateQuiz: async () => makeQuizN(15) },
+    questionQaService: { runQa: async () => { throw new Error('judge exploded'); } },
+  };
+  await assert.rejects(() => authorMcq('assess1', deps), /judge exploded/);
+  assert.strictEqual(assessment.config.mcq.authoring.status, 'failed', 'crash must persist failed, never stuck generating');
+  assert.match(assessment.config.mcq.authoring.error, /authoring crashed/);
+});
+
+test('regenerateQuestion refuses to swap a question when a release wins the race (atomic guard)', async () => {
+  const { regenerateQuestion } = require('../../services/institution/assessment/assessmentAuthoringService');
+  const assessment = makeAssessment();
+  assessment.config.mcq.questions = [{ questionText: 'old', options: [] }];
+  let conditionalFilter = null;
+  const deps = {
+    Assessment: {
+      findById: async () => assessment,
+      // Simulate a release landing between the status pre-check and the write:
+      // the conditional filter matches nothing.
+      updateOne: async (filter) => { conditionalFilter = filter; return { matchedCount: 0 }; },
+    },
+    Quiz: { findByIdAndDelete: async () => {} },
+    quizGenerationService: { generateQuiz: async () => makeQuizN(3) },
+    questionQaService: passThroughQa(),
+  };
+  await assert.rejects(() => regenerateQuestion('assess1', 0, deps), /RELEASED/);
+  assert.ok(conditionalFilter && conditionalFilter.status, 'write must be conditional on unreleased status');
+});

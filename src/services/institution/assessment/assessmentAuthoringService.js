@@ -202,8 +202,11 @@ async function authorMcq(assessmentId, deps = {}) {
   const Quiz = getQuiz(deps);
 
   // ── Over-generate → 3-gate QA → regenerate rejected (max rounds) ────────────
+  // Outer try/catch: ANY crash below must persist an honest 'failed' status —
+  // never leave the release gate reporting "still generating" forever.
   const passedPool = [];
   let qaAcc = null;
+  try {
   try {
     for (let round = 0; round < MCQ_MAX_ROUNDS && passedPool.length < poolTarget; round++) {
       const genCount = Math.max(1, poolTarget - passedPool.length);
@@ -270,10 +273,13 @@ async function authorMcq(assessmentId, deps = {}) {
 
   if (passedPool.length >= targetCount) {
     // Success — freeze the QA-passed pool; students are sampled from it at serve time.
+    // requireUnreleased guards the TOCTOU window: a release landing mid-authoring
+    // must never have its live question set swapped underneath students.
     assessment.config.mcq.questions = passedPool;
     assessment.config.mcq.questionCount = targetCount;
     assessment.config.mcq.totalQuestions = targetCount;
     assessment.config.mcq.authoring = { status: 'ready', error: null, qaReport };
+    await persistMcqConfig(Assessment, assessment, { requireUnreleased: true });
   } else {
     // Honest failure — never leave questions implying "still generating".
     assessment.config.mcq.authoring = {
@@ -281,11 +287,48 @@ async function authorMcq(assessmentId, deps = {}) {
       error: `QA produced only ${passedPool.length}/${targetCount} passing questions`,
       qaReport,
     };
+    await persistMcqConfig(Assessment, assessment, { requireUnreleased: false });
+  }
+  } catch (err) {
+    if (err && err.message === 'RELEASED') {
+      console.warn('[authorMcq] skipped persist — assessment was released mid-authoring');
+      throw err;
+    }
+    try {
+      assessment.config.mcq.authoring = {
+        status: 'failed',
+        error: `authoring crashed: ${err && err.message}`,
+        qaReport: qaAcc || null,
+      };
+      await persistMcqConfig(Assessment, assessment, { requireUnreleased: false });
+    } catch (persistErr) {
+      console.warn('[authorMcq] could not persist failed status:', persistErr.message);
+    }
+    throw err;
+  }
+
+  return assessment;
+}
+
+/**
+ * Persist config.mcq atomically. With requireUnreleased, the write is
+ * conditional on the assessment not being released/closed (closes the
+ * regen/re-author vs release TOCTOU race) — no match ⇒ throws RELEASED.
+ * Falls back to doc.save() when the model has no updateOne (test stubs),
+ * same defensive-DI convention as Quiz.findByIdAndDelete above.
+ */
+async function persistMcqConfig(Assessment, assessment, { requireUnreleased }) {
+  if (Assessment && typeof Assessment.updateOne === 'function') {
+    const filter = { _id: assessment._id };
+    if (requireUnreleased) filter.status = { $nin: ['released', 'closed'] };
+    const res = await Assessment.updateOne(filter, { $set: { 'config.mcq': assessment.config.mcq } });
+    // Mongoose returns matchedCount; legacy drivers n; some stubs only modifiedCount.
+    const matched = res ? (res.matchedCount ?? res.n ?? res.modifiedCount ?? 0) : 0;
+    if (requireUnreleased && !matched) throw new Error('RELEASED');
+    return;
   }
   assessment.markModified('config');
   await assessment.save();
-
-  return assessment;
 }
 
 /**
@@ -364,8 +407,9 @@ async function regenerateQuestion(assessmentId, qIndex, deps = {}) {
 
   questions[idx] = replacement;
   assessment.config.mcq.questions = questions;
-  assessment.markModified('config');
-  await assessment.save();
+  // Atomic + conditional: a release landing between the status check above and
+  // this write must win — the swap is rejected (throws RELEASED).
+  await persistMcqConfig(Assessment, assessment, { requireUnreleased: true });
   return assessment;
 }
 
