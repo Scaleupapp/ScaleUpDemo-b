@@ -412,23 +412,32 @@ test('mcq engine: create→release-before-authoring (409 NO_QUESTIONS)→author�
     'release before authoring should throw NO_QUESTIONS'
   );
 
-  // 3. authorMcq — stub quizGenerationService.generateQuiz returns a quiz with 2 questions
+  // 3. authorMcq — stub generateQuiz + a pass-through QA service (no real LLM).
+  //    Over-generation targets ceil(2 × 1.5) = 3; per-student count stays 2.
   const fakeQuizId = nextId();
   const fakeQuestions = [
-    { questionText: 'Q1', options: ['A', 'B'], correct: 'A', competency: 'DSA' },
-    { questionText: 'Q2', options: ['C', 'D'], correct: 'C', competency: 'DSA' },
+    { questionText: 'Q1 about arrays', options: ['A', 'B'], correctAnswer: 'A', competency: 'DSA' },
+    { questionText: 'Q2 about trees', options: ['C', 'D'], correctAnswer: 'C', competency: 'DSA' },
+    { questionText: 'Q3 about graphs', options: ['E', 'F'], correctAnswer: 'E', competency: 'DSA' },
   ];
+  const passThroughQa = {
+    runQa: async (questions, ctx = {}) => ({
+      passed: questions.map((q) => ({ ...q, qa: { lint: { passed: true }, solver: { agrees: true }, judge: { verdict: 'accept' }, generation: ctx.round } })),
+      rejected: [],
+      report: { round: ctx.round, total: questions.length, passedCount: questions.length, rejectedCount: 0, rejections: [] },
+    }),
+  };
   const authored = await authorMcq(assessmentId, {
     Assessment: S.Assessment,
     Quiz: S.Quiz,
     quizGenerationService: {
-      generateQuiz: async (_opts) => ({
-        _id: fakeQuizId,
-        questions: fakeQuestions,
-      }),
+      generateQuiz: async (_opts) => ({ _id: fakeQuizId, questions: fakeQuestions }),
     },
+    questionQaService: passThroughQa,
   });
-  assert.ok(authored.config.mcq.questions.length === 2, 'questions should be frozen onto assessment');
+  assert.ok(authored.config.mcq.questions.length === 3, 'QA-passed pool frozen onto assessment');
+  assert.equal(authored.config.mcq.questionCount, 2, 'per-student count = target');
+  assert.equal(authored.config.mcq.authoring.status, 'ready', 'authoring status ready');
   // The throwaway quiz should have been deleted
   const deletedQuiz = await S.Quiz.findById(fakeQuizId);
   assert.equal(deletedQuiz, null, 'throwaway quiz deleted after authoring');

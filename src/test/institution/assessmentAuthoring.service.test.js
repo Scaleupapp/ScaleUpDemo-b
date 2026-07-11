@@ -42,61 +42,105 @@ function makeQuiz(overrides = {}) {
   };
 }
 
+// A quiz with N distinct questions (for over-generation / pool assertions).
+function makeQuizN(n) {
+  return { _id: 'q1', questions: Array.from({ length: n }, (_, i) => ({ questionText: `q${i}` })) };
+}
+
+// QA stub that passes every question through all gates and attaches a `qa` object.
+function passThroughQa() {
+  return {
+    runQa: async (questions, ctx = {}) => ({
+      passed: questions.map((q) => ({
+        ...q,
+        qa: {
+          lint: { passed: true, failures: [] },
+          solver: { agrees: true, confidence: 0.9, ambiguous: false, valid: true },
+          judge: { verdict: 'accept', scores: { clarity: 5 }, valid: true },
+          generation: ctx.round,
+        },
+      })),
+      rejected: [],
+      report: { round: ctx.round, total: questions.length, passedCount: questions.length, rejectedCount: 0, letterDistribution: { passed: true }, rejections: [] },
+    }),
+  };
+}
+
+// QA stub that rejects every question (drives the FAILED authoring path).
+function rejectAllQa() {
+  return {
+    runQa: async (questions) => ({
+      passed: [],
+      rejected: questions.map((q) => ({ question: q, reasons: ['judge_reject'] })),
+      report: { total: questions.length, passedCount: 0, rejectedCount: questions.length, letterDistribution: { passed: true }, rejections: questions.map(() => ({ reasons: ['judge_reject'] })) },
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------
-// authorMcq — happy path for mcq type
+// authorMcq — happy path: over-generate → QA gates → freeze ready pool
 // ---------------------------------------------------------------------------
 
-test('authorMcq for mcq calls generateQuiz with correct args and freezes questions', async () => {
-  const assessment = makeAssessment();
+test('authorMcq over-generates a pool, runs QA, freezes ready pool with per-item qa', async () => {
+  const assessment = makeAssessment(); // totalQuestions: 10
   let generateQuizArgs = null;
   let deletedId = null;
   let markModifiedCalled = false;
   let savedCalled = false;
 
-  // Override markModified and save to track calls
-  assessment.markModified = function (path) { markModifiedCalled = true; };
+  assessment.markModified = function () { markModifiedCalled = true; };
   assessment.save = async function () { savedCalled = true; return this; };
 
   const deps = {
     Assessment: {
-      findById: async (id) => {
-        assert.strictEqual(String(id), 'assess1');
-        return assessment;
-      },
+      findById: async (id) => { assert.strictEqual(String(id), 'assess1'); return assessment; },
     },
-    Quiz: {
-      findByIdAndDelete: async (id) => { deletedId = String(id); },
-    },
+    Quiz: { findByIdAndDelete: async (id) => { deletedId = String(id); } },
     quizGenerationService: {
-      generateQuiz: async (args) => {
-        generateQuizArgs = args;
-        return makeQuiz();
-      },
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuizN(15); },
     },
+    questionQaService: passThroughQa(),
   };
 
   const result = await authorMcq('assess1', deps);
 
-  // generateQuiz called with expected args
+  // generateQuiz called with over-generated pool count (10 × 1.5 = 15)
   assert.ok(generateQuizArgs, 'generateQuiz should have been called');
   assert.strictEqual(generateQuizArgs.userId, 'user1');
   assert.strictEqual(generateQuizArgs.topic, 'JavaScript');
-  assert.strictEqual(generateQuizArgs.questionCount, 10);
+  assert.strictEqual(generateQuizArgs.questionCount, 15, 'over-generates the pool ×1.5');
   assert.strictEqual(generateQuizArgs.assessmentType, 'mixed');
   assert.strictEqual(generateQuizArgs.isSkillAssessment, true);
   assert.strictEqual(generateQuizArgs.suppressNotification, true);
   assert.strictEqual(generateQuizArgs.noObjective, true);
 
-  // Questions frozen onto assessment
-  assert.deepStrictEqual(result.config.mcq.questions, [{ questionText: 'a' }, { questionText: 'b' }]);
-  assert.strictEqual(result.config.mcq.totalQuestions, 2);
+  // Whole QA-passed pool frozen; per-student count recorded separately.
+  assert.strictEqual(result.config.mcq.questions.length, 15);
+  assert.strictEqual(result.config.mcq.questionCount, 10, 'per-student count = target');
+  assert.strictEqual(result.config.mcq.totalQuestions, 10);
+  assert.strictEqual(result.config.mcq.authoring.status, 'ready');
+  assert.ok(result.config.mcq.authoring.qaReport, 'qaReport persisted');
+  assert.ok(result.config.mcq.questions[0].qa, 'per-item qa persisted on frozen question');
 
-  // markModified + save were called
   assert.strictEqual(markModifiedCalled, true, 'markModified must be called');
   assert.strictEqual(savedCalled, true, 'save must be called');
+  assert.strictEqual(deletedId, 'q1', 'throwaway quiz deleted');
+});
 
-  // Throwaway quiz deleted
-  assert.strictEqual(deletedId, 'q1', 'Quiz.findByIdAndDelete should be called with quiz._id');
+test('authorMcq marks authoring FAILED (honest status) when QA cannot reach the target', async () => {
+  const assessment = makeAssessment();
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    quizGenerationService: { generateQuiz: async () => makeQuizN(6) },
+    questionQaService: rejectAllQa(),
+  };
+
+  const result = await authorMcq('assess1', deps);
+  assert.strictEqual(result.config.mcq.authoring.status, 'failed');
+  assert.match(result.config.mcq.authoring.error, /0\/10/);
+  // Questions must NOT be frozen on failure (release gate stays blocked).
+  assert.strictEqual((result.config.mcq.questions || []).length, 0, 'no questions frozen on failure');
 });
 
 test('authorMcq uses assessment.title as topic when config.mcq.topic is absent', async () => {
@@ -107,12 +151,8 @@ test('authorMcq uses assessment.title as topic when config.mcq.topic is absent',
   const deps = {
     Assessment: { findById: async () => assessment },
     Quiz: { findByIdAndDelete: async () => {} },
-    quizGenerationService: {
-      generateQuiz: async (args) => {
-        capturedTopic = args.topic;
-        return makeQuiz();
-      },
-    },
+    quizGenerationService: { generateQuiz: async (args) => { capturedTopic = args.topic; return makeQuizN(15); } },
+    questionQaService: passThroughQa(),
   };
 
   await authorMcq('assess1', deps);
@@ -128,16 +168,12 @@ test('authorMcq uses defaults when totalQuestions and assessmentType are absent'
   const deps = {
     Assessment: { findById: async () => assessment },
     Quiz: { findByIdAndDelete: async () => {} },
-    quizGenerationService: {
-      generateQuiz: async (args) => {
-        capturedArgs = args;
-        return makeQuiz();
-      },
-    },
+    quizGenerationService: { generateQuiz: async (args) => { capturedArgs = args; return makeQuizN(15); } },
+    questionQaService: passThroughQa(),
   };
 
   await authorMcq('assess1', deps);
-  assert.strictEqual(capturedArgs.questionCount, 10);
+  assert.strictEqual(capturedArgs.questionCount, 15, 'default target 10 → pool 15');
   assert.strictEqual(capturedArgs.assessmentType, 'mixed');
 });
 
@@ -152,9 +188,7 @@ test('authorMcq returns null without calling generateQuiz for non-mcq type', asy
   const deps = {
     Assessment: { findById: async () => assessment },
     Quiz: { findByIdAndDelete: async () => {} },
-    quizGenerationService: {
-      generateQuiz: async () => { generateCalled = true; return makeQuiz(); },
-    },
+    quizGenerationService: { generateQuiz: async () => { generateCalled = true; return makeQuiz(); } },
   };
 
   const result = await authorMcq('assess1', deps);
@@ -169,9 +203,7 @@ test('authorMcq returns null without calling generateQuiz for capstone type', as
   const deps = {
     Assessment: { findById: async () => assessment },
     Quiz: { findByIdAndDelete: async () => {} },
-    quizGenerationService: {
-      generateQuiz: async () => { generateCalled = true; return makeQuiz(); },
-    },
+    quizGenerationService: { generateQuiz: async () => { generateCalled = true; return makeQuiz(); } },
   };
 
   const result = await authorMcq('assess1', deps);
@@ -192,15 +224,12 @@ test('authorMcq throws Error("NOT_FOUND") when assessment does not exist', async
 
   await assert.rejects(
     () => authorMcq('missing-id', deps),
-    (err) => {
-      assert.strictEqual(err.message, 'NOT_FOUND');
-      return true;
-    }
+    (err) => { assert.strictEqual(err.message, 'NOT_FOUND'); return true; }
   );
 });
 
 // ---------------------------------------------------------------------------
-// authorMcq — Quiz delete failure is best-effort (does not throw)
+// authorMcq — best-effort delete + guard
 // ---------------------------------------------------------------------------
 
 test('authorMcq does not throw even if Quiz.findByIdAndDelete rejects', async () => {
@@ -208,22 +237,15 @@ test('authorMcq does not throw even if Quiz.findByIdAndDelete rejects', async ()
 
   const deps = {
     Assessment: { findById: async () => assessment },
-    Quiz: {
-      findByIdAndDelete: async () => { throw new Error('DB_DOWN'); },
-    },
-    quizGenerationService: {
-      generateQuiz: async () => makeQuiz(),
-    },
+    Quiz: { findByIdAndDelete: async () => { throw new Error('DB_DOWN'); } },
+    quizGenerationService: { generateQuiz: async () => makeQuizN(15) },
+    questionQaService: passThroughQa(),
   };
 
-  // Should resolve normally; delete failure is swallowed
   const result = await authorMcq('assess1', deps);
   assert.ok(result, 'should still return updated assessment despite delete failure');
+  assert.strictEqual(result.config.mcq.authoring.status, 'ready');
 });
-
-// ---------------------------------------------------------------------------
-// authorMcq — Quiz.findByIdAndDelete guard when method absent
-// ---------------------------------------------------------------------------
 
 test('authorMcq works when Quiz.findByIdAndDelete is not a function (guard)', async () => {
   const assessment = makeAssessment();
@@ -231,9 +253,8 @@ test('authorMcq works when Quiz.findByIdAndDelete is not a function (guard)', as
   const deps = {
     Assessment: { findById: async () => assessment },
     Quiz: {}, // no findByIdAndDelete
-    quizGenerationService: {
-      generateQuiz: async () => makeQuiz(),
-    },
+    quizGenerationService: { generateQuiz: async () => makeQuizN(15) },
+    questionQaService: passThroughQa(),
   };
 
   const result = await authorMcq('assess1', deps);
@@ -549,9 +570,10 @@ test('authorMcq with sourceId (ready): creates transient Content with keyConcept
     quizGenerationService: {
       generateQuiz: async (args) => {
         generateQuizArgs = args;
-        return makeQuiz();
+        return makeQuizN(8); // target 5 → pool 8
       },
     },
+    questionQaService: passThroughQa(),
   };
 
   const result = await authorMcq('assess1', deps);
@@ -561,6 +583,9 @@ test('authorMcq with sourceId (ready): creates transient Content with keyConcept
   assert.ok(Array.isArray(generateQuizArgs.contentIds), 'contentIds should be an array');
   assert.strictEqual(generateQuizArgs.contentIds.length, 1, 'contentIds should have 1 entry');
   assert.strictEqual(String(generateQuizArgs.contentIds[0]), String(transientId));
+
+  // Real grounding text now passed into generation (additive param).
+  assert.strictEqual(generateQuizArgs.groundingText, 'Chapter 1: Linked Lists. Chapter 2: Trees.');
 
   // Transient Content created with correct structure
   assert.ok(contentCreated, 'Content.create should have been called');
@@ -575,9 +600,10 @@ test('authorMcq with sourceId (ready): creates transient Content with keyConcept
   // Transient Content deleted after
   assert.strictEqual(contentDeletedId, String(transientId), 'transient Content must be deleted');
 
-  // Assessment updated with quiz questions
+  // Assessment updated with the QA-passed pool
   assert.ok(result, 'should return assessment');
-  assert.deepStrictEqual(result.config.mcq.questions, [{ questionText: 'a' }, { questionText: 'b' }]);
+  assert.strictEqual(result.config.mcq.questions.length, 8);
+  assert.strictEqual(result.config.mcq.authoring.status, 'ready');
 });
 
 test('authorMcq with sourceId but source not ready: falls back to topic-based (no contentIds)', async () => {
@@ -601,16 +627,18 @@ test('authorMcq with sourceId but source not ready: falls back to topic-based (n
       findById: async () => ({ _id: 'src1', status: 'extracting' }), // not ready
     },
     quizGenerationService: {
-      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuizN(8); },
     },
+    questionQaService: passThroughQa(),
   };
 
   await authorMcq('assess1', deps);
 
   // Content should NOT have been created (no grounding)
   assert.strictEqual(contentCreated, false, 'transient Content must NOT be created when source not ready');
-  // contentIds should be undefined (not passed)
+  // contentIds + groundingText should be undefined (not passed)
   assert.strictEqual(generateQuizArgs.contentIds, undefined, 'contentIds should be absent when source not ready');
+  assert.strictEqual(generateQuizArgs.groundingText, undefined, 'groundingText should be absent when source not ready');
 });
 
 test('authorMcq with sourceId but source not found: falls back to topic-based', async () => {
@@ -628,8 +656,9 @@ test('authorMcq with sourceId but source not found: falls back to topic-based', 
     Content: { create: async () => { throw new Error('should not be called'); }, findByIdAndDelete: async () => {} },
     AssessmentSource: { findById: async () => null },
     quizGenerationService: {
-      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuizN(8); },
     },
+    questionQaService: passThroughQa(),
   };
 
   await authorMcq('assess1', deps);
@@ -647,13 +676,15 @@ test('authorMcq without sourceId: behaves as before (no Content created, no cont
     Content: { create: async () => { contentCreated = true; return { _id: 'tid' }; }, findByIdAndDelete: async () => {} },
     AssessmentSource: { findById: async () => { throw new Error('should not be called'); } },
     quizGenerationService: {
-      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuiz(); },
+      generateQuiz: async (args) => { generateQuizArgs = args; return makeQuizN(15); },
     },
+    questionQaService: passThroughQa(),
   };
 
   await authorMcq('assess1', deps);
   assert.strictEqual(contentCreated, false, 'Content.create must NOT be called when no sourceId');
   assert.strictEqual(generateQuizArgs.contentIds, undefined);
+  assert.strictEqual(generateQuizArgs.groundingText, undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -1001,4 +1032,60 @@ test('authorDrill handles generateDrill failure gracefully without throwing', as
 
   assert.ok(result, 'should return assessment even when generateDrill throws');
   assert.ok(!result.config.drill.bundleId, 'bundleId should remain unset when generateDrill fails');
+});
+
+// ---------------------------------------------------------------------------
+// regenerateQuestion — single-item regen through the gates
+// ---------------------------------------------------------------------------
+
+const { regenerateQuestion } = require('../../services/institution/assessment/assessmentAuthoringService');
+
+function makeMcqWithQuestions(qs, status = 'configured') {
+  return {
+    _id: 'assessR',
+    type: 'mcq',
+    status,
+    title: 'T',
+    createdBy: 'user1',
+    config: { mcq: { topic: 'JavaScript', assessmentType: 'mixed', questions: qs } },
+    markModified() {},
+    save: async function () { return this; },
+  };
+}
+
+test('regenerateQuestion replaces a single item with a QA-passed one', async () => {
+  const assessment = makeMcqWithQuestions([{ questionText: 'old0' }, { questionText: 'old1' }]);
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    quizGenerationService: { generateQuiz: async () => makeQuizN(3) },
+    questionQaService: passThroughQa(),
+  };
+  const result = await regenerateQuestion('assessR', 1, deps);
+  assert.strictEqual(result.config.mcq.questions[0].questionText, 'old0', 'other items untouched');
+  assert.strictEqual(result.config.mcq.questions[1].questionText, 'q0', 'target item replaced with a passing question');
+  assert.ok(result.config.mcq.questions[1].qa, 'replacement carries qa metadata');
+});
+
+test('regenerateQuestion throws RELEASED once the assessment is released', async () => {
+  const assessment = makeMcqWithQuestions([{ questionText: 'x' }], 'released');
+  const deps = { Assessment: { findById: async () => assessment } };
+  await assert.rejects(() => regenerateQuestion('assessR', 0, deps), (e) => { assert.strictEqual(e.message, 'RELEASED'); return true; });
+});
+
+test('regenerateQuestion throws BAD_INDEX for an out-of-range index', async () => {
+  const assessment = makeMcqWithQuestions([{ questionText: 'x' }]);
+  const deps = { Assessment: { findById: async () => assessment } };
+  await assert.rejects(() => regenerateQuestion('assessR', 5, deps), (e) => { assert.strictEqual(e.message, 'BAD_INDEX'); return true; });
+});
+
+test('regenerateQuestion throws REGEN_FAILED when QA never yields a passing item', async () => {
+  const assessment = makeMcqWithQuestions([{ questionText: 'x' }]);
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    Quiz: { findByIdAndDelete: async () => {} },
+    quizGenerationService: { generateQuiz: async () => makeQuizN(3) },
+    questionQaService: rejectAllQa(),
+  };
+  await assert.rejects(() => regenerateQuestion('assessR', 0, deps), (e) => { assert.strictEqual(e.message, 'REGEN_FAILED'); return true; });
 });
