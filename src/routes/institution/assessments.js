@@ -39,6 +39,11 @@ router.post('/assessments', institutionAuth, requireInstitutionRole('tpo_head', 
     if (a.type === 'drill') {
       authoring().authorDrill(a._id).catch((e) => console.warn('[assessments:authorDrill]', e.message));
     }
+    // Interview question-plan authoring (Wave 2 block 4). typeof-guard keeps
+    // injected stubs that don't provide authorInterview working.
+    if (a.type === 'interview' && typeof authoring().authorInterview === 'function') {
+      authoring().authorInterview(a._id).catch((e) => console.warn('[assessments:authorInterview]', e.message));
+    }
     return res.status(201).json({ success: true, data: a });
   } catch (err) {
     // Sub-feature E: validation error codes
@@ -127,6 +132,24 @@ router.post('/assessments/:id/author-capstone', institutionAuth, requireInstitut
     return res.status(202).json({ success: true, data: { status: 'authoring' } });
   } catch (err) {
     console.error('[institution/assessments:author-capstone]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not trigger authoring.' });
+  }
+});
+
+// Re-author Interview question plan (recovery): tpo_head, tpo_coordinator
+// Blocked once released — the plan (grading anchors) must not change under students.
+router.post('/assessments/:id/author-interview', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const Assessment = getAssessmentModel();
+    const a = await Assessment.findOne({ ...institutionScope(req), _id: req.params.id });
+    if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
+    if (a.status === 'released' || a.status === 'closed') {
+      return res.status(409).json({ success: false, code: 'ALREADY_RELEASED', message: 'A released assessment cannot be re-authored.' });
+    }
+    authoring().authorInterview(a._id).catch((e) => console.warn('[assessments:author-interview]', e.message));
+    return res.status(202).json({ success: true, data: { status: 'authoring' } });
+  } catch (err) {
+    console.error('[institution/assessments:author-interview]', err.message);
     return res.status(500).json({ success: false, message: 'Could not trigger authoring.' });
   }
 });
