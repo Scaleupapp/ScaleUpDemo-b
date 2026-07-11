@@ -60,6 +60,7 @@ router.post('/assessments/:id/release', institutionAuth, requireInstitutionRole(
     if (err.message === 'NOT_FOUND') return res.status(404).json({ success: false, message: 'Assessment not found' });
     if (err.message === 'BAD_STATUS') return res.status(409).json({ success: false, code: 'BAD_STATUS', message: 'Only a configured assessment can be released.' });
     if (err.message === 'NO_QUESTIONS') return res.status(409).json({ success: false, code: 'NO_QUESTIONS', message: 'Questions are still being generated — try again in a moment.' });
+    if (err.message === 'AUTHORING_FAILED') return res.status(409).json({ success: false, code: 'AUTHORING_FAILED', message: 'Question generation failed quality checks — regenerate the assessment before releasing.' });
     if (err.message === 'NO_BUNDLE') return res.status(409).json({ success: false, code: 'NO_BUNDLE', message: 'The capstone is still being generated — try again in a moment.' });
     console.error('[institution/assessments:release]', err.message);
     return res.status(500).json({ success: false, message: 'Could not release the assessment.' });
@@ -79,16 +80,39 @@ router.post('/assessments/:id/close', institutionAuth, requireInstitutionRole('t
 });
 
 // Sub-feature D: Re-author MCQ (recovery): tpo_head, tpo_coordinator
+// Blocked once released — the frozen master must not be re-authored under students.
 router.post('/assessments/:id/author-mcq', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
   try {
     const Assessment = getAssessmentModel();
     const a = await Assessment.findOne({ ...institutionScope(req), _id: req.params.id });
     if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
+    if (a.status === 'released' || a.status === 'closed') {
+      return res.status(409).json({ success: false, code: 'ALREADY_RELEASED', message: 'A released assessment cannot be re-authored.' });
+    }
     authoring().authorMcq(a._id).catch((e) => console.warn('[assessments:author-mcq]', e.message));
     return res.status(202).json({ success: true, data: { status: 'authoring' } });
   } catch (err) {
     console.error('[institution/assessments:author-mcq]', err.message);
     return res.status(500).json({ success: false, message: 'Could not trigger authoring.' });
+  }
+});
+
+// Single-item MCQ regeneration (recovery): tpo_head, tpo_coordinator
+// Regenerates ONE authored question through the same 3 QA gates. Blocked once released.
+router.post('/assessments/:id/questions/:qIndex/regenerate', institutionAuth, requireInstitutionRole('tpo_head', 'tpo_coordinator'), async (req, res) => {
+  try {
+    const Assessment = getAssessmentModel();
+    const a = await Assessment.findOne({ ...institutionScope(req), _id: req.params.id });
+    if (!a) return res.status(404).json({ success: false, message: 'Assessment not found' });
+    const updated = await authoring().regenerateQuestion(a._id, req.params.qIndex);
+    return res.status(200).json({ success: true, data: { qIndex: Number(req.params.qIndex), status: 'regenerated', questionCount: (updated.config.mcq.questions || []).length } });
+  } catch (err) {
+    if (err.message === 'NOT_MCQ') return res.status(400).json({ success: false, code: 'NOT_MCQ', message: 'Only MCQ assessments have per-question regeneration.' });
+    if (err.message === 'RELEASED') return res.status(409).json({ success: false, code: 'ALREADY_RELEASED', message: 'A released assessment cannot be edited.' });
+    if (err.message === 'BAD_INDEX') return res.status(400).json({ success: false, code: 'BAD_INDEX', message: 'Question index out of range.' });
+    if (err.message === 'REGEN_FAILED') return res.status(409).json({ success: false, code: 'REGEN_FAILED', message: 'Could not generate a passing replacement — try again.' });
+    console.error('[institution/assessments:regenerate-question]', err.message);
+    return res.status(500).json({ success: false, message: 'Could not regenerate the question.' });
   }
 });
 
@@ -451,11 +475,17 @@ router.get('/assessments/:id/preview', institutionAuth, async (req, res) => {
     let preview = { type };
 
     if (type === 'mcq') {
-      const questions = (a.config && a.config.mcq && a.config.mcq.questions) || [];
+      const mcqCfg = (a.config && a.config.mcq) || {};
+      const questions = mcqCfg.questions || [];
+      const authoring = mcqCfg.authoring || null;
       const ready = !!(questions && questions.length);
       preview = {
         type: 'mcq',
         ready,
+        // Honest authoring status + aggregate QA evidence for the TPO.
+        authoringStatus: authoring ? authoring.status : (ready ? 'ready' : undefined),
+        qaReport: authoring ? authoring.qaReport : undefined,
+        perStudentCount: mcqCfg.questionCount || undefined,
         questionCount: questions.length,
         questions: questions.map((q) => {
           const opts = q.options || [];
@@ -480,6 +510,18 @@ router.get('/assessments/:id/preview', institutionAuth, async (req, res) => {
             correct,
             correctAnswer: q.correctAnswer,
             concept: q.concept,
+            competency: q.competency,
+            // Per-item quality evidence (lint/solver/judge verdicts) for the TPO.
+            qa: q.qa
+              ? {
+                  lintPassed: !!(q.qa.lint && q.qa.lint.passed),
+                  solverAgrees: !!(q.qa.solver && q.qa.solver.agrees),
+                  solverConfidence: q.qa.solver ? q.qa.solver.confidence : undefined,
+                  judgeVerdict: q.qa.judge ? q.qa.judge.verdict : undefined,
+                  judgeScores: q.qa.judge ? q.qa.judge.scores : undefined,
+                  generation: q.qa.generation,
+                }
+              : undefined,
           };
         }),
       };

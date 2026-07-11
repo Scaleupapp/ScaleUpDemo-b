@@ -68,9 +68,14 @@ async function releaseAssessment(scope, id, releasedBy, deps) {
   const a = await Assessment.findOne({ ...scope, _id: id });
   if (!a) throw new Error('NOT_FOUND');
   if (a.status !== 'configured') throw new Error('BAD_STATUS');
-  // MCQ assessments must have questions authored before release
-  if (a.type === 'mcq' && !(a.config && a.config.mcq && a.config.mcq.questions && a.config.mcq.questions.length)) {
-    throw new Error('NO_QUESTIONS');
+  // MCQ assessments must have questions authored before release. Reflect the
+  // honest authoring status: a failed run is a terminal error the TPO must act
+  // on (regenerate), NOT a "still generating, try again" transient.
+  if (a.type === 'mcq') {
+    const mcq = (a.config && a.config.mcq) || {};
+    const authoringStatus = mcq.authoring && mcq.authoring.status;
+    if (authoringStatus === 'failed') throw new Error('AUTHORING_FAILED');
+    if (!(mcq.questions && mcq.questions.length)) throw new Error('NO_QUESTIONS');
   }
   // Capstone assessments must have a bundle generated before release
   if (a.type === 'capstone' && !(a.config && a.config.capstone && a.config.capstone.bundleId)) {
