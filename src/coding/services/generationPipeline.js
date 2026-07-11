@@ -14,6 +14,7 @@
 
 const contentGenerator = require('./contentGenerator');
 const contentValidator = require('./contentValidator');
+const drillPromotion = require('./drillPromotion');
 
 // ── In-process metrics state ──────────────────────────────────────────────────
 
@@ -92,11 +93,28 @@ async function runPipeline(request, options = {}) {
 
     if (validation.ok) {
       if (attempt === 1) metricsState.passOnFirstTry += 1;
+
+      // Activation gate (Wave 4 block 2): a DRILL leaves validation at status
+      // 'validated' — promote it to 'active' via the LLM-judge gate so it is
+      // actually servable (fixes the authorDrill poll-for-active timeout).
+      // Capstones self-activate in capstoneGenerationService after their own
+      // cross-model review, so they are intentionally NOT promoted here.
+      let promotion;
+      if (draft.type === 'drill' && options.promote !== false) {
+        const promoteFn = options.promoteBundle || drillPromotion.promoteBundle;
+        try {
+          promotion = await promoteFn({ bundle_id: draft._id }, options.promoteDeps || {});
+        } catch (err) {
+          promotion = { promoted: false, error: err.message };
+        }
+      }
+
       return {
         ok: true,
         bundle_id: draft._id,
         attempts: attempt,
         duration_ms: Date.now() - started,
+        ...(promotion ? { promoted: !!promotion.promoted, promotion } : {}),
       };
     }
 
