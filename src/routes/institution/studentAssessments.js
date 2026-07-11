@@ -19,6 +19,7 @@ const express = require('express');
 const realAuth = require('../../middleware/auth');
 const { getAdapter: realGetAdapter } = require('../../services/institution/assessment/engineAdapters');
 const reviewService = require('../../services/institution/assessment/assessmentReviewService');
+const { getConfiguredDurationSeconds } = require('../../services/institution/assessment/assessmentSessionService');
 
 const router = express.Router();
 router._deps = null;
@@ -104,12 +105,21 @@ router.get('/assessments', (req, res, next) => getAuth()(req, res, next), async 
       sessionByAssessmentId[String(s.assessmentId)] = s;
     }
 
-    const data = assessments.map((a) => ({
-      assessment: a,
-      session: sessionByAssessmentId[String(a._id)] || null,
-      // Detailed per-question review unlocks for the student once the window closes.
-      windowClosed: reviewService.isWindowClosed(a),
-    }));
+    const data = assessments.map((a) => {
+      const session = sessionByAssessmentId[String(a._id)] || null;
+      return {
+        assessment: a,
+        session,
+        // Detailed per-question review unlocks for the student once the window closes.
+        windowClosed: reviewService.isWindowClosed(a),
+        // Take-flow contract (Wave 3): the countdown values apps render. deadlineAt
+        // is the authoritative per-session cutoff (null until the student starts, or
+        // when the assessment has no duration cap); durationSeconds is the configured
+        // budget.
+        durationSeconds: getConfiguredDurationSeconds(a) || null,
+        deadlineAt: (session && session.deadlineAt) || null,
+      };
+    });
 
     return res.status(200).json({ success: true, data });
   } catch (err) {
@@ -136,12 +146,27 @@ router.post('/assessments/:id/start', (req, res, next) => getAuth()(req, res, ne
       console.warn('[studentAssessments:start] getStartMeta failed:', metaErr.message);
     }
 
+    // Take-flow contract (Wave 3): expose the countdown values so apps can render
+    // a timer. deadlineAt is authoritative (server-enforced at sync + worker);
+    // durationSeconds is the configured budget. Best-effort assessment read —
+    // a lookup failure must never fail an otherwise-successful start.
+    let durationSeconds = null;
+    try {
+      const aQuery = getAssessment().findById(assessmentId);
+      const a = typeof aQuery.lean === 'function' ? await aQuery.lean() : await aQuery;
+      if (a) durationSeconds = getConfiguredDurationSeconds(a) || null;
+    } catch (durErr) {
+      console.warn('[studentAssessments:start] durationSeconds lookup failed:', durErr.message);
+    }
+
     return res.status(201).json({
       success: true,
       data: {
         assessmentSessionId: String(session._id),
         engine: session.engine,
         meta,
+        deadlineAt: session.deadlineAt || null,
+        durationSeconds,
       },
     });
   } catch (err) {

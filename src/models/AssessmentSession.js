@@ -14,6 +14,13 @@ const AssessmentSessionSchema = new mongoose.Schema({
   },
   status: { type: String, enum: ['scheduled', 'in_progress', 'submitted', 'graded', 'expired'], default: 'scheduled' },
   startedAt: Date,
+  // Server-side duration enforcement (Wave 3 block 1). Set at start when the
+  // assessment's engine config carries durationSeconds > 0:
+  //   deadlineAt = min(startedAt + durationSeconds, closesAt when set).
+  // Null ⇒ no per-session duration cap (only assessment.closesAt governs, via
+  // the sync worker). A sync/worker tick past deadlineAt auto-finalizes: grade
+  // what the engine has, else mark 'expired'. Additive — old clients ignore it.
+  deadlineAt: Date,
   submittedAt: Date,
   gradedAt: Date,
   result: {
