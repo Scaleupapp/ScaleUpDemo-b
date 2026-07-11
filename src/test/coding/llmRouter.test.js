@@ -49,7 +49,7 @@ test('getModelForTask: unknown task ID throws', () => {
 
 // ── getRoutingTable ───────────────────────────────────────────────────────────
 
-test('getRoutingTable: returns object with all 12 task IDs', () => {
+test('getRoutingTable: returns object with all 13 task IDs', () => {
   const table = getRoutingTable();
   assert.strictEqual(typeof table, 'object');
   assert.ok(table !== null);
@@ -57,6 +57,7 @@ test('getRoutingTable: returns object with all 12 task IDs', () => {
   const EXPECTED_TASK_IDS = [
     'content_generator_draft',
     'content_validator_cross',
+    'drill_promotion_judge',
     'capstone_quality_cross',
     'reference_solution_solver',
     'drill_grade_prompt',

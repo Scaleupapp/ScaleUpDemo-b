@@ -66,6 +66,13 @@ BEHAVIORAL INTERVIEW:
 const MIN_SUBSTANTIVE_ANSWERS = 3;
 const SUBSTANTIVE_MIN_CHARS = 30; // ~a full sentence; filters "yes"/"I'm ready"
 
+// 2-pass grading variance guard (Wave 4 block 4). The anchored grader runs at
+// temperature 0.2 (near-deterministic), but transcript + prompt nondeterminism
+// remains. For INSTITUTION assessments we grade twice and, if the two overall
+// scores diverge by more than this many points, flag the result for review so a
+// cohort score is never silently built on an unstable grade.
+const INTERVIEW_SCORE_VARIANCE_THRESHOLD = 10;
+
 // Score-band anchors + a calibration exemplar injected into the eval prompt so
 // scores are consistent across sessions (spec §Answer-side: anchored grader).
 const SCORING_ANCHORS = `SCORING ANCHORS (apply consistently; a perfect score is extremely rare):
@@ -108,7 +115,7 @@ class InterviewService {
   /**
    * Start a new interview session
    */
-  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null, abandonExisting = true, context = '', expectedAnswers = null } = {}) {
+  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null, abandonExisting = true, context = '', expectedAnswers = null, isInstitutionAssessment = false } = {}) {
     // Auto-abandon any stale in-progress session — users were trapped if a
     // previous interview was force-quit or crashed. The diagnostic engine
     // does the same on startAttempt.
@@ -248,6 +255,7 @@ ${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBl
       targetCompany: targetCompany || undefined,
       difficulty,
       objectiveId: objectiveId || undefined,
+      isInstitutionAssessment: !!isInstitutionAssessment,
       status: 'in_progress',
       systemInstruction,
       expectedAnswers: Array.isArray(expectedAnswers)
@@ -504,6 +512,29 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
         }
       }
 
+      // ── 2-pass variance guard (institution assessments only) ────────────────
+      // Env-gated: INTERVIEW_TWO_PASS default ON, but only for sessions started
+      // by the assessment engine (isInstitutionAssessment). D2C never runs it
+      // (cost). Grade a second time; if the two overall scores diverge by more
+      // than the threshold, flag needsReview + persist scoreVariance so a
+      // nondeterministic grade is never trusted as a cohort-comparable number.
+      const twoPassEnabled = process.env.INTERVIEW_TWO_PASS !== 'false';
+      let scoreVariance = null;
+      let twoPassNeedsReview = false;
+      if (twoPassEnabled && session.isInstitutionAssessment) {
+        try {
+          const second = await callEval();
+          if (validateEvaluationShape(second)) {
+            scoreVariance = Math.abs(result.overallScore - second.overallScore);
+            if (scoreVariance > INTERVIEW_SCORE_VARIANCE_THRESHOLD) twoPassNeedsReview = true;
+          } else {
+            console.warn(`[InterviewEval] two-pass second grade had invalid shape for session ${sessionId}; variance unknown`);
+          }
+        } catch (vErr) {
+          console.warn('[InterviewEval] two-pass variance guard failed (non-fatal):', vErr.message);
+        }
+      }
+
       // Save evaluation
       session.evaluation = {
         gradeStatus: 'graded',
@@ -532,7 +563,8 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
           flags: result.integrityReport?.flags || [],
           recommendation: result.integrityReport?.recommendation || '',
         },
-        needsReview: false,
+        needsReview: twoPassNeedsReview,
+        ...(scoreVariance != null ? { scoreVariance } : {}),
       };
 
       // ── Answer-side LLM-as-judge (best-effort; cross-family OpenAI vs the
@@ -560,7 +592,9 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
         });
         if (verdict.sampled) {
           if (typeof verdict.finalOverall === 'number') session.evaluation.overallScore = Math.round(verdict.finalOverall);
-          session.evaluation.needsReview = !!verdict.needsReview;
+          // OR the flags — a two-pass variance review must not be cleared by a
+          // judge that happens to concur on this pass.
+          session.evaluation.needsReview = session.evaluation.needsReview || !!verdict.needsReview;
           session.evaluation.judgeOverall = verdict.judgeOverall;
           session.evaluation.judgeDisagreement = verdict.disagreement;
         }

@@ -190,6 +190,9 @@ const interview = {
       abandonExisting: false,
       context,
       expectedAnswers,
+      // Institution-path signal: enables the 2-pass grading variance guard in
+      // evaluateInterview (INTERVIEW_TWO_PASS, default ON for institution only).
+      isInstitutionAssessment: true,
     });
     const sid = out && out.session ? out.session._id : (out && out._id);
     return { engine: { type: 'interview', sessionId: sid } };

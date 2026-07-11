@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "ai_eng",
+  "language": "python",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Sarvam / CRED ML-platform senior round — refactor a RAG retriever whose \"cosine\" score is actually an unnormalised dot product and whose ranking is inverted; fix the math and make the pieces unit-testable",
+  "brief": "A RAG pipeline retrieves context with this helper. It ships wrong results and nobody can unit-test the pieces:\n\n```python\ndef search(query, docs, k):\n    scored = []\n    for key, vec in docs.items():\n        dot = sum(a * b for a, b in zip(query, vec))   # mislabelled \"cosine\"\n        scored.append((dot, key))\n    scored.sort()                                      # ascending -> least similar first\n    return [key for _, key in scored[:k]]\n```\n\nTwo real bugs:\n1. It calls the score \"cosine similarity\" but computes only the raw **dot product** — it never divides by the vector norms, so a high-magnitude document looks similar regardless of direction.\n2. It sorts **ascending** and takes the front, returning the LEAST similar documents.\n\n**Your tasks:**\n1. Extract `cosine_similarity(a, b)` that normalises by both norms (returns `0.0` if either vector is all-zero) — magnitude-invariant, direction only.\n2. Extract `top_k(query, docs, k)` that ranks by DESCENDING cosine similarity, with a deterministic tie-break on the document key, and returns up to `k` keys.\n3. Remove the monolithic `search`; expose the two functions instead.\n4. Both visible tests must pass.",
+  "acceptance_criteria": [
+    "`cosine_similarity` and `top_k` exist at module level and are importable",
+    "`cosine_similarity` divides the dot product by BOTH vector norms and returns 0.0 for a zero vector — it is magnitude-invariant",
+    "`top_k` ranks by DESCENDING similarity (most similar first) with a deterministic tie-break",
+    "A high-magnitude but low-direction-similarity document does NOT outrank a unit-aligned one",
+    "Both visible tests pass"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "retriever.py",
+        "content": "# retriever.py -- a first-pass semantic search helper. Two real bugs:\n#\n#   (1) It calls the score \"cosine similarity\" but only computes the raw DOT\n#       PRODUCT -- it never divides by the vector norms. Any document with a\n#       large magnitude therefore looks artificially similar, regardless of\n#       direction. Cosine similarity must be direction-only.\n#   (2) It sorts ascending and slices the front, so it returns the LEAST similar\n#       documents instead of the most similar.\n#\n# It is also one monolithic function, so neither the similarity math nor the\n# ranking can be tested on its own.\n\n\ndef search(query, docs, k):\n    scored = []\n    for key, vec in docs.items():\n        dot = sum(a * b for a, b in zip(query, vec))   # mislabelled \"cosine\"\n        scored.append((dot, key))\n    scored.sort()                                      # ascending -> least similar first\n    return [key for _, key in scored[:k]]\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "retriever.py",
+        "content": "# retriever.py -- refactored into a correct, testable retriever.\n#\n# cosine_similarity normalises by both vector norms (direction-only, magnitude\n# invariant). top_k ranks by DESCENDING similarity with a deterministic tie\n# break on the document key.\n\nimport math\n\n\ndef cosine_similarity(a, b):\n    \"\"\"Cosine similarity of two equal-length vectors; 0.0 if either is a zero vector.\n\n    Args:\n        a, b: sequences of numbers of equal length.\n    Returns:\n        float in [-1, 1]; magnitude-invariant (direction only).\n    \"\"\"\n    dot = sum(x * y for x, y in zip(a, b))\n    na = math.sqrt(sum(x * x for x in a))\n    nb = math.sqrt(sum(y * y for y in b))\n    if na == 0 or nb == 0:\n        return 0.0\n    return dot / (na * nb)\n\n\ndef top_k(query, docs, k):\n    \"\"\"Return the keys of the k most similar documents, most-similar first.\n\n    Args:\n        query: query vector.\n        docs: dict of key -> document vector.\n        k: number of results to return.\n    Returns:\n        list of up to k document keys, sorted by descending cosine similarity\n        (ties broken by key for determinism).\n    \"\"\"\n    scored = [(cosine_similarity(query, vec), key) for key, vec in docs.items()]\n    scored.sort(key=lambda t: (-t[0], t[1]))\n    return [key for _, key in scored[:k]]\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "cosine_is_normalised_and_bounded",
+      "command": "python -c \"\nimport retriever\nassert callable(getattr(retriever, 'cosine_similarity', None)), 'cosine_similarity missing'\nassert callable(getattr(retriever, 'top_k', None)), 'top_k missing'\nassert abs(retriever.cosine_similarity([1, 0], [1, 0]) - 1.0) < 1e-9, 'identical should be 1.0'\nassert abs(retriever.cosine_similarity([1, 0], [0, 5]) - 0.0) < 1e-9, 'orthogonal should be 0.0'\n# magnitude invariance: scaling a vector must not change cosine\nassert abs(retriever.cosine_similarity([1, 0], [2, 0]) - 1.0) < 1e-9, 'must be magnitude-invariant'\nprint('PASS')\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": [
+        "PASS"
+      ]
+    },
+    {
+      "name": "top_k_ranks_by_direction_descending",
+      "command": "python -c \"\nimport retriever\nquery = [1, 0]\ndocs = {'x': [2, 0], 'y': [1, 1], 'z': [0, 5]}\nassert retriever.top_k(query, docs, 2) == ['x', 'y'], repr(retriever.top_k(query, docs, 2))\nprint('PASS')\n\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": [
+        "PASS"
+      ]
+    }
+  ],
+  "hidden_tests": [],
+  "seeded_mistakes": [
+    {
+      "location": "retriever.py",
+      "bug_description": "Renames the function to `cosine_similarity` but still returns the raw dot product without dividing by the norms, so it is not magnitude-invariant — `cosine_similarity([1,0],[2,0])` returns 2.0 instead of 1.0 and high-magnitude documents dominate the ranking.",
+      "why_compass_might_suggest_it": "The starter already had a variable literally named as a cosine score, so the model assumes the math is correct and only reshapes the structure. Fixing a subtle numerical bug requires actually knowing the cosine formula, not just refactoring.",
+      "detection_signals": [
+        "cosine_is_normalised_and_bounded fails on the magnitude-invariance assertion",
+        "No division by `sqrt(sum(x*x))` norms in the function body"
+      ]
+    },
+    {
+      "location": "retriever.py",
+      "bug_description": "Fixes the cosine math but preserves the ascending sort (`scored.sort()` then slice), so `top_k` still returns the LEAST similar documents.",
+      "why_compass_might_suggest_it": "Ascending sort is Python's default and the starter used it; the inverted-ranking bug is invisible unless you check the actual order rather than just \"it returns k items\".",
+      "detection_signals": [
+        "top_k_ranks_by_direction_descending returns ['z', 'y'] (least similar) instead of ['x', 'y']",
+        "The sort key is not negated and results are not reversed"
+      ]
+    },
+    {
+      "location": "retriever.py",
+      "bug_description": "Drops the zero-vector guard, so cosine of a query against an all-zero document vector raises ZeroDivisionError instead of returning 0.0.",
+      "why_compass_might_suggest_it": "The happy-path data has no zero vectors, so the missing guard never surfaces during casual testing; the model omits defensive code it was not explicitly asked for.",
+      "detection_signals": [
+        "ZeroDivisionError when a document vector is all zeros",
+        "No `if na == 0 or nb == 0` branch"
+      ]
+    }
+  ],
+  "rubric_anchors": [
+    {
+      "dimension": "correctness",
+      "check": "`cosine_similarity` divides the dot product by both norms (magnitude-invariant) and guards the zero vector — the normalisation visible test passes",
+      "weight": 0.3
+    },
+    {
+      "dimension": "correctness",
+      "check": "`top_k` ranks by DESCENDING similarity with a deterministic tie-break; the ranking visible test returns ['x', 'y']",
+      "weight": 0.3
+    },
+    {
+      "dimension": "code_quality",
+      "check": "The two concerns (similarity metric vs ranking) are separate top-level importable functions; the monolithic `search` is gone",
+      "weight": 0.2
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt called out BOTH bugs (unnormalised dot product AND inverted sort) rather than asking for a generic \"clean up\"",
+      "weight": 0.2
+    }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "States the correct formula: \"cosine = dot(a,b) / (||a|| · ||b||); it must be magnitude-invariant, so scaling a vector cannot change the score\"",
+      "Calls out the ranking bug: \"return the MOST similar documents — sort descending by similarity, with a stable tie-break on the key\"",
+      "Requires a zero-vector guard returning 0.0 rather than dividing by zero"
+    ],
+    "common_verification_traps": [
+      "Only asserting that top_k returns k items, not their ORDER — the inverted-sort bug passes a length check",
+      "Testing cosine only on unit vectors, where dot product equals cosine, so the missing normalisation is never exposed"
+    ],
+    "decomposition_reference": []
+  },
+  "difficulty_signals": {
+    "token_count": 195,
+    "branching_complexity": 4,
+    "edge_cases": 5,
+    "known_hard_patterns": [
+      "cosine vs raw dot product (normalisation)",
+      "inverted ranking / sort direction",
+      "zero-vector divide-by-zero guard"
+    ]
+  }
+}

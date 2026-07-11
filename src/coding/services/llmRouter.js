@@ -29,6 +29,10 @@ const gemini    = require('../integrations/gemini.client');
 const ROUTING_TABLE = {
   content_generator_draft:   { provider: 'anthropic', model: 'claude-opus-4-7', max_tokens: 20000 },
   content_validator_cross:   { provider: 'google',    model: 'gemini-2.5-pro' },
+  // Question-side judge that gates the validated -> active promotion of a
+  // generated drill (rubric quality + task clarity + difficulty honesty).
+  // Cross-family from the Anthropic generator, mirroring content_validator_cross.
+  drill_promotion_judge:     { provider: 'google',    model: 'gemini-2.5-pro' },
   capstone_quality_cross:    { provider: 'google',    model: 'gemini-2.5-pro' },
   reference_solution_solver: { provider: 'anthropic', model: 'claude-opus-4-7', max_tokens: 16000 },
   drill_grade_prompt:        { provider: 'anthropic', model: 'claude-haiku-4-5' },

@@ -13,6 +13,44 @@ const DAILY_DRILL_QUOTA = 1;
 const RECENT_BUNDLE_EXCLUSION_DAYS = 7;
 
 // ---------------------------------------------------------------------------
+// Deterministic seeded shuffle (mirrors engineAdapters xmur3/mulberry32 — the
+// repo convention avoids Math.random so selection is reproducible per user+day:
+// re-fetching /today the same day yields the SAME drill, but different users /
+// different days see different picks among eligible bundles).
+// ---------------------------------------------------------------------------
+function _xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function () {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+function _mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** Return a new array = deterministic Fisher-Yates shuffle of `arr` under `seedStr`. */
+function seededShuffle(arr, seedStr) {
+  const a = arr.slice();
+  const rng = _mulberry32(_xmur3(String(seedStr))());
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+  }
+  return a;
+}
+
+// ---------------------------------------------------------------------------
 // Test seam: allows tests to inject a fake workers module
 // ---------------------------------------------------------------------------
 let _workersModule = null;
@@ -118,25 +156,47 @@ async function getToday(req, res) {
     const weakestAxis = pickWeakestAxis(mastery);
     const drill_subtype = axisToSubtype(weakestAxis);
 
-    // Find the most recent active bundle matching the preferred subtype and difficulty.
-    const bundle = await ArtifactBundle.findOne({
-      type: 'drill',
-      role_track,
-      difficulty: diffState.current_difficulty,
-      drill_subtype,
-      status: 'active',
-    }).sort({ createdAt: -1 }).lean();
+    // ── Recent-exclusion (mirror requestDrill): don't re-serve a bundle the
+    // user attempted in the last RECENT_BUNDLE_EXCLUSION_DAYS days. ───────────
+    const exclusionDate = new Date(Date.now() - RECENT_BUNDLE_EXCLUSION_DAYS * 24 * 60 * 60 * 1000);
+    const recentAttempts = await DrillAttemptModel.find({
+      user_id: userId,
+      started_at: { $gte: exclusionDate },
+    }).select('bundle_id').lean();
+    const excludeBundleIds = recentAttempts.map(a => a.bundle_id);
 
-    // Fallback: if no exact-subtype bundle, try any Phase A subtype at this difficulty.
-    let actualBundle = bundle;
-    if (!actualBundle) {
-      actualBundle = await ArtifactBundle.findOne({
+    // Deterministic per-user/day seed so /today is stable within a day but
+    // varies across users and across days (no Math.random — repo convention).
+    const daySeed = `${userId}:${startOfDay.toISOString().slice(0, 10)}`;
+
+    // Pick from ALL eligible active bundles (not just the newest) via a
+    // deterministic seeded shuffle, excluding recently-attempted ones.
+    async function pickEligible(subtypeFilter) {
+      const eligible = await ArtifactBundle.find({
         type: 'drill',
         role_track,
         difficulty: diffState.current_difficulty,
-        drill_subtype: { $in: PHASE_A_DRILL_SUBTYPES },
+        ...subtypeFilter,
         status: 'active',
-      }).sort({ createdAt: -1 }).lean();
+        _id: { $nin: excludeBundleIds },
+      }).lean();
+      if (eligible.length > 0) return seededShuffle(eligible, daySeed)[0];
+      // Last-resort: user has attempted every bundle in this bucket recently —
+      // drop the exclusion rather than return nothing.
+      const anyBundle = await ArtifactBundle.find({
+        type: 'drill',
+        role_track,
+        difficulty: diffState.current_difficulty,
+        ...subtypeFilter,
+        status: 'active',
+      }).lean();
+      return anyBundle.length > 0 ? seededShuffle(anyBundle, daySeed)[0] : null;
+    }
+
+    // Preferred: weakest-axis subtype. Fallback: any Phase A subtype.
+    let actualBundle = await pickEligible({ drill_subtype });
+    if (!actualBundle) {
+      actualBundle = await pickEligible({ drill_subtype: { $in: PHASE_A_DRILL_SUBTYPES } });
     }
 
     if (!actualBundle) {
@@ -771,4 +831,5 @@ module.exports = {
   requestDrill,
   _setWorkersModule,
   safeBundleView,
+  seededShuffle,
 };

@@ -35,6 +35,11 @@ const interviewSessionSchema = new mongoose.Schema({
   difficulty: { type: String, enum: ['easy', 'moderate', 'hard'], default: 'moderate' },
   objectiveId: { type: mongoose.Schema.Types.ObjectId, ref: 'UserObjective' },
 
+  // True when this session was started by the institution assessment engine
+  // (engineAdapters path). Gates the 2-pass grading variance guard, which is
+  // ON for institution assessments and OFF for D2C (cost) — Wave 4 block 4.
+  isInstitutionAssessment: { type: Boolean, default: false },
+
   status: {
     type: String,
     enum: ['setup', 'in_progress', 'completed', 'evaluating', 'evaluated', 'abandoned'],
@@ -93,6 +98,10 @@ const interviewSessionSchema = new mongoose.Schema({
     needsReview: { type: Boolean, default: false },
     judgeOverall: { type: Number },
     judgeDisagreement: { type: Number },
+    // 2-pass variance guard (institution only, Wave 4 block 4): |overallScore
+    // pass1 - pass2|. When it exceeds the threshold, needsReview is set — the
+    // grade is nondeterministic enough to warrant a human look.
+    scoreVariance: { type: Number },
     // 'insufficient' when the transcript is too thin to grade (min-transcript gate).
     gradeStatus: { type: String, enum: ['graded', 'insufficient'] },
   },

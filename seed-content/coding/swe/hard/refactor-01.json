@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "type": "drill",
+  "drill_subtype": "refactor",
+  "role_track": "swe",
+  "language": "javascript",
+  "difficulty": "hard",
+  "time_budget_minutes": 15,
+  "interview_parallel": "Razorpay / Cred backend senior round — refactor a hot-path rate limiter that cannot be unit-tested and silently allows bursts; make it deterministic and correct without changing the public allow() contract",
+  "brief": "A payments service protects an upstream API with a hand-rolled rate limiter in `rateLimiter.js`. It works in production \"well enough\", but two problems block the next release:\n\n```javascript\nlet tokens = 5;\nlet lastRefill = Date.now();\n\nfunction allow() {\n  const now = Date.now();\n  if (now - lastRefill > 1000) {\n    tokens = 5;            // resets to full\n    lastRefill = now;\n  }\n  if (tokens > 0) { tokens -= 1; return true; }\n  return false;\n}\n\nmodule.exports = { allow };\n```\n\nProblem 1 — **untestable**: it reads `Date.now()` directly, so there is no way to test its behaviour without sleeping in real time.\n\nProblem 2 — **wrong refill**: once a full second passes it slams the bucket back to full capacity (`tokens = 5`) instead of adding the tokens that actually accrued. A caller that pauses for one second regains ALL five tokens, so the sustained rate is not bounded.\n\n**Your tasks:**\n1. Extract a `TokenBucket` class that takes `{ capacity, refillPerSec, now }`, where `now` is an injectable clock function (default `() => Date.now()`).\n2. Implement **incremental** refill: tokens accrue at `refillPerSec` per second and are capped at `capacity` — never reset-to-full.\n3. Expose `tryRemove(n = 1)` which refills, then removes `n` tokens if available (returns `true`) or returns `false`.\n4. Keep a module-level `allow()` wrapper (capacity 5, refill 5/sec) so existing callers are unaffected.\n5. Export BOTH `TokenBucket` and `allow`. Both visible tests must pass.",
+  "acceptance_criteria": [
+    "`TokenBucket` is exported as a constructor/class and accepts an injectable `now` clock",
+    "Refill is incremental and capped at `capacity` — a one-second pause does NOT restore the bucket to full unless refillPerSec × elapsed reaches capacity",
+    "`tryRemove(n)` refills first, then removes n tokens if available (true) else returns false",
+    "`allow()` is preserved as a module-level wrapper and still exported",
+    "Both visible tests pass against the refactored code"
+  ],
+  "starter_repo": {
+    "files": [
+      {
+        "path": "rateLimiter.js",
+        "content": "// rateLimiter.js — quick-and-dirty, written under deadline. Two problems:\n//   (1) It reads the wall clock directly (Date.now), so it cannot be unit-tested\n//       deterministically — every test would have to sleep in real time.\n//   (2) The refill logic is wrong: once a full second elapses it SLAMS the bucket\n//       back to full capacity instead of adding the tokens that accrued, so a\n//       caller can burst far more than the intended sustained rate.\nlet tokens = 5;\nlet lastRefill = Date.now();\n\nfunction allow() {\n  const now = Date.now();\n  if (now - lastRefill > 1000) {\n    tokens = 5;            // BUG: reset-to-full instead of incremental refill\n    lastRefill = now;\n  }\n  if (tokens > 0) {\n    tokens -= 1;\n    return true;\n  }\n  return false;\n}\n\nmodule.exports = { allow };\n"
+      }
+    ]
+  },
+  "reference_solution": {
+    "files": [
+      {
+        "path": "rateLimiter.js",
+        "content": "// rateLimiter.js — refactored into a testable, injectable token bucket.\n//\n// The clock is injected (`now`) so behaviour is deterministic under test, and\n// refill is incremental: tokens accrue at `refillPerSec` and are capped at\n// `capacity`. `allow()` is preserved as a thin wrapper over a module-level\n// default bucket so existing callers keep working.\n\nclass TokenBucket {\n  /**\n   * @param {object}   opts\n   * @param {number}   opts.capacity      max tokens the bucket can hold\n   * @param {number}   opts.refillPerSec  tokens added per second\n   * @param {() => number} [opts.now]     clock in ms (injectable for tests)\n   */\n  constructor({ capacity, refillPerSec, now = () => Date.now() }) {\n    this.capacity = capacity;\n    this.refillPerSec = refillPerSec;\n    this.now = now;\n    this.tokens = capacity;\n    this.last = now();\n  }\n\n  _refill() {\n    const t = this.now();\n    const elapsedSec = (t - this.last) / 1000;\n    if (elapsedSec > 0) {\n      // Incremental accrual, capped at capacity — NOT a reset-to-full.\n      this.tokens = Math.min(this.capacity, this.tokens + elapsedSec * this.refillPerSec);\n      this.last = t;\n    }\n  }\n\n  tryRemove(n = 1) {\n    this._refill();\n    if (this.tokens >= n) {\n      this.tokens -= n;\n      return true;\n    }\n    return false;\n  }\n}\n\nconst _default = new TokenBucket({ capacity: 5, refillPerSec: 5 });\nfunction allow() {\n  return _default.tryRemove(1);\n}\n\nmodule.exports = { TokenBucket, allow };\n"
+      }
+    ]
+  },
+  "visible_tests": [
+    {
+      "name": "token_bucket_is_exported_and_injectable",
+      "command": "node -e \"const m = require('./rateLimiter'); if (typeof m.TokenBucket !== 'function') { console.error('TokenBucket not exported'); process.exit(1); } const b = new m.TokenBucket({ capacity: 2, refillPerSec: 1, now: () => 0 }); if (typeof b.tryRemove !== 'function') { console.error('no tryRemove'); process.exit(1); } console.log('PASS');\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": [
+        "PASS"
+      ]
+    },
+    {
+      "name": "incremental_refill_bounds_sustained_rate",
+      "command": "node -e \"const { TokenBucket } = require('./rateLimiter'); let t = 0; const b = new TokenBucket({ capacity: 2, refillPerSec: 1, now: () => t }); const seq = []; seq.push(b.tryRemove()); seq.push(b.tryRemove()); seq.push(b.tryRemove()); t = 1000; seq.push(b.tryRemove()); seq.push(b.tryRemove()); const expected = [true, true, false, true, false]; if (JSON.stringify(seq) !== JSON.stringify(expected)) { console.error('got ' + JSON.stringify(seq)); process.exit(1); } console.log('PASS');\"",
+      "expected_exit_code": 0,
+      "expected_output_contains": [
+        "PASS"
+      ]
+    }
+  ],
+  "hidden_tests": [],
+  "seeded_mistakes": [
+    {
+      "location": "rateLimiter.js",
+      "bug_description": "Refactors into a TokenBucket class but preserves the original reset-to-full refill (`this.tokens = this.capacity`) instead of incremental accrual — the sustained-rate test fails because a one-second pause on a capacity-2 / 1-per-sec bucket restores 2 tokens instead of 1.",
+      "why_compass_might_suggest_it": "The learner is asked to \"extract a class\", so the model faithfully copies the existing (buggy) body into a method without questioning the refill math. Preserving behaviour is usually the safe refactoring instinct — here the behaviour itself was the bug.",
+      "detection_signals": [
+        "incremental_refill_bounds_sustained_rate returns [true,true,false,true,true] (5th call true) instead of [...,false]",
+        "The refill method assigns capacity directly rather than adding elapsed × refillPerSec"
+      ]
+    },
+    {
+      "location": "rateLimiter.js",
+      "bug_description": "Keeps reading `Date.now()` inside the class instead of accepting an injectable `now`, so the deterministic test that drives a fake clock cannot control time and the bucket never observes the simulated 1-second jump.",
+      "why_compass_might_suggest_it": "Dependency-injecting the clock is a testing-specific idiom; without an explicit instruction the model reaches for the familiar `Date.now()` it saw in the starter.",
+      "detection_signals": [
+        "token_bucket_is_exported_and_injectable constructs with `now: () => 0` but the bucket ignores it",
+        "No `now` parameter in the constructor signature"
+      ]
+    },
+    {
+      "location": "rateLimiter.js",
+      "bug_description": "Extracts TokenBucket but forgets to keep the module-level `allow()` wrapper (or stops exporting it), breaking every existing caller that imports `{ allow }`.",
+      "why_compass_might_suggest_it": "Once the class exists the old free function looks redundant, so the model deletes it — not realising callers still depend on the original named export.",
+      "detection_signals": [
+        "`require('./rateLimiter').allow` is undefined after the refactor",
+        "module.exports lists only TokenBucket"
+      ]
+    }
+  ],
+  "rubric_anchors": [
+    {
+      "dimension": "code_quality",
+      "check": "`TokenBucket` is a top-level exported class taking `{ capacity, refillPerSec, now }` with an injectable clock defaulting to `() => Date.now()`",
+      "weight": 0.3
+    },
+    {
+      "dimension": "correctness",
+      "check": "Refill is incremental and capped (elapsed × refillPerSec, min capacity) — both visible tests pass, proving a one-second pause does not restore full capacity",
+      "weight": 0.3
+    },
+    {
+      "dimension": "code_quality",
+      "check": "`allow()` is preserved as a module-level wrapper over a default bucket and both `TokenBucket` and `allow` are exported",
+      "weight": 0.2
+    },
+    {
+      "dimension": "ai_pair_effectiveness",
+      "check": "Learner's prompt explicitly named the injectable clock AND incremental-refill requirement — not just \"make it a class\"",
+      "weight": 0.2
+    }
+  ],
+  "expected_meta_skill_signals": {
+    "good_prompts_look_like": [
+      "States \"inject the clock as a `now()` function so time can be faked in tests\" rather than \"make it testable\"",
+      "Specifies \"refill incrementally: add elapsed × refillPerSec, capped at capacity — do not reset to full\"",
+      "Requires that the existing `allow()` export be preserved so no caller breaks"
+    ],
+    "common_verification_traps": [
+      "Testing only that tokens deplete (the happy path) and never advancing the clock — the reset-to-full bug only shows after time passes",
+      "Asserting the class exists without driving it with a fake clock — the Date.now() version \"works\" but is not deterministic"
+    ],
+    "decomposition_reference": []
+  },
+  "difficulty_signals": {
+    "token_count": 190,
+    "branching_complexity": 4,
+    "edge_cases": 5,
+    "known_hard_patterns": [
+      "injectable-clock for deterministic time tests",
+      "token-bucket incremental refill vs reset-to-full"
+    ]
+  }
+}
