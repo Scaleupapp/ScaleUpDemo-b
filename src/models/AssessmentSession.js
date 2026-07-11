@@ -17,8 +17,12 @@ const AssessmentSessionSchema = new mongoose.Schema({
   submittedAt: Date,
   gradedAt: Date,
   result: {
-    score: Number,        // 0-100 overall
+    score: Number,        // 0-100 overall (null when gradeStatus is 'insufficient')
     integrity: String,    // e.g. 'high'|'medium'|'low' | 'clean'|'minor_flags'|'suspicious'
+    // Answer-side judge flag: grade is disputed → TPO surface shows "under review".
+    needsReview: Boolean,
+    // 'insufficient' ⇒ not enough evidence to grade (interview min-transcript gate).
+    gradeStatus: String,
     raw: mongoose.Schema.Types.Mixed, // small summary copied from the engine result
   },
 }, { timestamps: true });

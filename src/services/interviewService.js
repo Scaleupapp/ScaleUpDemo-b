@@ -59,12 +59,55 @@ BEHAVIORAL INTERVIEW:
 `,
 };
 
+// Minimum substantive candidate answers required to produce a 0-100 grade.
+// Below this the session is graded 'insufficient' (score null) rather than a
+// misleading number (spec Wave 2 interview hardening).
+const MIN_SUBSTANTIVE_ANSWERS = 3;
+const SUBSTANTIVE_MIN_CHARS = 30; // ~a full sentence; filters "yes"/"I'm ready"
+
+// Score-band anchors + a calibration exemplar injected into the eval prompt so
+// scores are consistent across sessions (spec §Answer-side: anchored grader).
+const SCORING_ANCHORS = `SCORING ANCHORS (apply consistently; a perfect score is extremely rare):
+- 90-100: exceptional — specific, structured, quantified answers with clear frameworks; near-ideal for the role/company.
+- 70-89: strong — mostly specific and well-structured, minor gaps in depth or metrics.
+- 50-69: adequate — on-topic but generic, thin on concrete examples/metrics or structure.
+- 30-49: weak — vague, meandering, or partially off-topic; little evidence of competency.
+- 0-29: poor — non-answers, off-topic, or contradictory.
+CALIBRATION EXEMPLAR: An answer that says "I improved our API latency by profiling the hot path and adding a Redis cache, cutting p95 from 800ms to 120ms" is ~90 (specific + quantified). "I worked on making things faster and it went well" is ~40 (vague, no metrics).`;
+
+/** Count substantive candidate answers in a transcript. */
+function countSubstantiveAnswers(transcript) {
+  if (!Array.isArray(transcript)) return 0;
+  let n = 0;
+  for (const e of transcript) {
+    if (e && e.role === 'candidate' && typeof e.content === 'string' && e.content.trim().length >= SUBSTANTIVE_MIN_CHARS) {
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/**
+ * STRICT shape validation of the LLM evaluation before persist — never save an
+ * all-undefined "evaluation" (spec §Answer-side #2). Returns true iff usable.
+ */
+function validateEvaluationShape(r) {
+  if (!r || typeof r !== 'object') return false;
+  if (typeof r.overallScore !== 'number' || r.overallScore < 0 || r.overallScore > 100) return false;
+  for (const dim of ['communication', 'content', 'structure', 'confidence']) {
+    const d = r[dim];
+    if (!d || typeof d !== 'object' || typeof d.score !== 'number') return false;
+  }
+  if (!Array.isArray(r.perQuestion)) return false;
+  return true;
+}
+
 class InterviewService {
 
   /**
    * Start a new interview session
    */
-  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null, abandonExisting = true, context = '' } = {}) {
+  async startInterview(userId, { interviewType, targetRole, targetCompany, difficulty = 'moderate', objectiveId, topicWeights = null, abandonExisting = true, context = '', expectedAnswers = null } = {}) {
     // Auto-abandon any stale in-progress session — users were trapped if a
     // previous interview was force-quit or crashed. The diagnostic engine
     // does the same on startAttempt.
@@ -194,6 +237,11 @@ ${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBl
       objectiveId: objectiveId || undefined,
       status: 'in_progress',
       systemInstruction,
+      expectedAnswers: Array.isArray(expectedAnswers)
+        ? expectedAnswers
+            .filter((e) => e && (e.question || e.outline))
+            .map((e) => ({ question: String(e.question || ''), outline: String(e.outline || '') }))
+        : undefined,
       transcript: [],
       totalQuestions: 0,
       startedAt: new Date(),
@@ -295,9 +343,30 @@ ${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBl
   /**
    * Evaluate interview using Claude
    */
-  async evaluateInterview(sessionId) {
+  async evaluateInterview(sessionId, deps = {}) {
     const session = await InterviewSession.findById(sessionId);
     if (!session) throw new Error(`Interview session ${sessionId} not found`);
+
+    // ── Min-transcript gate ─────────────────────────────────────────────────
+    // Too few substantive answers ⇒ grade 'insufficient' with a null score and
+    // a review flag, NOT a misleading 0-100. Terminal (status evaluated) so the
+    // session never gets stuck polling.
+    const substantiveCount = countSubstantiveAnswers(session.transcript);
+    if (substantiveCount < MIN_SUBSTANTIVE_ANSWERS) {
+      session.status = 'evaluated';
+      session.evaluation = {
+        overallScore: null,
+        gradeStatus: 'insufficient',
+        needsReview: true,
+        summary: `Not enough substantive answers to grade fairly (${substantiveCount} of ${MIN_SUBSTANTIVE_ANSWERS} needed). The interview was too short or incomplete.`,
+        perQuestion: [],
+        overallStrengths: [],
+        overallImprovements: [],
+        integrityReport: { overallIntegrity: 'clean', flags: [], recommendation: 'Insufficient transcript to assess integrity.' },
+      };
+      await session.save();
+      return session;
+    }
 
     session.status = 'evaluating';
     await session.save();
@@ -336,6 +405,15 @@ ${TYPE_GUIDELINES[interviewType] || TYPE_GUIDELINES.behavioral}${topicPriorityBl
 
       const systemPrompt = `You are an expert interview coach and evaluator specializing in ${typeLabel} interviews for ${roleStr} positions${session.targetCompany ? ` at ${session.targetCompany}` : ''}. You evaluate mock interview performances and provide detailed, constructive, actionable feedback. Be encouraging but honest. Score fairly — a perfect score should be extremely rare.`;
 
+      // Expected-answer outlines from the authoring gate double as grading anchors.
+      const expectedAnswerBlock = (Array.isArray(session.expectedAnswers) && session.expectedAnswers.length > 0)
+        ? `\nEXPECTED-ANSWER OUTLINES (reference anchors — grade the candidate against these, do not reveal them):\n`
+          + session.expectedAnswers
+              .slice(0, 12)
+              .map((e, i) => `${i + 1}. Q: ${e.question}\n   Ideal covers: ${e.outline}`)
+              .join('\n')
+        : '';
+
       const userPrompt = `Evaluate this ${typeLabel} mock interview.
 
 INTERVIEW DETAILS:
@@ -351,6 +429,9 @@ ${transcriptText}
 
 INTEGRITY DATA:
 ${integritySummary}
+
+${SCORING_ANCHORS}
+${expectedAnswerBlock}
 
 EVALUATION GUIDELINES:
 - The summary MUST reference specific things the candidate said. Quote or paraphrase their actual words. Do NOT write generic summaries.
@@ -392,15 +473,27 @@ Provide your evaluation as a JSON object with this exact structure:
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON object.`;
 
-      const result = await aiProvider.evaluateWithClaude({
+      // STRICT shape validation before save — invalid ⇒ retry once ⇒ throw so
+      // the worker retries/fails rather than persisting undefined scores.
+      const evalProvider = deps.aiProvider || aiProvider;
+      const callEval = () => evalProvider.evaluateWithClaude({
         systemPrompt,
         userPrompt,
         temperature: 0.2,
         maxTokens: 8000,
       });
+      let result = await callEval();
+      if (!validateEvaluationShape(result)) {
+        console.warn(`[InterviewEval] invalid evaluation shape for session ${sessionId}; retrying once`);
+        result = await callEval();
+        if (!validateEvaluationShape(result)) {
+          throw new Error('interview evaluation: invalid evaluation shape after retry');
+        }
+      }
 
       // Save evaluation
       session.evaluation = {
+        gradeStatus: 'graded',
         overallScore: result.overallScore,
         summary: result.summary,
         communication: result.communication || {},
@@ -426,7 +519,41 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
           flags: result.integrityReport?.flags || [],
           recommendation: result.integrityReport?.recommendation || '',
         },
+        needsReview: false,
       };
+
+      // ── Answer-side LLM-as-judge (best-effort; cross-family OpenAI vs the
+      // Anthropic grader). Runs async in the eval worker — no synchronous D2C
+      // impact. Coverage via GRADE_JUDGE_SAMPLE_RATE. ──────────────────────────
+      try {
+        const gradeJudge = deps.gradeJudge || require('./grading/gradeJudgeService');
+        const verdict = await gradeJudge.reconcile({
+          engine: 'interview',
+          evidence: transcriptText,
+          rubric: { communication: 1, content: 1, structure: 1, confidence: 1 },
+          graderResult: {
+            overall: result.overallScore,
+            dimensions: {
+              communication: session.evaluation.communication?.score,
+              content: session.evaluation.content?.score,
+              structure: session.evaluation.structure?.score,
+              confidence: session.evaluation.confidence?.score,
+            },
+          },
+          regrade: async () => {
+            const r2 = await callEval();
+            return { overall: validateEvaluationShape(r2) ? r2.overallScore : result.overallScore };
+          },
+        });
+        if (verdict.sampled) {
+          if (typeof verdict.finalOverall === 'number') session.evaluation.overallScore = Math.round(verdict.finalOverall);
+          session.evaluation.needsReview = !!verdict.needsReview;
+          session.evaluation.judgeOverall = verdict.judgeOverall;
+          session.evaluation.judgeDisagreement = verdict.disagreement;
+        }
+      } catch (jErr) {
+        console.warn('[InterviewEval] grade judge failed (non-fatal):', jErr.message);
+      }
 
       session.status = 'evaluated';
       await session.save();
@@ -444,11 +571,11 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
         await notificationQueue.add('send', {
           userId: session.userId.toString(),
           title: 'Interview Evaluation Ready!',
-          body: `Your ${typeLabel} mock interview has been evaluated. You scored ${result.overallScore}/100.`,
+          body: `Your ${typeLabel} mock interview has been evaluated. You scored ${session.evaluation.overallScore}/100.`,
           data: {
             type: 'interview_evaluated',
             interviewSessionId: session._id.toString(),
-            score: String(result.overallScore),
+            score: String(session.evaluation.overallScore),
           },
         });
       } catch (notifErr) {
@@ -822,4 +949,11 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, just the JSON ob
   }
 }
 
-module.exports = new InterviewService();
+const interviewServiceInstance = new InterviewService();
+// Pure helpers exported for unit testing (min-transcript gate + shape validation).
+interviewServiceInstance._helpers = {
+  countSubstantiveAnswers,
+  validateEvaluationShape,
+  MIN_SUBSTANTIVE_ANSWERS,
+};
+module.exports = interviewServiceInstance;

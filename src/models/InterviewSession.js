@@ -44,6 +44,14 @@ const interviewSessionSchema = new mongoose.Schema({
   // Gemini system instruction (generated for this session)
   systemInstruction: { type: String },
 
+  // Expected-answer outlines from the question-side authoring gate (block 4).
+  // Doubled as grading anchors so the evaluator scores against a reference.
+  expectedAnswers: [{
+    question: String,
+    outline: String,
+    _id: false,
+  }],
+
   // Conversation transcript
   transcript: [transcriptEntrySchema],
   totalQuestions: { type: Number, default: 0 },

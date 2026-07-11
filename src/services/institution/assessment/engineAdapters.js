@@ -177,12 +177,19 @@ const interview = {
       }
     }
 
+    // Expected-answer outlines from the authoring gate double as grading anchors.
+    const expectedAnswers = (cfg.authoring && cfg.authoring.questionPlan && Array.isArray(cfg.authoring.questionPlan.questions))
+      ? cfg.authoring.questionPlan.questions
+      : null;
+
     const out = await interviewService.startInterview(userId, {
       interviewType: cfg.interviewType,
       targetRole: cfg.targetRole,
+      targetCompany: cfg.targetCompany,
       difficulty: cfg.difficulty || 'moderate',
       abandonExisting: false,
       context,
+      expectedAnswers,
     });
     const sid = out && out.session ? out.session._id : (out && out._id);
     return { engine: { type: 'interview', sessionId: sid } };
@@ -191,7 +198,15 @@ const interview = {
     const InterviewSession = deps.InterviewSession || require('../../../models/InterviewSession');
     const s = await InterviewSession.findById(session.engine.sessionId);
     if (!s || s.status !== 'evaluated' || !s.evaluation) return { done: false };
-    return { done: true, score: s.evaluation.overallScore, integrity: s.evaluation.integrityReport ? s.evaluation.integrityReport.overallIntegrity : undefined, raw: { dimensions: { communication: s.evaluation.communication, content: s.evaluation.content, structure: s.evaluation.structure, confidence: s.evaluation.confidence } } };
+    return {
+      done: true,
+      score: s.evaluation.overallScore,
+      integrity: s.evaluation.integrityReport ? s.evaluation.integrityReport.overallIntegrity : undefined,
+      needsReview: !!s.evaluation.needsReview,
+      // 'insufficient' ⇒ transcript too thin to grade (score is null, not 0).
+      status: s.evaluation.gradeStatus || 'graded',
+      raw: { dimensions: { communication: s.evaluation.communication, content: s.evaluation.content, structure: s.evaluation.structure, confidence: s.evaluation.confidence } },
+    };
   },
   async getStartMeta(session, deps = {}) {
     const InterviewSession = deps.InterviewSession || require('../../../models/InterviewSession');
