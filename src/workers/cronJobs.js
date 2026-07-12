@@ -133,6 +133,20 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 20. Intervention Weekly Brief — Sunday 10:30 PM IST (17:00 UTC). Generates
+  // weekly briefs for institution cohort intervention agent.
+  cronQueue.add('interventionWeeklyBrief', {}, {
+    repeat: { pattern: '30 22 * * 0' },
+    removeOnComplete: true,
+  });
+
+  // 21. Activation Daily Nudge — Daily 11:00 AM IST (5:30 AM UTC). Sends
+  // daily re-activation nudges to invited students within reminder cap.
+  cronQueue.add('activationDailyNudge', {}, {
+    repeat: { pattern: '30 5 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -246,6 +260,18 @@ function startCronJobs() {
         const { closeCompassActionOutcomes } = require('../services/agentOutcomeClosureService');
         const r = await closeCompassActionOutcomes({ olderThanHours: Number(process.env.AGENT_OUTCOME_CLOSURE_MIN_HOURS || 24) });
         console.log(`[cron] agentOutcomeClosure: ${r.closed} decisions closed`);
+        break;
+      }
+      case 'interventionWeeklyBrief': {
+        const { runWeekly } = require('../services/institution/interventionAgentService');
+        const r = await runWeekly();
+        console.log('[cron] interventionWeeklyBrief: ' + r.briefs + ' briefs recorded');
+        break;
+      }
+      case 'activationDailyNudge': {
+        const { runDaily } = require('../services/institution/activationAgentService');
+        const r = await runDaily();
+        console.log('[cron] activationDailyNudge: ' + r.reminded + ' reminders across ' + r.cohorts + ' cohorts');
         break;
       }
     }
