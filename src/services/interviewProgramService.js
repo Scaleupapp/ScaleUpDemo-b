@@ -221,6 +221,11 @@ async function createProgram({ userId, targetRole, targetCompany, driveDate, wee
  * persists. Never throws on "nothing to attach to" — no active program (or
  * flag off) is a safe, silent no-op so a missing program never breaks the
  * evaluation worker's critical path.
+ *
+ * Idempotent: a sessionId already present in sessionIds is skipped (no
+ * duplicate push, no extra save) — the hook fires at most once per session
+ * in the happy path, but a retried job / duplicate queue delivery must not
+ * double-count a session in the trend math.
  */
 async function attachSession({ userId, sessionId }, deps = {}) {
   const d = { ...defaultDeps(), ...deps };
@@ -229,9 +234,33 @@ async function attachSession({ userId, sessionId }, deps = {}) {
   const program = await d.InterviewProgram.findOne({ userId, status: 'active' });
   if (!program) return { attached: false };
 
+  const alreadyAttached = program.sessionIds.some((id) => String(id) === String(sessionId));
+  if (alreadyAttached) return { attached: false };
+
   program.sessionIds.push(sessionId);
   await program.save();
   return { attached: true };
+}
+
+/**
+ * abandonProgram({ userId }, deps) -> Promise<{ abandoned: boolean }>
+ *
+ * Sets the caller's active program's status to 'abandoned'. Idempotent — no
+ * active program (nothing to abandon, or it was already abandoned/completed)
+ * is a safe no-op rather than an error, so a double-tap "abandon" button (or
+ * a retried request) never surfaces a scary failure. Flag off -> {abandoned:
+ * false}, zero writes.
+ */
+async function abandonProgram({ userId }, deps = {}) {
+  const d = { ...defaultDeps(), ...deps };
+  if (!d.isAgentEnabled('interview_coach')) return { abandoned: false };
+
+  const program = await d.InterviewProgram.findOne({ userId, status: 'active' });
+  if (!program) return { abandoned: false };
+
+  program.status = 'abandoned';
+  await program.save();
+  return { abandoned: true };
 }
 
 /**
@@ -338,6 +367,7 @@ async function getProgram({ userId }, deps = {}) {
 module.exports = {
   createProgram,
   attachSession,
+  abandonProgram,
   computeNextFocus,
   getProgram,
   _helpers: {

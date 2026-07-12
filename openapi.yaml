@@ -62,6 +62,8 @@ tags:
     description: v2 You-tab — overview, activities, analytics, coding mastery
   - name: Coding
     description: Coding practice — drills + capstones
+  - name: InterviewProgram
+    description: Agentic layer — coached multi-week interview prep program (interview_coach)
 
 components:
   securitySchemes:
@@ -481,6 +483,56 @@ components:
         updatedAt:
           type: [string, 'null']
           format: date-time
+
+    InterviewProgramDimensionTrend:
+      type: object
+      required: [dimension, scores, delta]
+      properties:
+        dimension: { type: string, enum: [communication, content, structure, confidence] }
+        scores:
+          type: array
+          items: { type: number }
+        delta: { type: [number, 'null'] }
+
+    InterviewProgramFocus:
+      type: object
+      required: [dimension, score, delta, reason]
+      properties:
+        dimension: { type: [string, 'null'] }
+        score: { type: [number, 'null'] }
+        delta: { type: [number, 'null'] }
+        reason: { type: string }
+
+    InterviewProgramView:
+      type: object
+      required: [_id, status, target, weekStrip, trends, focus, suggestion, sessionsCompleted, createdAt]
+      description: |
+        Client shape for the caller's active interview-coach program (agentic
+        layer #4). Mirrors interviewProgramService.getProgram — week strip/
+        trends/focus so the future mobile screen is pure rendering.
+      properties:
+        _id: { type: string }
+        status: { type: string, enum: [active, completed, abandoned] }
+        target:
+          type: object
+          required: [role, company, driveDate]
+          properties:
+            role: { type: [string, 'null'] }
+            company: { type: [string, 'null'] }
+            driveDate: { type: [string, 'null'], format: date-time }
+        weekStrip:
+          type: object
+          required: [current, total]
+          properties:
+            current: { type: integer, minimum: 1 }
+            total: { type: integer, minimum: 1 }
+        trends:
+          type: array
+          items: { $ref: '#/components/schemas/InterviewProgramDimensionTrend' }
+        focus: { $ref: '#/components/schemas/InterviewProgramFocus' }
+        suggestion: { type: string }
+        sessionsCompleted: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
 
     PlanMastery:
       type: object
@@ -8517,6 +8569,122 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /api/v2/interview-program:
+    post:
+      operationId: createInterviewProgram
+      tags: [InterviewProgram]
+      summary: Start a coached multi-week interview prep program
+      description: |
+        Creates the caller's active interview-coach program (agentic layer
+        #4, flag `interview_coach`). Sessions attach to it as they're graded
+        (post-evaluation hook) and computeNextFocus recommends which
+        dimension to work on next. One active program per user — 409 when
+        one already exists (abandon it first). 404 when the interview_coach
+        flag is off — house convention: clients treat 404 as feature-off.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetRole]
+              properties:
+                targetRole: { type: string }
+                targetCompany: { type: string }
+                driveDate: { type: string, format: date-time }
+                weeks: { type: integer, minimum: 1, description: Program length in weeks; defaults to 4 }
+      responses:
+        '200':
+          description: Program created; returns the shaped active program
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [program]
+                    properties:
+                      program: { $ref: '#/components/schemas/InterviewProgramView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      operationId: getInterviewProgram
+      tags: [InterviewProgram]
+      summary: Get the caller's active interview prep program
+      description: |
+        Returns the caller's active interview-coach program shaped for
+        clients (target, week strip, dimension trends, current focus,
+        next-session suggestion copy) — or `null` when there is no active
+        program. 404 when the interview_coach flag is off.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The active program, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [program]
+                    properties:
+                      program:
+                        oneOf:
+                          - { $ref: '#/components/schemas/InterviewProgramView' }
+                          - { type: 'null' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v2/interview-program/abandon:
+    post:
+      operationId: abandonInterviewProgram
+      tags: [InterviewProgram]
+      summary: Abandon the caller's active interview prep program
+      description: |
+        Sets the caller's active program's status to 'abandoned'. Idempotent
+        — calling this with no active program (already abandoned, completed,
+        or never created) is a safe no-op that still returns 200 with
+        `abandoned:false`, not an error. 404 when the interview_coach flag is
+        off.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Abandon outcome (idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [abandoned]
+                    properties:
+                      abandoned: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/institution/assessments/{id}/author-agent:
     post:

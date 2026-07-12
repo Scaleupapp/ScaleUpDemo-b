@@ -6,6 +6,7 @@ const assert = require('assert');
 const {
   createProgram,
   attachSession,
+  abandonProgram,
   computeNextFocus,
   getProgram,
   _helpers,
@@ -193,6 +194,58 @@ test('attachSession: active program -> pushes sessionId, saves, {attached:true}'
   assert.deepStrictEqual(result, { attached: true });
   assert.deepStrictEqual(store[0].sessionIds, ['sess-1']);
   assert.strictEqual(store[0]._saveCount, 1);
+});
+
+test('attachSession: idempotent — sessionId already attached -> {attached:false}, no duplicate push, no extra save', async () => {
+  const store = [program({ sessionIds: ['sess-1'] })];
+  const deps = baseDeps({ InterviewProgram: makeProgramModel(store) });
+  const result = await attachSession({ userId: USER, sessionId: 'sess-1' }, deps);
+  assert.deepStrictEqual(result, { attached: false });
+  assert.deepStrictEqual(store[0].sessionIds, ['sess-1']); // still exactly one entry
+  assert.strictEqual(store[0]._saveCount, undefined); // save() never called
+});
+
+test('attachSession: idempotent dedupe matches across ObjectId vs string sessionId', async () => {
+  const store = [program({ sessionIds: [{ toString: () => 'sess-1' }] })];
+  const deps = baseDeps({ InterviewProgram: makeProgramModel(store) });
+  const result = await attachSession({ userId: USER, sessionId: 'sess-1' }, deps);
+  assert.deepStrictEqual(result, { attached: false });
+  assert.strictEqual(store[0].sessionIds.length, 1);
+});
+
+// ── abandonProgram ───────────────────────────────────────────────────────
+
+test('abandonProgram: flag off -> {abandoned:false}, no mutation', async () => {
+  const store = [program()];
+  const deps = baseDeps({ isAgentEnabled: () => false, InterviewProgram: makeProgramModel(store) });
+  const result = await abandonProgram({ userId: USER }, deps);
+  assert.deepStrictEqual(result, { abandoned: false });
+  assert.strictEqual(store[0].status, 'active');
+});
+
+test('abandonProgram: no active program -> {abandoned:false} (idempotent no-op, never throws)', async () => {
+  const deps = baseDeps({ InterviewProgram: makeProgramModel([]) });
+  const result = await abandonProgram({ userId: USER }, deps);
+  assert.deepStrictEqual(result, { abandoned: false });
+});
+
+test('abandonProgram: active program -> sets status abandoned, saves, {abandoned:true}', async () => {
+  const store = [program()];
+  const deps = baseDeps({ InterviewProgram: makeProgramModel(store) });
+  const result = await abandonProgram({ userId: USER }, deps);
+  assert.deepStrictEqual(result, { abandoned: true });
+  assert.strictEqual(store[0].status, 'abandoned');
+  assert.strictEqual(store[0]._saveCount, 1);
+});
+
+test('abandonProgram: idempotent — calling twice only mutates once (second call finds no active program)', async () => {
+  const store = [program()];
+  const deps = baseDeps({ InterviewProgram: makeProgramModel(store) });
+  const first = await abandonProgram({ userId: USER }, deps);
+  const second = await abandonProgram({ userId: USER }, deps);
+  assert.deepStrictEqual(first, { abandoned: true });
+  assert.deepStrictEqual(second, { abandoned: false });
+  assert.strictEqual(store[0].status, 'abandoned');
 });
 
 // ── computeNextFocus — pure math ────────────────────────────────────────
