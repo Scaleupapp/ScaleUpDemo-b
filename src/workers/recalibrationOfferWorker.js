@@ -14,7 +14,17 @@ const notificationService = require('../services/notificationService');
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-async function run() {
+/**
+ * @param {object} [deps] - injected-deps seam for tests (agentic-layer additions only;
+ *   the pre-existing DiagnosticAttempt/notificationService require.cache stubbing seam
+ *   still works unchanged since those two are imported at module scope above).
+ * @param {Function} [deps.record]          - agentDecisionService.record (or stub)
+ * @param {Function} [deps.isAgentEnabled]  - agentFlags.isAgentEnabled (or stub)
+ */
+async function run(deps = {}) {
+  const record = deps.record || require('../services/agentDecisionService').record;
+  const isAgentEnabled = deps.isAgentEnabled || require('../config/agentFlags').isAgentEnabled;
+
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - THIRTY_DAYS_MS);
 
@@ -47,6 +57,14 @@ async function run() {
   const recentRecalSet = new Set(recentRecals.map(id => String(id)));
   const eligibleUsers = userIds.filter(id => !recentRecalSet.has(String(id)));
 
+  // userId -> {latestCompletedAt, latestAttemptType}, for the ledger contextSnapshot.
+  const attemptById = new Map(
+    oldAttempts.map(a => [String(a._id), {
+      latestCompletedAt: a.latestCompletedAt,
+      latestAttemptType: a.latestAttemptType,
+    }])
+  );
+
   let notified = 0;
   for (const userId of eligibleUsers) {
     try {
@@ -57,6 +75,25 @@ async function run() {
         deepLink: null,
       });
       notified++;
+
+      if (isAgentEnabled('recalibration_coach')) {
+        try {
+          const attempt = attemptById.get(String(userId)) || {};
+          await record({
+            agentId: 'recalibration_coach',
+            decisionType: 'nudge',
+            userId,
+            contextSnapshot: {
+              latestCompletedAt: attempt.latestCompletedAt,
+              latestAttemptType: attempt.latestAttemptType,
+            },
+            action: { kind: 'recalibration_offer' },
+            promptVersion: 'recal-coach-v1',
+          });
+        } catch (err) {
+          console.warn(`[recalibrationOfferWorker] ledger record failed for user ${userId}:`, err.message);
+        }
+      }
     } catch (err) {
       console.warn(`[recalibrationOfferWorker] notification failed for user ${userId}:`, err.message);
     }

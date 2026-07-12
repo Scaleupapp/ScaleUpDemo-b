@@ -7,7 +7,12 @@ const mongoose = require('mongoose');
 // Stub helpers — set before loading the worker
 // ---------------------------------------------------------------------------
 
-function buildStubs({ oldAttempts = [], recentRecals = [], notifyError = false } = {}) {
+// `agentFlag` drives the real config/agentFlags env var (pattern from
+// src/config/agentFlags.test.js) — default 'false' so pre-existing tests that
+// call worker.run() with no deps never touch the real agentDecisionService/DB.
+// `deps.record` is a fake the agentic-layer tests inject explicitly when they
+// turn the flag on.
+function buildStubs({ oldAttempts = [], recentRecals = [], notifyError = false, agentFlag = 'false', recordError = false } = {}) {
   const daPath = require.resolve('../models/DiagnosticAttempt');
   require.cache[daPath] = {
     id: daPath, filename: daPath, loaded: true,
@@ -31,12 +36,24 @@ function buildStubs({ oldAttempts = [], recentRecals = [], notifyError = false }
     },
   };
 
+  if (agentFlag === undefined) {
+    delete process.env.AGENT_RECALIBRATION_COACH_ENABLED;
+  } else {
+    process.env.AGENT_RECALIBRATION_COACH_ENABLED = agentFlag;
+  }
+
+  const records = [];
+  const record = async (payload) => {
+    if (recordError) throw new Error('record failed');
+    records.push(payload);
+  };
+
   // Force fresh worker load
   const workerPath = require.resolve('./recalibrationOfferWorker');
   delete require.cache[workerPath];
   const worker = require('./recalibrationOfferWorker');
 
-  return { worker, getNotified: () => notified };
+  return { worker, getNotified: () => notified, getRecords: () => records, deps: { record } };
 }
 
 function teardown() {
@@ -45,6 +62,7 @@ function teardown() {
     '../services/notificationService',
     './recalibrationOfferWorker',
   ].forEach(p => { delete require.cache[require.resolve(p)]; });
+  delete process.env.AGENT_RECALIBRATION_COACH_ENABLED;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +120,85 @@ async function test_skipsUsersWithRecentRecalibration() {
   }
 }
 
+async function test_recordsLedgerNudgeWhenFlagOn() {
+  const userId1 = new mongoose.Types.ObjectId();
+  const completedAt = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);
+
+  const { worker, getRecords, deps } = buildStubs({
+    oldAttempts: [
+      { _id: userId1, latestCompletedAt: completedAt, latestAttemptType: 'initial' },
+    ],
+    recentRecals: [],
+    agentFlag: 'true',
+  });
+
+  try {
+    const result = await worker.run(deps);
+
+    assert.strictEqual(result.notified, 1);
+    const records = getRecords();
+    assert.strictEqual(records.length, 1, 'exactly one record call per notified user');
+    assert.deepStrictEqual(records[0], {
+      agentId: 'recalibration_coach',
+      decisionType: 'nudge',
+      userId: userId1,
+      contextSnapshot: { latestCompletedAt: completedAt, latestAttemptType: 'initial' },
+      action: { kind: 'recalibration_offer' },
+      promptVersion: 'recal-coach-v1',
+    });
+  } finally {
+    teardown();
+  }
+}
+
+async function test_noLedgerRecordWhenFlagOff() {
+  const userId1 = new mongoose.Types.ObjectId();
+  const userId2 = new mongoose.Types.ObjectId();
+  const thirtyFiveDaysAgo = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);
+
+  const { worker, getRecords, deps } = buildStubs({
+    oldAttempts: [
+      { _id: userId1, latestCompletedAt: thirtyFiveDaysAgo, latestAttemptType: 'initial' },
+      { _id: userId2, latestCompletedAt: thirtyFiveDaysAgo, latestAttemptType: 'initial' },
+    ],
+    recentRecals: [],
+    agentFlag: 'false',
+  });
+
+  try {
+    const result = await worker.run(deps);
+
+    assert.strictEqual(result.notified, 2, 'notified count unchanged by flag');
+    assert.strictEqual(getRecords().length, 0, 'no ledger record calls when flag is off');
+  } finally {
+    teardown();
+  }
+}
+
+async function test_ledgerFailureDoesNotBlockNotification() {
+  const userId1 = new mongoose.Types.ObjectId();
+  const thirtyFiveDaysAgo = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);
+
+  const { worker, getNotified, getRecords, deps } = buildStubs({
+    oldAttempts: [
+      { _id: userId1, latestCompletedAt: thirtyFiveDaysAgo, latestAttemptType: 'initial' },
+    ],
+    recentRecals: [],
+    agentFlag: 'true',
+    recordError: true,
+  });
+
+  try {
+    const result = await worker.run(deps);
+
+    assert.strictEqual(result.notified, 1, 'notification still sent despite ledger failure');
+    assert.strictEqual(getNotified().length, 1);
+    assert.strictEqual(getRecords().length, 0, 'failed record call is never pushed');
+  } finally {
+    teardown();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
@@ -110,6 +207,9 @@ async function test_skipsUsersWithRecentRecalibration() {
   const tests = [
     test_sendsOfferToEligibleUsers,
     test_skipsUsersWithRecentRecalibration,
+    test_recordsLedgerNudgeWhenFlagOn,
+    test_noLedgerRecordWhenFlagOff,
+    test_ledgerFailureDoesNotBlockNotification,
   ];
 
   let failed = 0;
