@@ -59,18 +59,33 @@ async function applyPlanOps(userId, ops, deps = {}) {
   let applied = 0;
   for (const op of list) {
     if (op.op === 'set_task_status') {
-      await Plan.updateOne(
+      const update = {
+        'weeklySchedule.$[].tasks.$[t].progress.status': op.status,
+      };
+      if (op.status === 'complete') {
+        update['weeklySchedule.$[].tasks.$[t].progress.completedAt'] = new Date();
+      }
+      const result = await Plan.updateOne(
         { userId, isActive: true },
-        { $set: { 'weeklySchedule.$[].tasks.$[t].progress.status': op.status } },
-        { arrayFilters: [{ 't.taskId': op.taskId }] }
+        { $set: update },
+        { arrayFilters: [{ 't._id': op.taskId }] }
       );
+      if (result.matchedCount === 0) {
+        throw new Error('active plan not found');
+      }
+      if (result.modifiedCount === 0) {
+        throw new Error('task not found in active plan');
+      }
       applied += 1;
     } else if (op.op === 'reset_skipped') {
-      await Plan.updateOne(
+      const result = await Plan.updateOne(
         { userId, isActive: true },
         { $set: { 'weeklySchedule.$[].tasks.$[t].progress.status': 'pending' } },
         { arrayFilters: [{ 't.progress.status': 'skipped' }] }
       );
+      if (result.matchedCount === 0) {
+        throw new Error('active plan not found');
+      }
       applied += 1;
     }
   }

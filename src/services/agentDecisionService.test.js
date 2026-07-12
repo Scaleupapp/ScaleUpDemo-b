@@ -49,7 +49,43 @@ test('applyPlanOps: set_task_status issues the scoped task mutation', async () =
   assert.strictEqual(calls.length, 1);
   assert.deepStrictEqual(calls[0].filter, { userId: 'u1', isActive: true });
   assert.strictEqual(calls[0].update.$set['weeklySchedule.$[].tasks.$[t].progress.status'], 'skipped');
-  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't.taskId': 't9' }]);
+  assert.strictEqual(calls[0].update.$set['weeklySchedule.$[].tasks.$[t].progress.completedAt'], undefined);
+  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't._id': 't9' }]);
+});
+
+test('applyPlanOps: set_task_status(complete) also stamps progress.completedAt', async () => {
+  const calls = [];
+  const before = Date.now();
+  const r = await svc.applyPlanOps('u1', [{ op: 'set_task_status', taskId: 't9', status: 'complete' }], { Plan: fakePlanModel(calls) });
+  assert.strictEqual(r.applied, 1);
+  const completedAt = calls[0].update.$set['weeklySchedule.$[].tasks.$[t].progress.completedAt'];
+  assert.ok(completedAt instanceof Date);
+  assert.ok(completedAt.getTime() >= before);
+  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't._id': 't9' }]);
+});
+
+test('applyPlanOps: set_task_status throws when the active plan is not found', async () => {
+  const Plan = { updateOne: async () => ({ matchedCount: 0, modifiedCount: 0 }) };
+  await assert.rejects(
+    () => svc.applyPlanOps('u1', [{ op: 'set_task_status', taskId: 't9', status: 'skipped' }], { Plan }),
+    /active plan not found/
+  );
+});
+
+test('applyPlanOps: set_task_status throws when the task is not found in the matched plan', async () => {
+  const Plan = { updateOne: async () => ({ matchedCount: 1, modifiedCount: 0 }) };
+  await assert.rejects(
+    () => svc.applyPlanOps('u1', [{ op: 'set_task_status', taskId: 'missing', status: 'skipped' }], { Plan }),
+    /task not found in active plan/
+  );
+});
+
+test('applyPlanOps: reset_skipped throws when the active plan is not found', async () => {
+  const Plan = { updateOne: async () => ({ matchedCount: 0, modifiedCount: 0 }) };
+  await assert.rejects(
+    () => svc.applyPlanOps('u1', [{ op: 'reset_skipped' }], { Plan }),
+    /active plan not found/
+  );
 });
 
 test('applyPlanOps: reset_skipped flips all skipped back to pending', async () => {
@@ -111,7 +147,7 @@ test('respond: adjusted applies the ADJUSTED ops and stores the diff', async () 
   );
   assert.strictEqual(doc.status, 'adjusted');
   assert.deepStrictEqual(doc.adjustmentDiff, adjustedOps);
-  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't.taskId': 't2' }]);
+  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't._id': 't2' }]);
 });
 
 test('respond: wrong owner is refused', async () => {
