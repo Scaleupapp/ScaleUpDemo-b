@@ -1121,6 +1121,54 @@ components:
           type: string
           description: One-line, learner-readable status suitable for direct display.
 
+    AgentInterventionBriefCluster:
+      type: object
+      required: [key, label, count, evidence, proposedAction]
+      properties:
+        key: { type: string, description: "e.g. not_started, weak_competency, inactive" }
+        label: { type: string }
+        count: { type: integer, description: Number of students in this cluster. }
+        evidence:
+          type: object
+          description: Cluster-specific evidence fields (deterministic aggregates, no PII beyond counts/names).
+        proposedAction:
+          type: object
+          required: [kind, payload]
+          properties:
+            kind: { type: string, enum: [notify_students] }
+            payload:
+              type: object
+              required: [title, message]
+              properties:
+                title: { type: string }
+                message: { type: string }
+
+    AgentInterventionBrief:
+      type: object
+      required: [id, cohortId, cohortLabel, createdAt, status, clusters]
+      properties:
+        id: { type: string }
+        cohortId: { type: [string, "null"] }
+        cohortLabel: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        status: { type: string, enum: [pending, accepted, adjusted, rejected, ignored] }
+        clusters:
+          type: array
+          items: { $ref: '#/components/schemas/AgentInterventionBriefCluster' }
+
+    AgentActivationFunnel:
+      type: object
+      required: [invited, claimed, claimRate, exhausted, lastBatch]
+      properties:
+        invited: { type: integer }
+        claimed: { type: integer }
+        claimRate: { type: number }
+        exhausted: { type: integer }
+        lastBatch:
+          type: object
+          nullable: true
+          description: action.stats from the most recent activation ledger row, or null when no batch has ever run for this cohort.
+
 paths:
   # =====================================================================
   # Auth
@@ -8578,6 +8626,156 @@ paths:
                             type: array
                             items: { type: integer }
                           passes: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/institution/agent/briefs:
+    get:
+      operationId: listAgentBriefs
+      tags: [Agentic]
+      summary: List the latest cohort intervention briefs for the caller's institution
+      description: |
+        interventionAgentService.runWeekly writes one PENDING AgentDecision
+        'brief' row per qualifying cohort per week (agentId 'intervention').
+        Returns the latest 10 of those rows for the caller's institution,
+        optionally filtered to one cohort, shaped for the TPO briefs UI
+        (cluster summaries — student counts, evidence, proposed copy — not
+        the raw studentId lists). 404 when the intervention flag is off
+        (house convention: clients treat 404 as feature-off).
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: cohortId
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Latest intervention briefs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [decisions]
+                    properties:
+                      decisions:
+                        type: array
+                        items: { $ref: '#/components/schemas/AgentInterventionBrief' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/institution/agent/briefs/{decisionId}/approve:
+    post:
+      operationId: approveAgentBrief
+      tags: [Agentic]
+      summary: Approve some or all clusters of an intervention brief (tpo_head only)
+      description: |
+        Checker semantics: a tpo_coordinator can view a brief via the list
+        endpoint but only tpo_head can approve one. Fires the approved
+        clusters' `notify_students` proposedAction to every studentId in
+        each approved cluster (per-student try/catch — one bad notification
+        never blocks the rest). Approving every cluster on the row closes it
+        'accepted'; approving a subset closes it 'adjusted' with
+        adjustmentDiff.approvedClusterKeys. 404 when the intervention flag
+        is off, the row doesn't exist, or isn't owned by the caller's
+        institution. 409 when the row isn't pending (already responded to).
+        400 when clusterKeys is missing/empty, or names a cluster key that
+        isn't on this row.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: decisionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clusterKeys]
+              properties:
+                clusterKeys:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+                  description: Subset of the brief's cluster keys to approve and execute.
+      responses:
+        '200':
+          description: Brief closed; approved clusters' notifications sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [executed, status]
+                    properties:
+                      executed:
+                        type: object
+                        required: [notified]
+                        properties:
+                          notified: { type: integer }
+                      status: { type: string, enum: [accepted, adjusted] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/institution/agent/activation:
+    get:
+      operationId: getAgentActivationFunnel
+      tags: [Agentic]
+      summary: Read the activation-agent's invite claim funnel for one cohort
+      description: |
+        Read-only snapshot from activationAgentService.getFunnel: outstanding
+        vs claimed invites, claim rate, students who've exhausted their
+        reminder cap, and the most recent daily reminder batch's stats.
+        cohortId is required. 404 when the activation flag is off (house
+        convention: clients treat 404 as feature-off).
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: cohortId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Activation funnel snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/AgentActivationFunnel' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

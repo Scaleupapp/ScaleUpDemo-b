@@ -17,6 +17,7 @@ router.use('/', require('./rosters'));
 router.use('/', require('./objectiveTemplates'));
 router.use('/', require('./assessments'));
 router.use('/', require('./authorAgent'));
+router.use('/', require('./agentBriefs'));
 router.use('/', require('./assessmentSources'));
 router.use('/', require('./uploads'));
 router.use('/', require('./notices'));
