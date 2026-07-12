@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('assert');
 
-const { runDaily, getFunnel } = require('./activationAgentService');
+const { runDaily, getFunnel, _helpers } = require('./activationAgentService');
 
 // ── Fakes ────────────────────────────────────────────────────────────────
 
@@ -182,7 +182,7 @@ test('runDaily: counters persisted via save() — remindersSent incremented and 
   assert.strictEqual(s._saved, 1);
 }));
 
-test('runDaily: invalid send isolation — one bad send does not stop the batch, is counted', () => withEnv(ENV, async () => {
+test('runDaily: invalid send isolation — one bad send does not stop the batch, is counted; reserved slot stays consumed', () => withEnv(ENV, async () => {
   const bad = student({ name: 'bad', createdAt: daysAgo(30) });
   const good = student({ name: 'good', createdAt: daysAgo(30) });
   const recorded = [];
@@ -197,13 +197,18 @@ test('runDaily: invalid send isolation — one bad send does not stop the batch,
   });
   const result = await runDaily(deps);
   assert.strictEqual(result.reminded, 1);
-  assert.strictEqual(bad.remindersSent, 0);
+  // Reserve-before-send: the counter is persisted before sendInvites runs, so
+  // a failed send still leaves the slot consumed — a wasted slot, not a
+  // duplicate-email risk.
+  assert.strictEqual(bad.remindersSent, 1);
+  assert.strictEqual(bad._saved, 1);
   assert.strictEqual(good.remindersSent, 1);
   assert.strictEqual(recorded[0].action.stats.invalid, 1);
   assert.strictEqual(recorded[0].action.stats.reminded, 1);
+  assert.strictEqual(recorded[0].action.stats.skipped, 0);
 }));
 
-test('runDaily: a thrown sendInvites is also isolated and counted invalid', () => withEnv(ENV, async () => {
+test('runDaily: a thrown sendInvites is also isolated and counted invalid; reserved slot stays consumed', () => withEnv(ENV, async () => {
   const s = student({ name: 'throws', createdAt: daysAgo(30) });
   const deps = baseDeps({
     PendingStudent: makePendingStudentModel([s]),
@@ -213,7 +218,41 @@ test('runDaily: a thrown sendInvites is also isolated and counted invalid', () =
   });
   const result = await runDaily(deps);
   assert.strictEqual(result.reminded, 0);
-  assert.strictEqual(s.remindersSent, 0);
+  // save() already succeeded before sendInvites threw — the reservation
+  // stands even though nothing was actually delivered.
+  assert.strictEqual(s.remindersSent, 1);
+  assert.strictEqual(s._saved, 1);
+}));
+
+test('runDaily: reservation save failure -> skipped, send is never called (no duplicate-email risk)', () => withEnv(ENV, async () => {
+  const s = student({ name: 'saveFails', createdAt: daysAgo(30) });
+  s.save = async function () { throw new Error('DB write failed'); };
+  let sendCalled = false;
+  const deps = baseDeps({
+    PendingStudent: makePendingStudentModel([s]),
+    listCandidateCohorts: async () => [{ institutionId: INST, cohortId: COHORT }],
+    sendInvites: async () => { sendCalled = true; return { invited: 1, failures: [] }; },
+    record: async () => { throw new Error('record should not be called — reminded is 0'); },
+  });
+  const result = await runDaily(deps);
+  assert.strictEqual(result.reminded, 0);
+  assert.strictEqual(sendCalled, false);
+}));
+
+test('processCohort: reservation save failure is counted in stats.skipped, distinct from invalid', () => withEnv(ENV, async () => {
+  const s = student({ name: 'saveFails', createdAt: daysAgo(30) });
+  s.save = async function () { throw new Error('DB write failed'); };
+  let sendCalled = false;
+  const d = baseDeps({
+    PendingStudent: makePendingStudentModel([s]),
+    sendInvites: async () => { sendCalled = true; return { invited: 1, failures: [] }; },
+    record: async () => {},
+  });
+  const { stats } = await _helpers.processCohort({ institutionId: INST, cohortId: COHORT }, d, NOW);
+  assert.strictEqual(stats.skipped, 1);
+  assert.strictEqual(stats.reminded, 0);
+  assert.strictEqual(stats.invalid, 0);
+  assert.strictEqual(sendCalled, false);
 }));
 
 test('runDaily: one batch ledger row only when reminded >= 1 — zero-eligible cohort writes nothing', () => withEnv(ENV, async () => {

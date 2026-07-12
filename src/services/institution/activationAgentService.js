@@ -96,6 +96,9 @@ function buildCandidateFilter({ institutionId, cohortId, cutoff, maxReminders })
  * processCohort — re-sends to every eligible candidate in one cohort, updates
  * their counters, and records the batch ledger row if any went out.
  * Returns { stats, recorded }.
+ *
+ * Ordering is reserve-before-send: the reminder counter is persisted BEFORE
+ * sendInvites is called, not after. See the in-loop comment for why.
  */
 async function processCohort({ institutionId, cohortId }, d, now) {
   const maxReminders = getMaxReminders();
@@ -116,19 +119,43 @@ async function processCohort({ institutionId, cohortId }, d, now) {
 
   let reminded = 0;
   let invalid = 0;
+  let skipped = 0;
   for (const candidate of candidates) {
+    // Reserve-before-send: persist the reminder slot BEFORE calling
+    // sendInvites, not after. This agent emails real students, so the
+    // failure bias must be UNDER-sending, never duplicate-sending. Doing
+    // save() first means a crash/save-failure that happens after a delivered
+    // email can never occur — the counter is already durable by the time the
+    // email goes out. The old send-then-save order let a save failure (or a
+    // crash) after a successful send leave the counter un-persisted, so the
+    // same student re-matched tomorrow's eligibility query and got emailed
+    // again, potentially repeatedly.
+    candidate.remindersSent = (candidate.remindersSent || 0) + 1;
+    candidate.lastReminderAt = now;
+    try {
+      await candidate.save();
+    } catch (_) {
+      // Reservation itself failed — the counter never persisted, so we must
+      // NOT send (a send here would be exactly the un-reserved duplicate-risk
+      // case this reordering exists to prevent). Skip and move on.
+      skipped += 1;
+      continue;
+    }
+
     try {
       const result = await d.sendInvites([candidate], { institutionName, baseLink });
       if (result && Array.isArray(result.failures) && result.failures.length > 0) {
         invalid += 1;
+        // Deliberate: the reserved slot stays consumed even though the send
+        // failed. One wasted reminder slot (a student who never got this
+        // nudge but still counts toward their cap) beats one duplicate email
+        // — under-sending is the safe failure mode, never duplicate-sending.
         continue;
       }
-      candidate.remindersSent = (candidate.remindersSent || 0) + 1;
-      candidate.lastReminderAt = now;
-      await candidate.save();
       reminded += 1;
     } catch (_) {
-      // one bad send never stops the batch
+      // one bad send never stops the batch — reserved slot stays consumed,
+      // same rationale as the failures-array branch above.
       invalid += 1;
     }
   }
@@ -141,7 +168,7 @@ async function processCohort({ institutionId, cohortId }, d, now) {
     d.PendingStudent.countDocuments({ institutionId, cohortId, status: 'invited', remindersSent: { $gte: maxReminders } }),
   ]);
 
-  const stats = { invited: invitedCount, claimed: claimedCount, reminded, exhausted: exhaustedCount, invalid };
+  const stats = { invited: invitedCount, claimed: claimedCount, reminded, exhausted: exhaustedCount, invalid, skipped };
 
   let recorded = false;
   if (reminded >= 1) {
