@@ -126,6 +126,13 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 19. Agent Outcome Closure — Daily 03:45 IST (22:15 UTC). Checks
+  // accepted/adjusted compass_actions proposals for implicit follow-through.
+  cronQueue.add('agentOutcomeClosure', {}, {
+    repeat: { pattern: '15 22 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -233,6 +240,12 @@ function startCronJobs() {
         const { expireStale } = require('../services/agentDecisionService');
         const r = await expireStale({ hours: Number(process.env.AGENT_DECISION_TTL_HOURS || 48) });
         console.log(`[cron] agentDecisionExpiry: ${r.expired} pending decisions marked ignored`);
+        break;
+      }
+      case 'agentOutcomeClosure': {
+        const { closeCompassActionOutcomes } = require('../services/agentOutcomeClosureService');
+        const r = await closeCompassActionOutcomes({ olderThanHours: Number(process.env.AGENT_OUTCOME_CLOSURE_MIN_HOURS || 24) });
+        console.log(`[cron] agentOutcomeClosure: ${r.closed} decisions closed`);
         break;
       }
     }
