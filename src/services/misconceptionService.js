@@ -152,6 +152,11 @@ async function recordFromAttempt(userId, attempt, quiz, deps = {}) {
         topicsAffected: [],
       };
       ledger.entries.push(entry);
+      // Mongoose DocumentArrays cast the pushed plain object into a new
+      // subdocument — the original `entry` reference is now detached from
+      // the array. Rebind to the stored subdocument before any further
+      // mutation, or every field set below is silently dropped on save.
+      entry = ledger.entries[ledger.entries.length - 1];
     }
     entry.count += info.count;
     entry.lastSeenAt = now;

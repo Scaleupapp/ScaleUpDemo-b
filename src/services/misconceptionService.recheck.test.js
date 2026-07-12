@@ -29,6 +29,22 @@ function fakeLedgerModelLean(doc) {
   };
 }
 
+// Simulates Mongoose DocumentArray casting behavior (verified against
+// mongoose 8.23.1): `entries.push(plainObject)` casts the argument into a
+// brand-new subdocument rather than storing the reference passed in. Code
+// that keeps a local `entry` variable and mutates it AFTER push() is
+// silently writing to a detached object — those mutations never reach the
+// stored subdocument and get dropped on save.
+//
+// A plain Array.push keeps reference identity (push(obj) stores obj itself)
+// and would NOT catch this bug class. This wrapper clones on push so a
+// future push-then-mutate regression fails a test instead of shipping.
+function makeDocumentArray(initial = []) {
+  const arr = initial.map((e) => ({ ...e }));
+  arr.push = (...items) => Array.prototype.push.apply(arr, items.map((item) => ({ ...item })));
+  return arr;
+}
+
 function makeQuiz({ topic = 'algebra', concept = 'linear-equations', tag = 'sign_flip_error' } = {}) {
   return {
     topic,
@@ -153,7 +169,11 @@ test('getDueReviews: empty ledger returns []', async () => {
 // ==========================================================================
 
 test('recordFromAttempt: a firing tag schedules the first re-check (day 2)', async () => {
-  const ledgerDoc = { userId: 'u1', entries: [], totalMisconceptionsTracked: 0, save: async function () { this._saved = true; return this; } };
+  // entries uses the DocumentArray-casting fake: push(entry) stores a
+  // CLONE, so any post-push mutation of the local `entry` reference in
+  // recordFromAttempt would be silently lost here — exactly like the real
+  // mongoose bug this test guards against.
+  const ledgerDoc = { userId: 'u1', entries: makeDocumentArray([]), totalMisconceptionsTracked: 0, save: async function () { this._saved = true; return this; } };
   const quiz = makeQuiz();
   const attempt = { userId: 'u1', answers: [{ questionIndex: 0, selectedAnswer: 'B', isCorrect: false }] };
   const recordCalls = [];
@@ -167,12 +187,17 @@ test('recordFromAttempt: a firing tag schedules the first re-check (day 2)', asy
   const after = Date.now();
 
   assert.strictEqual(ledgerDoc.entries.length, 1);
-  const entry = ledgerDoc.entries[0];
-  assert.strictEqual(entry.tag, 'sign_flip_error');
-  assert.strictEqual(entry.reviewStage, 0);
-  assert.strictEqual(entry.closedAt, null);
-  assert.ok(entry.nextReviewAt.getTime() >= before + REVIEW_INTERVALS[0] * DAY_MS);
-  assert.ok(entry.nextReviewAt.getTime() <= after + REVIEW_INTERVALS[0] * DAY_MS);
+  // Assert against the STORED entry (ledger.entries[0]) — the cast clone —
+  // not any local reference the implementation may still be holding.
+  const stored = ledgerDoc.entries[0];
+  assert.strictEqual(stored.tag, 'sign_flip_error');
+  assert.strictEqual(stored.count, 1); // incremented on the stored subdoc
+  assert.strictEqual(stored.reviewStage, 0);
+  assert.strictEqual(stored.closedAt, null);
+  assert.ok(stored.nextReviewAt instanceof Date, 'nextReviewAt must be set on the stored entry');
+  assert.ok(stored.nextReviewAt.getTime() >= before + REVIEW_INTERVALS[0] * DAY_MS);
+  assert.ok(stored.nextReviewAt.getTime() <= after + REVIEW_INTERVALS[0] * DAY_MS);
+  assert.ok(stored.lastSeenAt instanceof Date, 'lastSeenAt must be set on the stored entry');
   assert.strictEqual(ledgerDoc._saved, true);
   assert.strictEqual(recordCalls.length, 0); // opening isn't recorded, only closure
 });
@@ -296,11 +321,11 @@ test('recordFromAttempt: flag off leaves behavior byte-identical to pre-#7 code'
   const existingDueDate = new Date(Date.now() - 1000);
   const ledgerDoc = {
     userId: 'u1',
-    entries: [{
+    entries: makeDocumentArray([{
       tag: 'unit_confusion', count: 3, reviewStage: 0, closedAt: null,
       nextReviewAt: existingDueDate,
       topicsAffected: ['linear-equations'], recentTopic: 'linear-equations',
-    }],
+    }]),
     totalMisconceptionsTracked: 3,
     save: async function () { this._saved = true; return this; },
   };
