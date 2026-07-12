@@ -8469,3 +8469,118 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /api/institution/assessments/{id}/author-agent:
+    post:
+      operationId: startAuthorAgentRun
+      tags: [AuthorAgent]
+      summary: Kick off the author agent's bounded generate -> QA -> repair loop for an assessment
+      description: |
+        Starts an authorAgentService run (records an AgentDecision row, then
+        drives assessmentAuthoringService.authorMcq/regenerateQuestion in the
+        background). Returns immediately with a decisionId to poll via
+        GET /api/institution/author-agent/runs/{decisionId}. 404 when the
+        author_agent flag is off, or when the assessment doesn't exist / isn't
+        owned by the caller's institution — house convention: clients treat
+        404 as feature-off. 409 when the assessment isn't in an authorable
+        state (already released/closed, or MCQ authoring already in flight).
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brief]
+              properties:
+                brief: { type: string, description: 'Free-text authoring brief for the agent.' }
+      responses:
+        '200':
+          description: Run queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [decisionId]
+                    properties:
+                      decisionId: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/institution/author-agent/runs/{decisionId}:
+    get:
+      operationId: getAuthorAgentRunStatus
+      tags: [AuthorAgent]
+      summary: Poll an author-agent run's status, log, and result
+      description: |
+        Institution-scoped read for polling a run started via
+        POST /api/institution/assessments/{id}/author-agent. status is
+        'generating' until the run's result is finalized (ready/needs_review/failed).
+        404 when the author_agent flag is off, or the decision row doesn't
+        exist / isn't owned by the caller's institution.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: decisionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [status, runLog, result]
+                    properties:
+                      status: { type: string, enum: [generating, ready, needs_review, failed] }
+                      runLog:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            at: { type: string, format: date-time }
+                            msg: { type: string }
+                      result:
+                        type: object
+                        nullable: true
+                        description: Final run summary, set once the run leaves 'generating'.
+                        properties:
+                          status: { type: string, enum: [ready, needs_review, failed] }
+                          totalQuestions: { type: integer }
+                          regenerated: { type: integer }
+                          flaggedIndices:
+                            type: array
+                            items: { type: integer }
+                          passes: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
