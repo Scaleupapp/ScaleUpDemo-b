@@ -30,6 +30,7 @@ const Conversation = require('../models/Conversation');
 const misconceptionService = require('./misconceptionService');
 const spacedRepetitionService = require('./spacedRepetitionService');
 const cognitiveFingerprintService = require('./cognitiveFingerprintService');
+const { isAgentEnabled } = require('../config/agentFlags');
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const _cache = new Map(); // userId -> { value, expiresAt }
@@ -142,6 +143,18 @@ async function getUserContext(userId, { refresh = false } = {}) {
     },
     generatedAt: new Date().toISOString(),
   };
+
+  // Flag-gated: due misconception re-checks. Key is ABSENT (not an empty
+  // array) when the flag is off or the lookup fails — flag-off envelope must
+  // stay byte-identical to today's, and a getDueReviews hiccup must never
+  // break context building.
+  if (isAgentEnabled('misconception_tutor')) {
+    try {
+      context.dueMisconceptionChecks = await misconceptionService.getDueReviews(userId, 2);
+    } catch (err) {
+      console.warn('[userContextService] getDueReviews failed', err.message);
+    }
+  }
 
   _setCached(userId, context);
   return context;

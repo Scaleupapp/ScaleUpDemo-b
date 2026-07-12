@@ -283,10 +283,26 @@ function buildSystemContext(ctx) {
     }
     lines.push(`Use this context to make responses feel personal — don't ask the learner to repeat what we already know.`);
   }
-  const proposalHint = isAgentEnabled('compass_actions')
+  const agentHints = buildAgentHints({
+    proposalsOn: isAgentEnabled('compass_actions'),
+    misconceptionsOn: isAgentEnabled('misconception_tutor'),
+  });
+  return lines.join('\n') + agentHints;
+}
+
+/**
+ * Pure helper: concatenates the flag-gated agent hint strings appended to the
+ * Compass system prompt. Each hint contributes its own text verbatim when its
+ * flag is on, '' when off — order is proposals hint first, then misconceptions.
+ */
+function buildAgentHints({ proposalsOn, misconceptionsOn }) {
+  const proposalHint = proposalsOn
     ? '\nWhen the learner wants to rearrange, lighten, or catch up on their plan, use propose_plan_update to offer a concrete change as a confirmable card — never claim a change was applied; the learner must confirm the card first.'
     : '';
-  return lines.join('\n') + proposalHint;
+  const misconceptionHint = misconceptionsOn
+    ? '\nIf the learner context lists dueMisconceptionChecks, open with ONE 30-second inline check quiz targeting the oldest item before answering anything else this turn — frame it as a quick memory check ("One from last week — 30 seconds"), never as a test. Do not repeat a check the learner already answered this conversation.'
+    : '';
+  return proposalHint + misconceptionHint;
 }
 
 /** Merge read tools with proposal tools when the compass_actions agent is on. */
@@ -1378,6 +1394,7 @@ module.exports = {
   handle,
   buildUserContext,
   buildSystemContext,
+  buildAgentHints,
   buildToolset,
   callLLM,
   callLLMWithTools,
