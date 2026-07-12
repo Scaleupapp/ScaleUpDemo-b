@@ -8356,3 +8356,112 @@ paths:
                                 $ref: '#/components/schemas/CompassCard'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v2/agent/decisions:
+    get:
+      operationId: listAgentDecisions
+      tags: [AgentDecisions]
+      summary: List the caller's agent decisions (default status=pending)
+      description: |
+        Returns the calling user's AgentDecision rows, most recent first
+        (capped at 20). This is the surface the client polls to render
+        pending agent proposals as actionable cards.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, accepted, adjusted, rejected, ignored] }
+      responses:
+        '200':
+          description: Decisions for the calling user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [decisions]
+                    properties:
+                      decisions:
+                        type: array
+                        items:
+                          type: object
+                          description: AgentDecision document (action shape is agentId/decisionType-specific)
+                          required: [_id, status]
+                          properties:
+                            _id: { type: string }
+                            agentId: { type: string }
+                            decisionType: { type: string }
+                            action:
+                              type: object
+                              additionalProperties: true
+                            status:
+                              type: string
+                              enum: [pending, accepted, adjusted, rejected, ignored]
+                            createdAt: { type: string, format: date-time }
+                          additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v2/agent/decisions/{id}/respond:
+    post:
+      operationId: respondToAgentDecision
+      tags: [AgentDecisions]
+      summary: Record the user's response to an agent proposal (the feedback loop)
+      description: |
+        Every Apply / Adjust / Dismiss the client sends for an agent proposal
+        lands here and closes the AgentDecision row. accepted/adjusted
+        responses also apply the proposal's ops (or the caller-supplied
+        adjustedOps) to the user's active plan. 404 when the agent flag
+        (compass_actions) is off — house convention: clients treat 404 as
+        feature-off.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [response]
+              properties:
+                response: { type: string, enum: [accepted, adjusted, rejected] }
+                adjustedOps:
+                  type: array
+                  items: { type: object }
+      responses:
+        '200':
+          description: Response recorded (and ops applied when accepted/adjusted)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [decisionId, status, applied]
+                    properties:
+                      decisionId: { type: string }
+                      status: { type: string, enum: [accepted, adjusted, rejected] }
+                      applied: { type: boolean }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
