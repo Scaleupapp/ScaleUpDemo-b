@@ -51,9 +51,15 @@ const redis = require('../../config/redis');
 const userContextService = require('../userContextService');
 const readinessService = require('../readiness/readinessService');
 const compassTools = require('./compassTools');
+const compassProposalTools = require('./compassProposalTools');
+const { isAgentEnabled } = require('../../config/agentFlags');
 const compassProgress = require('./compassProgressService');
 const { detectDrillRequest } = require('./compassIntent');
 const { detectTutoringRequest } = require('./tutoringIntent');
+
+// Bump on ANY prompt/tool change so ledger rows stay attributable (replay evals
+// compare acceptance rates across versions).
+const COMPASS_PROMPT_VERSION = 'compass-actions-v1';
 
 const COMPASS_MAX_TOOL_ITERATIONS = 5;
 
@@ -277,7 +283,15 @@ function buildSystemContext(ctx) {
     }
     lines.push(`Use this context to make responses feel personal — don't ask the learner to repeat what we already know.`);
   }
-  return lines.join('\n');
+  const proposalHint = isAgentEnabled('compass_actions')
+    ? '\nWhen the learner wants to rearrange, lighten, or catch up on their plan, use propose_plan_update to offer a concrete change as a confirmable card — never claim a change was applied; the learner must confirm the card first.'
+    : '';
+  return lines.join('\n') + proposalHint;
+}
+
+/** Merge read tools with proposal tools when the compass_actions agent is on. */
+function buildToolset({ readTools, proposalTools, enabled }) {
+  return enabled ? [...readTools, ...proposalTools] : [...readTools];
 }
 
 /**
@@ -539,7 +553,12 @@ async function callLLMWithTools({ userId, systemPrompt, userPrompt, history = []
     for (let iter = 0; iter < COMPASS_MAX_TOOL_ITERATIONS; iter++) {
       const response = await anthropic.messages.create({
         model: COMPASS_MODEL, max_tokens: maxTokens, temperature: COMPASS_TEMPERATURE,
-        system: systemPrompt, messages, tools: compassTools.TOOLS,
+        system: systemPrompt, messages,
+        tools: buildToolset({
+          readTools: compassTools.TOOLS,
+          proposalTools: compassProposalTools.PROPOSAL_TOOLS,
+          enabled: isAgentEnabled('compass_actions'),
+        }),
       });
       totalIn += response.usage?.input_tokens || 0;
       totalOut += response.usage?.output_tokens || 0;
@@ -552,7 +571,12 @@ async function callLLMWithTools({ userId, systemPrompt, userPrompt, history = []
       const toolUses = (response.content || []).filter((b) => b.type === 'tool_use');
       const toolResults = [];
       for (const block of toolUses) {
-        const r = await compassTools.dispatch({ userId, name: block.name, input: block.input });
+        const r = compassProposalTools.isProposalTool(block.name)
+          ? await compassProposalTools.dispatch({
+              userId, name: block.name, input: block.input,
+              meta: { promptVersion: COMPASS_PROMPT_VERSION, modelId: COMPASS_MODEL },
+            })
+          : await compassTools.dispatch({ userId, name: block.name, input: block.input });
         if (r.card) cards.push(r.card);
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: r.output, is_error: !r.ok });
       }
@@ -562,13 +586,18 @@ async function callLLMWithTools({ userId, systemPrompt, userPrompt, history = []
     const actual = totalIn + totalOut;
     await adjustBudget(userId, actual - estimatedTokens);
 
+    // agent_proposal cards are never deduped away — each one is a distinct
+    // pending decision the user must be able to answer.
+    const proposalCards = cards.filter((c) => c.type === 'agent_proposal');
     const seen = new Set();
     const deduped = [];
     for (const c of cards) {
+      if (c.type === 'agent_proposal') continue;
       if (seen.has(c.type)) continue;
       seen.add(c.type); deduped.push(c);
       if (deduped.length >= 2) break;
     }
+    deduped.push(...proposalCards);
     return { text: finalText || null, cards: deduped, capped: false, tokensIn: totalIn, tokensOut: totalOut };
   } catch (err) {
     await adjustBudget(userId, -estimatedTokens);
@@ -1349,6 +1378,7 @@ module.exports = {
   handle,
   buildUserContext,
   buildSystemContext,
+  buildToolset,
   callLLM,
   callLLMWithTools,
   conversation,
