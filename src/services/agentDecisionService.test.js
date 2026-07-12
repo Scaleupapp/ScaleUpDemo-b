@@ -186,6 +186,75 @@ test('respond: non-pending decision is refused (idempotency)', async () => {
   );
 });
 
+// ---- respond: recalibration_offer kind ----------------------------------
+test('respond: accepted recalibration_offer calls notify and applies without touching Plan', async () => {
+  const doc = fakeDecisionDoc({ action: { kind: 'recalibration_offer' } });
+  const calls = [];
+  const notifyCalls = [];
+  const r = await svc.respond(
+    { decisionId: doc._id, userId: String(doc.userId), response: 'accepted' },
+    {
+      AgentDecision: fakeDecisionModel(doc),
+      Plan: fakePlanModel(calls),
+      notify: async (userId) => { notifyCalls.push(userId); },
+    }
+  );
+  assert.strictEqual(r.applied, true);
+  assert.strictEqual(doc.status, 'accepted');
+  assert.deepStrictEqual(notifyCalls, [String(doc.userId)]);
+  assert.strictEqual(calls.length, 0);
+});
+
+test('respond: rejected recalibration_offer records without notifying', async () => {
+  const doc = fakeDecisionDoc({ action: { kind: 'recalibration_offer' } });
+  const notifyCalls = [];
+  const r = await svc.respond(
+    { decisionId: doc._id, userId: String(doc.userId), response: 'rejected' },
+    {
+      AgentDecision: fakeDecisionModel(doc),
+      Plan: fakePlanModel([]),
+      notify: async (userId) => { notifyCalls.push(userId); },
+    }
+  );
+  assert.strictEqual(r.applied, false);
+  assert.strictEqual(doc.status, 'rejected');
+  assert.strictEqual(notifyCalls.length, 0);
+});
+
+test('respond: adjusted is not allowed for recalibration_offer', async () => {
+  const doc = fakeDecisionDoc({ action: { kind: 'recalibration_offer' } });
+  const notifyCalls = [];
+  await assert.rejects(
+    () => svc.respond(
+      { decisionId: doc._id, userId: String(doc.userId), response: 'adjusted', adjustedOps: [{ op: 'reset_skipped' }] },
+      {
+        AgentDecision: fakeDecisionModel(doc),
+        Plan: fakePlanModel([]),
+        notify: async (userId) => { notifyCalls.push(userId); },
+      }
+    ),
+    /unsupported/
+  );
+  assert.strictEqual(doc.status, 'pending');
+  assert.strictEqual(notifyCalls.length, 0);
+});
+
+test('respond: unknown action kind is rejected before any state change', async () => {
+  let saveCalls = 0;
+  const doc = fakeDecisionDoc({ action: { kind: 'mystery_kind' }, save: async function () { saveCalls += 1; return this; } });
+  const calls = [];
+  await assert.rejects(
+    () => svc.respond(
+      { decisionId: doc._id, userId: String(doc.userId), response: 'accepted' },
+      { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel(calls) }
+    ),
+    /unsupported action kind/
+  );
+  assert.strictEqual(doc.status, 'pending');
+  assert.strictEqual(calls.length, 0);
+  assert.strictEqual(saveCalls, 0);
+});
+
 // ---- expireStale ---------------------------------------------------------
 test('expireStale: sweeps pending older than cutoff to ignored', async () => {
   const model = fakeDecisionModel(null);

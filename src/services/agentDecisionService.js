@@ -19,6 +19,13 @@ function defaultDeps() {
   return {
     AgentDecision: require('../models/AgentDecision'),
     Plan: require('../models/Plan'),
+    notify: (userId) =>
+      require('./notificationService').createInApp(userId, {
+        type: 'recalibration_offer',
+        title: 'Fresh check-in, fresh plan',
+        message: 'Quick recalibration → your plan updates to match where you are now.',
+        deepLink: null,
+      }),
   };
 }
 
@@ -105,16 +112,36 @@ async function respond({ decisionId, userId, response, adjustedOps }, deps = {})
   if (!['accepted', 'adjusted', 'rejected'].includes(response)) {
     throw new Error(`unsupported response: ${response}`);
   }
-  if (response === 'adjusted' && (!Array.isArray(adjustedOps) || adjustedOps.length === 0)) {
-    throw new Error('unsupported response: adjusted requires non-empty adjustedOps');
-  }
+
+  const kind = (decision.action && decision.action.kind) || 'plan_ops';
 
   let applied = false;
-  if (response === 'accepted' || response === 'adjusted') {
-    const ops = response === 'adjusted' ? adjustedOps : (decision.action && decision.action.ops);
-    await applyPlanOps(String(decision.userId), ops || [], d);
-    applied = true;
+  switch (kind) {
+    case 'plan_ops': {
+      if (response === 'adjusted' && (!Array.isArray(adjustedOps) || adjustedOps.length === 0)) {
+        throw new Error('unsupported response: adjusted requires non-empty adjustedOps');
+      }
+      if (response === 'accepted' || response === 'adjusted') {
+        const ops = response === 'adjusted' ? adjustedOps : (decision.action && decision.action.ops);
+        await applyPlanOps(String(decision.userId), ops || [], d);
+        applied = true;
+      }
+      break;
+    }
+    case 'recalibration_offer': {
+      if (response === 'adjusted') {
+        throw new Error('unsupported response: adjusted not allowed for recalibration_offer');
+      }
+      if (response === 'accepted') {
+        await d.notify(String(decision.userId));
+        applied = true;
+      }
+      break;
+    }
+    default:
+      throw new Error(`unsupported action kind: ${kind}`);
   }
+
   decision.status = response;
   if (response === 'adjusted') decision.adjustmentDiff = adjustedOps;
   decision.respondedAt = new Date();
