@@ -119,6 +119,13 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 18. Agent Decision Expiry — Daily 03:15 IST (21:45 UTC prev day). Marks
+  // pending agent decisions as ignored once they've sat unactioned past TTL.
+  cronQueue.add('agentDecisionExpiry', {}, {
+    repeat: { pattern: '45 21 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -222,6 +229,12 @@ function startCronJobs() {
       case 'cohortDirectoryHousekeeping':
         await require('./cohortDirectoryHousekeepingWorker').run();
         break;
+      case 'agentDecisionExpiry': {
+        const { expireStale } = require('../services/agentDecisionService');
+        const r = await expireStale({ hours: Number(process.env.AGENT_DECISION_TTL_HOURS || 48) });
+        console.log(`[cron] agentDecisionExpiry: ${r.expired} pending decisions marked ignored`);
+        break;
+      }
     }
   }, { connection });
 
