@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('assert');
 
-const { buildAgentHints } = require('./compassOrchestrator');
+const { buildAgentHints, renderDueMisconceptionChecks } = require('./compassOrchestrator');
 
 test('buildAgentHints: both off → empty string', () => {
   const hints = buildAgentHints({ proposalsOn: false, misconceptionsOn: false });
@@ -27,4 +27,25 @@ test('buildAgentHints: both on → both sentinels present, proposal text first',
   assert.ok(hints.includes('propose_plan_update'));
   assert.ok(hints.includes('dueMisconceptionChecks'));
   assert.ok(hints.indexOf('propose_plan_update') < hints.indexOf('dueMisconceptionChecks'));
+});
+
+test('renderDueMisconceptionChecks: undefined → empty string', () => {
+  assert.strictEqual(renderDueMisconceptionChecks(undefined), '');
+});
+
+test('renderDueMisconceptionChecks: empty array → empty string', () => {
+  assert.strictEqual(renderDueMisconceptionChecks([]), '');
+});
+
+test('renderDueMisconceptionChecks: two items → both tags present, oldest first preserved, stage rendered', () => {
+  const items = [
+    { tag: 'off-by-one', recentTopic: 'arrays', reviewStage: 1 },
+    { tag: 'null-check', recentTopic: 'pointers', reviewStage: 2 },
+  ];
+  const rendered = renderDueMisconceptionChecks(items);
+  assert.ok(rendered.includes('off-by-one'));
+  assert.ok(rendered.includes('null-check'));
+  assert.ok(rendered.indexOf('off-by-one') < rendered.indexOf('null-check'));
+  assert.ok(rendered.includes('stage 1/3'));
+  assert.ok(rendered.includes('stage 2/3'));
 });

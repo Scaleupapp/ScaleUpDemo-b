@@ -233,6 +233,7 @@ async function buildUserContext(userId) {
       recentTopics: (deepContext.recentTopicsTouched || []).slice(0, 5),
       recentTutor: (deepContext.recentAITutor?.topicsCovered || []).slice(0, 3),
       lastTutorQs: (deepContext.recentAITutor?.openQuestions || []).slice(0, 2),
+      dueMisconceptionChecks: deepContext.dueMisconceptionChecks || undefined,
     } : null,
   };
 }
@@ -281,6 +282,9 @@ function buildSystemContext(ctx) {
       const qs = ctx.deep.lastTutorQs.map(q => `"${q.question}"`).join(' / ');
       lines.push(`Recent tutor questions still open: ${qs}.`);
     }
+    if (ctx.deep.dueMisconceptionChecks?.length) {
+      lines.push(renderDueMisconceptionChecks(ctx.deep.dueMisconceptionChecks));
+    }
     lines.push(`Use this context to make responses feel personal — don't ask the learner to repeat what we already know.`);
   }
   const agentHints = buildAgentHints({
@@ -288,6 +292,17 @@ function buildSystemContext(ctx) {
     misconceptionsOn: isAgentEnabled('misconception_tutor'),
   });
   return lines.join('\n') + agentHints;
+}
+
+/**
+ * Pure helper: renders the due-misconception-recheck line for the system
+ * prompt. Items are already oldest-first (see misconceptionService.getDueReviews).
+ * Returns '' for undefined/empty so callers can push it unconditionally.
+ */
+function renderDueMisconceptionChecks(items) {
+  if (!items?.length) return '';
+  const parts = items.map(i => `${i.tag} (topic: ${i.recentTopic}, stage ${i.reviewStage}/3)`).join('; ');
+  return `Due misconception re-checks (oldest first): ${parts}.`;
 }
 
 /**
@@ -1395,6 +1410,7 @@ module.exports = {
   buildUserContext,
   buildSystemContext,
   buildAgentHints,
+  renderDueMisconceptionChecks,
   buildToolset,
   callLLM,
   callLLMWithTools,
