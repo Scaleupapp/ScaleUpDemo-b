@@ -150,6 +150,20 @@ test('respond: adjusted applies the ADJUSTED ops and stores the diff', async () 
   assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't._id': 't2' }]);
 });
 
+test('respond: adjusted with missing adjustedOps is rejected before any apply', async () => {
+  const doc = fakeDecisionDoc();
+  const calls = [];
+  await assert.rejects(
+    () => svc.respond(
+      { decisionId: doc._id, userId: String(doc.userId), response: 'adjusted' },
+      { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel(calls) }
+    ),
+    /unsupported/
+  );
+  assert.strictEqual(doc.status, 'pending');
+  assert.strictEqual(calls.length, 0);
+});
+
 test('respond: wrong owner is refused', async () => {
   const doc = fakeDecisionDoc();
   await assert.rejects(

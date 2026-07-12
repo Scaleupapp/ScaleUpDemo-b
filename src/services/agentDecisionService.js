@@ -105,6 +105,9 @@ async function respond({ decisionId, userId, response, adjustedOps }, deps = {})
   if (!['accepted', 'adjusted', 'rejected'].includes(response)) {
     throw new Error(`unsupported response: ${response}`);
   }
+  if (response === 'adjusted' && (!Array.isArray(adjustedOps) || adjustedOps.length === 0)) {
+    throw new Error('unsupported response: adjusted requires non-empty adjustedOps');
+  }
 
   let applied = false;
   if (response === 'accepted' || response === 'adjusted') {

@@ -142,10 +142,14 @@ components:
       description: >
         A rich answer card projected from an invoked Compass Progress tool.
         Clients render the payload by `type`; unknown types must be ignored.
+        For `type: agent_proposal`, payload is
+        `{ decisionId, title, summary, consequence, ops }` — an agentic-layer
+        proposal the client renders with Apply/Adjust/Dismiss actions and
+        resolves via POST /v2/agent/decisions/{decisionId}/respond.
       properties:
         type:
           type: string
-          enum: [readiness_explanation, activity_result, topic_detail, weak_topics, recent_activity, tutoring_result]
+          enum: [readiness_explanation, activity_result, topic_detail, weak_topics, recent_activity, tutoring_result, agent_proposal]
         payload:
           type: object
           additionalProperties: true
