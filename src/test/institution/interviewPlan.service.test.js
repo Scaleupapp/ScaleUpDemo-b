@@ -13,6 +13,10 @@ const plan = require('../../services/institution/assessment/interviewPlanService
 const authoring = require('../../services/institution/assessment/assessmentAuthoringService');
 const { releaseAssessment } = require('../../services/institution/assessment/assessmentService');
 
+// releaseAssessment fires authorAgentClosure.closeOnLifecycle fire-and-forget
+// (Plan 3, Task 3) — stub it so these DI-stubbed tests stay real-DB-free.
+const NOOP_AUTHOR_AGENT_CLOSURE = { authorAgentClosure: { closeOnLifecycle: async () => ({ closed: false }) } };
+
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 function goodQuestions(n = 10) {
@@ -228,13 +232,13 @@ test('releaseAssessment: interview authoring ready ⇒ releases', async () => {
   const doc = makeAssessmentDoc();
   doc.config.interview.authoring = { status: 'ready', questionPlan: { questions: goodQuestions(10) } };
   doc.save = async function () { return this; };
-  const out = await releaseAssessment({ institutionId: 'i1' }, 'a1', 'u1', { Assessment: releaseModel(doc) });
+  const out = await releaseAssessment({ institutionId: 'i1' }, 'a1', 'u1', { Assessment: releaseModel(doc), ...NOOP_AUTHOR_AGENT_CLOSURE });
   assert.strictEqual(out.status, 'released');
 });
 
 test('releaseAssessment: legacy interview with no authoring still releases', async () => {
   const doc = makeAssessmentDoc();
   doc.save = async function () { return this; };
-  const out = await releaseAssessment({ institutionId: 'i1' }, 'a1', 'u1', { Assessment: releaseModel(doc) });
+  const out = await releaseAssessment({ institutionId: 'i1' }, 'a1', 'u1', { Assessment: releaseModel(doc), ...NOOP_AUTHOR_AGENT_CLOSURE });
   assert.strictEqual(out.status, 'released');
 });

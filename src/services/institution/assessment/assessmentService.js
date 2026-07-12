@@ -100,6 +100,16 @@ async function releaseAssessment(scope, id, releasedBy, deps) {
   // Notify the cohort that a new assessment is open. Gated + best-effort:
   // never let a notification error fail the release.
   await _notifyAssessmentAssigned(a, deps);
+  // Close the author agent's pending decision row against this real lifecycle
+  // event (Plan 3, Task 3). editedQuestionCount is always 0 here — there is
+  // no edit-tracking infra on Assessment/AgentDecision yet, so every release
+  // reads as a clean accept (see authorAgentClosure.js doc comment for the
+  // 'adjusted' path this simplifies away). Fire-and-forget: flag-gated
+  // internally and never allowed to affect the release response.
+  const authorAgentClosure = (deps && deps.authorAgentClosure) || require('./authorAgentClosure');
+  authorAgentClosure
+    .closeOnLifecycle({ assessmentId: a._id, event: 'released', editedQuestionCount: 0 })
+    .catch((e) => console.warn('[authorAgentClosure]', e.message));
   return a;
 }
 

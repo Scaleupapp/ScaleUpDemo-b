@@ -32,6 +32,10 @@ function makeAssessmentDoc(overrides = {}) {
 
 const SCOPE = { institutionId: 'i1' };
 
+// releaseAssessment fires authorAgentClosure.closeOnLifecycle fire-and-forget
+// (Plan 3, Task 3) — stub it so release-success tests stay real-DB-free.
+const NOOP_AUTHOR_AGENT_CLOSURE = { authorAgentClosure: { closeOnLifecycle: async () => ({ closed: false }) } };
+
 // ---------------------------------------------------------------------------
 // createAssessment
 // ---------------------------------------------------------------------------
@@ -58,7 +62,7 @@ test('createAssessment passes scope + payload to Assessment.create', async () =>
 
 test('releaseAssessment succeeds for mcq with questions', async () => {
   const doc = makeAssessmentDoc();
-  const deps = { Assessment: { findOne: async () => doc } };
+  const deps = { Assessment: { findOne: async () => doc }, ...NOOP_AUTHOR_AGENT_CLOSURE };
   const result = await releaseAssessment(SCOPE, 'a1', 'user1', deps);
   assert.strictEqual(result.status, 'released');
   assert.strictEqual(result.releasedBy, 'user1');
@@ -105,14 +109,14 @@ test('releaseAssessment throws NO_QUESTIONS for mcq with null config.mcq', async
 
 test('releaseAssessment succeeds for interview type (no questions required)', async () => {
   const doc = makeAssessmentDoc({ type: 'interview', config: { interview: {} } });
-  const deps = { Assessment: { findOne: async () => doc } };
+  const deps = { Assessment: { findOne: async () => doc }, ...NOOP_AUTHOR_AGENT_CLOSURE };
   const result = await releaseAssessment(SCOPE, 'a1', 'user1', deps);
   assert.strictEqual(result.status, 'released');
 });
 
 test('releaseAssessment succeeds for capstone type (no questions required)', async () => {
   const doc = makeAssessmentDoc({ type: 'capstone', config: { capstone: { bundleId: 'existing-bundle' } } });
-  const deps = { Assessment: { findOne: async () => doc } };
+  const deps = { Assessment: { findOne: async () => doc }, ...NOOP_AUTHOR_AGENT_CLOSURE };
   const result = await releaseAssessment(SCOPE, 'a1', 'user1', deps);
   assert.strictEqual(result.status, 'released');
 });
@@ -135,7 +139,7 @@ test('releaseAssessment throws NO_BUNDLE for capstone with no bundleId', async (
 
 test('releaseAssessment succeeds for capstone with bundleId set', async () => {
   const doc = makeAssessmentDoc({ type: 'capstone', config: { capstone: { bundleId: 'b1' } } });
-  const deps = { Assessment: { findOne: async () => doc } };
+  const deps = { Assessment: { findOne: async () => doc }, ...NOOP_AUTHOR_AGENT_CLOSURE };
   const result = await releaseAssessment(SCOPE, 'a1', 'user1', deps);
   assert.strictEqual(result.status, 'released');
 });
@@ -391,7 +395,7 @@ test('releaseAssessment throws NO_BUNDLE for drill with no bundleId', async () =
 
 test('releaseAssessment succeeds for drill with bundleId set', async () => {
   const doc = makeAssessmentDoc({ type: 'drill', config: { drill: { bundleId: 'b1', drillSubtype: 'prompt' } } });
-  const deps = { Assessment: { findOne: async () => doc } };
+  const deps = { Assessment: { findOne: async () => doc }, ...NOOP_AUTHOR_AGENT_CLOSURE };
   const result = await releaseAssessment(SCOPE, 'a1', 'user1', deps);
   assert.strictEqual(result.status, 'released');
 });
