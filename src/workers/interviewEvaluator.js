@@ -1,4 +1,5 @@
 const interviewService = require('../services/interviewService');
+const interviewProgramService = require('../services/interviewProgramService');
 
 /**
  * Interview Evaluation Worker
@@ -18,9 +19,9 @@ async function evaluateInterview(job) {
     // (agentic layer Plan 5, #4). Flag-gated + no-op-safe inside the service;
     // never awaited here so a slow/failing hook can't delay or fail the job.
     const userId = result.userId;
-    require('../services/interviewProgramService')
+    interviewProgramService
       .attachSession({ userId, sessionId })
-      .then((r) => (r.attached ? require('../services/interviewProgramService').computeNextFocus({ userId }) : null))
+      .then((r) => (r.attached ? interviewProgramService.computeNextFocus({ userId }) : null))
       .catch((e) => console.warn('[interviewProgramHook]', e.message));
 
     return { status: 'completed', sessionId, overallScore: result.evaluation?.overallScore };

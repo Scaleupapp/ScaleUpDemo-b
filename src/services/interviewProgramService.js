@@ -222,24 +222,27 @@ async function createProgram({ userId, targetRole, targetCompany, driveDate, wee
  * flag off) is a safe, silent no-op so a missing program never breaks the
  * evaluation worker's critical path.
  *
- * Idempotent: a sessionId already present in sessionIds is skipped (no
- * duplicate push, no extra save) — the hook fires at most once per session
- * in the happy path, but a retried job / duplicate queue delivery must not
- * double-count a session in the trend math.
+ * Atomic: a single findOneAndUpdate with $addToSet does the find + dedupe +
+ * push in one DB round-trip — no findOne -> push -> save read-modify-write
+ * window. The interviewEvaluator worker runs at concurrency 2, so two
+ * evaluations for the same user can complete close together; a
+ * findOne/push/save sequence lets the second save() lose a VersionError race
+ * (swallowed by the caller's .catch, session silently never attached).
+ * $addToSet is itself idempotent on the array, so `attached` here means "an
+ * active program was found for this user" rather than "this call was the one
+ * that newly added the session" — computeNextFocus downstream is safe to
+ * call redundantly since it only writes when the focus dimension changes.
  */
 async function attachSession({ userId, sessionId }, deps = {}) {
   const d = { ...defaultDeps(), ...deps };
   if (!d.isAgentEnabled('interview_coach')) return { attached: false };
 
-  const program = await d.InterviewProgram.findOne({ userId, status: 'active' });
-  if (!program) return { attached: false };
-
-  const alreadyAttached = program.sessionIds.some((id) => String(id) === String(sessionId));
-  if (alreadyAttached) return { attached: false };
-
-  program.sessionIds.push(sessionId);
-  await program.save();
-  return { attached: true };
+  const doc = await d.InterviewProgram.findOneAndUpdate(
+    { userId, status: 'active' },
+    { $addToSet: { sessionIds: sessionId } },
+    { new: true },
+  );
+  return { attached: !!doc };
 }
 
 /**

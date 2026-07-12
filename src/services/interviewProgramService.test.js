@@ -35,10 +35,26 @@ function matchesProgram(doc, filter) {
 
 /** Wraps a mutable array of plain program fixtures as an InterviewProgram-
  * like model: findOne() runs a real filter match, create() pushes a new
- * Document-like object (with .save()) into the store. */
-function makeProgramModel(store, { failCreateWithDupKey = false } = {}) {
+ * Document-like object (with .save()) into the store, findOneAndUpdate()
+ * applies a $addToSet-only update atomically (mirrors the real Mongo op
+ * attachSession relies on) and records the call shape — same
+ * calls.push({filter, update, opts}) convention as agentDecisionService's
+ * fakePlanModel — so tests can assert on the update object instead of
+ * inspecting private array-mutation order. */
+function makeProgramModel(store, { failCreateWithDupKey = false, calls } = {}) {
   return {
     findOne: (filter) => queryResult(store.find((p) => matchesProgram(p, filter)) || null),
+    findOneAndUpdate: async (filter, update, opts) => {
+      if (calls) calls.push({ filter, update, opts });
+      const doc = store.find((p) => matchesProgram(p, filter));
+      if (!doc) return null;
+      if (update.$addToSet && update.$addToSet.sessionIds !== undefined) {
+        const val = update.$addToSet.sessionIds;
+        const exists = doc.sessionIds.some((id) => String(id) === String(val));
+        if (!exists) doc.sessionIds.push(val);
+      }
+      return doc;
+    },
     create: async (payload) => {
       if (failCreateWithDupKey) {
         const e = new Error('E11000 duplicate key error collection: one_active_program_per_user');
@@ -187,29 +203,40 @@ test('attachSession: no active program -> {attached:false} (hook safety, never t
   assert.deepStrictEqual(result, { attached: false });
 });
 
-test('attachSession: active program -> pushes sessionId, saves, {attached:true}', async () => {
+test('attachSession: active program -> atomic findOneAndUpdate $addToSet, {attached:true}', async () => {
   const store = [program()];
-  const deps = baseDeps({ InterviewProgram: makeProgramModel(store) });
+  const calls = [];
+  const deps = baseDeps({ InterviewProgram: makeProgramModel(store, { calls }) });
   const result = await attachSession({ userId: USER, sessionId: 'sess-1' }, deps);
   assert.deepStrictEqual(result, { attached: true });
   assert.deepStrictEqual(store[0].sessionIds, ['sess-1']);
-  assert.strictEqual(store[0]._saveCount, 1);
+  // Single atomic call — no separate findOne + push + save round trip, so
+  // two concurrent evaluations for the same user can't race a
+  // read-modify-write into a lost update.
+  assert.strictEqual(calls.length, 1);
+  assert.deepStrictEqual(calls[0].filter, { userId: USER, status: 'active' });
+  assert.strictEqual(calls[0].update.$addToSet.sessionIds, 'sess-1');
+  assert.deepStrictEqual(calls[0].opts, { new: true });
 });
 
-test('attachSession: idempotent — sessionId already attached -> {attached:false}, no duplicate push, no extra save', async () => {
+test('attachSession: idempotent — sessionId already attached -> still {attached:true} (active program found), $addToSet issued but no duplicate in the array', async () => {
   const store = [program({ sessionIds: ['sess-1'] })];
-  const deps = baseDeps({ InterviewProgram: makeProgramModel(store) });
+  const calls = [];
+  const deps = baseDeps({ InterviewProgram: makeProgramModel(store, { calls }) });
   const result = await attachSession({ userId: USER, sessionId: 'sess-1' }, deps);
-  assert.deepStrictEqual(result, { attached: false });
+  // $addToSet is idempotent by design — attachSession no longer distinguishes
+  // "newly added" from "already present"; both mean an active program exists.
+  assert.deepStrictEqual(result, { attached: true });
   assert.deepStrictEqual(store[0].sessionIds, ['sess-1']); // still exactly one entry
-  assert.strictEqual(store[0]._saveCount, undefined); // save() never called
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].update.$addToSet.sessionIds, 'sess-1');
 });
 
 test('attachSession: idempotent dedupe matches across ObjectId vs string sessionId', async () => {
   const store = [program({ sessionIds: [{ toString: () => 'sess-1' }] })];
   const deps = baseDeps({ InterviewProgram: makeProgramModel(store) });
   const result = await attachSession({ userId: USER, sessionId: 'sess-1' }, deps);
-  assert.deepStrictEqual(result, { attached: false });
+  assert.deepStrictEqual(result, { attached: true });
   assert.strictEqual(store[0].sessionIds.length, 1);
 });
 
