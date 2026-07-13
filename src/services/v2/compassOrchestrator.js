@@ -318,14 +318,40 @@ function renderDueMisconceptionChecks(items) {
 }
 
 /**
+ * Formats a driveDate (Date object, ISO string, or null/undefined) as
+ * YYYY-MM-DD. Returns '' for absent/invalid input so callers can splice it
+ * in unconditionally.
+ */
+function formatDriveDateISO(driveDate) {
+  if (!driveDate) return '';
+  const d = new Date(driveDate);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+/**
  * Pure helper: renders the interview-program "tonight's focus" line for the
  * system prompt. Returns '' for undefined/empty so callers can push it
  * unconditionally.
+ *
+ * - delta is null/undefined for the first graded session (no prior score to
+ *   diff against) — rendered as just "(score X)", never "delta null".
+ * - reason already ends with '.' in every upstream branch (see
+ *   interviewProgramService.buildFocusReason) — trailing '.' is stripped
+ *   before we append our own to avoid "..".
+ * - driveDate, when present and parseable, is rendered as the urgency
+ *   signal "— drive on YYYY-MM-DD"; absent/invalid dates are omitted.
  */
 function renderInterviewProgramFocus(item) {
   if (!item || !item.dimension) return '';
   const role = item.targetRole ? ` for ${item.targetRole}` : '';
-  return `Interview program focus${role}: ${item.dimension} (score ${item.score}, delta ${item.delta}) — ${item.reason}.`;
+  const deltaPart = (item.delta === null || item.delta === undefined)
+    ? ''
+    : `, Δ${item.delta > 0 ? '+' : ''}${item.delta}`;
+  const reason = String(item.reason || '').replace(/\.+$/, '');
+  const driveDateStr = formatDriveDateISO(item.driveDate);
+  const drivePart = driveDateStr ? ` — drive on ${driveDateStr}` : '';
+  return `Interview program focus${role}: ${item.dimension} (score ${item.score}${deltaPart}) — ${reason}.${drivePart}`;
 }
 
 /**

@@ -117,6 +117,61 @@ test('renderInterviewProgramFocus: full item → dimension, role, reason all pre
   assert.ok(rendered.includes('lowest latest score'));
 });
 
+test('renderInterviewProgramFocus: delta null (first graded session) → no "null" substring', () => {
+  const item = {
+    dimension: 'confidence', score: 55, delta: null,
+    reason: 'confidence is your lowest-scoring area (55/100) so far.',
+  };
+  const rendered = renderInterviewProgramFocus(item);
+  assert.ok(!rendered.includes('null'));
+  assert.ok(rendered.includes('(score 55)'));
+});
+
+test('renderInterviewProgramFocus: reason already ends with "." → no double period', () => {
+  const item = {
+    dimension: 'confidence', score: 62, delta: -8,
+    reason: 'confidence dropped 8 pts since your last session.',
+  };
+  const rendered = renderInterviewProgramFocus(item);
+  assert.ok(!rendered.includes('..'));
+  assert.ok(rendered.endsWith('.'));
+});
+
+test('renderInterviewProgramFocus: driveDate present (ISO string) → rendered as urgency signal', () => {
+  const item = {
+    dimension: 'confidence', score: 62, delta: -8, reason: 'lowest score.',
+    driveDate: '2026-08-01',
+  };
+  const rendered = renderInterviewProgramFocus(item);
+  assert.ok(rendered.includes('drive on 2026-08-01'));
+});
+
+test('renderInterviewProgramFocus: driveDate present (Date object) → rendered as YYYY-MM-DD', () => {
+  const item = {
+    dimension: 'confidence', score: 62, delta: -8, reason: 'lowest score.',
+    driveDate: new Date('2026-09-15T00:00:00.000Z'),
+  };
+  const rendered = renderInterviewProgramFocus(item);
+  assert.ok(rendered.includes('drive on 2026-09-15'));
+});
+
+test('renderInterviewProgramFocus: driveDate absent → omitted, no dangling "drive on"', () => {
+  const item = {
+    dimension: 'confidence', score: 62, delta: -8, reason: 'lowest score.',
+  };
+  const rendered = renderInterviewProgramFocus(item);
+  assert.ok(!rendered.includes('drive on'));
+});
+
+test('renderInterviewProgramFocus: driveDate invalid → omitted, no dangling "drive on"', () => {
+  const item = {
+    dimension: 'confidence', score: 62, delta: -8, reason: 'lowest score.',
+    driveDate: 'not-a-date',
+  };
+  const rendered = renderInterviewProgramFocus(item);
+  assert.ok(!rendered.includes('drive on'));
+});
+
 test('renderProofJourneyNext: undefined → empty string', () => {
   assert.strictEqual(renderProofJourneyNext(undefined), '');
 });
