@@ -22,14 +22,14 @@ const STEP_DEFS = [
   { key: 'publish', label: 'Publishing your proof' },
 ];
 
-// Default language per role-track — mirrors capstones.controller.js's
-// LANG_BY_TRACK (private/unexported there). A JD-driven proof capstone uses
-// the learner's track default rather than sniffing the JD text for a
-// language hint (the existing JD-paste flow does that sniff on the raw
-// job_description field itself; capstoneAuthoringSupport.requestGeneration
-// forwards our jdText as job_description, so the generator still benefits
-// from the JD content even though we don't duplicate the sniff here).
-const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
+// Default language per role-track (shared constant — see langByTrack.js).
+// A JD-driven proof capstone uses the learner's track default rather than
+// sniffing the JD text for a language hint (the existing JD-paste flow does
+// that sniff on the raw job_description field itself;
+// capstoneAuthoringSupport.requestGeneration forwards our jdText as
+// job_description, so the generator still benefits from the JD content even
+// though we don't duplicate the sniff here).
+const { LANG_BY_TRACK } = require('../coding/services/langByTrack');
 
 // Proof-journey capstones default to medium difficulty — this is a "prove a
 // skill for a real JD" artifact, not a recalibrated practice rep, so we don't
