@@ -8121,6 +8121,10 @@ paths:
       operationId: getCapstoneHumanReviewQueue
       tags: [Coding]
       summary: List bundles flagged for human review (anchor-drift, validator fail)
+      description: |
+        Each item additionally carries a `dossier` — the latest review_triage
+        (Plan 6 #9) evidence pack + advisory recommendation for that item,
+        `null` when the agent hasn't produced one yet.
       security:
         - BearerAuth: []
       parameters:
@@ -8143,6 +8147,54 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/coding/admin/human-review/{id}/resolve:
+    post:
+      operationId: resolveCapstoneHumanReview
+      tags: [Coding]
+      summary: Reviewer's approve/reject decision on a human-review item
+      description: |
+        The one mutating admin-dashboard endpoint. Persists the reviewer's
+        real resolution, then closes the item's review_triage dossier
+        (Plan 6 #9): agreeing with the agent's recommendation closes it
+        `accepted`, overruling it closes it `adjusted`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution:
+                  type: string
+                  enum: [approved, rejected]
+                notes: { type: string }
+      responses:
+        '200':
+          description: Review item resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item]
+                properties:
+                  item: { type: object }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/coding/admin/cost-summary:
     get:

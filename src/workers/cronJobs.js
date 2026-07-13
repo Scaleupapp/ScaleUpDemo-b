@@ -148,6 +148,17 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 22. Review Triage Sweep — Hourly at :20. Builds a dossier for every
+  // pending HumanReviewQueue item without one yet (Plan 6 #9). Dedup (skip
+  // items that already have an open dossier row) is a plain findOne inside
+  // the loop, not an atomic claim — safe because this Worker processes
+  // 'cronJobs' jobs serially per process; only a multi-instance deployment
+  // running overlapping sweeps concurrently could double-dossier an item.
+  cronQueue.add('reviewTriageSweep', {}, {
+    repeat: { pattern: '20 * * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -274,6 +285,12 @@ function startCronJobs() {
         const { runDaily } = require('../services/institution/activationAgentService');
         const r = await runDaily();
         console.log('[cron] activationDailyNudge: ' + r.reminded + ' reminders across ' + r.cohorts + ' cohorts');
+        break;
+      }
+      case 'reviewTriageSweep': {
+        const { triagePending } = require('../coding/services/reviewTriageService');
+        const r = await triagePending();
+        console.log('[cron] reviewTriageSweep: ' + r.triaged + ' dossiers');
         break;
       }
     }

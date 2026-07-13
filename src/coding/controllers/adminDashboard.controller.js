@@ -4,20 +4,66 @@ const EvaluationAnchor = require('../models/evaluationAnchor.model');
 const HumanReviewQueue = require('../models/humanReviewQueue.model');
 const CapstoneSession = require('../models/capstoneSession.model');
 const LLMSpend = require('../models/llmSpend.model');
+const AgentDecision = require('../../models/AgentDecision');
+const reviewTriageService = require('../services/reviewTriageService');
 
 /**
- * Admin / ops read-only views for the capstone pipeline.
+ * Admin / ops views for the capstone pipeline.
  *
  * - /api/coding/admin/anchor-drift  — recent drift observations + which
  *   bundles trip the threshold most often (spec §8.3 anti-drift).
- * - /api/coding/admin/human-review   — pending HRQ entries.
+ * - /api/coding/admin/human-review   — pending HRQ entries (+ review_triage
+ *   dossier per item, Plan 6 #9).
+ * - /api/coding/admin/human-review/:id/resolve — the ONE mutating endpoint:
+ *   the reviewer's real approve/reject decision.
  * - /api/coding/admin/cost-summary   — per-task LLM spend rollup.
  * - /api/coding/admin/recent-sessions — capstone session activity.
  *
  * All endpoints require the caller to have role=admin (enforced by the
- * route's admin-auth middleware). They don't mutate state — they just
- * read.
+ * route's admin-auth middleware).
  */
+
+/**
+ * Attaches the latest `review_triage` AgentDecision row ("dossier") to each
+ * HumanReviewQueue item — additive `dossier` key, `null` when the item has
+ * no dossier yet (agent hasn't swept it, flag off, or it's genuinely new).
+ * Lean projection: only what the reviewer's brief needs.
+ */
+async function attachDossiers(items) {
+  if (!items.length) return items;
+
+  const ids = items.map((i) => String(i._id));
+  const dossierRows = await AgentDecision.find({
+    agentId: 'review_triage',
+    'action.reviewItemId': { $in: ids },
+  })
+    .sort({ createdAt: -1 })
+    .select('action.reviewItemId action.evidence action.recommendation createdAt status')
+    .lean();
+
+  // Rows are sorted newest-first, so the first row seen per reviewItemId is
+  // the latest dossier for that item.
+  const latestByItem = new Map();
+  for (const row of dossierRows) {
+    const key = row.action && row.action.reviewItemId;
+    if (key && !latestByItem.has(key)) latestByItem.set(key, row);
+  }
+
+  return items.map((item) => {
+    const row = latestByItem.get(String(item._id));
+    return {
+      ...item,
+      dossier: row
+        ? {
+            evidence: row.action.evidence ?? null,
+            recommendation: row.action.recommendation ?? null,
+            createdAt: row.createdAt,
+            status: row.status,
+          }
+        : null,
+    };
+  });
+}
 
 /** GET /api/coding/admin/anchor-drift */
 async function anchorDrift(req, res) {
@@ -80,7 +126,43 @@ async function humanReview(req, res) {
     .sort({ createdAt: -1 })
     .limit(200)
     .lean();
-  res.json({ items });
+  res.json({ items: await attachDossiers(items) });
+}
+
+/**
+ * POST /api/coding/admin/human-review/:id/resolve
+ *
+ * The reviewer's real approve/reject decision. This is the only mutating
+ * endpoint on the admin dashboard — everything else is read-only. Persists
+ * the resolution first, then fires the review-triage closure hook
+ * fire-and-forget: a triage-service hiccup must never fail (or even slow
+ * down) a real review action.
+ */
+async function resolveHumanReview(req, res) {
+  const { id } = req.params;
+  const resolution = req.body && req.body.resolution;
+  const notes = req.body && req.body.notes;
+
+  if (resolution !== 'approved' && resolution !== 'rejected') {
+    return res.status(400).json({ error: 'resolution must be "approved" or "rejected"' });
+  }
+
+  const item = await HumanReviewQueue.findById(id);
+  if (!item) return res.status(404).json({ error: 'review item not found' });
+
+  item.status = resolution;
+  item.reviewer_id = req.user && req.user.userId;
+  if (typeof notes === 'string' && notes.trim()) item.review_notes = notes.trim();
+  item.reviewed_at = new Date();
+  await item.save();
+
+  // Fire-and-forget: agree -> the triage dossier closes 'accepted'; overrule
+  // -> 'adjusted'. Never awaited/blocking — never in the critical path.
+  reviewTriageService
+    .closeOnResolution({ reviewItemId: id, resolution })
+    .catch((e) => console.warn('[reviewTriageHook]', e.message));
+
+  res.json({ item: item.toObject() });
 }
 
 /** GET /api/coding/admin/cost-summary?days=30 */
@@ -160,6 +242,7 @@ function round6(n) { return Math.round(n * 1_000_000) / 1_000_000; }
 module.exports = {
   anchorDrift,
   humanReview,
+  resolveHumanReview,
   costSummary,
   recentSessions,
 };
