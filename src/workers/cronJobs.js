@@ -258,9 +258,10 @@ function startCronJobs() {
         break;
       }
       case 'agentOutcomeClosure': {
-        const { closeCompassActionOutcomes } = require('../services/agentOutcomeClosureService');
-        const r = await closeCompassActionOutcomes({ olderThanHours: Number(process.env.AGENT_OUTCOME_CLOSURE_MIN_HOURS || 24) });
-        console.log(`[cron] agentOutcomeClosure: ${r.closed} decisions closed`);
+        const { closeCompassActionOutcomes, closeInterviewFocusOutcomes } = require('../services/agentOutcomeClosureService');
+        const compassResult = await closeCompassActionOutcomes({ olderThanHours: Number(process.env.AGENT_OUTCOME_CLOSURE_MIN_HOURS || 24) });
+        const interviewFocusResult = await closeInterviewFocusOutcomes({ olderThanDays: Number(process.env.AGENT_OUTCOME_CLOSURE_INTERVIEW_FOCUS_DAYS || 7) });
+        console.log(`[cron] agentOutcomeClosure: ${compassResult.closed} compass decisions closed, ${interviewFocusResult.closed} interview-focus closed`);
         break;
       }
       case 'interventionWeeklyBrief': {
