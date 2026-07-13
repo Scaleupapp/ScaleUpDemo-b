@@ -37,17 +37,47 @@ function makeDecisionDoc(overrides = {}) {
   };
 }
 
+/** Matches a stored decision doc against a Mongo-shaped query (dot-path fields only). */
+function matchesDecisionQuery(row, query) {
+  return Object.entries(query).every(([key, expected]) => {
+    if (key === 'agentId') return row.agentId === expected;
+    if (key === 'action.assessmentId') return !!row.action && row.action.assessmentId === expected;
+    if (key === 'action.result') {
+      // Mongo's `{ field: null }` matches both an explicit null and a missing field.
+      if (expected === null) return !row.action || row.action.result === null || row.action.result === undefined;
+      return !!row.action && row.action.result === expected;
+    }
+    return row[key] === expected;
+  });
+}
+
 /** Fake AgentDecision model backed by an in-memory map of decision docs. */
 function makeAgentDecisionModel(store) {
   return {
     async create(payload) {
       const id = `dec${Object.keys(store).length + 1}`;
-      const doc = makeDecisionDoc({ _id: id, institutionId: payload.institutionId, action: payload.action });
+      const doc = makeDecisionDoc({
+        _id: id,
+        agentId: payload.agentId,
+        institutionId: payload.institutionId,
+        action: payload.action,
+      });
       store[id] = doc;
       return doc;
     },
     async findById(id) {
       return store[id] || null;
+    },
+    // Chainable to mirror the real Mongoose builder (`.findOne(...).select(...).lean()`)
+    // used by startRun's in-flight guard.
+    findOne(query = {}) {
+      const found = Object.values(store).find((row) => matchesDecisionQuery(row, query)) || null;
+      const q = {
+        select: () => q,
+        lean: async () => found,
+        then: (resolve, reject) => Promise.resolve(found).then(resolve, reject),
+      };
+      return q;
     },
   };
 }
@@ -300,6 +330,91 @@ test('startRun: mcq authoring already generating -> throws /not authorable/', as
     startRun({ assessmentId: 'a1', institutionId: 'inst1' }, deps),
     /not authorable/
   );
+});
+
+// ── startRun: uniform agent-level in-flight guard (all four engines) ────
+
+test('startRun: rejects when a prior author_agent run for this assessment is unfinished (action.result null), no new ledger row recorded', async () => {
+  const decisionStore = {};
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  // Simulate a prior in-flight run's ledger row directly — the row is only
+  // finalized (action.result set) when the run ends.
+  await AgentDecision.create({
+    agentId: 'author_agent',
+    institutionId: 'inst1',
+    action: { kind: 'assessment_authoring_run', assessmentId: 'a1', engine: 'mcq', runLog: [], result: null },
+  });
+  const rowCountBefore = Object.keys(decisionStore).length;
+
+  const assessment = baseAssessment({ questions: [], status: 'configured' });
+  const deps = {
+    isAgentEnabled: () => true,
+    Assessment: makeAssessmentModel({ a1: assessment }),
+    AgentDecision,
+    record: async () => { throw new Error('record should not be called when a run is already in flight'); },
+  };
+
+  await assert.rejects(
+    startRun({ assessmentId: 'a1', institutionId: 'inst1', brief: 'second click' }, deps),
+    /already in progress/
+  );
+  assert.strictEqual(Object.keys(decisionStore).length, rowCountBefore, 'no new ledger row should be recorded');
+});
+
+test('startRun: succeeds when the prior author_agent run for this assessment IS finalized (result non-null)', async () => {
+  const decisionStore = {};
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  await AgentDecision.create({
+    agentId: 'author_agent',
+    institutionId: 'inst1',
+    action: {
+      kind: 'assessment_authoring_run',
+      assessmentId: 'a1',
+      engine: 'mcq',
+      runLog: [],
+      result: { status: 'ready', engine: 'mcq', evidence: {}, flagged: [], passes: 1 },
+    },
+  });
+
+  const assessment = baseAssessment({ questions: [passedQuestion()], status: 'configured' });
+  let recorded = null;
+  const deps = {
+    isAgentEnabled: () => true,
+    Assessment: makeAssessmentModel({ a1: assessment }),
+    AgentDecision,
+    authoring: { authorMcq: async () => assessment, regenerateQuestion: async () => {} },
+    record: async (payload) => { recorded = payload; return { _id: 'dec-new', action: payload.action }; },
+  };
+
+  const { decisionId } = await startRun({ assessmentId: 'a1', institutionId: 'inst1', brief: 'new run' }, deps);
+  assert.strictEqual(decisionId, 'dec-new');
+  assert.ok(recorded, 'record should be called once the prior run is finalized');
+});
+
+test('startRun: in-flight guard applies to capstone (the engine that motivated it)', async () => {
+  const decisionStore = {};
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  await AgentDecision.create({
+    agentId: 'author_agent',
+    institutionId: 'inst1',
+    action: { kind: 'assessment_authoring_run', assessmentId: 'a1', engine: 'capstone', runLog: [], result: null },
+  });
+  const rowCountBefore = Object.keys(decisionStore).length;
+
+  const assessment = bundleAssessment({ type: 'capstone', bundleId: null, status: 'draft' });
+  const deps = {
+    isAgentEnabled: () => true,
+    Assessment: makeAssessmentModel({ a1: assessment }),
+    AgentDecision,
+    ArtifactBundle: makeArtifactBundleModel({}),
+    record: async () => { throw new Error('record should not be called when a run is already in flight'); },
+  };
+
+  await assert.rejects(
+    startRun({ assessmentId: 'a1', institutionId: 'inst1', brief: 'double-clicked capstone run' }, deps),
+    /already in progress/
+  );
+  assert.strictEqual(Object.keys(decisionStore).length, rowCountBefore, 'no new ledger row should be recorded');
 });
 
 test('startRun: happy path records decision and returns decisionId', async () => {

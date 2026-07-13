@@ -60,6 +60,7 @@ function makeHandlers(deps = {}) {
       if (/disabled/i.test(err.message)) return res.status(404).json({ success: false, message: 'Not found' });
       if (/not found/i.test(err.message)) return res.status(404).json({ success: false, message: 'Assessment not found' });
       if (/not authorable/i.test(err.message)) return res.status(409).json({ success: false, message: err.message });
+      if (/already in progress/i.test(err.message)) return res.status(409).json({ success: false, message: err.message });
       console.error('[institution/author-agent] startRun error', err);
       return res.status(500).json({ success: false, message: 'Could not start the author-agent run.' });
     }

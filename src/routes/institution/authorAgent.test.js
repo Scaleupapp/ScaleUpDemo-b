@@ -88,6 +88,20 @@ test('POST author-agent: service "not authorable" -> 409', async () => {
   assert.strictEqual(r.body.success, false);
 });
 
+test('POST author-agent: service "already in progress" (concurrent run guard) -> 409', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    Assessment: {
+      findById: () => ({ select: async () => ({ institutionId: 'inst1', cohortId: 'c1' }) }),
+    },
+    startRun: async () => { throw new Error('assessment authoring already in progress'); },
+  });
+  const r = res();
+  await h.startRunHandler(baseReq({ params: { id: 'a1' }, body: { brief: 'x' } }), r);
+  assert.strictEqual(r.statusCode, 409);
+  assert.strictEqual(r.body.success, false);
+});
+
 test('GET author-agent run status: happy path returns status/runLog/result', async () => {
   const decisionId = new mongoose.Types.ObjectId();
   const h = makeHandlers({

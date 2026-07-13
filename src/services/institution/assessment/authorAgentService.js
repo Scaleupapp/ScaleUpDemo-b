@@ -65,6 +65,15 @@ const AUTHORABLE_TYPES = ['mcq', 'interview', 'capstone', 'drill'];
 // by user_id (capstone) or nothing at all (drill), with no cheap link back to
 // this assessmentId. Per the plan's contract, that sub-guard is skipped for
 // those two engines rather than faked.
+//
+// That gap is what let a double-clicked "Run author agent" fire the full
+// LLM generation + sandbox proof + cross-model check pipeline TWICE for
+// capstone/drill (real duplicated spend + an orphaned ArtifactBundle) before
+// the losing run failed on a version conflict at save. startRun's
+// AgentDecision in-flight check below closes that gap uniformly for ALL
+// FOUR engines — it does not replace the mcq/interview config-level guard
+// above (belt and braces), it just adds the one signal that's cheaply
+// knowable for every engine: an unfinished ledger row for this assessment.
 const MID_GENERATION_GUARDED_ENGINES = ['mcq', 'interview'];
 
 function defaultDeps() {
@@ -135,7 +144,10 @@ async function finalizeResult(AgentDecision, decisionId, result) {
  * assessment.type is one of the four authorable engines; assessment.status
  * in [draft, configured]; for mcq/interview only, that engine's
  * config.<type>.authoring.status isn't already 'generating' (capstone/drill
- * have no cheap in-flight signal — see MID_GENERATION_GUARDED_ENGINES above).
+ * have no cheap in-flight signal — see MID_GENERATION_GUARDED_ENGINES above);
+ * and — across all four engines — no author_agent AgentDecision row for this
+ * assessmentId is still unfinished (action.result null/absent), which is
+ * what stops a double-click from firing the full generation pipeline twice.
  * Records the AgentDecision row (action.engine = assessment.type, userId
  * stays unset — this is an institution-side agent), then fires runAuthoring
  * in the background.
@@ -157,6 +169,19 @@ async function startRun({ assessmentId, institutionId, cohortId, actorInstitutio
   const midGeneration =
     MID_GENERATION_GUARDED_ENGINES.includes(engine) && authoringStatusFor(assessment, engine) === 'generating';
   if (!statusOk || midGeneration) throw new Error('assessment not authorable');
+
+  // Uniform agent-level guard for ALL four engines: an author_agent ledger
+  // row for this assessment is only finalized (action.result set) when the
+  // run ends, so an unfinished row means a run is genuinely in flight right
+  // now — reject rather than kick off a second full generation pipeline.
+  const inFlightRun = await d.AgentDecision.findOne({
+    agentId: 'author_agent',
+    'action.assessmentId': String(assessmentId),
+    'action.result': null,
+  })
+    .select('_id')
+    .lean();
+  if (inFlightRun) throw new Error('assessment authoring already in progress');
 
   const decision = await d.record(
     {
