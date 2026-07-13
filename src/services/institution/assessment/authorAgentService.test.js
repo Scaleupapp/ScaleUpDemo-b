@@ -7,8 +7,23 @@ const {
   startRun,
   runAuthoring,
   getRunStatus,
+  reapOrphanedRuns,
   _helpers: { computeFlaggedIndices },
 } = require('./authorAgentService');
+
+/** Dot-path get/set — the reaper's Assessment.updateOne fake needs both. */
+function getPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+function setPath(obj, path, value) {
+  const keys = path.split('.');
+  let cur = obj;
+  keys.slice(0, -1).forEach((k) => {
+    cur[k] = cur[k] || {};
+    cur = cur[k];
+  });
+  cur[keys[keys.length - 1]] = value;
+}
 
 // ── Fakes ────────────────────────────────────────────────────────────────
 
@@ -17,6 +32,7 @@ function makeDecisionDoc(overrides = {}) {
   return {
     _id: 'dec1',
     institutionId: 'inst1',
+    createdAt: new Date(),
     action: {
       kind: 'assessment_authoring_run',
       brief: 'brief',
@@ -46,6 +62,9 @@ function matchesDecisionQuery(row, query) {
       // Mongo's `{ field: null }` matches both an explicit null and a missing field.
       if (expected === null) return !row.action || row.action.result === null || row.action.result === undefined;
       return !!row.action && row.action.result === expected;
+    }
+    if (key === 'createdAt' && expected && typeof expected === 'object' && '$lt' in expected) {
+      return new Date(row.createdAt).getTime() < new Date(expected.$lt).getTime();
     }
     return row[key] === expected;
   });
@@ -79,6 +98,15 @@ function makeAgentDecisionModel(store) {
       };
       return q;
     },
+    // Chainable to mirror `.find(query).exec()`, used by reapOrphanedRuns.
+    find(query = {}) {
+      const matched = Object.values(store).filter((row) => matchesDecisionQuery(row, query));
+      const q = {
+        exec: async () => matched,
+        then: (resolve, reject) => Promise.resolve(matched).then(resolve, reject),
+      };
+      return q;
+    },
   };
 }
 
@@ -87,6 +115,21 @@ function makeAssessmentModel(store) {
   return {
     async findById(id) {
       return store[id] || null;
+    },
+    // Scoped update mirroring Assessment.updateOne({_id, <dot-path>: cond}, {$set: {...}})
+    // used by reapOrphanedRuns to reset a stuck config.<engine>.authoring.status.
+    async updateOne(query, update) {
+      const doc = store[query._id];
+      if (!doc) return { matchedCount: 0, modifiedCount: 0 };
+      const matches = Object.entries(query).every(([key, expected]) => {
+        if (key === '_id') return true;
+        return getPath(doc, key) === expected;
+      });
+      if (!matches) return { matchedCount: 1, modifiedCount: 0 };
+      if (update && update.$set) {
+        Object.entries(update.$set).forEach(([path, value]) => setPath(doc, path, value));
+      }
+      return { matchedCount: 1, modifiedCount: 1 };
     },
   };
 }
@@ -775,4 +818,128 @@ test('startRun: ledger row carries action.engine matching the assessment type', 
   };
   await startRun({ assessmentId: 'a1', institutionId: 'inst1', cohortId: 'cohort1', brief: 'a drill' }, deps);
   assert.strictEqual(recordedPayload.action.engine, 'drill');
+});
+
+// ── reapOrphanedRuns ─────────────────────────────────────────────────────
+
+function minutesAgo(n) {
+  return new Date(Date.now() - n * 60 * 1000);
+}
+
+/** An in-flight (unfinished) author_agent ledger row, createdAt N minutes ago. */
+function orphanCandidateDoc({ id = 'dec1', engine = 'mcq', assessmentId = 'a1', ageMinutes = 40 } = {}) {
+  return makeDecisionDoc({
+    _id: id,
+    agentId: 'author_agent',
+    institutionId: 'inst1',
+    createdAt: minutesAgo(ageMinutes),
+    action: {
+      kind: 'assessment_authoring_run',
+      engine,
+      brief: 'brief',
+      assessmentId,
+      runLog: [{ at: new Date(), msg: 'run queued' }],
+      result: null,
+    },
+  });
+}
+
+test('reapOrphanedRuns: row older than window -> row failed + assessment authoring status reset', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ ageMinutes: 40 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = { a1: baseAssessment({ questions: [], authoringStatus: 'generating' }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
+
+  assert.strictEqual(reaped, 1);
+
+  const row = decisionStore.dec1;
+  assert.strictEqual(row.action.result.status, 'failed');
+  assert.strictEqual(row.action.result.engine, 'mcq');
+  assert.strictEqual(row.action.result.note, 'orphaned');
+  assert.ok(row.action.runLog.some((e) => /run orphaned/.test(e.msg)));
+  assert.ok(row.marked.includes('action'));
+
+  const assessment = assessmentStore.a1;
+  assert.strictEqual(assessment.config.mcq.authoring.status, 'failed');
+  assert.strictEqual(assessment.config.mcq.authoring.error, 'run orphaned');
+});
+
+test('reapOrphanedRuns: row younger than window -> untouched', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ ageMinutes: 5 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = { a1: baseAssessment({ questions: [], authoringStatus: 'generating' }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
+
+  assert.strictEqual(reaped, 0);
+  assert.strictEqual(decisionStore.dec1.action.result, null);
+  assert.strictEqual(assessmentStore.a1.config.mcq.authoring.status, 'generating');
+});
+
+test('reapOrphanedRuns: row already finalized (action.result non-null) -> untouched even if old', async () => {
+  const decisionStore = {
+    dec1: orphanCandidateDoc({ ageMinutes: 90 }),
+  };
+  decisionStore.dec1.action.result = { status: 'ready', engine: 'mcq', evidence: {}, flagged: [], passes: 1 };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const Assessment = makeAssessmentModel({ a1: baseAssessment({ questions: [], authoringStatus: 'ready' }) });
+
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
+
+  assert.strictEqual(reaped, 0);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'ready');
+});
+
+test('reapOrphanedRuns: capstone row (no authoring flag) -> row failed, no assessment write attempted', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'capstone', ageMinutes: 60 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const Assessment = {
+    async findById() { throw new Error('should not be called'); },
+    async updateOne() { throw new Error('capstone has no authoring flag — updateOne must not be called'); },
+  };
+
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
+
+  assert.strictEqual(reaped, 1);
+  const row = decisionStore.dec1;
+  assert.strictEqual(row.action.result.status, 'failed');
+  assert.strictEqual(row.action.result.engine, 'capstone');
+});
+
+test('reapOrphanedRuns: per-row failure isolation — one row throwing on save does not stop the others', async () => {
+  const badDoc = orphanCandidateDoc({ id: 'dec-bad', assessmentId: 'a-bad', ageMinutes: 45 });
+  badDoc.save = async () => { throw new Error('save exploded'); };
+  const goodDoc = orphanCandidateDoc({ id: 'dec-good', assessmentId: 'a-good', ageMinutes: 45 });
+
+  const decisionStore = { 'dec-bad': badDoc, 'dec-good': goodDoc };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = {
+    'a-bad': baseAssessment({ questions: [], authoringStatus: 'generating' }),
+    'a-good': baseAssessment({ questions: [], authoringStatus: 'generating' }),
+  };
+  assessmentStore['a-bad']._id = 'a-bad';
+  assessmentStore['a-good']._id = 'a-good';
+  const Assessment = makeAssessmentModel(assessmentStore);
+
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
+
+  // Only the good row counts as reaped — the bad row's save() throw is caught
+  // and swallowed (per-row isolation), never propagating out of the sweep.
+  assert.strictEqual(reaped, 1);
+  assert.strictEqual(goodDoc.action.result.status, 'failed');
+  assert.strictEqual(assessmentStore['a-good'].config.mcq.authoring.status, 'failed');
+});
+
+test('reapOrphanedRuns: no orphaned rows -> reaped 0, never throws', async () => {
+  const AgentDecision = makeAgentDecisionModel({});
+  const Assessment = makeAssessmentModel({});
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
+  assert.strictEqual(reaped, 0);
 });

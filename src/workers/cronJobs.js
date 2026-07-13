@@ -167,6 +167,18 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 24. Author Agent Orphan Reaper — Every 15 minutes. runAuthoring is
+  // fire-and-forget from startRun; if the server restarts or the process
+  // dies mid-run, the AgentDecision row's action.result never finalizes,
+  // which permanently blocks that assessment's in-flight guard AND (for
+  // mcq/interview) leaves config.<engine>.authoring.status stuck on
+  // 'generating'. This sweep closes out anything unfinished past the
+  // window as 'failed' so a dead process can't block an assessment forever.
+  cronQueue.add('authorAgentOrphanReaper', {}, {
+    repeat: { pattern: '*/15 * * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -305,6 +317,12 @@ function startCronJobs() {
         const { runDaily } = require('../services/sentinelService');
         const r = await runDaily();
         console.log('[cron] opsSentinelDaily: ' + r.findings + ' findings');
+        break;
+      }
+      case 'authorAgentOrphanReaper': {
+        const { reapOrphanedRuns } = require('../services/institution/assessment/authorAgentService');
+        const r = await reapOrphanedRuns();
+        console.log(`[cron] authorAgentOrphanReaper: ${r.reaped} orphaned runs failed`);
         break;
       }
     }
