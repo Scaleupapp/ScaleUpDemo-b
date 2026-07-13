@@ -14,8 +14,8 @@ const mongoose = require('mongoose');
  * learner publishes their readiness proof (proofService.publish).
  *
  * Status lifecycle (client-visible checklist progress):
- *   extracting → capstone_pending → building → grading → publishable → published
- *                                                                    ↘ failed (any stage)
+ *   extracting → capstone_pending → building → publishable → published
+ *                                                           ↘ failed (any stage)
  *
  * NOTE on capstoneRef: `generationRequestId` is stamped immediately at
  * generation-kickoff time (runExtractionAndGeneration) since the
@@ -70,7 +70,7 @@ const proofJourneySchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['extracting', 'capstone_pending', 'building', 'grading', 'publishable', 'published', 'failed'],
+    enum: ['extracting', 'capstone_pending', 'building', 'publishable', 'published', 'failed'],
     default: 'extracting',
   },
 
