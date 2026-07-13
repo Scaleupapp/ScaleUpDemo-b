@@ -9,10 +9,11 @@ const NOW = new Date('2026-07-13T00:00:00.000Z');
 
 // ── LLMSpend aggregate fake ─────────────────────────────────────────────────
 // The service issues four distinct aggregate() pipelines against LLMSpend:
-//   1. zero-cost:   $match has cost_usd: 0                    -> group by $model
-//   2. spike 24h:   $match createdAt >= ~1 day ago             -> group by $task_id
-//   3. spike 30d:   $match createdAt >= ~30 days ago            -> group by $task_id
-//   4. model inv:   $match createdAt >= ~1 day ago (no cost_usd)-> group by $model
+//   1. zero-cost:   $match has cost_usd: 0                          -> group by $model
+//   2. spike 24h:   $match createdAt >= ~1 day ago                   -> group by $task_id
+//   3. spike 29d:   $match createdAt >= ~30 days ago AND < ~1 day ago -> group by $task_id
+//      (baseline window excludes the last 24h so the spike never dilutes its own average)
+//   4. model inv:   $match createdAt >= ~1 day ago (no cost_usd)      -> group by $model
 // This fake dispatches on those pipeline shapes so tests exercise the real
 // pipeline the service builds, not just canned call-order sequencing.
 function makeLLMSpend({ zeroCostRows = [], spike24hRows = [], spike30dRows = [], modelRows = [], throwOn } = {}) {
@@ -137,11 +138,13 @@ test('runDaily: spend-spike fires only above the factor AND the $1 floor, not at
         { _id: 'task_at_floor_boundary', cost: 1 },          // avg=0.1-> factor=10  -> cost not > $1 floor, no fire
         { _id: 'task_below_floor_high_factor', cost: 0.5 },  // avg=0.01->factor=50 -> cost < $1 floor, no fire
       ],
+      // Baseline totals are 29-day sums (BASELINE_DAYS) since the baseline
+      // window now excludes the last 24h — totalCost = avg * 29.
       spike30dRows: [
-        { _id: 'task_spike', totalCost: 30 },
-        { _id: 'task_at_factor_boundary', totalCost: 60 },
-        { _id: 'task_at_floor_boundary', totalCost: 3 },
-        { _id: 'task_below_floor_high_factor', totalCost: 0.3 },
+        { _id: 'task_spike', totalCost: 29 },                // 29*1
+        { _id: 'task_at_factor_boundary', totalCost: 58 },   // 29*2
+        { _id: 'task_at_floor_boundary', totalCost: 2.9 },   // 29*0.1
+        { _id: 'task_below_floor_high_factor', totalCost: 0.29 }, // 29*0.01
       ],
     },
   });
@@ -159,7 +162,7 @@ test('runDaily: SENTINEL_SPEND_SPIKE_FACTOR env override raises/lowers the spike
   const deps = baseDeps({
     llmSpendFixture: {
       spike24hRows: [{ _id: 'task_spike', cost: 5 }], // factor=5 with avg=1
-      spike30dRows: [{ _id: 'task_spike', totalCost: 30 }],
+      spike30dRows: [{ _id: 'task_spike', totalCost: 29 }], // 29-day baseline, avg=1
     },
   });
   const prev = process.env.SENTINEL_SPEND_SPIKE_FACTOR;
@@ -171,6 +174,56 @@ test('runDaily: SENTINEL_SPEND_SPIKE_FACTOR env override raises/lowers the spike
     if (prev === undefined) delete process.env.SENTINEL_SPEND_SPIKE_FACTOR;
     else process.env.SENTINEL_SPEND_SPIKE_FACTOR = prev;
   }
+});
+
+test('runDaily: SENTINEL_SPEND_SPIKE_FACTOR="0" is honored, not coerced back to the default', async () => {
+  // Number('0') is falsy under `|| DEFAULT`, which used to silently re-apply
+  // the default factor of 2 even though the operator explicitly asked for 0
+  // (i.e. "alert on any spend above the $1 floor"). Number.isFinite(0) is
+  // true, so the fixed coercion must honor it.
+  const deps = baseDeps({
+    llmSpendFixture: {
+      spike24hRows: [{ _id: 'task_tiny_spike', cost: 1.5 }], // avg=1 -> factor=1.5, would NOT fire at default factor=2
+      spike30dRows: [{ _id: 'task_tiny_spike', totalCost: 29 }],
+    },
+  });
+  const prev = process.env.SENTINEL_SPEND_SPIKE_FACTOR;
+  process.env.SENTINEL_SPEND_SPIKE_FACTOR = '0';
+  try {
+    const result = await runDaily(deps);
+    const spikeFindings = deps.recordCalls[0].action.findings.filter((f) => f.kind === 'spend_spike');
+    assert.strictEqual(spikeFindings.length, 1, 'factor=0 disables the relative gate, so any spend above the $1 floor fires');
+    assert.strictEqual(spikeFindings[0].task_id, 'task_tiny_spike');
+    assert.strictEqual(result.findings, 1);
+  } finally {
+    if (prev === undefined) delete process.env.SENTINEL_SPEND_SPIKE_FACTOR;
+    else process.env.SENTINEL_SPEND_SPIKE_FACTOR = prev;
+  }
+});
+
+// ── baseline self-inclusion regression ──────────────────────────────────────
+
+test('runDaily: spend-spike baseline excludes the last 24h so a true spike is not diluted by itself', async () => {
+  // Prior 29 full days flat at $1000/day (baseline totalCost=29000, avg=$1000
+  // exactly under the fixed /BASELINE_DAYS(29) divide) plus a last-24h spend
+  // of $2002 — a true ~2x spike (factor=2.002, > the default 2x threshold,
+  // reported/rounded as 2). Under the OLD buggy query (baseline including the
+  // spiking 24h, divided by 30) this same fixture would have computed
+  // avg=(29000+2002)/30=1033.4 and factor=2002/1033.4≈1.937 — UNDER the
+  // factor=2 threshold, so the true spike would have been silently missed.
+  const deps = baseDeps({
+    llmSpendFixture: {
+      spike24hRows: [{ _id: 'task_true_spike', cost: 2002 }],
+      spike30dRows: [{ _id: 'task_true_spike', totalCost: 29000 }],
+    },
+  });
+  const result = await runDaily(deps);
+  const spikeFindings = deps.recordCalls[0].action.findings.filter((f) => f.kind === 'spend_spike');
+  assert.strictEqual(spikeFindings.length, 1, 'the undiluted baseline correctly fires on the true spike');
+  assert.strictEqual(spikeFindings[0].task_id, 'task_true_spike');
+  assert.strictEqual(spikeFindings[0].dailyAvg30d, 1000, 'baseline average is the 29-day (self-exclusive) average');
+  assert.strictEqual(spikeFindings[0].factor, 2, 'factor reflects the true ~2x spike, not a diluted <2x reading');
+  assert.strictEqual(result.findings, 1);
 });
 
 // ── model inventory ──────────────────────────────────────────────────────────

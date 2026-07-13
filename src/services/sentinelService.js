@@ -9,11 +9,13 @@
  *   1. Zero-cost anomaly: LLMSpend rows in the last 24h with cost_usd === 0
  *      but nonzero tokens — the exact shape of a pricing-key bug (the
  *      Haiku $0-cost defect this agent exists to catch class-wide).
- *   2. Spend spike: per task_id, last-24h cost vs the trailing 30-day daily
- *      average, gated by BOTH a relative factor (env
- *      SENTINEL_SPEND_SPIKE_FACTOR, default 2x) AND an absolute $1 floor —
- *      the floor keeps a task going from $0.01/day to $0.03/day from
- *      generating noise.
+ *   2. Spend spike: per task_id, last-24h cost vs the trailing 29-day daily
+ *      average — the baseline window explicitly EXCLUDES the last 24h so the
+ *      spike being measured never dilutes its own baseline (an inclusive
+ *      window would let a true 2x spike shrink under threshold) — gated by
+ *      BOTH a relative factor (env SENTINEL_SPEND_SPIKE_FACTOR, default 2x)
+ *      AND an absolute $1 floor — the floor keeps a task going from
+ *      $0.01/day to $0.03/day from generating noise.
  *   3. Model inventory: distinct `model` values seen in the last 24h.
  *      Informational only, never a finding — scanning against a hardcoded
  *      retirement list would rot the moment a new model ships; surfacing
@@ -44,6 +46,13 @@
 
 const DEFAULT_SPEND_SPIKE_FACTOR = 2;
 const SPEND_SPIKE_FLOOR_USD = 1;
+// The 30-day lookback window (MS_30D) is used as the query's lower bound,
+// but the baseline average divides by 29, not 30 — the query's upper bound
+// excludes the last 24h (see checkSpendSpike), so the baseline only ever
+// covers the 29 full days *before* the 24h window being measured. Dividing
+// by 30 here would silently under-count the per-day average for a window
+// that only ever contains 29 days of data.
+const BASELINE_DAYS = 29;
 const REPORT_CARD_MIN_RESPONDED = 10;
 const PROMPT_VERSION = 'sentinel-v1';
 
@@ -87,20 +96,24 @@ async function checkZeroCost(since24h, d) {
 // ── Check 2: spend spike ─────────────────────────────────────────────────────
 
 async function checkSpendSpike(since24h, since30d, d) {
-  const factorThreshold = Number(process.env.SENTINEL_SPEND_SPIKE_FACTOR) || DEFAULT_SPEND_SPIKE_FACTOR;
+  const envFactor = Number(process.env.SENTINEL_SPEND_SPIKE_FACTOR);
+  const factorThreshold = Number.isFinite(envFactor) && envFactor >= 0 ? envFactor : DEFAULT_SPEND_SPIKE_FACTOR;
 
   const [last24, last30] = await Promise.all([
     d.LLMSpend.aggregate([
       { $match: { createdAt: { $gte: since24h } } },
       { $group: { _id: '$task_id', cost: { $sum: '$cost_usd' } } },
     ]),
+    // Upper-bounded at since24h: the trailing baseline must never include the
+    // very window whose spend is being measured against it, or a true spike
+    // dilutes its own average and can silently duck under the factor gate.
     d.LLMSpend.aggregate([
-      { $match: { createdAt: { $gte: since30d } } },
+      { $match: { createdAt: { $gte: since30d, $lt: since24h } } },
       { $group: { _id: '$task_id', totalCost: { $sum: '$cost_usd' } } },
     ]),
   ]);
 
-  const avgByTask = new Map((last30 || []).map((r) => [String(r._id), (r.totalCost || 0) / 30]));
+  const avgByTask = new Map((last30 || []).map((r) => [String(r._id), (r.totalCost || 0) / BASELINE_DAYS]));
 
   const findings = [];
   for (const r of last24 || []) {
@@ -206,7 +219,7 @@ function alertForFinding(finding) {
     case 'spend_spike':
       return {
         title: `Spend spike: task ${finding.task_id}`,
-        detail: `Last-24h cost $${finding.cost24h} vs trailing 30-day daily average $${finding.dailyAvg30d}` +
+        detail: `Last-24h cost $${finding.cost24h} vs trailing 29-day daily average $${finding.dailyAvg30d}` +
           (finding.factor == null ? ' (no trailing baseline).' : ` — ${finding.factor}x.`),
         key: finding.task_id,
         fields: {
@@ -314,5 +327,6 @@ module.exports = {
     DEFAULT_SPEND_SPIKE_FACTOR,
     SPEND_SPIKE_FLOOR_USD,
     REPORT_CARD_MIN_RESPONDED,
+    BASELINE_DAYS,
   },
 };
