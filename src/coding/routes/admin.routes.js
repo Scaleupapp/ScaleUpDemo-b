@@ -8,6 +8,7 @@ router.use(adminAuth);
 
 router.get('/anchor-drift', dashboard.anchorDrift);
 router.get('/human-review', dashboard.humanReview);
+router.post('/human-review/:id/resolve', dashboard.resolveHumanReview);
 router.get('/cost-summary', dashboard.costSummary);
 router.get('/recent-sessions', dashboard.recentSessions);
 

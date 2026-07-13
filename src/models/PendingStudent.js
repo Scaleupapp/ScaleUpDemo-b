@@ -15,6 +15,11 @@ const PendingStudentSchema = new mongoose.Schema({
   claimCode: { type: String, index: true },
   status: { type: String, enum: ['pending', 'invited', 'claimed', 'expired'], default: 'pending' },
   matchedUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  // Activation agent (#10): how many re-nudge reminders have gone out to this
+  // still-unclaimed invite, and when the last one fired. Both additive —
+  // absent/0 for every pre-existing row (never reminded yet).
+  remindersSent: { type: Number, default: 0 },
+  lastReminderAt: { type: Date },
 }, { timestamps: true });
 PendingStudentSchema.index({ institutionId: 1, email: 1 });
 PendingStudentSchema.index({ institutionId: 1, phone: 1 });

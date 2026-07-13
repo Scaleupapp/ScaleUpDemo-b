@@ -19,6 +19,10 @@ const { recompute } = require('../../services/institution/assessment/cohortRollu
 const { markActive } = require('../../services/institution/enrollmentProgressService');
 const { runSyncTick } = require('../../workers/assessmentSync.worker');
 
+// releaseAssessment fires authorAgentClosure.closeOnLifecycle fire-and-forget
+// (Plan 3, Task 3) — stub it so these fully-in-memory tests stay real-DB-free.
+const NOOP_AUTHOR_AGENT_CLOSURE = { authorAgentClosure: { closeOnLifecycle: async () => ({ closed: false }) } };
+
 // ─── In-memory store ─────────────────────────────────────────────────────────
 
 let _idCounter = 0;
@@ -264,7 +268,7 @@ test('interview engine: full lifecycle (create→release→start→grade→sync�
   const assessmentId = String(a._id);
 
   // 2. releaseAssessment
-  const released = await releaseAssessment(scope, assessmentId, 'admin1', { Assessment: S.Assessment });
+  const released = await releaseAssessment(scope, assessmentId, 'admin1', { Assessment: S.Assessment, ...NOOP_AUTHOR_AGENT_CLOSURE });
   assert.equal(released.status, 'released');
 
   // 3. startSession — interview engine with stub interviewService
@@ -443,7 +447,7 @@ test('mcq engine: create→release-before-authoring (409 NO_QUESTIONS)→author�
   assert.equal(deletedQuiz, null, 'throwaway quiz deleted after authoring');
 
   // 4. releaseAssessment AFTER authoring → should succeed
-  const released = await releaseAssessment(scope, assessmentId, 'admin2', { Assessment: S.Assessment });
+  const released = await releaseAssessment(scope, assessmentId, 'admin2', { Assessment: S.Assessment, ...NOOP_AUTHOR_AGENT_CLOSURE });
   assert.equal(released.status, 'released');
 
   // 5. startSession via REAL mcq adapter (injected Quiz + QuizAttempt)
@@ -578,7 +582,7 @@ test('capstone engine: create→release-before-bundle (409 NO_BUNDLE)→author�
   assert.equal(String(authored.config.capstone.bundleId), String(bundleId), 'bundleId set on config');
 
   // 4. Release AFTER bundle → success
-  const released = await releaseAssessment(scope, assessmentId, 'admin3', { Assessment: S.Assessment });
+  const released = await releaseAssessment(scope, assessmentId, 'admin3', { Assessment: S.Assessment, ...NOOP_AUTHOR_AGENT_CLOSURE });
   assert.equal(released.status, 'released');
 
   // 5. startSession via capstone adapter with stub startCapstone
@@ -859,7 +863,7 @@ test('drill engine: create→release-before-bundle (NO_BUNDLE)→authorDrill→r
   assert.equal(String(authored.config.drill.bundleId), String(bundleId), 'bundleId set on config');
 
   // 4. Release AFTER bundle → success
-  const released = await releaseAssessment(scope, assessmentId, 'admin-drill', { Assessment: S.Assessment });
+  const released = await releaseAssessment(scope, assessmentId, 'admin-drill', { Assessment: S.Assessment, ...NOOP_AUTHOR_AGENT_CLOSURE });
   assert.equal(released.status, 'released');
 
   // 5. startSession via drill adapter (injected DrillAttempt + ArtifactBundle)
@@ -962,7 +966,7 @@ test('race: second concurrent startSession returns existing session without call
     opensAt: PAST,
     closesAt: FUTURE,
   }, { Assessment: S.Assessment, InstitutionCohort: S.InstitutionCohort });
-  await releaseAssessment(scope, String(a._id), 'admin6', { Assessment: S.Assessment });
+  await releaseAssessment(scope, String(a._id), 'admin6', { Assessment: S.Assessment, ...NOOP_AUTHOR_AGENT_CLOSURE });
   const assessmentId = String(a._id);
 
   const fakeInterviewSessionId = nextId();

@@ -12,6 +12,10 @@ const assert = require('node:assert');
 const svc = require('../../services/institution/assessment/assessmentService');
 const { runSyncTick } = require('../../workers/assessmentSync.worker');
 
+// releaseAssessment fires authorAgentClosure.closeOnLifecycle fire-and-forget
+// (Plan 3, Task 3) — stub it so these deps-injected tests stay real-DB-free.
+const NOOP_AUTHOR_AGENT_CLOSURE = { authorAgentClosure: { closeOnLifecycle: async () => ({ closed: false }) } };
+
 const FLAG = 'PLACEMENTS_NOTIFICATIONS_ENABLED';
 
 // Run `fn` with the flag forced on/off, always restoring the prior value.
@@ -169,6 +173,7 @@ test('releaseAssessment: ON → releases AND notifies the cohort (assigned)', as
       Assessment: { findOne: async () => releasableDoc() },
       InstitutionEnrollment: enrollmentStub(['u1']),
       notificationService,
+      ...NOOP_AUTHOR_AGENT_CLOSURE,
     };
     const res = await svc.releaseAssessment({ institutionId: 'i1' }, 'a1', 'tpo1', deps);
     assert.strictEqual(res.status, 'released');
@@ -184,6 +189,7 @@ test('releaseAssessment: OFF → releases with NO notification (default-safe)', 
       Assessment: { findOne: async () => releasableDoc() },
       InstitutionEnrollment: enrollmentStub(['u1']),
       notificationService: { sendToUsers: async () => { sendCalled = true; return []; } },
+      ...NOOP_AUTHOR_AGENT_CLOSURE,
     };
     const res = await svc.releaseAssessment({ institutionId: 'i1' }, 'a1', 'tpo1', deps);
     assert.strictEqual(res.status, 'released');

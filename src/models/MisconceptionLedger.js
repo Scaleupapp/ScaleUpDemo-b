@@ -20,6 +20,14 @@ const ledgerEntrySchema = new mongoose.Schema({
   topicsAffected:     [{ type: String }],
   recentExplanation:  { type: String }, // most recent human-readable phrasing
   recentTopic:        { type: String }, // topic where it last fired
+
+  // Spaced re-checks (#7) — additive. A tag that fires gets scheduled for a
+  // verified re-check at day 2/7/16; each check the learner passes (topic
+  // touched again, misconception did NOT recur) advances the stage. Passing
+  // all three stages closes the item; a recurrence at any point reopens it.
+  reviewStage:        { type: Number, default: 0 },
+  nextReviewAt:       { type: Date },
+  closedAt:           { type: Date },
 }, { _id: false });
 
 const misconceptionLedgerSchema = new mongoose.Schema({

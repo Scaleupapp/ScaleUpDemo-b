@@ -85,6 +85,28 @@ function startCapstoneEvalWorker() {
     async (job) => {
       const { sessionId } = job.data;
       const result = await evaluator.evaluate({ sessionId });
+
+      // Proof-journey correlation hook (agentic layer, Plan 5 Task 4
+      // EXPANDED) — advances any proof journey correlated to this capstone
+      // session now that it's graded (evaluator.evaluate only resolves once
+      // the grade has persisted and the session has transitioned to
+      // 'graded'). This job's data only carries sessionId, so we look up
+      // user_id off the just-graded session. Deliberately NOT awaited —
+      // fire-and-forget, never in the worker's critical path — and the
+      // require() calls are wrapped in try/catch so a require-time failure
+      // can't throw synchronously into the job handler either.
+      try {
+        const CapstoneSession = require('../models/capstoneSession.model');
+        const proofJourneyService = require('../../services/proofJourneyService');
+        CapstoneSession.findById(sessionId)
+          .select('user_id')
+          .lean()
+          .then((sess) => (sess ? proofJourneyService.advanceOnCapstoneGraded({ userId: sess.user_id, sessionId }) : null))
+          .catch((e) => console.warn('[proofJourneyHook]', e.message));
+      } catch (e) {
+        console.warn('[proofJourneyHook] hook setup failed:', e.message);
+      }
+
       // Post-grade recalibration — feeds capstone dimension scores into the
       // same MetaSkillMastery + DifficultyState loop the drills already use.
       // Must run BEFORE notifications so the level-up push reflects the

@@ -51,9 +51,15 @@ const redis = require('../../config/redis');
 const userContextService = require('../userContextService');
 const readinessService = require('../readiness/readinessService');
 const compassTools = require('./compassTools');
+const compassProposalTools = require('./compassProposalTools');
+const { isAgentEnabled } = require('../../config/agentFlags');
 const compassProgress = require('./compassProgressService');
 const { detectDrillRequest } = require('./compassIntent');
 const { detectTutoringRequest } = require('./tutoringIntent');
+
+// Bump on ANY prompt/tool change so ledger rows stay attributable (replay evals
+// compare acceptance rates across versions).
+const COMPASS_PROMPT_VERSION = 'compass-actions-v1';
 
 const COMPASS_MAX_TOOL_ITERATIONS = 5;
 
@@ -227,6 +233,9 @@ async function buildUserContext(userId) {
       recentTopics: (deepContext.recentTopicsTouched || []).slice(0, 5),
       recentTutor: (deepContext.recentAITutor?.topicsCovered || []).slice(0, 3),
       lastTutorQs: (deepContext.recentAITutor?.openQuestions || []).slice(0, 2),
+      dueMisconceptionChecks: deepContext.dueMisconceptionChecks || undefined,
+      interviewProgramFocus: deepContext.interviewProgramFocus || undefined,
+      proofJourneyNext: deepContext.proofJourneyNext || undefined,
     } : null,
   };
 }
@@ -275,9 +284,115 @@ function buildSystemContext(ctx) {
       const qs = ctx.deep.lastTutorQs.map(q => `"${q.question}"`).join(' / ');
       lines.push(`Recent tutor questions still open: ${qs}.`);
     }
+    if (ctx.deep.dueMisconceptionChecks?.length) {
+      lines.push(renderDueMisconceptionChecks(ctx.deep.dueMisconceptionChecks));
+    }
+    if (ctx.deep.interviewProgramFocus) {
+      const rendered = renderInterviewProgramFocus(ctx.deep.interviewProgramFocus);
+      if (rendered) lines.push(rendered);
+    }
+    if (ctx.deep.proofJourneyNext) {
+      const rendered = renderProofJourneyNext(ctx.deep.proofJourneyNext);
+      if (rendered) lines.push(rendered);
+    }
     lines.push(`Use this context to make responses feel personal — don't ask the learner to repeat what we already know.`);
   }
-  return lines.join('\n');
+  const agentHints = buildAgentHints({
+    proposalsOn: isAgentEnabled('compass_actions'),
+    misconceptionsOn: isAgentEnabled('misconception_tutor'),
+    interviewCoachOn: isAgentEnabled('interview_coach'),
+    proofBuilderOn: isAgentEnabled('proof_builder'),
+  });
+  return lines.join('\n') + agentHints;
+}
+
+/**
+ * Pure helper: renders the due-misconception-recheck line for the system
+ * prompt. Items are already oldest-first (see misconceptionService.getDueReviews).
+ * Returns '' for undefined/empty so callers can push it unconditionally.
+ */
+function renderDueMisconceptionChecks(items) {
+  if (!items?.length) return '';
+  const parts = items.map(i => `${i.tag} (topic: ${i.recentTopic}, stage ${i.reviewStage}/3)`).join('; ');
+  return `Due misconception re-checks (oldest first): ${parts}.`;
+}
+
+/**
+ * Formats a driveDate (Date object, ISO string, or null/undefined) as
+ * YYYY-MM-DD. Returns '' for absent/invalid input so callers can splice it
+ * in unconditionally.
+ */
+function formatDriveDateISO(driveDate) {
+  if (!driveDate) return '';
+  const d = new Date(driveDate);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Pure helper: renders the interview-program "tonight's focus" line for the
+ * system prompt. Returns '' for undefined/empty so callers can push it
+ * unconditionally.
+ *
+ * - delta is null/undefined for the first graded session (no prior score to
+ *   diff against) — rendered as just "(score X)", never "delta null".
+ * - reason already ends with '.' in every upstream branch (see
+ *   interviewProgramService.buildFocusReason) — trailing '.' is stripped
+ *   before we append our own to avoid "..".
+ * - driveDate, when present and parseable, is rendered as the urgency
+ *   signal "— drive on YYYY-MM-DD"; absent/invalid dates are omitted.
+ */
+function renderInterviewProgramFocus(item) {
+  if (!item || !item.dimension) return '';
+  const role = item.targetRole ? ` for ${item.targetRole}` : '';
+  const deltaPart = (item.delta === null || item.delta === undefined)
+    ? ''
+    : `, Δ${item.delta > 0 ? '+' : ''}${item.delta}`;
+  const reason = String(item.reason || '').replace(/\.+$/, '');
+  const driveDateStr = formatDriveDateISO(item.driveDate);
+  const drivePart = driveDateStr ? ` — drive on ${driveDateStr}` : '';
+  return `Interview program focus${role}: ${item.dimension} (score ${item.score}${deltaPart}) — ${reason}.${drivePart}`;
+}
+
+/**
+ * Pure helper: renders the proof-journey "next step" line for the system
+ * prompt. Returns '' for undefined/empty so callers can push it
+ * unconditionally.
+ */
+function renderProofJourneyNext(item) {
+  if (!item || !item.status) return '';
+  const step = item.nextStepLabel ? ` Next step: ${item.nextStepLabel}.` : '';
+  const suggestion = item.nextProofSuggestion?.skill
+    ? ` Next proof suggestion: ${item.nextProofSuggestion.skill} (${item.nextProofSuggestion.reason}).`
+    : '';
+  return `Proof journey status: ${item.status}.${step}${suggestion}`;
+}
+
+/**
+ * Pure helper: concatenates the flag-gated agent hint strings appended to the
+ * Compass system prompt. Each hint contributes its own text verbatim when its
+ * flag is on, '' when off — order is proposals, misconceptions, interview
+ * coach, proof builder.
+ */
+function buildAgentHints({ proposalsOn, misconceptionsOn, interviewCoachOn, proofBuilderOn }) {
+  const proposalHint = proposalsOn
+    ? '\nWhen the learner wants to rearrange, lighten, or catch up on their plan, use propose_plan_update to offer a concrete change as a confirmable card — never claim a change was applied; the learner must confirm the card first.'
+    : '';
+  const misconceptionHint = misconceptionsOn
+    ? '\nIf the learner context lists dueMisconceptionChecks, open with ONE 30-second inline check quiz targeting the oldest item before answering anything else this turn — frame it as a quick memory check ("One from last week — 30 seconds"), never as a test. Do not repeat a check the learner already answered this conversation.'
+    : '';
+  const interviewCoachHint = interviewCoachOn
+    ? '\nIf the learner context lists interviewProgramFocus, weave tonight\'s focused session into your plan suggestions when interview or preparation topics come up — one concrete nudge, never more than once per conversation.'
+    : '';
+  const proofBuilderHint = proofBuilderOn
+    ? '\nIf the learner context lists proofJourneyNext, remind the learner of that next step when career or job topics come up — never nag more than once per conversation.'
+    : '';
+  return proposalHint + misconceptionHint + interviewCoachHint + proofBuilderHint;
+}
+
+/** Merge read tools with proposal tools when the compass_actions agent is on. */
+function buildToolset({ readTools, proposalTools, enabled }) {
+  return enabled ? [...readTools, ...proposalTools] : [...readTools];
 }
 
 /**
@@ -539,7 +654,12 @@ async function callLLMWithTools({ userId, systemPrompt, userPrompt, history = []
     for (let iter = 0; iter < COMPASS_MAX_TOOL_ITERATIONS; iter++) {
       const response = await anthropic.messages.create({
         model: COMPASS_MODEL, max_tokens: maxTokens, temperature: COMPASS_TEMPERATURE,
-        system: systemPrompt, messages, tools: compassTools.TOOLS,
+        system: systemPrompt, messages,
+        tools: buildToolset({
+          readTools: compassTools.TOOLS,
+          proposalTools: compassProposalTools.PROPOSAL_TOOLS,
+          enabled: isAgentEnabled('compass_actions'),
+        }),
       });
       totalIn += response.usage?.input_tokens || 0;
       totalOut += response.usage?.output_tokens || 0;
@@ -552,7 +672,12 @@ async function callLLMWithTools({ userId, systemPrompt, userPrompt, history = []
       const toolUses = (response.content || []).filter((b) => b.type === 'tool_use');
       const toolResults = [];
       for (const block of toolUses) {
-        const r = await compassTools.dispatch({ userId, name: block.name, input: block.input });
+        const r = compassProposalTools.isProposalTool(block.name)
+          ? await compassProposalTools.dispatch({
+              userId, name: block.name, input: block.input,
+              meta: { promptVersion: COMPASS_PROMPT_VERSION, modelId: COMPASS_MODEL },
+            })
+          : await compassTools.dispatch({ userId, name: block.name, input: block.input });
         if (r.card) cards.push(r.card);
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: r.output, is_error: !r.ok });
       }
@@ -562,13 +687,18 @@ async function callLLMWithTools({ userId, systemPrompt, userPrompt, history = []
     const actual = totalIn + totalOut;
     await adjustBudget(userId, actual - estimatedTokens);
 
+    // agent_proposal cards are never deduped away — each one is a distinct
+    // pending decision the user must be able to answer.
+    const proposalCards = cards.filter((c) => c.type === 'agent_proposal');
     const seen = new Set();
     const deduped = [];
     for (const c of cards) {
+      if (c.type === 'agent_proposal') continue;
       if (seen.has(c.type)) continue;
       seen.add(c.type); deduped.push(c);
       if (deduped.length >= 2) break;
     }
+    deduped.push(...proposalCards);
     return { text: finalText || null, cards: deduped, capped: false, tokensIn: totalIn, tokensOut: totalOut };
   } catch (err) {
     await adjustBudget(userId, -estimatedTokens);
@@ -1349,6 +1479,11 @@ module.exports = {
   handle,
   buildUserContext,
   buildSystemContext,
+  buildAgentHints,
+  renderDueMisconceptionChecks,
+  renderInterviewProgramFocus,
+  renderProofJourneyNext,
+  buildToolset,
   callLLM,
   callLLMWithTools,
   conversation,

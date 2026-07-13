@@ -62,6 +62,10 @@ tags:
     description: v2 You-tab — overview, activities, analytics, coding mastery
   - name: Coding
     description: Coding practice — drills + capstones
+  - name: InterviewProgram
+    description: Agentic layer — coached multi-week interview prep program (interview_coach)
+  - name: ProofJourney
+    description: Agentic layer — JD-to-published-proof journey (proof_builder)
 
 components:
   securitySchemes:
@@ -142,10 +146,14 @@ components:
       description: >
         A rich answer card projected from an invoked Compass Progress tool.
         Clients render the payload by `type`; unknown types must be ignored.
+        For `type: agent_proposal`, payload is
+        `{ decisionId, title, summary, consequence, ops }` — an agentic-layer
+        proposal the client renders with Apply/Adjust/Dismiss actions and
+        resolves via POST /v2/agent/decisions/{decisionId}/respond.
       properties:
         type:
           type: string
-          enum: [readiness_explanation, activity_result, topic_detail, weak_topics, recent_activity, tutoring_result]
+          enum: [readiness_explanation, activity_result, topic_detail, weak_topics, recent_activity, tutoring_result, agent_proposal]
         payload:
           type: object
           additionalProperties: true
@@ -477,6 +485,115 @@ components:
         updatedAt:
           type: [string, 'null']
           format: date-time
+
+    InterviewProgramDimensionTrend:
+      type: object
+      required: [dimension, scores, delta]
+      properties:
+        dimension: { type: string, enum: [communication, content, structure, confidence] }
+        scores:
+          type: array
+          items: { type: number }
+        delta: { type: [number, 'null'] }
+
+    InterviewProgramFocus:
+      type: object
+      required: [dimension, score, delta, reason]
+      properties:
+        dimension: { type: [string, 'null'] }
+        score: { type: [number, 'null'] }
+        delta: { type: [number, 'null'] }
+        reason: { type: string }
+
+    InterviewProgramView:
+      type: object
+      required: [_id, status, target, weekStrip, trends, focus, suggestion, sessionsCompleted, createdAt]
+      description: |
+        Client shape for the caller's active interview-coach program (agentic
+        layer #4). Mirrors interviewProgramService.getProgram — week strip/
+        trends/focus so the future mobile screen is pure rendering.
+      properties:
+        _id: { type: string }
+        status: { type: string, enum: [active, completed, abandoned] }
+        target:
+          type: object
+          required: [role, company, driveDate]
+          properties:
+            role: { type: [string, 'null'] }
+            company: { type: [string, 'null'] }
+            driveDate: { type: [string, 'null'], format: date-time }
+        weekStrip:
+          type: object
+          required: [current, total]
+          properties:
+            current: { type: integer, minimum: 1 }
+            total: { type: integer, minimum: 1 }
+        trends:
+          type: array
+          items: { $ref: '#/components/schemas/InterviewProgramDimensionTrend' }
+        focus: { $ref: '#/components/schemas/InterviewProgramFocus' }
+        suggestion: { type: string }
+        sessionsCompleted: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+
+    ProofJourneyStep:
+      type: object
+      required: [key, label, status]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        status: { type: string, enum: [done, now, todo, failed] }
+        at: { type: [string, 'null'], format: date-time }
+
+    ProofJourneyJdSummary:
+      type: object
+      required: [role, company, skills]
+      properties:
+        role: { type: [string, 'null'] }
+        company: { type: [string, 'null'] }
+        skills:
+          type: array
+          items: { type: string }
+
+    ProofJourneyCapstoneRef:
+      type: object
+      required: [bundleId, sessionId]
+      properties:
+        bundleId: { type: [string, 'null'] }
+        sessionId: { type: [string, 'null'] }
+
+    ProofJourneyNextSuggestion:
+      type: object
+      required: [skill, reason]
+      nullable: true
+      properties:
+        skill: { type: string }
+        reason: { type: string }
+
+    ProofJourneyView:
+      type: object
+      required: [_id, status, jdSummary, steps, capstoneRef, proofToken, nextProofSuggestion, createdAt]
+      description: |
+        Client shape for the caller's latest proof-builder journey (agentic
+        layer #8). Mirrors proofJourneyService.getJourney — steps checklist
+        exactly like the approved mockup so the future mobile screen is pure
+        rendering.
+      properties:
+        _id: { type: string }
+        status:
+          type: string
+          enum: [extracting, capstone_pending, building, grading, publishable, published, failed]
+        jdSummary: { $ref: '#/components/schemas/ProofJourneyJdSummary' }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/ProofJourneyStep' }
+        capstoneRef: { $ref: '#/components/schemas/ProofJourneyCapstoneRef' }
+        proofToken: { type: [string, 'null'] }
+        nextProofSuggestion:
+          oneOf:
+            - { $ref: '#/components/schemas/ProofJourneyNextSuggestion' }
+            - { type: 'null' }
+        createdAt: { type: string, format: date-time }
 
     PlanMastery:
       type: object
@@ -1116,6 +1233,54 @@ components:
         summary_line:
           type: string
           description: One-line, learner-readable status suitable for direct display.
+
+    AgentInterventionBriefCluster:
+      type: object
+      required: [key, label, count, evidence, proposedAction]
+      properties:
+        key: { type: string, description: "e.g. not_started, weak_competency, inactive" }
+        label: { type: string }
+        count: { type: integer, description: Number of students in this cluster. }
+        evidence:
+          type: object
+          description: Cluster-specific evidence fields (deterministic aggregates, no PII beyond counts/names).
+        proposedAction:
+          type: object
+          required: [kind, payload]
+          properties:
+            kind: { type: string, enum: [notify_students] }
+            payload:
+              type: object
+              required: [title, message]
+              properties:
+                title: { type: string }
+                message: { type: string }
+
+    AgentInterventionBrief:
+      type: object
+      required: [id, cohortId, cohortLabel, createdAt, status, clusters]
+      properties:
+        id: { type: string }
+        cohortId: { type: [string, "null"] }
+        cohortLabel: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        status: { type: string, enum: [pending, accepted, adjusted, rejected, ignored] }
+        clusters:
+          type: array
+          items: { $ref: '#/components/schemas/AgentInterventionBriefCluster' }
+
+    AgentActivationFunnel:
+      type: object
+      required: [invited, claimed, claimRate, exhausted, lastBatch]
+      properties:
+        invited: { type: integer }
+        claimed: { type: integer }
+        claimRate: { type: number }
+        exhausted: { type: integer }
+        lastBatch:
+          type: object
+          nullable: true
+          description: action.stats from the most recent activation ledger row, or null when no batch has ever run for this cohort.
 
 paths:
   # =====================================================================
@@ -7956,6 +8121,10 @@ paths:
       operationId: getCapstoneHumanReviewQueue
       tags: [Coding]
       summary: List bundles flagged for human review (anchor-drift, validator fail)
+      description: |
+        Each item additionally carries a `dossier` — the latest review_triage
+        (Plan 6 #9) evidence pack + advisory recommendation for that item,
+        `null` when the agent hasn't produced one yet.
       security:
         - BearerAuth: []
       parameters:
@@ -7978,6 +8147,54 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/coding/admin/human-review/{id}/resolve:
+    post:
+      operationId: resolveCapstoneHumanReview
+      tags: [Coding]
+      summary: Reviewer's approve/reject decision on a human-review item
+      description: |
+        The one mutating admin-dashboard endpoint. Persists the reviewer's
+        real resolution, then closes the item's review_triage dossier
+        (Plan 6 #9): agreeing with the agent's recommendation closes it
+        `accepted`, overruling it closes it `adjusted`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution:
+                  type: string
+                  enum: [approved, rejected]
+                notes: { type: string }
+      responses:
+        '200':
+          description: Review item resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item]
+                properties:
+                  item: { type: object }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/coding/admin/cost-summary:
     get:
@@ -8356,3 +8573,607 @@ paths:
                                 $ref: '#/components/schemas/CompassCard'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v2/agent/decisions:
+    get:
+      operationId: listAgentDecisions
+      tags: [AgentDecisions]
+      summary: List the caller's agent decisions (default status=pending)
+      description: |
+        Returns the calling user's AgentDecision rows, most recent first
+        (capped at 20). This is the surface the client polls to render
+        pending agent proposals as actionable cards.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, accepted, adjusted, rejected, ignored] }
+      responses:
+        '200':
+          description: Decisions for the calling user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [decisions]
+                    properties:
+                      decisions:
+                        type: array
+                        items:
+                          type: object
+                          description: AgentDecision document (action shape is agentId/decisionType-specific)
+                          required: [_id, status]
+                          properties:
+                            _id: { type: string }
+                            agentId: { type: string }
+                            decisionType: { type: string }
+                            action:
+                              type: object
+                              additionalProperties: true
+                            status:
+                              type: string
+                              enum: [pending, accepted, adjusted, rejected, ignored]
+                            createdAt: { type: string, format: date-time }
+                          additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v2/agent/decisions/{id}/respond:
+    post:
+      operationId: respondToAgentDecision
+      tags: [AgentDecisions]
+      summary: Record the user's response to an agent proposal (the feedback loop)
+      description: |
+        Every Apply / Adjust / Dismiss the client sends for an agent proposal
+        lands here and closes the AgentDecision row. accepted/adjusted
+        responses also apply the proposal's ops (or the caller-supplied
+        adjustedOps) to the user's active plan. 404 when the agent flag
+        (compass_actions) is off — house convention: clients treat 404 as
+        feature-off.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [response]
+              properties:
+                response: { type: string, enum: [accepted, adjusted, rejected] }
+                adjustedOps:
+                  type: array
+                  items: { type: object }
+      responses:
+        '200':
+          description: Response recorded (and ops applied when accepted/adjusted)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [decisionId, status, applied]
+                    properties:
+                      decisionId: { type: string }
+                      status: { type: string, enum: [accepted, adjusted, rejected] }
+                      applied: { type: boolean }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v2/interview-program:
+    post:
+      operationId: createInterviewProgram
+      tags: [InterviewProgram]
+      summary: Start a coached multi-week interview prep program
+      description: |
+        Creates the caller's active interview-coach program (agentic layer
+        #4, flag `interview_coach`). Sessions attach to it as they're graded
+        (post-evaluation hook) and computeNextFocus recommends which
+        dimension to work on next. One active program per user — 409 when
+        one already exists (abandon it first). 404 when the interview_coach
+        flag is off — house convention: clients treat 404 as feature-off.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetRole]
+              properties:
+                targetRole: { type: string }
+                targetCompany: { type: string }
+                driveDate: { type: string, format: date-time }
+                weeks: { type: integer, minimum: 1, description: Program length in weeks; defaults to 4 }
+      responses:
+        '200':
+          description: Program created; returns the shaped active program
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [program]
+                    properties:
+                      program: { $ref: '#/components/schemas/InterviewProgramView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      operationId: getInterviewProgram
+      tags: [InterviewProgram]
+      summary: Get the caller's active interview prep program
+      description: |
+        Returns the caller's active interview-coach program shaped for
+        clients (target, week strip, dimension trends, current focus,
+        next-session suggestion copy) — or `null` when there is no active
+        program. 404 when the interview_coach flag is off.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The active program, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [program]
+                    properties:
+                      program:
+                        oneOf:
+                          - { $ref: '#/components/schemas/InterviewProgramView' }
+                          - { type: 'null' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v2/interview-program/abandon:
+    post:
+      operationId: abandonInterviewProgram
+      tags: [InterviewProgram]
+      summary: Abandon the caller's active interview prep program
+      description: |
+        Sets the caller's active program's status to 'abandoned'. Idempotent
+        — calling this with no active program (already abandoned, completed,
+        or never created) is a safe no-op that still returns 200 with
+        `abandoned:false`, not an error. 404 when the interview_coach flag is
+        off.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Abandon outcome (idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [abandoned]
+                    properties:
+                      abandoned: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v2/proof-journey:
+    post:
+      operationId: createProofJourney
+      tags: [ProofJourney]
+      summary: Start a JD-to-published-proof journey
+      description: |
+        Creates the caller's proof-builder journey (agentic layer #8, flag
+        `proof_builder`) from a pasted job description. Extracts a compact
+        skill summary (one LLM call) and kicks off capstone generation
+        through the existing JD-paste generation entry point in the
+        background — the response returns immediately with the freshly
+        created journey in `extracting` status; poll GET to watch it advance.
+        404 when the proof_builder flag is off.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jdText]
+              properties:
+                jdText: { type: string, description: Pasted job description text (max ~20k chars) }
+      responses:
+        '200':
+          description: Journey created (background extraction/generation kicked off)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [journey]
+                    properties:
+                      journey: { $ref: '#/components/schemas/ProofJourneyView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      operationId: getProofJourney
+      tags: [ProofJourney]
+      summary: Get the caller's latest proof journey
+      description: |
+        Returns the caller's latest proof-builder journey shaped for clients
+        (steps checklist, jdSummary, capstoneRef, proofToken,
+        nextProofSuggestion) — or `null` when none exists yet. 404 when the
+        proof_builder flag is off.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The latest journey, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [journey]
+                    properties:
+                      journey:
+                        oneOf:
+                          - { $ref: '#/components/schemas/ProofJourneyView' }
+                          - { type: 'null' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v2/proof-journey/publish:
+    post:
+      operationId: publishProofJourney
+      tags: [ProofJourney]
+      summary: Publish the caller's readiness proof from a graded journey
+      description: |
+        Guards on the journey being in `publishable` status (409 when it
+        isn't — capstone not graded yet) and 404 when the caller has no
+        journey at all. On success, calls the existing proof-publish engine,
+        stores the returned token, and flips the journey to `published`. 404
+        when the proof_builder flag is off.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Proof published; returns the updated journey
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [journey]
+                    properties:
+                      journey: { $ref: '#/components/schemas/ProofJourneyView' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/institution/assessments/{id}/author-agent:
+    post:
+      operationId: startAuthorAgentRun
+      tags: [AuthorAgent]
+      summary: Kick off the author agent's bounded generate -> QA -> repair loop for an assessment
+      description: |
+        Starts an authorAgentService run (records an AgentDecision row, then
+        drives assessmentAuthoringService.authorMcq/regenerateQuestion in the
+        background). Returns immediately with a decisionId to poll via
+        GET /api/institution/author-agent/runs/{decisionId}. 404 when the
+        author_agent flag is off, or when the assessment doesn't exist / isn't
+        owned by the caller's institution — house convention: clients treat
+        404 as feature-off. 409 when the assessment isn't in an authorable
+        state (already released/closed, or MCQ authoring already in flight).
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brief]
+              properties:
+                brief: { type: string, description: 'Free-text authoring brief for the agent.' }
+      responses:
+        '200':
+          description: Run queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [decisionId]
+                    properties:
+                      decisionId: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/institution/author-agent/runs/{decisionId}:
+    get:
+      operationId: getAuthorAgentRunStatus
+      tags: [AuthorAgent]
+      summary: Poll an author-agent run's status, log, and result
+      description: |
+        Institution-scoped read for polling a run started via
+        POST /api/institution/assessments/{id}/author-agent. status is
+        'generating' until the run's result is finalized (ready/needs_review/failed).
+        404 when the author_agent flag is off, or the decision row doesn't
+        exist / isn't owned by the caller's institution.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: decisionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [status, runLog, result]
+                    properties:
+                      status: { type: string, enum: [generating, ready, needs_review, failed] }
+                      runLog:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            at: { type: string, format: date-time }
+                            msg: { type: string }
+                      result:
+                        type: object
+                        nullable: true
+                        description: Final run summary, set once the run leaves 'generating'.
+                        properties:
+                          status: { type: string, enum: [ready, needs_review, failed] }
+                          totalQuestions: { type: integer }
+                          regenerated: { type: integer }
+                          flaggedIndices:
+                            type: array
+                            items: { type: integer }
+                          passes: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/institution/agent/briefs:
+    get:
+      operationId: listAgentBriefs
+      tags: [Agentic]
+      summary: List the latest cohort intervention briefs for the caller's institution
+      description: |
+        interventionAgentService.runWeekly writes one PENDING AgentDecision
+        'brief' row per qualifying cohort per week (agentId 'intervention').
+        Returns the latest 10 of those rows for the caller's institution,
+        optionally filtered to one cohort, shaped for the TPO briefs UI
+        (cluster summaries — student counts, evidence, proposed copy — not
+        the raw studentId lists). 404 when the intervention flag is off
+        (house convention: clients treat 404 as feature-off).
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: cohortId
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Latest intervention briefs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [decisions]
+                    properties:
+                      decisions:
+                        type: array
+                        items: { $ref: '#/components/schemas/AgentInterventionBrief' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/institution/agent/briefs/{decisionId}/approve:
+    post:
+      operationId: approveAgentBrief
+      tags: [Agentic]
+      summary: Approve some or all clusters of an intervention brief (tpo_head only)
+      description: |
+        Checker semantics: a tpo_coordinator can view a brief via the list
+        endpoint but only tpo_head can approve one. Fires the approved
+        clusters' `notify_students` proposedAction to every studentId in
+        each approved cluster (per-student try/catch — one bad notification
+        never blocks the rest). Approving every cluster on the row closes it
+        'accepted'; approving a subset closes it 'adjusted' with
+        adjustmentDiff.approvedClusterKeys. 404 when the intervention flag
+        is off, the row doesn't exist, or isn't owned by the caller's
+        institution. 409 when the row isn't pending (already responded to).
+        400 when clusterKeys is missing/empty, or names a cluster key that
+        isn't on this row.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: decisionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clusterKeys]
+              properties:
+                clusterKeys:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+                  description: Subset of the brief's cluster keys to approve and execute.
+      responses:
+        '200':
+          description: Brief closed; approved clusters' notifications sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [executed, status]
+                    properties:
+                      executed:
+                        type: object
+                        required: [notified]
+                        properties:
+                          notified: { type: integer }
+                      status: { type: string, enum: [accepted, adjusted] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/institution/agent/activation:
+    get:
+      operationId: getAgentActivationFunnel
+      tags: [Agentic]
+      summary: Read the activation-agent's invite claim funnel for one cohort
+      description: |
+        Read-only snapshot from activationAgentService.getFunnel: outstanding
+        vs claimed invites, claim rate, students who've exhausted their
+        reminder cap, and the most recent daily reminder batch's stats.
+        cohortId is required. 404 when the activation flag is off (house
+        convention: clients treat 404 as feature-off).
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: cohortId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Activation funnel snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data: { $ref: '#/components/schemas/AgentActivationFunnel' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'

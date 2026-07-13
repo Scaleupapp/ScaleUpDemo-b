@@ -43,6 +43,11 @@ const ROUTING_TABLE = {
   seeded_mistake_generator:  { provider: 'anthropic', model: 'claude-opus-4-7', max_tokens: 8000 },
   hidden_test_generator:     { provider: 'google',    model: 'gemini-2.5-pro' },
   compass_coder:             { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+  // Advisory brief for a pending HumanReviewQueue item (reviewTriageService,
+  // Plan 6 #9). Judgment-tier model (same tier as capstone_evaluator /
+  // compass_coder), not the bulk-grading haiku tier — this is a low-volume,
+  // per-review-item call bounded by queue size + dedup, not a hot path.
+  review_triage_brief:       { provider: 'anthropic', model: 'claude-sonnet-4-6', max_tokens: 1200 },
 };
 
 // ── Public helpers ────────────────────────────────────────────────────────────

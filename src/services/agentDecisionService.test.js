@@ -1,0 +1,321 @@
+// src/services/agentDecisionService.test.js
+'use strict';
+
+const { test } = require('node:test');
+const assert = require('assert');
+const mongoose = require('mongoose');
+
+const svc = require('./agentDecisionService');
+
+// ---- fakes (no DB) ----------------------------------------------------
+function fakePlanModel(calls) {
+  return {
+    updateOne: async (filter, update, opts) => {
+      calls.push({ filter, update, opts });
+      return { matchedCount: 1, modifiedCount: 1 };
+    },
+  };
+}
+
+function fakeDecisionDoc(overrides = {}) {
+  return Object.assign(
+    {
+      _id: new mongoose.Types.ObjectId(),
+      userId: new mongoose.Types.ObjectId(),
+      status: 'pending',
+      action: { title: 'x', ops: [{ op: 'reset_skipped' }] },
+      save: async function () { return this; },
+    },
+    overrides
+  );
+}
+
+function fakeDecisionModel(doc) {
+  return {
+    findById: async () => doc,
+    // Mutates the SAME doc reference in place (mirrors a real findOneAndUpdate
+    // persisting to the row the earlier findById already returned) so
+    // assertions against `doc` after calling respond() still see the change.
+    findOneAndUpdate: async (filter, update) => {
+      if (!doc) return null;
+      if (String(filter._id) !== String(doc._id)) return null;
+      if (filter.status && doc.status !== filter.status) return null;
+      Object.assign(doc, update.$set);
+      return doc;
+    },
+    updateMany: async (filter, update) => {
+      fakeDecisionModel.lastSweep = { filter, update };
+      return { modifiedCount: 3 };
+    },
+    create: async (payload) => Object.assign({ _id: new mongoose.Types.ObjectId() }, payload),
+  };
+}
+
+/**
+ * A model fake whose findById returns a FRESH SNAPSHOT decoupled from the
+ * underlying store (like a real DB read), while findOneAndUpdate mutates a
+ * single shared store atomically. This is what lets a test genuinely
+ * exercise the double-submit race: two respond() calls can both read status
+ * 'pending' from findById before either one's atomic claim runs.
+ */
+function fakeDecisionStoreModel(initial) {
+  const store = { ...initial };
+  return {
+    store,
+    findById: async () => ({ ...store }),
+    findOneAndUpdate: async (filter, update) => {
+      if (String(filter._id) !== String(store._id)) return null;
+      if (filter.status && store.status !== filter.status) return null;
+      Object.assign(store, update.$set);
+      return { ...store };
+    },
+  };
+}
+
+// ---- applyPlanOps ------------------------------------------------------
+test('applyPlanOps: set_task_status issues the scoped task mutation', async () => {
+  const calls = [];
+  const r = await svc.applyPlanOps('u1', [{ op: 'set_task_status', taskId: 't9', status: 'skipped' }], { Plan: fakePlanModel(calls) });
+  assert.strictEqual(r.applied, 1);
+  assert.strictEqual(calls.length, 1);
+  assert.deepStrictEqual(calls[0].filter, { userId: 'u1', isActive: true });
+  assert.strictEqual(calls[0].update.$set['weeklySchedule.$[].tasks.$[t].progress.status'], 'skipped');
+  assert.strictEqual(calls[0].update.$set['weeklySchedule.$[].tasks.$[t].progress.completedAt'], undefined);
+  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't._id': 't9' }]);
+});
+
+test('applyPlanOps: set_task_status(complete) also stamps progress.completedAt', async () => {
+  const calls = [];
+  const before = Date.now();
+  const r = await svc.applyPlanOps('u1', [{ op: 'set_task_status', taskId: 't9', status: 'complete' }], { Plan: fakePlanModel(calls) });
+  assert.strictEqual(r.applied, 1);
+  const completedAt = calls[0].update.$set['weeklySchedule.$[].tasks.$[t].progress.completedAt'];
+  assert.ok(completedAt instanceof Date);
+  assert.ok(completedAt.getTime() >= before);
+  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't._id': 't9' }]);
+});
+
+test('applyPlanOps: set_task_status throws when the active plan is not found', async () => {
+  const Plan = { updateOne: async () => ({ matchedCount: 0, modifiedCount: 0 }) };
+  await assert.rejects(
+    () => svc.applyPlanOps('u1', [{ op: 'set_task_status', taskId: 't9', status: 'skipped' }], { Plan }),
+    /active plan not found/
+  );
+});
+
+test('applyPlanOps: set_task_status throws when the task is not found in the matched plan', async () => {
+  const Plan = { updateOne: async () => ({ matchedCount: 1, modifiedCount: 0 }) };
+  await assert.rejects(
+    () => svc.applyPlanOps('u1', [{ op: 'set_task_status', taskId: 'missing', status: 'skipped' }], { Plan }),
+    /task not found in active plan/
+  );
+});
+
+test('applyPlanOps: reset_skipped throws when the active plan is not found', async () => {
+  const Plan = { updateOne: async () => ({ matchedCount: 0, modifiedCount: 0 }) };
+  await assert.rejects(
+    () => svc.applyPlanOps('u1', [{ op: 'reset_skipped' }], { Plan }),
+    /active plan not found/
+  );
+});
+
+test('applyPlanOps: reset_skipped flips all skipped back to pending', async () => {
+  const calls = [];
+  await svc.applyPlanOps('u1', [{ op: 'reset_skipped' }], { Plan: fakePlanModel(calls) });
+  assert.strictEqual(calls[0].update.$set['weeklySchedule.$[].tasks.$[t].progress.status'], 'pending');
+  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't.progress.status': 'skipped' }]);
+});
+
+test('applyPlanOps: unknown ops are rejected, nothing applied', async () => {
+  const calls = [];
+  await assert.rejects(
+    () => svc.applyPlanOps('u1', [{ op: 'delete_everything' }], { Plan: fakePlanModel(calls) }),
+    /unsupported op/
+  );
+  assert.strictEqual(calls.length, 0);
+});
+
+test('applyPlanOps: set_task_status requires a valid status', async () => {
+  await assert.rejects(
+    () => svc.applyPlanOps('u1', [{ op: 'set_task_status', taskId: 't1', status: 'exploded' }], { Plan: fakePlanModel([]) }),
+    /unsupported status/
+  );
+});
+
+// ---- respond -----------------------------------------------------------
+test('respond: accepted applies ops and stamps the signal', async () => {
+  const doc = fakeDecisionDoc();
+  const calls = [];
+  const r = await svc.respond(
+    { decisionId: doc._id, userId: String(doc.userId), response: 'accepted' },
+    { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel(calls) }
+  );
+  assert.strictEqual(r.applied, true);
+  assert.strictEqual(doc.status, 'accepted');
+  assert.ok(doc.respondedAt instanceof Date);
+  assert.strictEqual(calls.length, 1);
+});
+
+test('respond: rejected records signal, applies nothing', async () => {
+  const doc = fakeDecisionDoc();
+  const calls = [];
+  const r = await svc.respond(
+    { decisionId: doc._id, userId: String(doc.userId), response: 'rejected' },
+    { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel(calls) }
+  );
+  assert.strictEqual(r.applied, false);
+  assert.strictEqual(doc.status, 'rejected');
+  assert.strictEqual(calls.length, 0);
+});
+
+test('respond: adjusted applies the ADJUSTED ops and stores the diff', async () => {
+  const doc = fakeDecisionDoc();
+  const calls = [];
+  const adjustedOps = [{ op: 'set_task_status', taskId: 't2', status: 'complete' }];
+  await svc.respond(
+    { decisionId: doc._id, userId: String(doc.userId), response: 'adjusted', adjustedOps },
+    { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel(calls) }
+  );
+  assert.strictEqual(doc.status, 'adjusted');
+  assert.deepStrictEqual(doc.adjustmentDiff, adjustedOps);
+  assert.deepStrictEqual(calls[0].opts.arrayFilters, [{ 't._id': 't2' }]);
+});
+
+test('respond: adjusted with missing adjustedOps is rejected before any apply', async () => {
+  const doc = fakeDecisionDoc();
+  const calls = [];
+  await assert.rejects(
+    () => svc.respond(
+      { decisionId: doc._id, userId: String(doc.userId), response: 'adjusted' },
+      { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel(calls) }
+    ),
+    /unsupported/
+  );
+  assert.strictEqual(doc.status, 'pending');
+  assert.strictEqual(calls.length, 0);
+});
+
+test('respond: wrong owner is refused', async () => {
+  const doc = fakeDecisionDoc();
+  await assert.rejects(
+    () => svc.respond(
+      { decisionId: doc._id, userId: String(new mongoose.Types.ObjectId()), response: 'accepted' },
+      { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel([]) }
+    ),
+    /not found/
+  );
+});
+
+test('respond: non-pending decision is refused (idempotency)', async () => {
+  const doc = fakeDecisionDoc({ status: 'accepted' });
+  await assert.rejects(
+    () => svc.respond(
+      { decisionId: doc._id, userId: String(doc.userId), response: 'accepted' },
+      { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel([]) }
+    ),
+    /already/
+  );
+});
+
+test('respond: concurrent double-submit only claims and applies once (atomic claim)', async () => {
+  const decisionId = new mongoose.Types.ObjectId();
+  const userId = new mongoose.Types.ObjectId();
+  const model = fakeDecisionStoreModel({
+    _id: decisionId,
+    userId,
+    status: 'pending',
+    action: { title: 'x', ops: [{ op: 'reset_skipped' }] },
+  });
+  const calls = [];
+  const args = { decisionId, userId: String(userId), response: 'accepted' };
+  const deps = { AgentDecision: model, Plan: fakePlanModel(calls) };
+
+  const results = await Promise.allSettled([svc.respond(args, deps), svc.respond(args, deps)]);
+  const fulfilled = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+
+  assert.strictEqual(fulfilled.length, 1, 'exactly one of the two concurrent calls must win the claim');
+  assert.strictEqual(rejected.length, 1);
+  assert.match(rejected[0].reason.message, /already/);
+  assert.strictEqual(calls.length, 1, 'the plan mutation side effect must run exactly once');
+  assert.strictEqual(model.store.status, 'accepted');
+});
+
+// ---- respond: recalibration_offer kind ----------------------------------
+test('respond: accepted recalibration_offer calls notify and applies without touching Plan', async () => {
+  const doc = fakeDecisionDoc({ action: { kind: 'recalibration_offer' } });
+  const calls = [];
+  const notifyCalls = [];
+  const r = await svc.respond(
+    { decisionId: doc._id, userId: String(doc.userId), response: 'accepted' },
+    {
+      AgentDecision: fakeDecisionModel(doc),
+      Plan: fakePlanModel(calls),
+      notify: async (userId) => { notifyCalls.push(userId); },
+    }
+  );
+  assert.strictEqual(r.applied, true);
+  assert.strictEqual(doc.status, 'accepted');
+  assert.deepStrictEqual(notifyCalls, [String(doc.userId)]);
+  assert.strictEqual(calls.length, 0);
+});
+
+test('respond: rejected recalibration_offer records without notifying', async () => {
+  const doc = fakeDecisionDoc({ action: { kind: 'recalibration_offer' } });
+  const notifyCalls = [];
+  const r = await svc.respond(
+    { decisionId: doc._id, userId: String(doc.userId), response: 'rejected' },
+    {
+      AgentDecision: fakeDecisionModel(doc),
+      Plan: fakePlanModel([]),
+      notify: async (userId) => { notifyCalls.push(userId); },
+    }
+  );
+  assert.strictEqual(r.applied, false);
+  assert.strictEqual(doc.status, 'rejected');
+  assert.strictEqual(notifyCalls.length, 0);
+});
+
+test('respond: adjusted is not allowed for recalibration_offer', async () => {
+  const doc = fakeDecisionDoc({ action: { kind: 'recalibration_offer' } });
+  const notifyCalls = [];
+  await assert.rejects(
+    () => svc.respond(
+      { decisionId: doc._id, userId: String(doc.userId), response: 'adjusted', adjustedOps: [{ op: 'reset_skipped' }] },
+      {
+        AgentDecision: fakeDecisionModel(doc),
+        Plan: fakePlanModel([]),
+        notify: async (userId) => { notifyCalls.push(userId); },
+      }
+    ),
+    /unsupported/
+  );
+  assert.strictEqual(doc.status, 'pending');
+  assert.strictEqual(notifyCalls.length, 0);
+});
+
+test('respond: unknown action kind is rejected before any state change', async () => {
+  let saveCalls = 0;
+  const doc = fakeDecisionDoc({ action: { kind: 'mystery_kind' }, save: async function () { saveCalls += 1; return this; } });
+  const calls = [];
+  await assert.rejects(
+    () => svc.respond(
+      { decisionId: doc._id, userId: String(doc.userId), response: 'accepted' },
+      { AgentDecision: fakeDecisionModel(doc), Plan: fakePlanModel(calls) }
+    ),
+    /unsupported action kind/
+  );
+  assert.strictEqual(doc.status, 'pending');
+  assert.strictEqual(calls.length, 0);
+  assert.strictEqual(saveCalls, 0);
+});
+
+// ---- expireStale ---------------------------------------------------------
+test('expireStale: sweeps pending older than cutoff to ignored', async () => {
+  const model = fakeDecisionModel(null);
+  const r = await svc.expireStale({ hours: 48 }, { AgentDecision: model });
+  assert.strictEqual(r.expired, 3);
+  assert.strictEqual(fakeDecisionModel.lastSweep.filter.status, 'pending');
+  assert.ok(fakeDecisionModel.lastSweep.filter.createdAt.$lt instanceof Date);
+  assert.strictEqual(fakeDecisionModel.lastSweep.update.$set.status, 'ignored');
+});

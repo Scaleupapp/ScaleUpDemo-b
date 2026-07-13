@@ -119,6 +119,54 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 18. Agent Decision Expiry — Daily 03:15 IST (21:45 UTC prev day). Marks
+  // pending agent decisions as ignored once they've sat unactioned past TTL.
+  cronQueue.add('agentDecisionExpiry', {}, {
+    repeat: { pattern: '45 21 * * *' },
+    removeOnComplete: true,
+  });
+
+  // 19. Agent Outcome Closure — Daily 03:45 IST (22:15 UTC). Checks
+  // accepted/adjusted compass_actions proposals for implicit follow-through.
+  cronQueue.add('agentOutcomeClosure', {}, {
+    repeat: { pattern: '15 22 * * *' },
+    removeOnComplete: true,
+  });
+
+  // 20. Intervention Weekly Brief — Sunday 23:00 UTC (Monday 04:30 IST). Staggered
+  // 30 minutes off the 22:15/22:30 UTC Sunday cron cluster; still generates
+  // weekly briefs for institution cohort intervention agent well before the
+  // TPO's Monday morning.
+  cronQueue.add('interventionWeeklyBrief', {}, {
+    repeat: { pattern: '0 23 * * 0' },
+    removeOnComplete: true,
+  });
+
+  // 21. Activation Daily Nudge — Daily 11:00 AM IST (5:30 AM UTC). Sends
+  // daily re-activation nudges to invited students within reminder cap.
+  cronQueue.add('activationDailyNudge', {}, {
+    repeat: { pattern: '30 5 * * *' },
+    removeOnComplete: true,
+  });
+
+  // 22. Review Triage Sweep — Hourly at :20. Builds a dossier for every
+  // pending HumanReviewQueue item without one yet (Plan 6 #9). Dedup (skip
+  // items that already have an open dossier row) is a plain findOne inside
+  // the loop, not an atomic claim — safe because this Worker processes
+  // 'cronJobs' jobs serially per process; only a multi-instance deployment
+  // running overlapping sweeps concurrently could double-dossier an item.
+  cronQueue.add('reviewTriageSweep', {}, {
+    repeat: { pattern: '20 * * * *' },
+    removeOnComplete: true,
+  });
+
+  // 23. Ops Sentinel Daily — Daily 07:00 IST (01:30 UTC). Monitors
+  // operational metrics and detects spend spikes.
+  cronQueue.add('opsSentinelDaily', {}, {
+    repeat: { pattern: '30 1 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -222,6 +270,43 @@ function startCronJobs() {
       case 'cohortDirectoryHousekeeping':
         await require('./cohortDirectoryHousekeepingWorker').run();
         break;
+      case 'agentDecisionExpiry': {
+        const { expireStale } = require('../services/agentDecisionService');
+        const r = await expireStale({ hours: Number(process.env.AGENT_DECISION_TTL_HOURS || 48) });
+        console.log(`[cron] agentDecisionExpiry: ${r.expired} pending decisions marked ignored`);
+        break;
+      }
+      case 'agentOutcomeClosure': {
+        const { closeCompassActionOutcomes, closeInterviewFocusOutcomes } = require('../services/agentOutcomeClosureService');
+        const compassResult = await closeCompassActionOutcomes({ olderThanHours: Number(process.env.AGENT_OUTCOME_CLOSURE_MIN_HOURS || 24) });
+        const interviewFocusResult = await closeInterviewFocusOutcomes({ olderThanDays: Number(process.env.AGENT_OUTCOME_CLOSURE_INTERVIEW_FOCUS_DAYS || 7) });
+        console.log(`[cron] agentOutcomeClosure: ${compassResult.closed} compass decisions closed, ${interviewFocusResult.closed} interview-focus closed`);
+        break;
+      }
+      case 'interventionWeeklyBrief': {
+        const { runWeekly } = require('../services/institution/interventionAgentService');
+        const r = await runWeekly();
+        console.log('[cron] interventionWeeklyBrief: ' + r.briefs + ' briefs recorded');
+        break;
+      }
+      case 'activationDailyNudge': {
+        const { runDaily } = require('../services/institution/activationAgentService');
+        const r = await runDaily();
+        console.log('[cron] activationDailyNudge: ' + r.reminded + ' reminders across ' + r.cohorts + ' cohorts');
+        break;
+      }
+      case 'reviewTriageSweep': {
+        const { triagePending } = require('../coding/services/reviewTriageService');
+        const r = await triagePending();
+        console.log('[cron] reviewTriageSweep: ' + r.triaged + ' dossiers');
+        break;
+      }
+      case 'opsSentinelDaily': {
+        const { runDaily } = require('../services/sentinelService');
+        const r = await runDaily();
+        console.log('[cron] opsSentinelDaily: ' + r.findings + ' findings');
+        break;
+      }
     }
   }, { connection });
 

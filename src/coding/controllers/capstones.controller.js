@@ -19,10 +19,9 @@ const DifficultyState = require('../models/difficultyState.model');
 const { evaluateCodingEligibility } = require('../services/codingEligibility');
 const capstoneSessionService = require('../services/capstoneSessionService');
 const { abortNeverStartedSessions: abortNeverStartedSessionsSvc } = require('../services/capstoneSessionService');
-
 // Default language per role-track for generated capstones (learner can't pick
 // an arbitrary language; we map their track to its canonical language).
-const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
+const { LANG_BY_TRACK } = require('../services/langByTrack');
 
 /**
  * Pick the capstone language from what the learner actually typed, falling back

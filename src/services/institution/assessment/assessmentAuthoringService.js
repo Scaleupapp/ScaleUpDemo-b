@@ -41,6 +41,7 @@ const MCQ_GROUNDING_LIMIT = 6000; // chars of syllabus text injected into genera
 const MCQ_OVER_GENERATION_FACTOR = 1.5; // over-generate the servable pool
 const MCQ_MAX_ROUNDS = 3; // initial generation + 2 regeneration rounds
 const MCQ_SYLLABUS_EXCERPT_LIMIT = 2000; // judge context
+const { LANG_BY_TRACK } = require('../../../coding/services/langByTrack');
 
 function getModel(deps) { return (deps && deps.Assessment) || require('../../../models/Assessment'); }
 function getQuiz(deps) { return (deps && deps.Quiz) || require('../../../models/Quiz'); }
@@ -575,7 +576,6 @@ async function authorCapstone(assessmentId, deps = {}) {
   // enforces required enums; passing invalid values causes a silent ValidationError).
   const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
   const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
-  const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
 
   const roleTrack = VALID_ROLE_TRACKS.includes(cfg.roleTrack) ? cfg.roleTrack : 'swe';
   const difficulty = VALID_DIFFICULTIES.includes(cfg.difficulty) ? cfg.difficulty : 'medium';
@@ -675,7 +675,6 @@ async function authorDrill(assessmentId, deps = {}) {
   const pollMs = deps.pollMs !== undefined ? deps.pollMs : 3000;
   const maxPolls = deps.maxPolls !== undefined ? deps.maxPolls : 60;
 
-  const LANG_BY_TRACK = { swe: 'javascript', ds: 'python', ai_eng: 'python' };
   const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
   const roleTrack = VALID_ROLE_TRACKS.includes(cfg.roleTrack) ? cfg.roleTrack : 'swe';
   const language = LANG_BY_TRACK[roleTrack] || 'python';
