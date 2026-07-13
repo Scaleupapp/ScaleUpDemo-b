@@ -117,3 +117,74 @@ test('GET author-agent run status: "run not found" -> 404', async () => {
   assert.strictEqual(r.statusCode, 404);
   assert.strictEqual(r.body.success, false);
 });
+
+// ── Plan 7, Task 2: route accepts every engine (no mcq-specific gate here — ──
+// ── the route never checked assessment.type; authorAgentService owns that). ──
+
+test('POST author-agent: succeeds for a capstone assessment (DI fake service)', async () => {
+  const decisionId = new mongoose.Types.ObjectId();
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    Assessment: {
+      findById: (id) => ({
+        select: async () => {
+          assert.strictEqual(id, 'cap1');
+          // type isn't even selected by the route (service owns that guard) —
+          // this fixture just mirrors what a capstone assessment looks like.
+          return { institutionId: 'inst1', cohortId: 'c-capstone', type: 'capstone' };
+        },
+      }),
+    },
+    startRun: async ({ assessmentId, institutionId, cohortId, brief }) => {
+      assert.strictEqual(assessmentId, 'cap1');
+      assert.strictEqual(institutionId, 'inst1');
+      assert.strictEqual(cohortId, 'c-capstone');
+      assert.strictEqual(brief, 'payment service with seeded bugs, 90 min');
+      return { decisionId };
+    },
+  });
+  const r = res();
+  await h.startRunHandler(
+    baseReq({ params: { id: 'cap1' }, body: { brief: 'payment service with seeded bugs, 90 min' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 200);
+  assert.deepStrictEqual(r.body, { success: true, data: { decisionId: String(decisionId) } });
+});
+
+test('POST author-agent: service "assessment not authorable" for a released assessment -> 409', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    Assessment: {
+      findById: () => ({ select: async () => ({ institutionId: 'inst1', cohortId: 'c1' }) }),
+    },
+    startRun: async () => { throw new Error('assessment not authorable'); },
+  });
+  const r = res();
+  await h.startRunHandler(baseReq({ params: { id: 'released1' }, body: { brief: 'x' } }), r);
+  assert.strictEqual(r.statusCode, 409);
+  assert.strictEqual(r.body.success, false);
+});
+
+test('GET author-agent run status: passes through engine + evidence', async () => {
+  const decisionId = new mongoose.Types.ObjectId();
+  const evidence = { bundleId: 'b1', bundleStatus: 'active', roleTrack: 'backend', difficulty: 'medium', language: 'python', humanReviewed: true };
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    getRunStatus: async ({ decisionId: id, institutionId }) => {
+      assert.strictEqual(String(id), String(decisionId));
+      assert.strictEqual(institutionId, 'inst1');
+      return {
+        status: 'ready',
+        runLog: [{ at: new Date(), msg: 'bundle promoted to active' }],
+        result: { status: 'ready', engine: 'capstone', evidence, flagged: [], passes: 0 },
+      };
+    },
+  });
+  const r = res();
+  await h.getRunStatusHandler(baseReq({ params: { decisionId: String(decisionId) } }), r);
+  assert.strictEqual(r.statusCode, 200);
+  assert.strictEqual(r.body.success, true);
+  assert.strictEqual(r.body.data.result.engine, 'capstone');
+  assert.deepStrictEqual(r.body.data.result.evidence, evidence);
+});

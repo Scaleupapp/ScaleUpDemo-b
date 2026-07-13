@@ -9015,6 +9015,16 @@ paths:
                         description: Final run summary, set once the run leaves 'generating'.
                         properties:
                           status: { type: string, enum: [ready, needs_review, failed] }
+                          engine: { type: string, enum: [mcq, interview, capstone, drill] }
+                          evidence:
+                            type: object
+                            additionalProperties: true
+                            description: |
+                              Per-engine REAL persisted evidence (shape varies by engine — mcq:
+                              totalQuestions/regenerated/flaggedIndices/passes; interview:
+                              questionCount/rounds/judgeVerdict/judgeScores/lintPassed;
+                              capstone/drill: bundleId/bundleStatus/roleTrack/difficulty/
+                              language/drillSubtype/humanReviewed).
                           totalQuestions: { type: integer }
                           regenerated: { type: integer }
                           flaggedIndices:
