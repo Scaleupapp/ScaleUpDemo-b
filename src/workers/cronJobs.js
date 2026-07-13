@@ -159,6 +159,13 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 23. Ops Sentinel Daily — Daily 07:00 IST (01:30 UTC). Monitors
+  // operational metrics and detects spend spikes.
+  cronQueue.add('opsSentinelDaily', {}, {
+    repeat: { pattern: '30 1 * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -291,6 +298,12 @@ function startCronJobs() {
         const { triagePending } = require('../coding/services/reviewTriageService');
         const r = await triagePending();
         console.log('[cron] reviewTriageSweep: ' + r.triaged + ' dossiers');
+        break;
+      }
+      case 'opsSentinelDaily': {
+        const { runDaily } = require('../services/sentinelService');
+        const r = await runDaily();
+        console.log('[cron] opsSentinelDaily: ' + r.findings + ' findings');
         break;
       }
     }
