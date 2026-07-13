@@ -61,6 +61,24 @@ test('dispatch: invalid ops never reach the ledger', async () => {
   assert.strictEqual(r.card, null);
 });
 
+test('dispatch: more than 5 ops is rejected before it reaches the ledger', async () => {
+  const rows = [];
+  const ops = Array.from({ length: 6 }, (_, i) => ({ op: 'set_task_status', taskId: `t${i}`, status: 'skipped' }));
+  const r = await proposals.dispatch(
+    { userId: 'u1', name: 'propose_plan_update', input: { title: 'Too many', ops }, meta: {} },
+    { record: fakeRecorder(rows) }
+  );
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(rows.length, 0);
+  assert.strictEqual(r.card, null);
+  assert.match(JSON.parse(r.output).error, /5/);
+});
+
+test('PROPOSAL_TOOLS: ops schema declares maxItems 5', () => {
+  const tool = proposals.PROPOSAL_TOOLS.find((t) => t.name === 'propose_plan_update');
+  assert.strictEqual(tool.input_schema.properties.ops.maxItems, 5);
+});
+
 test('dispatch: title and non-empty ops are required', async () => {
   const rows = [];
   const r = await proposals.dispatch(

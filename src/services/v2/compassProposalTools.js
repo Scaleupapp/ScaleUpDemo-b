@@ -16,6 +16,7 @@ const agentDecisionService = require('../agentDecisionService');
 
 const OPS = ['set_task_status', 'reset_skipped'];
 const STATUSES = ['skipped', 'complete', 'pending'];
+const MAX_OPS = 5;
 
 const PROPOSAL_TOOLS = [
   {
@@ -33,6 +34,7 @@ const PROPOSAL_TOOLS = [
         consequence: { type: 'string', description: 'Effect on the readiness projection' },
         ops: {
           type: 'array',
+          maxItems: MAX_OPS,
           items: {
             type: 'object',
             properties: {
@@ -58,6 +60,7 @@ function isProposalTool(name) {
 function validateInput(input) {
   if (!input || typeof input.title !== 'string' || !input.title.trim()) return 'title is required';
   if (!Array.isArray(input.ops) || input.ops.length === 0) return 'ops must be a non-empty array';
+  if (input.ops.length > MAX_OPS) return `ops must not exceed ${MAX_OPS} items`;
   for (const op of input.ops) {
     if (!op || !OPS.includes(op.op)) return `unsupported op: ${op && op.op}`;
     if (op.op === 'set_task_status') {
