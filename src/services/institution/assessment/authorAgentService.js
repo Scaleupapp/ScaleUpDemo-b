@@ -516,6 +516,94 @@ async function runAuthoring({ decisionId, assessmentId }, deps = {}) {
 }
 
 /**
+ * reapOrphanedRuns({ olderThanMinutes }, deps) -> Promise<{ reaped }>
+ *
+ * runAuthoring is fired fire-and-forget from startRun (same pattern as the
+ * pre-existing institution routes' `authoring().authorMcq(a._id).catch(...)`
+ * calls) — if the process dies or the server restarts mid-run, nothing ever
+ * finalizes that AgentDecision row's `action.result`, which is exactly the
+ * signal startRun's in-flight guard reads as "a run is genuinely in
+ * progress". Left alone, an orphaned row permanently blocks that assessment
+ * from ever being re-authored, and (for mcq/interview) the Assessment's own
+ * `config.<engine>.authoring.status` is stuck reading 'generating' forever
+ * too. This sweep finds author_agent rows that have been unfinished for
+ * longer than any real run could possibly take, closes them out honestly as
+ * 'failed', and resets the stuck engine-side flag so the TPO can retry.
+ *
+ * Real runs finish in minutes, so anything still open past the window
+ * cannot still be alive — it's a corpse from a dead process, not a slow run.
+ * Per-row try/catch: one bad row must never stop the rest of the sweep, and
+ * this function itself never throws.
+ */
+async function reapOrphanedRuns(
+  { olderThanMinutes = Number(process.env.AUTHOR_AGENT_ORPHAN_MINUTES || 30) } = {},
+  deps = {}
+) {
+  const d = { ...defaultDeps(), ...deps };
+  const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+
+  let rows = [];
+  try {
+    rows = await d.AgentDecision.find({
+      agentId: 'author_agent',
+      'action.result': null,
+      createdAt: { $lt: cutoff },
+    }).exec();
+  } catch (_) {
+    return { reaped: 0 };
+  }
+
+  let reaped = 0;
+
+  for (const row of rows || []) {
+    try {
+      row.action = row.action || {};
+      const engine = row.action.engine || null;
+      const assessmentId = row.action.assessmentId;
+
+      row.action.runLog = Array.isArray(row.action.runLog) ? row.action.runLog : [];
+      row.action.runLog.push({
+        at: new Date(),
+        msg: 'run orphaned — the server restarted or the process died before this finished',
+      });
+      row.action.result = {
+        status: 'failed',
+        engine,
+        evidence: {},
+        flagged: [],
+        passes: 0,
+        note: 'orphaned',
+      };
+      row.markModified('action');
+      await row.save();
+      reaped += 1;
+
+      if (assessmentId && MID_GENERATION_GUARDED_ENGINES.includes(engine)) {
+        try {
+          await d.Assessment.updateOne(
+            { _id: assessmentId, [`config.${engine}.authoring.status`]: 'generating' },
+            {
+              $set: {
+                [`config.${engine}.authoring.status`]: 'failed',
+                [`config.${engine}.authoring.error`]: 'run orphaned',
+              },
+            }
+          );
+        } catch (_) {
+          // Best-effort — the ledger row itself is already reaped, which is
+          // what unblocks startRun's in-flight guard; the stuck UI flag is a
+          // secondary cleanup.
+        }
+      }
+    } catch (_) {
+      // Per-row isolation — never let one bad row abort the sweep.
+    }
+  }
+
+  return { reaped };
+}
+
+/**
  * getRunStatus({ decisionId, institutionId }, deps) -> Promise<{ status, runLog, result }>
  *
  * Institution-scoped read for polling. status is result?.status || 'generating'.
@@ -535,5 +623,6 @@ module.exports = {
   startRun,
   runAuthoring,
   getRunStatus,
+  reapOrphanedRuns,
   _helpers: { computeFlaggedIndices, mcqAuthoringStatus, authoringStatusFor },
 };
