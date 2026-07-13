@@ -35,14 +35,13 @@ const AgentDecisionSchema = new mongoose.Schema(
         'review_triage',        // #9
         'ops_sentinel',         // #12
       ],
-      index: true,
     },
     decisionType: {
       type: String,
       required: true,
       enum: ['proposal', 'artifact', 'brief', 'nudge', 'recommendation'],
     },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     institutionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Institution' },
     cohortId: { type: mongoose.Schema.Types.ObjectId, ref: 'InstitutionCohort' },
 
@@ -77,5 +76,9 @@ const AgentDecisionSchema = new mongoose.Schema(
 
 AgentDecisionSchema.index({ userId: 1, status: 1, createdAt: -1 });
 AgentDecisionSchema.index({ agentId: 1, status: 1, createdAt: -1 });
+// Institution-scoped brief lists (e.g. "all briefs for this institution/agent").
+AgentDecisionSchema.index({ institutionId: 1, agentId: 1, createdAt: -1 });
+// Sentinel's rolling 7-day scans (agent-agnostic, institution-agnostic).
+AgentDecisionSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('AgentDecision', AgentDecisionSchema);
