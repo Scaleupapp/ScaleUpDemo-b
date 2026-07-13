@@ -65,3 +65,48 @@ test('list handler: returns caller-scoped pending decisions', async () => {
   assert.strictEqual(r.statusCode, 200);
   assert.strictEqual(r.body.data.decisions.length, 1);
 });
+
+test('list handler: default listForUser projects out internal telemetry fields', async () => {
+  // Mirrors recommendationService.test.js's monkey-patch-the-static-method
+  // convention for exercising a route's default (non-injected) query path.
+  const AgentDecision = require('../../models/AgentDecision');
+  const originalFind = AgentDecision.find;
+  const selectCalls = [];
+  const rows = [{ _id: 'd1', agentId: 'compass_actions', status: 'pending', action: { title: 'T' }, createdAt: new Date() }];
+
+  AgentDecision.find = (filter) => ({
+    select: (projection) => {
+      selectCalls.push(projection);
+      return {
+        sort: () => ({
+          limit: () => ({
+            lean: async () => rows,
+          }),
+        }),
+      };
+    },
+  });
+
+  try {
+    const h = makeHandlers({ isAgentEnabled: () => true }); // no listForUser override -> exercises defaultListForUser
+    const r = res();
+    await h.listHandler({ user: { userId: 'u1' }, query: { status: 'pending' } }, r);
+
+    assert.strictEqual(r.statusCode, 200);
+    assert.deepStrictEqual(r.body.data.decisions, rows);
+    assert.strictEqual(selectCalls.length, 1);
+    const projection = selectCalls[0];
+    assert.strictEqual(typeof projection, 'string');
+    // Internal telemetry must never be requested from the DB for this list.
+    assert.ok(!projection.includes('costUsd'), 'costUsd must not be in the projection');
+    assert.ok(!projection.includes('modelId'), 'modelId must not be in the projection');
+    assert.ok(!projection.includes('promptVersion'), 'promptVersion must not be in the projection');
+    assert.ok(!projection.includes('contextSnapshot'), 'contextSnapshot must not be in the projection');
+    assert.ok(!projection.includes('toolTrace'), 'toolTrace must not be in the projection');
+    // Sanity: the client-facing fields ARE requested.
+    assert.ok(projection.includes('status'));
+    assert.ok(projection.includes('action'));
+  } finally {
+    AgentDecision.find = originalFind;
+  }
+});

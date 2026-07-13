@@ -33,11 +33,42 @@ function fakeDecisionDoc(overrides = {}) {
 function fakeDecisionModel(doc) {
   return {
     findById: async () => doc,
+    // Mutates the SAME doc reference in place (mirrors a real findOneAndUpdate
+    // persisting to the row the earlier findById already returned) so
+    // assertions against `doc` after calling respond() still see the change.
+    findOneAndUpdate: async (filter, update) => {
+      if (!doc) return null;
+      if (String(filter._id) !== String(doc._id)) return null;
+      if (filter.status && doc.status !== filter.status) return null;
+      Object.assign(doc, update.$set);
+      return doc;
+    },
     updateMany: async (filter, update) => {
       fakeDecisionModel.lastSweep = { filter, update };
       return { modifiedCount: 3 };
     },
     create: async (payload) => Object.assign({ _id: new mongoose.Types.ObjectId() }, payload),
+  };
+}
+
+/**
+ * A model fake whose findById returns a FRESH SNAPSHOT decoupled from the
+ * underlying store (like a real DB read), while findOneAndUpdate mutates a
+ * single shared store atomically. This is what lets a test genuinely
+ * exercise the double-submit race: two respond() calls can both read status
+ * 'pending' from findById before either one's atomic claim runs.
+ */
+function fakeDecisionStoreModel(initial) {
+  const store = { ...initial };
+  return {
+    store,
+    findById: async () => ({ ...store }),
+    findOneAndUpdate: async (filter, update) => {
+      if (String(filter._id) !== String(store._id)) return null;
+      if (filter.status && store.status !== filter.status) return null;
+      Object.assign(store, update.$set);
+      return { ...store };
+    },
   };
 }
 
@@ -184,6 +215,30 @@ test('respond: non-pending decision is refused (idempotency)', async () => {
     ),
     /already/
   );
+});
+
+test('respond: concurrent double-submit only claims and applies once (atomic claim)', async () => {
+  const decisionId = new mongoose.Types.ObjectId();
+  const userId = new mongoose.Types.ObjectId();
+  const model = fakeDecisionStoreModel({
+    _id: decisionId,
+    userId,
+    status: 'pending',
+    action: { title: 'x', ops: [{ op: 'reset_skipped' }] },
+  });
+  const calls = [];
+  const args = { decisionId, userId: String(userId), response: 'accepted' };
+  const deps = { AgentDecision: model, Plan: fakePlanModel(calls) };
+
+  const results = await Promise.allSettled([svc.respond(args, deps), svc.respond(args, deps)]);
+  const fulfilled = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+
+  assert.strictEqual(fulfilled.length, 1, 'exactly one of the two concurrent calls must win the claim');
+  assert.strictEqual(rejected.length, 1);
+  assert.match(rejected[0].reason.message, /already/);
+  assert.strictEqual(calls.length, 1, 'the plan mutation side effect must run exactly once');
+  assert.strictEqual(model.store.status, 'accepted');
 });
 
 // ---- respond: recalibration_offer kind ----------------------------------

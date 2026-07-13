@@ -115,12 +115,40 @@ async function respond({ decisionId, userId, response, adjustedOps }, deps = {})
 
   const kind = (decision.action && decision.action.kind) || 'plan_ops';
 
+  // Validate EVERYTHING about this response before touching the row or
+  // running any side effect — no partial claims on bad input.
+  if (kind === 'plan_ops') {
+    if (response === 'adjusted' && (!Array.isArray(adjustedOps) || adjustedOps.length === 0)) {
+      throw new Error('unsupported response: adjusted requires non-empty adjustedOps');
+    }
+  } else if (kind === 'recalibration_offer') {
+    if (response === 'adjusted') {
+      throw new Error('unsupported response: adjusted not allowed for recalibration_offer');
+    }
+  } else {
+    throw new Error(`unsupported action kind: ${kind}`);
+  }
+
+  // Atomic claim: flips status pending -> response ONLY if it is still
+  // pending. This is what actually prevents a double-submit race from
+  // double-executing the side effect below (double plan mutation / double
+  // notification) — the earlier status check above is just a fast-path,
+  // not a safe one, under concurrent requests.
+  const setFields = { status: response, respondedAt: new Date() };
+  if (response === 'adjusted') setFields.adjustmentDiff = adjustedOps;
+  const claimed = await d.AgentDecision.findOneAndUpdate(
+    { _id: decisionId, status: 'pending' },
+    { $set: setFields },
+    { new: true }
+  );
+  if (!claimed) {
+    const current = await d.AgentDecision.findById(decisionId);
+    throw new Error(`decision already ${(current && current.status) || 'resolved'}`);
+  }
+
   let applied = false;
   switch (kind) {
     case 'plan_ops': {
-      if (response === 'adjusted' && (!Array.isArray(adjustedOps) || adjustedOps.length === 0)) {
-        throw new Error('unsupported response: adjusted requires non-empty adjustedOps');
-      }
       if (response === 'accepted' || response === 'adjusted') {
         const ops = response === 'adjusted' ? adjustedOps : (decision.action && decision.action.ops);
         await applyPlanOps(String(decision.userId), ops || [], d);
@@ -129,9 +157,6 @@ async function respond({ decisionId, userId, response, adjustedOps }, deps = {})
       break;
     }
     case 'recalibration_offer': {
-      if (response === 'adjusted') {
-        throw new Error('unsupported response: adjusted not allowed for recalibration_offer');
-      }
       if (response === 'accepted') {
         await d.notify(String(decision.userId));
         applied = true;
@@ -139,14 +164,10 @@ async function respond({ decisionId, userId, response, adjustedOps }, deps = {})
       break;
     }
     default:
-      throw new Error(`unsupported action kind: ${kind}`);
+      break;
   }
 
-  decision.status = response;
-  if (response === 'adjusted') decision.adjustmentDiff = adjustedOps;
-  decision.respondedAt = new Date();
-  await decision.save();
-  return { decision, applied };
+  return { decision: claimed, applied };
 }
 
 async function expireStale({ hours = 48 } = {}, deps = {}) {

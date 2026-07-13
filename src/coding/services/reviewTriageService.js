@@ -350,21 +350,31 @@ async function closeOnResolution({ reviewItemId, resolution }, deps = {}) {
   const recommendation = row.action && row.action.recommendation;
   const expected = RESOLUTION_TO_RECOMMENDATION[resolution];
 
+  let newStatus;
+  let adjustmentDiff;
   if (!recommendation || !recommendation.recommendation) {
-    row.status = 'accepted';
+    newStatus = 'accepted';
   } else if (expected && recommendation.recommendation === expected) {
-    row.status = 'accepted';
+    newStatus = 'accepted';
   } else {
-    row.status = 'adjusted';
-    row.adjustmentDiff = { humanResolution: resolution };
-    // adjustmentDiff is Schema.Types.Mixed — flag it explicitly so a
-    // whole-value reassignment is never silently dropped, same convention
-    // as briefApprovalService.approveBrief's contextSnapshot stamp.
-    row.markModified('adjustmentDiff');
+    newStatus = 'adjusted';
+    adjustmentDiff = { humanResolution: resolution };
   }
 
-  row.respondedAt = (d.now && d.now()) || new Date();
-  await row.save();
+  const setFields = { status: newStatus, respondedAt: (d.now && d.now()) || new Date() };
+  if (adjustmentDiff) setFields.adjustmentDiff = adjustmentDiff;
+
+  // Atomic claim: flips status pending -> newStatus ONLY if the row is
+  // still pending, via a direct $set update (no markModified/save race —
+  // this is an atomic update query, not an in-memory mutation). Prevents
+  // two concurrent resolutions of the same review item (e.g. a reviewer
+  // double-submit) from both reporting closed:true.
+  const claimed = await d.AgentDecision.findOneAndUpdate(
+    { _id: row._id, status: 'pending' },
+    { $set: setFields },
+    { new: true }
+  );
+  if (!claimed) return { closed: false };
 
   return { closed: true };
 }

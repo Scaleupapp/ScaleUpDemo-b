@@ -97,6 +97,17 @@ function makeAgentDecision(rows) {
       rows.push(row);
       return row;
     },
+    // Mutates the SAME row object in-place (mirrors findOne's asDoc — the
+    // "document" IS the array element) and only succeeds while the filter's
+    // status still matches, exercising closeOnResolution's atomic claim
+    // (including under a simulated concurrent double-submit).
+    findOneAndUpdate: async (filter = {}, update = {}) => {
+      const row = rows.find((r) => String(r._id) === String(filter._id));
+      if (!row) return null;
+      if (filter.status && row.status !== filter.status) return null;
+      Object.assign(row, update.$set || {});
+      return row;
+    },
   };
 }
 
@@ -290,4 +301,27 @@ test('closeOnResolution: no open dossier row is a no-op', async () => {
   const deps = baseDeps({ decisionRows: [] });
   const result = await closeOnResolution({ reviewItemId: 'item-does-not-exist', resolution: 'approved' }, deps);
   assert.deepStrictEqual(result, { closed: false });
+});
+
+test('closeOnResolution: concurrent double-submit only closes once (atomic claim)', async () => {
+  const decisionRows = [
+    {
+      _id: 'd1',
+      agentId: 'review_triage',
+      status: 'pending',
+      createdAt: new Date('2026-07-01'),
+      action: { reviewItemId: 'item1', recommendation: { recommendation: 'approve', confidence: 0.9, assessment: 'x' } },
+    },
+  ];
+  const deps = baseDeps({ decisionRows });
+  const args = { reviewItemId: 'item1', resolution: 'approved' };
+
+  const results = await Promise.allSettled([closeOnResolution(args, deps), closeOnResolution(args, deps)]);
+
+  assert.strictEqual(results.every((r) => r.status === 'fulfilled'), true, 'closeOnResolution never throws on a lost race');
+  const closedTrueCount = results.filter((r) => r.value.closed === true).length;
+  const closedFalseCount = results.filter((r) => r.value.closed === false).length;
+  assert.strictEqual(closedTrueCount, 1, 'exactly one concurrent call should win the claim');
+  assert.strictEqual(closedFalseCount, 1, 'the loser reports closed:false rather than double-closing the row');
+  assert.strictEqual(decisionRows[0].status, 'accepted');
 });

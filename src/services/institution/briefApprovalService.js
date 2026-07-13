@@ -66,6 +66,36 @@ async function approveBrief({ decisionId, institutionId, actorInstitutionUserId,
   }
 
   const approvedKeys = [...new Set(keys)];
+  const allKeys = clusters.map((c) => c.key);
+  const isFullSet = allKeys.length === approvedKeys.length && allKeys.every((k) => approvedKeys.includes(k));
+  const finalStatus = isFullSet ? 'accepted' : 'adjusted';
+
+  // Atomic claim BEFORE any notification fires: flips status pending ->
+  // finalStatus ONLY if the row is still pending, via a direct $set update
+  // (dot-path 'contextSnapshot.approvedBy' so the write can't clobber the
+  // rest of contextSnapshot — no markModified/save race needed here since
+  // this is an atomic update query, not an in-memory mutation).
+  //
+  // Ordering tradeoff, deliberate: claim-then-notify means a crash mid-notify
+  // loop leaves some students un-notified for an already-claimed (closed)
+  // brief — under-notify. That is preferred over notify-then-claim, which
+  // would let a double-submit fan out the same notifications twice
+  // (over-notify / spam) before either request closes the row.
+  const setFields = {
+    status: finalStatus,
+    respondedAt: new Date(),
+    'contextSnapshot.approvedBy': actorInstitutionUserId,
+  };
+  if (!isFullSet) setFields.adjustmentDiff = { approvedClusterKeys: approvedKeys };
+
+  const claimed = await d.AgentDecision.findOneAndUpdate(
+    { _id: decisionId, agentId: 'intervention', institutionId, status: 'pending' },
+    { $set: setFields },
+    { new: true }
+  );
+  if (!claimed) {
+    throw new Error('brief already resolved');
+  }
 
   let notified = 0;
   for (const key of approvedKeys) {
@@ -87,27 +117,7 @@ async function approveBrief({ decisionId, institutionId, actorInstitutionUserId,
     }
   }
 
-  const allKeys = clusters.map((c) => c.key);
-  const isFullSet = allKeys.length === approvedKeys.length && allKeys.every((k) => approvedKeys.includes(k));
-
-  if (isFullSet) {
-    row.status = 'accepted';
-  } else {
-    row.status = 'adjusted';
-    row.adjustmentDiff = { approvedClusterKeys: approvedKeys };
-  }
-  row.respondedAt = new Date();
-
-  row.contextSnapshot = row.contextSnapshot || {};
-  row.contextSnapshot.approvedBy = actorInstitutionUserId;
-  // contextSnapshot is Schema.Types.Mixed — Mongoose won't detect an
-  // in-place mutation of it, so the approvedBy stamp must be flagged
-  // explicitly or it silently never persists.
-  row.markModified('contextSnapshot');
-
-  await row.save();
-
-  return { executed: { notified }, status: row.status };
+  return { executed: { notified }, status: claimed.status };
 }
 
 module.exports = { approveBrief };

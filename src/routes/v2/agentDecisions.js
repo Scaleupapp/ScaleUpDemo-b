@@ -12,11 +12,16 @@ const auth = require('../../middleware/auth');
 const agentDecisionService = require('../../services/agentDecisionService');
 const { isAgentEnabled } = require('../../config/agentFlags');
 
+// Fields the client needs to render the decisions list. Deliberately
+// excludes internal telemetry (costUsd, modelId, promptVersion,
+// contextSnapshot, toolTrace) that must never leave the server.
+const LIST_PROJECTION = 'agentId decisionType status action adjustmentDiff respondedAt createdAt';
+
 function defaultListForUser(userId, status) {
   const AgentDecision = require('../../models/AgentDecision');
   const filter = { userId };
   if (status) filter.status = status;
-  return AgentDecision.find(filter).sort({ createdAt: -1 }).limit(20).lean();
+  return AgentDecision.find(filter).select(LIST_PROJECTION).sort({ createdAt: -1 }).limit(20).lean();
 }
 
 /**
