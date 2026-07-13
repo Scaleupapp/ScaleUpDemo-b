@@ -95,9 +95,13 @@ function makeHandlers(deps = {}) {
       });
       return res.json({ success: true, data: result });
     } catch (err) {
+      // Order matters: unsupported-* messages interpolate a caller-controlled
+      // clusterKey that could contain "not found" or "already" — check the
+      // anchored, caller-independent prefix first so those can't mis-map to
+      // 404/409.
+      if (/^unsupported/i.test(err.message)) return res.status(400).json({ success: false, message: err.message });
       if (/not found/i.test(err.message)) return res.status(404).json({ success: false, message: 'Brief not found' });
       if (/already/i.test(err.message)) return res.status(409).json({ success: false, message: err.message });
-      if (/unsupported/i.test(err.message)) return res.status(400).json({ success: false, message: err.message });
       console.error('[institution/agent-briefs] approve error', err);
       return res.status(500).json({ success: false, message: 'Could not approve the brief.' });
     }

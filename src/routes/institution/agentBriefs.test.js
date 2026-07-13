@@ -147,6 +147,10 @@ test('POST agent/briefs/:id/approve: error mapping (not found/already/unsupporte
     { err: 'brief already accepted', status: 409 },
     { err: 'unsupported cluster key: bogus', status: 400 },
     { err: 'boom', status: 500 },
+    // caller-controlled clusterKey interpolated into the message must not
+    // mis-map to 404/409 — /^unsupported/i must win over /not found/ and /already/.
+    { err: 'unsupported cluster key: not found', status: 400 },
+    { err: 'unsupported cluster key: already-approved', status: 400 },
   ];
   for (const c of cases) {
     const h = makeHandlers({

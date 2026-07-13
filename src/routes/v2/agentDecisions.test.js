@@ -50,6 +50,21 @@ test('respond handler: service "not found" → 404, "already" → 409', async ()
   assert.strictEqual(r2.statusCode, 409);
 });
 
+test('respond handler: caller-controlled "unsupported response" message must not mis-map to 404/409', async () => {
+  // unsupported response: <response> interpolates req.body.response — a
+  // caller could send response="not found" or response="already-done" and
+  // must still get 400, not 404/409.
+  const h1 = makeHandlers({ isAgentEnabled: () => true, respond: async () => { throw new Error('unsupported response: not found'); } });
+  const r1 = res();
+  await h1.respondHandler({ user: { userId: 'u1' }, params: { id: 'x' }, body: { response: 'not found' } }, r1);
+  assert.strictEqual(r1.statusCode, 400);
+
+  const h2 = makeHandlers({ isAgentEnabled: () => true, respond: async () => { throw new Error('unsupported response: already-done'); } });
+  const r2 = res();
+  await h2.respondHandler({ user: { userId: 'u1' }, params: { id: 'x' }, body: { response: 'already-done' } }, r2);
+  assert.strictEqual(r2.statusCode, 400);
+});
+
 test('list handler: returns caller-scoped pending decisions', async () => {
   const rows = [{ _id: 'd1', action: { title: 'T' }, status: 'pending', createdAt: new Date() }];
   const h = makeHandlers({
