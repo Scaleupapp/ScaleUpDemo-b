@@ -64,6 +64,8 @@ tags:
     description: Coding practice — drills + capstones
   - name: InterviewProgram
     description: Agentic layer — coached multi-week interview prep program (interview_coach)
+  - name: ProofJourney
+    description: Agentic layer — JD-to-published-proof journey (proof_builder)
 
 components:
   securitySchemes:
@@ -532,6 +534,65 @@ components:
         focus: { $ref: '#/components/schemas/InterviewProgramFocus' }
         suggestion: { type: string }
         sessionsCompleted: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+
+    ProofJourneyStep:
+      type: object
+      required: [key, label, status]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        status: { type: string, enum: [done, now, todo, failed] }
+        at: { type: [string, 'null'], format: date-time }
+
+    ProofJourneyJdSummary:
+      type: object
+      required: [role, company, skills]
+      properties:
+        role: { type: [string, 'null'] }
+        company: { type: [string, 'null'] }
+        skills:
+          type: array
+          items: { type: string }
+
+    ProofJourneyCapstoneRef:
+      type: object
+      required: [bundleId, sessionId]
+      properties:
+        bundleId: { type: [string, 'null'] }
+        sessionId: { type: [string, 'null'] }
+
+    ProofJourneyNextSuggestion:
+      type: object
+      required: [skill, reason]
+      nullable: true
+      properties:
+        skill: { type: string }
+        reason: { type: string }
+
+    ProofJourneyView:
+      type: object
+      required: [_id, status, jdSummary, steps, capstoneRef, proofToken, nextProofSuggestion, createdAt]
+      description: |
+        Client shape for the caller's latest proof-builder journey (agentic
+        layer #8). Mirrors proofJourneyService.getJourney — steps checklist
+        exactly like the approved mockup so the future mobile screen is pure
+        rendering.
+      properties:
+        _id: { type: string }
+        status:
+          type: string
+          enum: [extracting, capstone_pending, building, grading, publishable, published, failed]
+        jdSummary: { $ref: '#/components/schemas/ProofJourneyJdSummary' }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/ProofJourneyStep' }
+        capstoneRef: { $ref: '#/components/schemas/ProofJourneyCapstoneRef' }
+        proofToken: { type: [string, 'null'] }
+        nextProofSuggestion:
+          oneOf:
+            - { $ref: '#/components/schemas/ProofJourneyNextSuggestion' }
+            - { type: 'null' }
         createdAt: { type: string, format: date-time }
 
     PlanMastery:
@@ -8685,6 +8746,120 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v2/proof-journey:
+    post:
+      operationId: createProofJourney
+      tags: [ProofJourney]
+      summary: Start a JD-to-published-proof journey
+      description: |
+        Creates the caller's proof-builder journey (agentic layer #8, flag
+        `proof_builder`) from a pasted job description. Extracts a compact
+        skill summary (one LLM call) and kicks off capstone generation
+        through the existing JD-paste generation entry point in the
+        background — the response returns immediately with the freshly
+        created journey in `extracting` status; poll GET to watch it advance.
+        404 when the proof_builder flag is off.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jdText]
+              properties:
+                jdText: { type: string, description: Pasted job description text (max ~20k chars) }
+      responses:
+        '200':
+          description: Journey created (background extraction/generation kicked off)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [journey]
+                    properties:
+                      journey: { $ref: '#/components/schemas/ProofJourneyView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      operationId: getProofJourney
+      tags: [ProofJourney]
+      summary: Get the caller's latest proof journey
+      description: |
+        Returns the caller's latest proof-builder journey shaped for clients
+        (steps checklist, jdSummary, capstoneRef, proofToken,
+        nextProofSuggestion) — or `null` when none exists yet. 404 when the
+        proof_builder flag is off.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The latest journey, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [journey]
+                    properties:
+                      journey:
+                        oneOf:
+                          - { $ref: '#/components/schemas/ProofJourneyView' }
+                          - { type: 'null' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v2/proof-journey/publish:
+    post:
+      operationId: publishProofJourney
+      tags: [ProofJourney]
+      summary: Publish the caller's readiness proof from a graded journey
+      description: |
+        Guards on the journey being in `publishable` status (409 when it
+        isn't — capstone not graded yet) and 404 when the caller has no
+        journey at all. On success, calls the existing proof-publish engine,
+        stores the returned token, and flips the journey to `published`. 404
+        when the proof_builder flag is off.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Proof published; returns the updated journey
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [journey]
+                    properties:
+                      journey: { $ref: '#/components/schemas/ProofJourneyView' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/institution/assessments/{id}/author-agent:
     post:

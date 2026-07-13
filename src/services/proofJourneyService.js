@@ -60,6 +60,12 @@ function buildDeps(deps = {}) {
     ProofJourney: deps.ProofJourney || require('../models/ProofJourney'),
     AgentDecision: deps.AgentDecision || require('../models/AgentDecision'),
     UserObjective: deps.UserObjective || require('../models/UserObjective'),
+    // Correlation-closure deps (Task 4 EXPANDED): advanceOnCapstoneGraded
+    // resolves sessionId -> bundle_id via CapstoneSession, and (fallback)
+    // bundle_id -> the originating CapstoneGenerationRequest.
+    CapstoneSession: deps.CapstoneSession || require('../coding/models/capstoneSession.model'),
+    CapstoneGenerationRequest:
+      deps.CapstoneGenerationRequest || require('../coding/models/capstoneGenerationRequest.model'),
     codingEligibility: deps.codingEligibility || require('../coding/services/codingEligibility'),
     requestGeneration: deps.requestGeneration || require('../coding/services/capstoneAuthoringSupport').requestGeneration,
     aiProvider: deps.aiProvider || require('../config/aiProvider'),
@@ -188,13 +194,19 @@ async function runExtractionAndGeneration(journey, jdText, userId, d) {
   // capstoneRef.bundleId/sessionId aren't known yet at kickoff time — the
   // generation request still has to run (generate -> validate -> cross-check
   // -> ready) and then the learner has to start an attempt on the resulting
-  // bundle before a CapstoneSession (and therefore a sessionId) exists. This
-  // journey enters 'building' to reflect "capstone is in flight"; the next
+  // bundle before a CapstoneSession (and therefore a sessionId) exists.
+  // capstoneRef.generationRequestId IS known right now though (genReq._id) —
+  // persist it so advanceOnCapstoneGraded's correlation-closure fallback
+  // (Task 4 EXPANDED) can resolve this journey the first time its capstone
+  // is graded, before bundleId/sessionId are ever stamped. This journey
+  // enters 'building' to reflect "capstone is in flight"; the next
   // observable transition is advanceOnCapstoneGraded, once the underlying
   // session is graded.
   journey.status = 'building';
   setStep(journey, 'generate', 'done');
   setStep(journey, 'build', 'now');
+  journey.capstoneRef = journey.capstoneRef || {};
+  journey.capstoneRef.generationRequestId = genReq && genReq._id;
   await journey.save();
   return genReq;
 }
@@ -321,11 +333,31 @@ async function computeNextProofSuggestion({ userId, jdSummary }, d) {
 /**
  * advanceOnCapstoneGraded({ userId, sessionId }, deps) -> Promise<{advanced:boolean, journey?}>
  *
- * Hook target (Task 4): fire-and-forget after a CapstoneSession's grade
- * persists. Matches the journey by capstoneRef.sessionId — a session that
- * doesn't belong to any journey (i.e. it wasn't started from a proof-journey
- * capstone) is a safe, silent no-op, never a throw, so this hook can never
- * break the capstone-eval worker's critical path.
+ * Hook target (Task 4, EXPANDED correlation closure): fire-and-forget after
+ * a CapstoneSession's grade persists. Task 3 left capstoneRef.bundleId/
+ * sessionId UNSET at kickoff time (see runExtractionAndGeneration) — a
+ * straight `capstoneRef.sessionId` match would therefore NEVER fire, which
+ * is the bug this rewrite closes. Resolution chain:
+ *
+ *   1. Load the CapstoneSession by sessionId -> its bundle_id (the model's
+ *      real field name — src/coding/models/capstoneSession.model.js).
+ *   2. Direct match: this user's journey with capstoneRef.bundleId ===
+ *      bundle_id (covers a journey a PRIOR grade already correlated).
+ *   3. Fallback (bundleId not yet stamped on any journey): resolve the
+ *      CapstoneGenerationRequest that produced this bundle
+ *      (bundle_id === session's bundle_id) and match this user's journey by
+ *      capstoneRef.generationRequestId === that request's _id — stamped in
+ *      runExtractionAndGeneration when generation was kicked off, so this is
+ *      the path that fires on a journey's FIRST grade.
+ *   4. On match: stamp capstoneRef.bundleId + capstoneRef.sessionId onto the
+ *      journey (closing the correlation for any future direct-bundleId
+ *      lookup — e.g. a retry/regrade of the same bundle), then advance
+ *      exactly as before (steps, status -> publishable, nextProofSuggestion,
+ *      ledger outcomeSignal).
+ *   5. No match anywhere (session not found, no bundle_id, no journey via
+ *      either path, or wrong userId) -> {advanced:false}, silent no-op —
+ *      never a throw, so this hook can never break the capstone-eval
+ *      worker's critical path.
  *
  * Idempotent: a journey already 'publishable' or 'published' is left alone
  * (no re-computation, no duplicate ledger mutation) — the hook may fire more
@@ -337,9 +369,25 @@ async function advanceOnCapstoneGraded({ userId, sessionId }, deps = {}) {
   const d = buildDeps(deps);
   if (!d.isAgentEnabled('proof_builder')) return { advanced: false };
 
-  const journey = await d.ProofJourney.findOne({ userId, 'capstoneRef.sessionId': sessionId });
+  const session = await d.CapstoneSession.findById(sessionId).lean();
+  const bundleId = session && session.bundle_id;
+  if (!bundleId) return { advanced: false };
+
+  let journey = await d.ProofJourney.findOne({ userId, 'capstoneRef.bundleId': bundleId });
+
+  if (!journey) {
+    const genReq = await d.CapstoneGenerationRequest.findOne({ bundle_id: bundleId }).lean();
+    if (genReq) {
+      journey = await d.ProofJourney.findOne({ userId, 'capstoneRef.generationRequestId': genReq._id });
+    }
+  }
+
   if (!journey) return { advanced: false };
   if (journey.status === 'publishable' || journey.status === 'published') return { advanced: false };
+
+  journey.capstoneRef = journey.capstoneRef || {};
+  journey.capstoneRef.bundleId = bundleId;
+  journey.capstoneRef.sessionId = sessionId;
 
   const suggestion = await computeNextProofSuggestion({ userId, jdSummary: journey.jdSummary }, d);
 

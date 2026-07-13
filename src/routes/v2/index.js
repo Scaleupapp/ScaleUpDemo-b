@@ -26,6 +26,7 @@ router.use('/opt-in', require('./optIn'));
 router.use('/me', require('./me'));
 router.use('/agent', require('./agentDecisions'));
 router.use('/interview-program', require('./interviewProgram'));
+router.use('/proof-journey', require('./proofJourney'));
 
 router.get('/health', (_req, res) => res.json({ status: 'ok', namespace: 'v2', ts: new Date() }));
 

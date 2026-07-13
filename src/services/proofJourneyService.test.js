@@ -142,6 +142,27 @@ function fakeProofService({ snapshot, throwOnSnapshot, publishResult } = {}) {
   };
 }
 
+/** Fake CapstoneSession — findById(id).lean() shape, matching how the
+ * service queries it. `sessions` is a plain array of {_id, bundle_id,
+ * user_id} rows. */
+function makeCapstoneSessionModel(sessions) {
+  return {
+    findById: (id) => ({
+      lean: async () => sessions.find((s) => String(s._id) === String(id)) || null,
+    }),
+  };
+}
+
+/** Fake CapstoneGenerationRequest — findOne(filter).lean() shape. `rows` is
+ * a plain array of {_id, bundle_id} rows. */
+function makeCapstoneGenerationRequestModel(rows) {
+  return {
+    findOne: (filter) => ({
+      lean: async () => rows.find((r) => String(r.bundle_id) === String(filter.bundle_id)) || null,
+    }),
+  };
+}
+
 function baseDeps(overrides = {}) {
   const ledger = overrides.__ledger || makeLedgerHarness();
   return {
@@ -154,6 +175,8 @@ function baseDeps(overrides = {}) {
     requestGeneration: fakeRequestGeneration(),
     aiProvider: fakeAiProvider({ result: { role: 'Backend Engineer', company: 'Acme', skills: ['React', 'SQL'] } }),
     proofService: fakeProofService({ snapshot: { competencies: [] } }),
+    CapstoneSession: makeCapstoneSessionModel([]),
+    CapstoneGenerationRequest: makeCapstoneGenerationRequestModel([]),
     ...overrides,
   };
 }
@@ -228,6 +251,10 @@ test('startJourney: extraction success + generation kickoff success -> capstone_
   assert.strictEqual(genGen.calls[0].roleTrack, 'swe');
   assert.strictEqual(genGen.calls[0].language, 'javascript');
   assert.strictEqual(genGen.calls[0].difficulty, _helpers.DEFAULT_DIFFICULTY);
+  // Correlation-closure (Task 4 EXPANDED): generationRequestId is stamped
+  // the moment kickCapstoneGeneration resolves, well before bundleId/
+  // sessionId ever exist.
+  assert.strictEqual(journey.capstoneRef.generationRequestId, 'genreq-1');
 });
 
 test('startJourney: generation kickoff failure (e.g. no resolvable coding track) -> failed, generate step failed', async () => {
@@ -254,35 +281,74 @@ test('startJourney: enqueue failure from the existing generation entry point als
   assert.strictEqual(journey.steps.find((s) => s.key === 'generate').status, 'failed');
 });
 
-// ── advanceOnCapstoneGraded — hook matching + heuristic + ledger timing ────
+// ── advanceOnCapstoneGraded — correlation chain + heuristic + ledger timing ─
+//
+// Task 4 EXPANDED: the hook resolves sessionId -> bundle_id (CapstoneSession)
+// -> journey, either via a direct capstoneRef.bundleId match or (fallback,
+// the FIRST-grade path for every journey) via the CapstoneGenerationRequest
+// that produced the bundle -> capstoneRef.generationRequestId match.
 
 test('advanceOnCapstoneGraded: flag off -> {advanced:false}, zero writes', async () => {
-  const store = [journeyFixture({ capstoneRef: { bundleId: 'b1', sessionId: 'sess-1' } })];
-  const deps = baseDeps({ isAgentEnabled: () => false, ProofJourney: makeJourneyModel(store) });
+  const store = [journeyFixture({ capstoneRef: { bundleId: 'b1', sessionId: null } })];
+  const deps = baseDeps({
+    isAgentEnabled: () => false,
+    ProofJourney: makeJourneyModel(store),
+    CapstoneSession: makeCapstoneSessionModel([{ _id: 'sess-1', bundle_id: 'b1', user_id: USER }]),
+  });
   const result = await advanceOnCapstoneGraded({ userId: USER, sessionId: 'sess-1' }, deps);
   assert.deepStrictEqual(result, { advanced: false });
   assert.strictEqual(store[0].status, 'building');
 });
 
-test('advanceOnCapstoneGraded: wrong session -> no-op, never throws', async () => {
-  const store = [journeyFixture({ capstoneRef: { bundleId: 'b1', sessionId: 'sess-1' } })];
-  const deps = baseDeps({ ProofJourney: makeJourneyModel(store) });
+test('advanceOnCapstoneGraded: session not found -> no-op, never throws', async () => {
+  const store = [journeyFixture({ capstoneRef: { bundleId: 'b1', sessionId: null } })];
+  const deps = baseDeps({
+    ProofJourney: makeJourneyModel(store),
+    CapstoneSession: makeCapstoneSessionModel([]), // no such session
+  });
   const result = await advanceOnCapstoneGraded({ userId: USER, sessionId: 'sess-999' }, deps);
   assert.deepStrictEqual(result, { advanced: false });
   assert.strictEqual(store[0].status, 'building');
 });
 
-test('advanceOnCapstoneGraded: matching sessionId -> publishable, grade/build done, publish now, nextProofSuggestion computed, ledger outcomeSignal updated', async () => {
+test('advanceOnCapstoneGraded: no-match anywhere (bundle not correlated to any journey, no genReq) -> no-op', async () => {
+  const store = [journeyFixture({ capstoneRef: { bundleId: 'b-other', sessionId: null } })];
+  const deps = baseDeps({
+    ProofJourney: makeJourneyModel(store),
+    CapstoneSession: makeCapstoneSessionModel([{ _id: 'sess-1', bundle_id: 'b1', user_id: USER }]),
+    CapstoneGenerationRequest: makeCapstoneGenerationRequestModel([]), // no genReq for b1 either
+  });
+  const result = await advanceOnCapstoneGraded({ userId: USER, sessionId: 'sess-1' }, deps);
+  assert.deepStrictEqual(result, { advanced: false });
+  assert.strictEqual(store[0].status, 'building');
+});
+
+test('advanceOnCapstoneGraded: wrong user -> no-op (journey belongs to a different userId)', async () => {
+  const store = [journeyFixture({
+    userId: 'someone-else',
+    capstoneRef: { bundleId: 'b1', sessionId: null },
+  })];
+  const deps = baseDeps({
+    ProofJourney: makeJourneyModel(store),
+    CapstoneSession: makeCapstoneSessionModel([{ _id: 'sess-1', bundle_id: 'b1', user_id: 'someone-else' }]),
+  });
+  const result = await advanceOnCapstoneGraded({ userId: USER, sessionId: 'sess-1' }, deps);
+  assert.deepStrictEqual(result, { advanced: false });
+  assert.strictEqual(store[0].status, 'building');
+});
+
+test('advanceOnCapstoneGraded: direct bundleId match -> publishable, grade/build done, publish now, nextProofSuggestion computed, ledger outcomeSignal updated', async () => {
   const ledger = makeLedgerHarness();
   const ledgerRow = await ledger.record({ agentId: 'proof_builder', decisionType: 'artifact', userId: USER, action: { kind: 'proof_journey' } });
   const store = [journeyFixture({
-    capstoneRef: { bundleId: 'b1', sessionId: 'sess-1' },
+    capstoneRef: { bundleId: 'b1', sessionId: null },
     jdSummary: { role: 'Backend Engineer', company: 'Acme', skills: ['React', 'SQL'] },
     ledgerDecisionId: ledgerRow._id,
   })];
   const deps = baseDeps({
     __ledger: ledger,
     ProofJourney: makeJourneyModel(store),
+    CapstoneSession: makeCapstoneSessionModel([{ _id: 'sess-1', bundle_id: 'b1', user_id: USER }]),
     proofService: fakeProofService({ snapshot: { competencies: [{ name: 'React', score: 80, assessed: true }] } }),
   });
 
@@ -292,6 +358,8 @@ test('advanceOnCapstoneGraded: matching sessionId -> publishable, grade/build do
   assert.strictEqual(store[0].steps.find((s) => s.key === 'build').status, 'done');
   assert.strictEqual(store[0].steps.find((s) => s.key === 'grade').status, 'done');
   assert.strictEqual(store[0].steps.find((s) => s.key === 'publish').status, 'now');
+  // capstoneRef.sessionId is stamped even though the match was via bundleId.
+  assert.strictEqual(store[0].capstoneRef.sessionId, 'sess-1');
   // React is evidenced (competency match) -> SQL is the gap -> the suggestion.
   assert.strictEqual(store[0].nextProofSuggestion.skill, 'SQL');
 
@@ -299,6 +367,25 @@ test('advanceOnCapstoneGraded: matching sessionId -> publishable, grade/build do
   assert.deepStrictEqual(closedRow.outcomeSignal, { graded: true });
   assert.ok(closedRow._markModified.includes('outcomeSignal'));
   assert.strictEqual(closedRow._saveCount, 1);
+});
+
+test('advanceOnCapstoneGraded: full-chain match via CapstoneGenerationRequest fallback (bundleId not yet stamped on any journey)', async () => {
+  const store = [journeyFixture({
+    capstoneRef: { bundleId: null, sessionId: null, generationRequestId: 'genreq-1' },
+    jdSummary: { role: 'Backend Engineer', company: 'Acme', skills: ['React', 'SQL'] },
+  })];
+  const deps = baseDeps({
+    ProofJourney: makeJourneyModel(store),
+    CapstoneSession: makeCapstoneSessionModel([{ _id: 'sess-1', bundle_id: 'b1', user_id: USER }]),
+    CapstoneGenerationRequest: makeCapstoneGenerationRequestModel([{ _id: 'genreq-1', bundle_id: 'b1' }]),
+  });
+
+  const result = await advanceOnCapstoneGraded({ userId: USER, sessionId: 'sess-1' }, deps);
+  assert.strictEqual(result.advanced, true);
+  assert.strictEqual(store[0].status, 'publishable');
+  // Correlation closed: bundleId/sessionId are now stamped for future lookups.
+  assert.strictEqual(store[0].capstoneRef.bundleId, 'b1');
+  assert.strictEqual(store[0].capstoneRef.sessionId, 'sess-1');
 });
 
 test('advanceOnCapstoneGraded: idempotent — already publishable -> no-op, no duplicate ledger mutation', async () => {
@@ -309,7 +396,11 @@ test('advanceOnCapstoneGraded: idempotent — already publishable -> no-op, no d
     capstoneRef: { bundleId: 'b1', sessionId: 'sess-1' },
     ledgerDecisionId: ledgerRow._id,
   })];
-  const deps = baseDeps({ __ledger: ledger, ProofJourney: makeJourneyModel(store) });
+  const deps = baseDeps({
+    __ledger: ledger,
+    ProofJourney: makeJourneyModel(store),
+    CapstoneSession: makeCapstoneSessionModel([{ _id: 'sess-1', bundle_id: 'b1', user_id: USER }]),
+  });
   const result = await advanceOnCapstoneGraded({ userId: USER, sessionId: 'sess-1' }, deps);
   assert.deepStrictEqual(result, { advanced: false });
   assert.strictEqual(ledger.store.find((r) => r._id === ledgerRow._id).outcomeSignal, null);

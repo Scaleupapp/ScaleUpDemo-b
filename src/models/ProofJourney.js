@@ -17,13 +17,18 @@ const mongoose = require('mongoose');
  *   extracting → capstone_pending → building → grading → publishable → published
  *                                                                    ↘ failed (any stage)
  *
- * NOTE on capstoneRef: `bundleId`/`sessionId` are populated as the underlying
- * capstone moves through ITS OWN lifecycle (CapstoneGenerationRequest ready →
- * learner starts an attempt → CapstoneSession graded). Task 3/4 of this plan
- * wire the generation kickoff and the post-grade hook (advanceOnCapstoneGraded
- * matches by capstoneRef.sessionId); backfilling sessionId once the learner
- * actually starts the generated bundle is a known follow-up (no "session
- * started" hook exists yet in the plan) — see proofJourneyService docs.
+ * NOTE on capstoneRef: `generationRequestId` is stamped immediately at
+ * generation-kickoff time (runExtractionAndGeneration) since the
+ * CapstoneGenerationRequest exists right away. `bundleId`/`sessionId` are
+ * only known later, as the underlying capstone moves through ITS OWN
+ * lifecycle (CapstoneGenerationRequest ready → learner starts an attempt →
+ * CapstoneSession graded) — no "session started" hook exists yet, so this
+ * journey never observes bundleId/sessionId directly; instead
+ * advanceOnCapstoneGraded (Task 4 EXPANDED correlation closure) resolves the
+ * chain backwards from the graded session (sessionId → bundleId →
+ * CapstoneGenerationRequest → generationRequestId match) and stamps
+ * bundleId/sessionId onto the journey at that point — see
+ * proofJourneyService docs.
  *
  * `ledgerDecisionId` is additive plumbing (not in the original field list but
  * required to satisfy it): the single AgentDecision ledger row created in
@@ -41,6 +46,9 @@ const stepSchema = new mongoose.Schema({
 const capstoneRefSchema = new mongoose.Schema({
   bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle', default: null },
   sessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'CapstoneSession', default: null },
+  // Additive (Task 4 EXPANDED correlation closure). Stamped at generation-
+  // kickoff time, before bundleId/sessionId exist — see the class doc above.
+  generationRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'CapstoneGenerationRequest', default: null },
 }, { _id: false });
 
 const jdSummarySchema = new mongoose.Schema({
