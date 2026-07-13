@@ -1,12 +1,18 @@
 'use strict';
 
 /**
- * Author-agent run endpoints (agentic layer, Plan 3, Task 2).
+ * Author-agent run endpoints (agentic layer, Plan 3, Task 2; made
+ * engine-aware in Plan 7, Task 2).
  *
- * Kicks off authorAgentService's bounded generate -> QA -> repair loop for
- * MCQ authoring (startRun) and exposes a polling endpoint for its run status
- * (getRunStatus). Flag-off returns 404 (house convention: clients treat 404
- * as feature-off — see src/routes/v2/agentDecisions.js).
+ * Kicks off authorAgentService's engine-aware generate -> QA -> (repair,
+ * where applicable) run for ANY authorable assessment type — mcq, interview,
+ * capstone, drill (startRun) — and exposes a polling endpoint for its run
+ * status (getRunStatus). The route itself carries no engine-specific gate:
+ * authorAgentService.startRun owns the full authorability guard (assessment
+ * type + status); this route just scopes to the caller's institution and
+ * maps the service's errors onto HTTP status codes. Flag-off returns 404
+ * (house convention: clients treat 404 as feature-off — see
+ * src/routes/v2/agentDecisions.js).
  */
 const express = require('express');
 const institutionAuth = require('../../middleware/institutionAuth');
@@ -54,6 +60,7 @@ function makeHandlers(deps = {}) {
       if (/disabled/i.test(err.message)) return res.status(404).json({ success: false, message: 'Not found' });
       if (/not found/i.test(err.message)) return res.status(404).json({ success: false, message: 'Assessment not found' });
       if (/not authorable/i.test(err.message)) return res.status(409).json({ success: false, message: err.message });
+      if (/already in progress/i.test(err.message)) return res.status(409).json({ success: false, message: err.message });
       console.error('[institution/author-agent] startRun error', err);
       return res.status(500).json({ success: false, message: 'Could not start the author-agent run.' });
     }
