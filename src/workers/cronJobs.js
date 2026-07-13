@@ -133,11 +133,12 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
-  // 20. Intervention Weekly Brief — Sunday 22:30 UTC (Monday 04:00 IST). Generates
-  // weekly briefs for institution cohort intervention agent, ready before the
+  // 20. Intervention Weekly Brief — Sunday 23:00 UTC (Monday 04:30 IST). Staggered
+  // 30 minutes off the 22:15/22:30 UTC Sunday cron cluster; still generates
+  // weekly briefs for institution cohort intervention agent well before the
   // TPO's Monday morning.
   cronQueue.add('interventionWeeklyBrief', {}, {
-    repeat: { pattern: '30 22 * * 0' },
+    repeat: { pattern: '0 23 * * 0' },
     removeOnComplete: true,
   });
 
