@@ -12,8 +12,7 @@
  * zero network/DB in tests).
  */
 
-const OP_WHITELIST = new Set(['set_task_status', 'reset_skipped']);
-const STATUS_WHITELIST = new Set(['skipped', 'complete', 'pending']);
+const { OP_WHITELIST, STATUS_WHITELIST } = require('./agentPlanOps');
 
 function defaultDeps() {
   return {

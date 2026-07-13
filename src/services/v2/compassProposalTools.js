@@ -9,13 +9,13 @@
  * confirm card is deliberate — it is also the feedback-labeling mechanism
  * that trains every future version of this agent.
  *
- * Ops are a strict whitelist mirrored from agentDecisionService.applyPlanOps.
+ * Ops are a strict whitelist shared with agentDecisionService.applyPlanOps
+ * via ./agentPlanOps (the single source of truth for both).
  */
 
 const agentDecisionService = require('../agentDecisionService');
+const { OPS, STATUSES } = require('../agentPlanOps');
 
-const OPS = ['set_task_status', 'reset_skipped'];
-const STATUSES = ['skipped', 'complete', 'pending'];
 const MAX_OPS = 5;
 
 const PROPOSAL_TOOLS = [
