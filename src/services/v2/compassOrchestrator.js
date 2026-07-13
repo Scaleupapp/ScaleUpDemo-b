@@ -234,6 +234,8 @@ async function buildUserContext(userId) {
       recentTutor: (deepContext.recentAITutor?.topicsCovered || []).slice(0, 3),
       lastTutorQs: (deepContext.recentAITutor?.openQuestions || []).slice(0, 2),
       dueMisconceptionChecks: deepContext.dueMisconceptionChecks || undefined,
+      interviewProgramFocus: deepContext.interviewProgramFocus || undefined,
+      proofJourneyNext: deepContext.proofJourneyNext || undefined,
     } : null,
   };
 }
@@ -285,11 +287,21 @@ function buildSystemContext(ctx) {
     if (ctx.deep.dueMisconceptionChecks?.length) {
       lines.push(renderDueMisconceptionChecks(ctx.deep.dueMisconceptionChecks));
     }
+    if (ctx.deep.interviewProgramFocus) {
+      const rendered = renderInterviewProgramFocus(ctx.deep.interviewProgramFocus);
+      if (rendered) lines.push(rendered);
+    }
+    if (ctx.deep.proofJourneyNext) {
+      const rendered = renderProofJourneyNext(ctx.deep.proofJourneyNext);
+      if (rendered) lines.push(rendered);
+    }
     lines.push(`Use this context to make responses feel personal — don't ask the learner to repeat what we already know.`);
   }
   const agentHints = buildAgentHints({
     proposalsOn: isAgentEnabled('compass_actions'),
     misconceptionsOn: isAgentEnabled('misconception_tutor'),
+    interviewCoachOn: isAgentEnabled('interview_coach'),
+    proofBuilderOn: isAgentEnabled('proof_builder'),
   });
   return lines.join('\n') + agentHints;
 }
@@ -306,18 +318,50 @@ function renderDueMisconceptionChecks(items) {
 }
 
 /**
+ * Pure helper: renders the interview-program "tonight's focus" line for the
+ * system prompt. Returns '' for undefined/empty so callers can push it
+ * unconditionally.
+ */
+function renderInterviewProgramFocus(item) {
+  if (!item || !item.dimension) return '';
+  const role = item.targetRole ? ` for ${item.targetRole}` : '';
+  return `Interview program focus${role}: ${item.dimension} (score ${item.score}, delta ${item.delta}) — ${item.reason}.`;
+}
+
+/**
+ * Pure helper: renders the proof-journey "next step" line for the system
+ * prompt. Returns '' for undefined/empty so callers can push it
+ * unconditionally.
+ */
+function renderProofJourneyNext(item) {
+  if (!item || !item.status) return '';
+  const step = item.nextStepLabel ? ` Next step: ${item.nextStepLabel}.` : '';
+  const suggestion = item.nextProofSuggestion?.skill
+    ? ` Next proof suggestion: ${item.nextProofSuggestion.skill} (${item.nextProofSuggestion.reason}).`
+    : '';
+  return `Proof journey status: ${item.status}.${step}${suggestion}`;
+}
+
+/**
  * Pure helper: concatenates the flag-gated agent hint strings appended to the
  * Compass system prompt. Each hint contributes its own text verbatim when its
- * flag is on, '' when off — order is proposals hint first, then misconceptions.
+ * flag is on, '' when off — order is proposals, misconceptions, interview
+ * coach, proof builder.
  */
-function buildAgentHints({ proposalsOn, misconceptionsOn }) {
+function buildAgentHints({ proposalsOn, misconceptionsOn, interviewCoachOn, proofBuilderOn }) {
   const proposalHint = proposalsOn
     ? '\nWhen the learner wants to rearrange, lighten, or catch up on their plan, use propose_plan_update to offer a concrete change as a confirmable card — never claim a change was applied; the learner must confirm the card first.'
     : '';
   const misconceptionHint = misconceptionsOn
     ? '\nIf the learner context lists dueMisconceptionChecks, open with ONE 30-second inline check quiz targeting the oldest item before answering anything else this turn — frame it as a quick memory check ("One from last week — 30 seconds"), never as a test. Do not repeat a check the learner already answered this conversation.'
     : '';
-  return proposalHint + misconceptionHint;
+  const interviewCoachHint = interviewCoachOn
+    ? '\nIf the learner context lists interviewProgramFocus, weave tonight\'s focused session into your plan suggestions when interview or preparation topics come up — one concrete nudge, never more than once per conversation.'
+    : '';
+  const proofBuilderHint = proofBuilderOn
+    ? '\nIf the learner context lists proofJourneyNext, remind the learner of that next step when career or job topics come up — never nag more than once per conversation.'
+    : '';
+  return proposalHint + misconceptionHint + interviewCoachHint + proofBuilderHint;
 }
 
 /** Merge read tools with proposal tools when the compass_actions agent is on. */
@@ -1411,6 +1455,8 @@ module.exports = {
   buildSystemContext,
   buildAgentHints,
   renderDueMisconceptionChecks,
+  renderInterviewProgramFocus,
+  renderProofJourneyNext,
   buildToolset,
   callLLM,
   callLLMWithTools,

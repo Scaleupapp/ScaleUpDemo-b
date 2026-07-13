@@ -30,6 +30,8 @@ const Conversation = require('../models/Conversation');
 const misconceptionService = require('./misconceptionService');
 const spacedRepetitionService = require('./spacedRepetitionService');
 const cognitiveFingerprintService = require('./cognitiveFingerprintService');
+const interviewProgramService = require('./interviewProgramService');
+const proofJourneyService = require('./proofJourneyService');
 const { isAgentEnabled } = require('../config/agentFlags');
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -153,6 +155,46 @@ async function getUserContext(userId, { refresh = false } = {}) {
       context.dueMisconceptionChecks = await misconceptionService.getDueReviews(userId, 2);
     } catch (err) {
       console.warn('[userContextService] getDueReviews failed', err.message);
+    }
+  }
+
+  // Flag-gated: tonight's interview-program focus. Key is ABSENT (not null)
+  // when the flag is off, there's no active program, or the program has no
+  // computed focus yet (baseline needed) — same discipline as above.
+  if (isAgentEnabled('interview_coach')) {
+    try {
+      const program = await interviewProgramService.getProgram({ userId });
+      if (program && program.focus && program.focus.dimension) {
+        context.interviewProgramFocus = {
+          dimension: program.focus.dimension,
+          score: program.focus.score,
+          delta: program.focus.delta,
+          reason: program.focus.reason,
+          targetRole: program.target?.role ?? null,
+          driveDate: program.target?.driveDate ?? null,
+        };
+      }
+    } catch (err) {
+      console.warn('[userContextService] getProgram failed', err.message);
+    }
+  }
+
+  // Flag-gated: next proof-journey step. Key is ABSENT (not null) when the
+  // flag is off, there's no journey, or the journey isn't in an actionable
+  // state (building/publishable) — same discipline as above.
+  if (isAgentEnabled('proof_builder')) {
+    try {
+      const journey = await proofJourneyService.getJourney({ userId });
+      if (journey && (journey.status === 'building' || journey.status === 'publishable')) {
+        const nextStep = (journey.steps || []).find(s => s.status === 'now' || s.status === 'todo');
+        context.proofJourneyNext = {
+          status: journey.status,
+          nextStepLabel: nextStep ? nextStep.label : null,
+          nextProofSuggestion: journey.nextProofSuggestion ?? null,
+        };
+      }
+    } catch (err) {
+      console.warn('[userContextService] getJourney failed', err.message);
     }
   }
 
