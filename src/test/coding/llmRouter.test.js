@@ -49,7 +49,7 @@ test('getModelForTask: unknown task ID throws', () => {
 
 // ── getRoutingTable ───────────────────────────────────────────────────────────
 
-test('getRoutingTable: returns object with all 13 task IDs', () => {
+test('getRoutingTable: returns object with all 14 task IDs', () => {
   const table = getRoutingTable();
   assert.strictEqual(typeof table, 'object');
   assert.ok(table !== null);
@@ -68,6 +68,7 @@ test('getRoutingTable: returns object with all 13 task IDs', () => {
     'seeded_mistake_generator',
     'hidden_test_generator',
     'compass_coder',
+    'review_triage_brief',
   ];
 
   for (const taskId of EXPECTED_TASK_IDS) {
@@ -78,5 +79,11 @@ test('getRoutingTable: returns object with all 13 task IDs', () => {
   }
 
   assert.strictEqual(Object.keys(table).length, EXPECTED_TASK_IDS.length,
-    'Routing table should contain exactly 12 entries');
+    'Routing table should contain exactly 14 entries');
+});
+
+test('getModelForTask: review_triage_brief → anthropic + sonnet model', () => {
+  const result = getModelForTask('review_triage_brief');
+  assert.strictEqual(result.provider, 'anthropic');
+  assert.match(result.model, /sonnet/);
 });
