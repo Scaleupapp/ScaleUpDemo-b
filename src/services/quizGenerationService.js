@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { OPENAI_CHAT_MODEL } = require('../config/openaiModels');
+const { OPENAI_CHAT_MODEL, OPENAI_MAX_OUTPUT_TOKENS } = require('../config/openaiModels');
 const openai = require('../config/openai');
 const Content = require('../models/Content');
 const Quiz = require('../models/Quiz');
@@ -13,6 +13,26 @@ const { DIFFICULTY_MIX } = require('../utils/constants');
 // — D2C included — to drop malformed/leaky/duplicate items so the existing
 // top-up loop replaces them. Requiring this module is cheap (no client init).
 const questionQaService = require('./institution/assessment/questionQaService');
+
+/**
+ * Pure helper: derive the max_tokens to request from OpenAI for a batch of
+ * `count` questions, given a per-question token budget, clamped to the
+ * model's hard output cap.
+ *
+ * WHY the clamp matters: a request above the model's output cap doesn't get
+ * truncated to the cap — OpenAI rejects the ENTIRE call with a 400, so
+ * generation returns ZERO questions. This bit institutional MCQ authoring
+ * for any pool size where count * tokensPerQuestion exceeded gpt-4o's
+ * 16,384-token output limit (e.g. 30 questions x 700 tokens/question =
+ * 21,000). Clamping instead of failing outright is safe here because the
+ * existing continuation loop (see below) already backfills any shortfall
+ * from a truncated/short response with follow-up calls — so a clamped
+ * request degrades gracefully instead of failing outright.
+ */
+function computeMaxTokens(questionCount, tokensPerQuestion, cap = OPENAI_MAX_OUTPUT_TOKENS) {
+  const requested = Math.max(4096, questionCount * tokensPerQuestion);
+  return Math.min(cap, requested);
+}
 
 const QUIZ_SYSTEM_PROMPT = `You are an expert educational assessment creator. Your quizzes must actually test understanding — not be trivially solvable by elimination.
 
@@ -419,7 +439,14 @@ class QuizGenerationService {
       const complexTypes = ['case_study', 'applied_scenario', 'situational_judgment', 'exam_style'];
       const isComplexType = complexTypes.includes(effectiveAssessmentType);
       const tokensPerQuestion = competencyContext ? 700 : isComplexType ? 800 : 500;
-      const maxTokens = Math.max(4096, questionCount * tokensPerQuestion);
+      // Clamp to the model's output cap — a request above it fails outright
+      // (see computeMaxTokens doc comment above). The continuation loop
+      // below backfills any shortfall, so clamping here is safe.
+      const unclampedTokens = Math.max(4096, questionCount * tokensPerQuestion);
+      const maxTokens = computeMaxTokens(questionCount, tokensPerQuestion);
+      if (maxTokens < unclampedTokens) {
+        console.warn(`[QuizGeneration] clamped max_tokens ${unclampedTokens} -> ${maxTokens} (model cap); continuation loop will backfill`);
+      }
 
       console.log(`[QuizGeneration] Calling OpenAI for topic="${topic}", questionCount=${questionCount}, assessmentType=${effectiveAssessmentType || 'mixed'}, contentCount=${conceptData.length}, competencyAware=${!!competencyContext}, maxTokens=${maxTokens}`);
 
@@ -469,6 +496,12 @@ class QuizGenerationService {
           note: `You already generated ${questions.length} questions. Generate exactly ${remaining} MORE unique questions on the same topic "${topic}". Do NOT repeat any of these existing questions: ${questions.map((q, i) => `Q${i+1}: ${q.questionText.substring(0, 60)}`).join('; ')}`,
         }) + groundingBlock;
 
+        const contMaxTokens = computeMaxTokens(remaining, tokensPerQuestion);
+        const contUnclamped = Math.max(4096, remaining * tokensPerQuestion);
+        if (contMaxTokens < contUnclamped) {
+          console.warn(`[QuizGeneration] clamped max_tokens ${contUnclamped} -> ${contMaxTokens} (model cap); continuation loop will backfill`);
+        }
+
         const contResponse = await openai.chat.completions.create({
           model: OPENAI_CHAT_MODEL,
           messages: [
@@ -477,7 +510,7 @@ class QuizGenerationService {
           ],
           response_format: { type: 'json_object' },
           temperature: 0.75,
-          max_tokens: Math.max(4096, remaining * tokensPerQuestion),
+          max_tokens: contMaxTokens,
         });
 
         const contParsed = JSON.parse(contResponse.choices[0].message.content);
@@ -631,4 +664,5 @@ class QuizGenerationService {
 
 const _instance = new QuizGenerationService();
 _instance.DIAGNOSTIC_QUIZ_SYSTEM_PROMPT = DIAGNOSTIC_QUIZ_SYSTEM_PROMPT;
+_instance.computeMaxTokens = computeMaxTokens;
 module.exports = _instance;
