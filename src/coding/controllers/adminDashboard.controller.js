@@ -1,5 +1,6 @@
 'use strict';
 
+const mongoose = require('mongoose');
 const EvaluationAnchor = require('../models/evaluationAnchor.model');
 const HumanReviewQueue = require('../models/humanReviewQueue.model');
 const CapstoneSession = require('../models/capstoneSession.model');
@@ -139,30 +140,50 @@ async function humanReview(req, res) {
  * down) a real review action.
  */
 async function resolveHumanReview(req, res) {
-  const { id } = req.params;
-  const resolution = req.body && req.body.resolution;
-  const notes = req.body && req.body.notes;
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
 
-  if (resolution !== 'approved' && resolution !== 'rejected') {
-    return res.status(400).json({ error: 'resolution must be "approved" or "rejected"' });
+    const resolution = req.body && req.body.resolution;
+    const notes = req.body && req.body.notes;
+
+    if (resolution !== 'approved' && resolution !== 'rejected') {
+      return res.status(400).json({ error: 'resolution must be "approved" or "rejected"' });
+    }
+
+    const item = await HumanReviewQueue.findById(id);
+    if (!item) return res.status(404).json({ error: 'review item not found' });
+
+    // Idempotency guard: the audit trail (reviewer_id/review_notes/reviewed_at)
+    // is written once. A second resolve on an already-resolved item (double
+    // submit, stale client, retry) must not silently overwrite who/when/why
+    // it was decided — reject instead of clobbering.
+    if (item.status !== 'pending') {
+      return res.status(409).json({ error: 'already_resolved', status: item.status });
+    }
+
+    item.status = resolution;
+    item.reviewer_id = req.user && req.user.userId;
+    if (typeof notes === 'string' && notes.trim()) item.review_notes = notes.trim();
+    item.reviewed_at = new Date();
+    await item.save();
+
+    // Fire-and-forget: agree -> the triage dossier closes 'accepted'; overrule
+    // -> 'adjusted'. Never awaited/blocking — never in the critical path.
+    reviewTriageService
+      .closeOnResolution({ reviewItemId: id, resolution })
+      .catch((e) => console.warn('[reviewTriageHook]', e.message));
+
+    res.json({ item: item.toObject() });
+  } catch (err) {
+    // Guards against a malformed :id or an unexpected model/service failure
+    // ever escaping as an unhandled rejection (this route has no upstream
+    // async-error middleware — see sibling coding controllers' convention).
+    console.error('[coding/admin/resolveHumanReview]', err);
+    res.status(500).json({ error: 'internal_error' });
   }
-
-  const item = await HumanReviewQueue.findById(id);
-  if (!item) return res.status(404).json({ error: 'review item not found' });
-
-  item.status = resolution;
-  item.reviewer_id = req.user && req.user.userId;
-  if (typeof notes === 'string' && notes.trim()) item.review_notes = notes.trim();
-  item.reviewed_at = new Date();
-  await item.save();
-
-  // Fire-and-forget: agree -> the triage dossier closes 'accepted'; overrule
-  // -> 'adjusted'. Never awaited/blocking — never in the critical path.
-  reviewTriageService
-    .closeOnResolution({ reviewItemId: id, resolution })
-    .catch((e) => console.warn('[reviewTriageHook]', e.message));
-
-  res.json({ item: item.toObject() });
 }
 
 /** GET /api/coding/admin/cost-summary?days=30 */

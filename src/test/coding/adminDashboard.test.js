@@ -123,14 +123,21 @@ test('humanReview: dossier is null when no AgentDecision row exists for the item
 
 // ── POST /human-review/:id/resolve ──────────────────────────────────────────
 
+// Valid 24-hex-char ObjectId strings — mongoose.Types.ObjectId.isValid()
+// rejects short fixture ids like 'item3', so the resolve endpoint's ids
+// must look like real Mongo ids.
+const ITEM3_ID = '64b7f0000000000000000003';
+const ITEM4_ID = '64b7f0000000000000000004';
+const ITEM5_ID = '64b7f0000000000000000005';
+
 test('resolveHumanReview: persists the resolution then fires closeOnResolution fire-and-forget', async () => {
-  const item = fakeDoc({ _id: 'item3', status: 'pending', bundle_id: 'b1' });
-  fakeHRQ.findById = (id) => { assert.strictEqual(id, 'item3'); return Promise.resolve(item); };
+  const item = fakeDoc({ _id: ITEM3_ID, status: 'pending', bundle_id: 'b1' });
+  fakeHRQ.findById = (id) => { assert.strictEqual(id, ITEM3_ID); return Promise.resolve(item); };
 
   let hookCall = null;
   fakeTriageService.closeOnResolution = async (args) => { hookCall = args; return { closed: true }; };
 
-  const req = { params: { id: 'item3' }, body: { resolution: 'approved' }, user: { userId: 'admin1' } };
+  const req = { params: { id: ITEM3_ID }, body: { resolution: 'approved' }, user: { userId: 'admin1' } };
   const res = fakeRes();
   await ctrl.resolveHumanReview(req, res);
 
@@ -141,17 +148,17 @@ test('resolveHumanReview: persists the resolution then fires closeOnResolution f
   assert.strictEqual(res._json.item.status, 'approved');
   // The hook was invoked synchronously (its own promise need not resolve
   // before the response is sent — fire-and-forget, never in the critical path).
-  assert.deepStrictEqual(hookCall, { reviewItemId: 'item3', resolution: 'approved' });
+  assert.deepStrictEqual(hookCall, { reviewItemId: ITEM3_ID, resolution: 'approved' });
 });
 
 test('resolveHumanReview: flag-off interplay — resolving an item with no open dossier still succeeds (closeOnResolution no-ops)', async () => {
-  const item = fakeDoc({ _id: 'item4', status: 'pending' });
+  const item = fakeDoc({ _id: ITEM4_ID, status: 'pending' });
   fakeHRQ.findById = () => Promise.resolve(item);
   // Simulates review_triage flag off / never swept: closeOnResolution finds
   // no dossier row and no-ops rather than throwing.
   fakeTriageService.closeOnResolution = async () => ({ closed: false });
 
-  const req = { params: { id: 'item4' }, body: { resolution: 'rejected' }, user: { userId: 'admin1' } };
+  const req = { params: { id: ITEM4_ID }, body: { resolution: 'rejected' }, user: { userId: 'admin1' } };
   const res = fakeRes();
   await ctrl.resolveHumanReview(req, res);
 
@@ -159,11 +166,60 @@ test('resolveHumanReview: flag-off interplay — resolving an item with no open 
   assert.strictEqual(item.status, 'rejected');
 
   // Invalid resolution is rejected before any state mutation or hook call.
-  const badReq = { params: { id: 'item4' }, body: { resolution: 'maybe' }, user: { userId: 'admin1' } };
+  const badReq = { params: { id: ITEM4_ID }, body: { resolution: 'maybe' }, user: { userId: 'admin1' } };
   const badRes = fakeRes();
   let hookCalledForBadReq = false;
   fakeTriageService.closeOnResolution = async () => { hookCalledForBadReq = true; return { closed: false }; };
   await ctrl.resolveHumanReview(badReq, badRes);
   assert.strictEqual(badRes._status, 400);
   assert.strictEqual(hookCalledForBadReq, false);
+});
+
+test('resolveHumanReview: malformed :id short-circuits with 400 before touching the model', async () => {
+  let findByIdCalled = false;
+  fakeHRQ.findById = () => { findByIdCalled = true; return Promise.resolve(null); };
+
+  const req = { params: { id: 'not-a-valid-object-id' }, body: { resolution: 'approved' }, user: { userId: 'admin1' } };
+  const res = fakeRes();
+  await ctrl.resolveHumanReview(req, res);
+
+  assert.strictEqual(res._status, 400);
+  assert.strictEqual(res._json.error, 'invalid_id');
+  // A malformed id used to reach HumanReviewQueue.findById() and reject with
+  // a CastError with no catch around it — now it never gets that far.
+  assert.strictEqual(findByIdCalled, false);
+});
+
+test('resolveHumanReview: re-resolving an already-resolved item returns 409 and leaves the audit trail untouched', async () => {
+  const reviewedAt = new Date('2026-07-01T00:00:00.000Z');
+  const item = fakeDoc({
+    _id: ITEM5_ID,
+    status: 'approved',
+    reviewer_id: 'admin-original',
+    review_notes: 'original decision',
+    reviewed_at: reviewedAt,
+  });
+  fakeHRQ.findById = () => Promise.resolve(item);
+
+  let hookCalled = false;
+  fakeTriageService.closeOnResolution = async () => { hookCalled = true; return { closed: true }; };
+
+  const req = {
+    params: { id: ITEM5_ID },
+    body: { resolution: 'rejected', notes: 'trying to overwrite' },
+    user: { userId: 'admin-second' },
+  };
+  const res = fakeRes();
+  await ctrl.resolveHumanReview(req, res);
+
+  assert.strictEqual(res._status, 409);
+  assert.strictEqual(res._json.error, 'already_resolved');
+  assert.strictEqual(res._json.status, 'approved');
+
+  // Original audit trail fields are untouched — no overwrite occurred.
+  assert.strictEqual(item.status, 'approved');
+  assert.strictEqual(item.reviewer_id, 'admin-original');
+  assert.strictEqual(item.review_notes, 'original decision');
+  assert.strictEqual(item.reviewed_at, reviewedAt);
+  assert.strictEqual(hookCalled, false);
 });
