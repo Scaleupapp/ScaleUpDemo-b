@@ -140,6 +140,85 @@ test('checkTopicEcho fails when no topic token appears', () => {
 test('checkTopicEcho is a no-op when topic is absent', () => {
   assert.strictEqual(qa.checkTopicEcho(goodQ(), ''), null);
 });
+test('checkTopicEcho is a no-op when topic is missing (undefined)', () => {
+  assert.strictEqual(qa.checkTopicEcho(goodQ(), undefined), null);
+});
+
+// Regression: prod incident — topic "Probabilities" rejected 52/67 good
+// questions solely because the stem says "probability", not "probabilities".
+test('checkTopicEcho REGRESSION: "Probabilities" topic passes a "probability" stem', () => {
+  const q = goodQ({
+    questionText: 'What is the probability of drawing two aces from a standard deck?',
+    options: [
+      { label: 'A', text: '1/221' },
+      { label: 'B', text: '1/13' },
+      { label: 'C', text: '4/52' },
+      { label: 'D', text: '1/52' },
+    ],
+    correctAnswer: 'A',
+  });
+  assert.strictEqual(qa.checkTopicEcho(q, 'Probabilities'), null);
+});
+
+test('checkTopicEcho: "Data Interpretation" topic passes a stem using "interpreting"', () => {
+  const q = goodQ({
+    questionText: 'When interpreting the bar chart below, which quarter had the highest revenue?',
+  });
+  assert.strictEqual(qa.checkTopicEcho(q, 'Data Interpretation'), null);
+});
+
+test('checkTopicEcho: "Time and Work" topic passes a "workers" stem (plural, not just suffix)', () => {
+  const q = goodQ({
+    questionText: 'If 6 workers can complete a job in 10 days, how many days will 15 workers take?',
+  });
+  assert.strictEqual(qa.checkTopicEcho(q, 'Time and Work'), null);
+});
+
+test('checkTopicEcho: matches via the question\'s own concept/competency metadata field', () => {
+  // Stem itself never mentions the topic, but the generator-tagged `concept`
+  // field does — this must still pass (rule 3 of the doc comment).
+  const q = goodQ({
+    questionText: 'A fair six-sided die is rolled twice. What is the chance both rolls show a 6?',
+    concept: 'probability',
+  });
+  assert.strictEqual(qa.checkTopicEcho(q, 'Probabilities'), null);
+});
+
+test('checkTopicEcho still rejects a genuinely off-topic question (guard is not neutered)', () => {
+  const q = goodQ({
+    questionText: 'Which pigment absorbs light most efficiently during photosynthesis in plant cells?',
+    options: [
+      { label: 'A', text: 'Chlorophyll a' },
+      { label: 'B', text: 'Carotenoid' },
+      { label: 'C', text: 'Anthocyanin' },
+      { label: 'D', text: 'Xanthophyll' },
+    ],
+    correctAnswer: 'A',
+  });
+  assert.strictEqual(qa.checkTopicEcho(q, 'Probabilities'), 'topic_echo_missing');
+});
+
+// ── stemToken (pure helper) ───────────────────────────────────────────────────
+
+test('stemToken: plural/suffix family collapses to a shared prefix', () => {
+  assert.strictEqual(qa.stemToken('probability'), qa.stemToken('probabilities'));
+  assert.strictEqual(qa.stemToken('probability'), qa.stemToken('probabilistic'));
+  assert.strictEqual(qa.stemToken('interpret'), qa.stemToken('interpreting'));
+  assert.strictEqual(qa.stemToken('interpret'), qa.stemToken('interpretation'));
+});
+test('stemToken: short tokens (< 6 chars) pass through unchanged', () => {
+  assert.strictEqual(qa.stemToken('work'), 'work');
+  assert.strictEqual(qa.stemToken('time'), 'time');
+});
+test('stemToken: is total — never throws on nullish/empty/non-string input', () => {
+  assert.strictEqual(qa.stemToken(''), '');
+  assert.strictEqual(qa.stemToken(null), '');
+  assert.strictEqual(qa.stemToken(undefined), '');
+  assert.strictEqual(qa.stemToken(123), '123');
+});
+test('stemToken: lowercases input', () => {
+  assert.strictEqual(qa.stemToken('Probability'), qa.stemToken('probability'));
+});
 
 // ── Gate 1: checkDedup (set-level) ────────────────────────────────────────────
 

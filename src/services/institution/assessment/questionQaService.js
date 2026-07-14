@@ -147,14 +147,75 @@ function checkStemKeywordLeak(q) {
   return null;
 }
 
-/** Each item should name-check the requested topic domain (cheap heuristic). */
+/** Longest raw-token length eligible for the prefix-overlap comparison in checkTopicEcho. */
+const TOPIC_PREFIX_MIN_LEN = 5;
+/** Truncation length for the topic-echo stemmer (see stemToken doc comment). */
+const STEM_PREFIX_LEN = 6;
+
+/**
+ * stemToken(t) — total, conservative morphological stem for a lowercase word,
+ * used ONLY by checkTopicEcho's cheap "did the topic get mentioned at all"
+ * heuristic (not by dedup/keyword-leak, which need exact tokens).
+ *
+ * Approach: truncate to the first STEM_PREFIX_LEN (6) characters for any
+ * token that long or longer; shorter tokens pass through unchanged. A real
+ * suffix-stripping stemmer (Porter etc.) is overkill here and has its own
+ * edge cases (irregular plurals, "-ion"/"-ies" ambiguity); a fixed prefix is
+ * simple, predictable, and total (never throws, no dictionary needed). It
+ * collapses the exact family this bug was about: "probability" / "probabilities"
+ * / "probabilistic" all truncate to "probab". It intentionally does NOT
+ * guarantee every plural/suffix pair collapses (e.g. "work" vs "workers"
+ * truncate to "work" vs "worker" — different) — that gap is covered by the
+ * prefix-overlap check below, so the two rules together are the fix, not
+ * stemToken alone.
+ *
+ * @param {string} t
+ * @returns {string} lowercased, truncated stem; '' for nullish/empty input.
+ */
+function stemToken(t) {
+  const s = String(t == null ? '' : t).toLowerCase();
+  return s.length >= STEM_PREFIX_LEN ? s.slice(0, STEM_PREFIX_LEN) : s;
+}
+
+/**
+ * Each item should name-check the requested topic domain — a CHEAP guard
+ * against wildly off-topic generations, not the authoritative relevance
+ * check. The authoritative gate is the LLM judge's `topicRelevance` score
+ * (Gate 3, JUDGE_DIMENSIONS) — it already reads the topic, syllabus excerpt,
+ * and full question, and correctly rejects genuinely off-topic items. This
+ * lint exists only to save generation/QA budget on obvious misses before
+ * spending an LLM call. Being strict here has no upside: it only burns
+ * generation budget on false rejections (a plural, a gerund, a synonym) that
+ * the judge would have passed anyway. Prod incident: topic "Probabilities"
+ * rejected 52/67 good questions over "probability" vs "probabilities" alone.
+ *
+ * Matches (any one is sufficient — only reject when NONE hold):
+ *   1. A stemmed topic token equals a stemmed haystack token.
+ *   2. A topic token is a raw prefix of a haystack token, or vice versa,
+ *      where the longer of the two is >= TOPIC_PREFIX_MIN_LEN chars (avoids
+ *      noise matches off very short words).
+ *   3. The above also runs against the question's own `concept`/`competency`
+ *      metadata fields (set by the generator — see models/Quiz.js), folded
+ *      into the haystack, so a correctly-tagged question is never rejected
+ *      just because the stem itself phrases the topic differently.
+ */
 function checkTopicEcho(q, topic) {
   if (!topic) return null;
   const topicTokens = tokenize(topic).filter((t) => t.length >= TOPIC_TOKEN_MIN_LEN);
   if (topicTokens.length === 0) return null;
   const { stem, options } = normalizeQuestion(q);
-  const haystack = (stem + ' ' + options.map((o) => o.text).join(' ')).toLowerCase();
-  const anyMatch = topicTokens.some((t) => haystack.includes(t));
+  const metaText = [q && q.concept, q && q.competency].filter(Boolean).join(' ');
+  const haystackTokens = tokenize(stem + ' ' + options.map((o) => o.text).join(' ') + ' ' + metaText);
+  const stemmedHaystack = new Set(haystackTokens.map(stemToken));
+
+  const anyMatch = topicTokens.some((tt) => {
+    if (stemmedHaystack.has(stemToken(tt))) return true;
+    return haystackTokens.some((ht) => {
+      const longer = Math.max(tt.length, ht.length);
+      if (longer < TOPIC_PREFIX_MIN_LEN) return false;
+      return tt.length <= ht.length ? ht.startsWith(tt) : tt.startsWith(ht);
+    });
+  });
   return anyMatch ? null : 'topic_echo_missing';
 }
 
@@ -451,6 +512,7 @@ module.exports = {
   checkStemKeywordLeak,
   checkTopicEcho,
   checkDedup,
+  stemToken,
   // shape validators
   shapeSolver,
   shapeJudge,
@@ -458,5 +520,6 @@ module.exports = {
   constants: {
     KEYWORD_MIN_LEN, TOPIC_TOKEN_MIN_LEN, LENGTH_BIAS_RATIO,
     LETTER_SKEW_RATIO, DEDUP_JACCARD, SOLVER_MIN_CONFIDENCE, JUDGE_MIN_SCORE, JUDGE_DIMENSIONS,
+    TOPIC_PREFIX_MIN_LEN, STEM_PREFIX_LEN,
   },
 };
