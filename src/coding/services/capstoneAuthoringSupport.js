@@ -5,6 +5,17 @@
  * Extracted helper that creates a CapstoneGenerationRequest and enqueues it.
  * Used by both the D2C capstones controller (generateCapstone) and the
  * institution assessmentAuthoringService (authorCapstone).
+ *
+ * Ownership: the caller passes EXACTLY ONE of `userId` (D2C — one student
+ * generating their own capstone) or `institutionId` (institution — a TPO /
+ * author agent authoring a capstone for a cohort, which has no single
+ * student owner). `cohortId` / `assessmentId` / `requestedByInstitutionUserId`
+ * are optional enrichment carried alongside `institutionId`, never a
+ * substitute for it. Whichever mode is given is persisted onto the matching
+ * new fields on CapstoneGenerationRequest — an InstitutionUser id must NEVER
+ * land in `user_id` (that was the original bug: assessment.createdBy, an
+ * InstitutionUser id, was being passed as `userId` here). The model's own
+ * pre('validate') hook is the final backstop if a caller gets this wrong.
  */
 
 /**
@@ -15,12 +26,25 @@
  *   - marks reqDoc.status = 'failed' (best-effort)
  *   - re-throws the enqueue error so the caller can handle it (e.g. return 503)
  *
- * @param {{ userId, roleTrack, difficulty, language, jobDescription, topicHint }} params
+ * @param {{ userId?, institutionId?, cohortId?, assessmentId?,
+ *           requestedByInstitutionUserId?, roleTrack, difficulty, language,
+ *           jobDescription, topicHint }} params
  * @param {object} deps  - injectable: { CapstoneGenerationRequest, capstoneGenerationWorker }
  * @returns {Promise<object>} reqDoc
  */
 async function requestGeneration(
-  { userId, roleTrack, difficulty, language, jobDescription, topicHint },
+  {
+    userId,
+    institutionId,
+    cohortId,
+    assessmentId,
+    requestedByInstitutionUserId,
+    roleTrack,
+    difficulty,
+    language,
+    jobDescription,
+    topicHint,
+  },
   deps = {}
 ) {
   const CapstoneGenerationRequest =
@@ -30,8 +54,17 @@ async function requestGeneration(
     deps.capstoneGenerationWorker ||
     require('../workers/capstoneGeneration.worker');
 
+  const ownership = institutionId
+    ? {
+        institution_id: institutionId,
+        cohort_id: cohortId || undefined,
+        assessment_id: assessmentId || undefined,
+        requested_by_institution_user: requestedByInstitutionUserId || undefined,
+      }
+    : { user_id: userId };
+
   const reqDoc = await CapstoneGenerationRequest.create({
-    user_id: userId,
+    ...ownership,
     job_description: jobDescription || '',
     topic_hint: topicHint || '',
     role_track: roleTrack,
