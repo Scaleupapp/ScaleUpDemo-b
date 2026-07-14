@@ -180,6 +180,100 @@ test('POST author-agent: service "assessment not authorable" for a released asse
   assert.strictEqual(r.body.success, false);
 });
 
+// ── POST /agent/create-assessment — the one-prompt path ──────────────────
+
+test('POST agent/create-assessment: happy path returns assessmentId/decisionId/spec', async () => {
+  const spec = { type: 'mcq', title: 'Aptitude Test', config: { mcq: { topic: 'Aptitude' } } };
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async ({ institutionId, cohortId, actorInstitutionUserId, brief }) => {
+      assert.strictEqual(institutionId, 'inst1');
+      assert.strictEqual(cohortId, 'c1');
+      assert.strictEqual(actorInstitutionUserId, 'iu1');
+      assert.strictEqual(brief, '20-question aptitude MCQ, 30 minutes');
+      return { assessmentId: 'a1', decisionId: 'dec1', spec };
+    },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: '20-question aptitude MCQ, 30 minutes' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 200);
+  assert.deepStrictEqual(r.body, {
+    success: true,
+    data: { assessmentId: 'a1', decisionId: 'dec1', spec },
+  });
+});
+
+test('POST agent/create-assessment: flag off -> 404 envelope', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => false,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(baseReq({ body: { cohortId: 'c1', brief: 'x' } }), r);
+  assert.strictEqual(r.statusCode, 404);
+  assert.strictEqual(r.body.success, false);
+});
+
+test('POST agent/create-assessment: missing cohortId -> 400', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(baseReq({ body: { brief: 'x' } }), r);
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.success, false);
+});
+
+test('POST agent/create-assessment: missing brief -> 400', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(baseReq({ body: { cohortId: 'c1' } }), r);
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.success, false);
+});
+
+test('POST agent/create-assessment: cohort not found -> 404', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('cohort not found'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(baseReq({ body: { cohortId: 'nope', brief: 'x' } }), r);
+  assert.strictEqual(r.statusCode, 404);
+  assert.strictEqual(r.body.success, false);
+});
+
+test('POST agent/create-assessment: unparseable brief -> 422', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('could not understand the brief'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(baseReq({ body: { cohortId: 'c1', brief: 'asdkjfh' } }), r);
+  assert.strictEqual(r.statusCode, 422);
+  assert.strictEqual(r.body.success, false);
+});
+
+test('POST agent/create-assessment: unexpected service error -> 500', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('boom'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(baseReq({ body: { cohortId: 'c1', brief: 'x' } }), r);
+  assert.strictEqual(r.statusCode, 500);
+  assert.strictEqual(r.body.success, false);
+});
+
+// ── back to author-agent run status coverage ──────────────────────────────
+
 test('GET author-agent run status: passes through engine + evidence', async () => {
   const decisionId = new mongoose.Types.ObjectId();
   const evidence = { bundleId: 'b1', bundleStatus: 'active', roleTrack: 'backend', difficulty: 'medium', language: 'python', humanReviewed: true };

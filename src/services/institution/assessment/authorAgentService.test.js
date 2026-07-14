@@ -8,6 +8,7 @@ const {
   runAuthoring,
   getRunStatus,
   reapOrphanedRuns,
+  createAndAuthor,
   _helpers: { computeFlaggedIndices },
 } = require('./authorAgentService');
 
@@ -487,6 +488,50 @@ test('startRun: happy path records decision and returns decisionId', async () =>
   assert.ok(Array.isArray(recordedPayload.action.runLog) && recordedPayload.action.runLog.length === 1);
 });
 
+// ── startRun: createdByAgent is written atomically into the record() payload ──
+// (never patched onto the row after the fact — see authorAgentService.js's
+// startRun/createAndAuthor doc comments for why a post-hoc save would race
+// runAuthoring's fire-and-forget mutations of the same row.)
+
+test('startRun: without createdByAgent, the record() payload carries no createdByAgent key at all', async () => {
+  const assessment = baseAssessment({ questions: [passedQuestion()], status: 'configured' });
+  let recordedPayload = null;
+  const deps = startRunDeps({
+    assessment,
+    record: async (payload) => {
+      recordedPayload = payload;
+      return { _id: 'dec-new', action: payload.action };
+    },
+  });
+
+  await startRun({ assessmentId: 'a1', institutionId: 'inst1', brief: 'hand-configured run' }, deps);
+
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(recordedPayload.action, 'createdByAgent'),
+    false,
+    'existing callers that never pass createdByAgent must see byte-identical action shape'
+  );
+});
+
+test('startRun: createdByAgent: true -> record() payload carries action.createdByAgent === true', async () => {
+  const assessment = baseAssessment({ questions: [passedQuestion()], status: 'configured' });
+  let recordedPayload = null;
+  const deps = startRunDeps({
+    assessment,
+    record: async (payload) => {
+      recordedPayload = payload;
+      return { _id: 'dec-new', action: payload.action };
+    },
+  });
+
+  await startRun(
+    { assessmentId: 'a1', institutionId: 'inst1', brief: 'one-prompt create', createdByAgent: true },
+    deps
+  );
+
+  assert.strictEqual(recordedPayload.action.createdByAgent, true);
+});
+
 // ── getRunStatus ──────────────────────────────────────────────────────
 
 test('getRunStatus: returns generating status when result is still null', async () => {
@@ -942,4 +987,186 @@ test('reapOrphanedRuns: no orphaned rows -> reaped 0, never throws', async () =>
   const Assessment = makeAssessmentModel({});
   const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
   assert.strictEqual(reaped, 0);
+});
+
+// ── createAndAuthor: the one-prompt path (parseBrief -> createAssessment -> ──
+// ── the EXISTING startRun/runAuthoring, never reimplemented) ─────────────
+
+const mcqSpec = {
+  type: 'mcq',
+  title: 'Aptitude Test',
+  config: { mcq: { questionCount: 20, totalQuestions: 30, durationSeconds: 1800, assessmentType: 'mixed', topic: 'Aptitude' } },
+};
+
+function createAndAuthorDeps({ agentEnabled = true, spec, createAssessmentImpl } = {}) {
+  const decisionStore = {};
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = {};
+  const Assessment = makeAssessmentModel(assessmentStore);
+
+  const deps = {
+    isAgentEnabled: () => agentEnabled,
+    AgentDecision,
+    Assessment,
+    InstitutionCohort: { findOne: () => ({ select: async () => null }) },
+    assessmentSpecService: {
+      parseBrief: async () => {
+        if (spec === undefined) throw new Error('spec fixture not provided');
+        return spec;
+      },
+    },
+    assessmentService: {
+      createAssessment: createAssessmentImpl || (async (scope, payload) => {
+        const doc = { _id: 'a1', institutionId: scope.institutionId, status: 'draft', type: payload.type, config: payload.config, createdBy: payload.createdBy };
+        assessmentStore.a1 = doc;
+        return doc;
+      }),
+    },
+    authoring: {
+      authorMcq: async () => assessmentStore.a1,
+      authorInterview: async () => assessmentStore.a1,
+      authorCapstone: async () => assessmentStore.a1,
+      authorDrill: async () => assessmentStore.a1,
+      regenerateQuestion: async () => {},
+    },
+    // Real record() is exercised here (not a stub) — it just needs the fake
+    // AgentDecision above, which the spread of `d` into d.record(payload, d)
+    // supplies.
+    record: require('../../agentDecisionService').record,
+  };
+
+  return { deps, decisionStore, assessmentStore };
+}
+
+test('createAndAuthor: agent disabled -> throws /disabled/', async () => {
+  const { deps } = createAndAuthorDeps({ agentEnabled: false, spec: mcqSpec });
+  await assert.rejects(
+    createAndAuthor({ institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x' }, deps),
+    /disabled/
+  );
+});
+
+test('createAndAuthor: unparseable brief -> throws "could not understand the brief"', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+  deps.assessmentSpecService.parseBrief = async () => {
+    throw new Error('analyzeWithClaude: response contained no JSON object');
+  };
+  await assert.rejects(
+    createAndAuthor({ institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'gibberish' }, deps),
+    /could not understand the brief/
+  );
+});
+
+test('createAndAuthor: cohort not owned by institution -> "cohort not found"', async () => {
+  const { deps } = createAndAuthorDeps({
+    spec: mcqSpec,
+    createAssessmentImpl: async () => { throw new Error('COHORT_NOT_FOUND'); },
+  });
+  await assert.rejects(
+    createAndAuthor({ institutionId: 'inst1', cohortId: 'nope', actorInstitutionUserId: 'iu1', brief: 'x' }, deps),
+    /cohort not found/
+  );
+});
+
+test('createAndAuthor: other createAssessment errors propagate unchanged (not mistranslated)', async () => {
+  const { deps } = createAndAuthorDeps({
+    spec: mcqSpec,
+    createAssessmentImpl: async () => { throw new Error('BAD_WINDOW'); },
+  });
+  await assert.rejects(
+    createAndAuthor({ institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x' }, deps),
+    /BAD_WINDOW/
+  );
+});
+
+test('createAndAuthor: happy path wires parseBrief -> createAssessment -> startRun, tags the ledger row', async () => {
+  const { deps, decisionStore, assessmentStore } = createAndAuthorDeps({ spec: mcqSpec });
+
+  let cohortQuery = null;
+  deps.InstitutionCohort = {
+    findOne: (q) => { cohortQuery = q; return { select: async () => ({ label: 'CSE Final Year' }) }; },
+  };
+
+  let parseBriefArgs = null;
+  deps.assessmentSpecService.parseBrief = async (args) => { parseBriefArgs = args; return mcqSpec; };
+
+  let createAssessmentArgs = null;
+  deps.assessmentService.createAssessment = async (scope, payload) => {
+    createAssessmentArgs = { scope, payload };
+    const doc = { _id: 'a1', institutionId: scope.institutionId, status: 'draft', type: payload.type, config: payload.config };
+    assessmentStore.a1 = doc;
+    return doc;
+  };
+
+  const result = await createAndAuthor(
+    { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: '20-question aptitude MCQ' },
+    deps
+  );
+
+  // cohort-label lookup used for the prompt only, scoped to the caller's institution
+  assert.deepStrictEqual(cohortQuery, { _id: 'c1', institutionId: 'inst1' });
+  assert.strictEqual(parseBriefArgs.brief, '20-question aptitude MCQ');
+  assert.strictEqual(parseBriefArgs.cohortLabel, 'CSE Final Year');
+
+  // createAssessment received the parsed spec, scoped by institution, attributed to the actor
+  assert.strictEqual(createAssessmentArgs.scope.institutionId, 'inst1');
+  assert.strictEqual(createAssessmentArgs.payload.cohortId, 'c1');
+  assert.strictEqual(createAssessmentArgs.payload.type, 'mcq');
+  assert.strictEqual(createAssessmentArgs.payload.title, 'Aptitude Test');
+  assert.strictEqual(createAssessmentArgs.payload.createdBy, 'iu1');
+
+  assert.strictEqual(result.assessmentId, 'a1');
+  assert.ok(result.decisionId, 'expected a decisionId');
+  assert.deepStrictEqual(result.spec, mcqSpec);
+
+  // createAndAuthor passes createdByAgent: true into startRun, which writes it
+  // into the record() payload atomically at row creation (see startRun) — NOT
+  // via a post-hoc findById/save, which would race runAuthoring's
+  // fire-and-forget mutations of this same row.
+  const row = decisionStore[result.decisionId];
+  assert.ok(row, 'expected the ledger row to exist');
+  assert.strictEqual(row.agentId, 'author_agent');
+  assert.strictEqual(row.action.engine, 'mcq');
+  assert.strictEqual(row.action.createdByAgent, true);
+  assert.strictEqual(row.action.assessmentId, 'a1');
+});
+
+test('createAndAuthor: performs no extra findById/save on the decision row itself (no lost-write race with runAuthoring)', async () => {
+  const { deps, decisionStore, assessmentStore } = createAndAuthorDeps({ spec: mcqSpec });
+
+  // startRun's own guard needs ONE real read of the freshly created assessment
+  // to proceed. Any read after that is runAuthoring's fire-and-forget background
+  // job re-reading the assessment — freeze it there (never resolve) so that job
+  // never reaches the AgentDecision row at all. That isolates what createAndAuthor
+  // itself does to the ledger row from what the background run does.
+  let assessmentFindByIdCalls = 0;
+  deps.Assessment = {
+    findById: async (id) => {
+      assessmentFindByIdCalls += 1;
+      if (assessmentFindByIdCalls === 1) return assessmentStore[id] || null;
+      return new Promise(() => {}); // never resolves
+    },
+  };
+
+  const baseAgentDecision = makeAgentDecisionModel(decisionStore);
+  let decisionFindByIdCalls = 0;
+  const AgentDecision = {
+    ...baseAgentDecision,
+    findById: async (id) => {
+      decisionFindByIdCalls += 1;
+      return baseAgentDecision.findById(id);
+    },
+  };
+  deps.AgentDecision = AgentDecision;
+
+  const result = await createAndAuthor(
+    { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: '20-question aptitude MCQ' },
+    deps
+  );
+
+  assert.strictEqual(decisionFindByIdCalls, 0, 'createAndAuthor must never findById the decision row itself');
+  const row = decisionStore[result.decisionId];
+  assert.ok(row, 'expected the ledger row to exist');
+  assert.strictEqual(row.saveCalls || 0, 0, 'createAndAuthor must never save the decision row itself');
+  assert.strictEqual(row.action.createdByAgent, true, 'the flag must already be set from record() time');
 });

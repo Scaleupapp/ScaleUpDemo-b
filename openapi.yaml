@@ -9038,6 +9038,85 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/institution/agent/create-assessment:
+    post:
+      operationId: createAssessmentFromBrief
+      tags: [AuthorAgent]
+      summary: TPO describes an assessment in one prompt; the agent creates it and starts authoring it
+      description: |
+        The one-prompt path: no pre-existing assessment shell, no picker.
+        Turns a free-text brief into a validated create-assessment payload
+        (assessmentSpecService.parseBrief — one LLM call, choosing exactly
+        one engine among mcq|capstone|interview|drill and filling only that
+        engine's config), creates the Assessment via the SAME
+        assessmentService.createAssessment used by the manual create flow
+        (so cohort-ownership and per-type config validation are enforced
+        identically), then immediately starts the SAME author-agent run as
+        POST /api/institution/assessments/{id}/author-agent — poll its
+        status via GET /api/institution/author-agent/runs/{decisionId}.
+        404 when the author_agent flag is off, or the cohort doesn't exist
+        / isn't owned by the caller's institution. 422 when the brief
+        cannot be understood even after deterministic repair.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cohortId, brief]
+              properties:
+                cohortId: { type: string }
+                brief: { type: string, description: 'Free-text description of the assessment the TPO wants.' }
+      responses:
+        '200':
+          description: Assessment created and authoring started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [assessmentId, decisionId, spec]
+                    properties:
+                      assessmentId: { type: string }
+                      decisionId: { type: string }
+                      spec:
+                        type: object
+                        description: The validated create-assessment payload the agent derived from the brief.
+                        required: [type, title, config]
+                        properties:
+                          type: { type: string, enum: [mcq, capstone, interview, drill] }
+                          title: { type: string }
+                          config:
+                            type: object
+                            additionalProperties: true
+                            description: 'Only the sub-object matching `type` is populated (config.mcq | config.capstone | config.interview | config.drill).'
+                          opensAt: { type: string, format: date-time }
+                          closesAt: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The brief could not be understood, even after deterministic repair.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message]
+                properties:
+                  success: { const: false }
+                  message: { type: string }
+
   /api/institution/agent/briefs:
     get:
       operationId: listAgentBriefs

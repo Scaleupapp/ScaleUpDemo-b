@@ -28,6 +28,7 @@ function makeHandlers(deps = {}) {
     isAgentEnabled: deps.isAgentEnabled || isAgentEnabled,
     startRun: deps.startRun || authorAgentService.startRun,
     getRunStatus: deps.getRunStatus || authorAgentService.getRunStatus,
+    createAndAuthor: deps.createAndAuthor || authorAgentService.createAndAuthor,
     Assessment: deps.Assessment || require('../../models/Assessment'),
   };
 
@@ -84,7 +85,45 @@ function makeHandlers(deps = {}) {
     }
   }
 
-  return { startRunHandler, getRunStatusHandler };
+  /**
+   * POST /api/institution/agent/create-assessment — the one-prompt path.
+   * No pre-existing assessment shell, no picker: the TPO describes the
+   * assessment they want and the agent creates it (assessmentSpecService
+   * .parseBrief -> assessmentService.createAssessment) then immediately
+   * kicks off the SAME author-agent run startRunHandler above starts.
+   * institutionScope comes from the authed principal — NEVER the body.
+   */
+  async function createAssessmentHandler(req, res) {
+    try {
+      if (!d.isAgentEnabled('author_agent')) {
+        return res.status(404).json({ success: false, message: 'Not found' });
+      }
+      const { cohortId, brief } = req.body || {};
+      if (!cohortId || !brief || typeof brief !== 'string') {
+        return res.status(400).json({ success: false, message: 'cohortId and brief are required' });
+      }
+
+      const scope = institutionScope(req);
+      const { assessmentId, decisionId, spec } = await d.createAndAuthor({
+        institutionId: scope.institutionId,
+        cohortId,
+        actorInstitutionUserId: req.institution.institutionUserId,
+        brief,
+      });
+      return res.json({
+        success: true,
+        data: { assessmentId: String(assessmentId), decisionId: String(decisionId), spec },
+      });
+    } catch (err) {
+      if (/disabled/i.test(err.message)) return res.status(404).json({ success: false, message: 'Not found' });
+      if (/cohort not found/i.test(err.message)) return res.status(404).json({ success: false, message: 'Cohort not found' });
+      if (/could not understand/i.test(err.message)) return res.status(422).json({ success: false, message: err.message });
+      console.error('[institution/author-agent] createAndAuthor error', err);
+      return res.status(500).json({ success: false, message: 'Could not create the assessment.' });
+    }
+  }
+
+  return { startRunHandler, getRunStatusHandler, createAssessmentHandler };
 }
 
 const router = express.Router();
@@ -100,6 +139,12 @@ router.get(
   institutionAuth,
   requireInstitutionRole('tpo_head', 'tpo_coordinator'),
   handlers.getRunStatusHandler
+);
+router.post(
+  '/agent/create-assessment',
+  institutionAuth,
+  requireInstitutionRole('tpo_head', 'tpo_coordinator'),
+  handlers.createAssessmentHandler
 );
 
 module.exports = router;

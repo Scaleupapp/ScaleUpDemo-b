@@ -84,6 +84,9 @@ function defaultDeps() {
     authoring: require('./assessmentAuthoringService'),
     record: require('../../agentDecisionService').record,
     isAgentEnabled: require('../../../config/agentFlags').isAgentEnabled,
+    InstitutionCohort: require('../../../models/InstitutionCohort'),
+    assessmentSpecService: require('./assessmentSpecService'),
+    assessmentService: require('./assessmentService'),
   };
 }
 
@@ -137,7 +140,7 @@ async function finalizeResult(AgentDecision, decisionId, result) {
 }
 
 /**
- * startRun({ assessmentId, institutionId, cohortId, actorInstitutionUserId, brief }, deps)
+ * startRun({ assessmentId, institutionId, cohortId, actorInstitutionUserId, brief, createdByAgent }, deps)
  *   -> Promise<{ decisionId }>
  *
  * Guards: agent flag on; assessment exists and belongs to institutionId;
@@ -151,8 +154,21 @@ async function finalizeResult(AgentDecision, decisionId, result) {
  * Records the AgentDecision row (action.engine = assessment.type, userId
  * stays unset — this is an institution-side agent), then fires runAuthoring
  * in the background.
+ *
+ * `createdByAgent` (optional, default false): when true, `action.createdByAgent
+ * = true` is written INTO the record() payload itself, atomically at row
+ * creation — before runAuthoring is kicked. This must never be set via a
+ * post-hoc findById/save on the row: runAuthoring's fire-and-forget loop
+ * concurrently mutates and saves action.runLog/action.result on the same row,
+ * so any save issued after startRun returns risks reading a stale copy and
+ * clobbering whatever the run has written in the meantime. Callers that don't
+ * pass the flag (or pass false) see byte-identical behavior to before — no
+ * `createdByAgent` key is added to the action object at all.
  */
-async function startRun({ assessmentId, institutionId, cohortId, actorInstitutionUserId, brief }, deps = {}) {
+async function startRun(
+  { assessmentId, institutionId, cohortId, actorInstitutionUserId, brief, createdByAgent = false },
+  deps = {}
+) {
   const d = { ...defaultDeps(), ...deps };
 
   if (!d.isAgentEnabled('author_agent')) throw new Error('author agent disabled');
@@ -197,6 +213,7 @@ async function startRun({ assessmentId, institutionId, cohortId, actorInstitutio
         assessmentId: String(assessmentId),
         runLog: [{ at: new Date(), msg: 'run queued' }],
         result: null,
+        ...(createdByAgent ? { createdByAgent: true } : {}),
       },
       promptVersion: 'author-agent-v1',
     },
@@ -207,6 +224,85 @@ async function startRun({ assessmentId, institutionId, cohortId, actorInstitutio
   runAuthoring({ decisionId, assessmentId }, d).catch(console.warn);
 
   return { decisionId };
+}
+
+/**
+ * createAndAuthor({ institutionId, cohortId, actorInstitutionUserId, brief }, deps)
+ *   -> Promise<{ assessmentId, decisionId, spec }>
+ *
+ * The one-prompt path: a TPO describes the assessment they want in free text
+ * — no pre-existing shell, no picker. Turns the brief into a validated
+ * create-assessment payload (assessmentSpecService.parseBrief), creates the
+ * Assessment (assessmentService.createAssessment — which already enforces
+ * the cohort-belongs-to-institution guard and per-type config validation),
+ * then reuses the EXISTING startRun/runAuthoring generate -> QA -> repair
+ * pipeline on the freshly created assessment. Does not reimplement any of
+ * that logic — it is the same run a TPO gets by hand-configuring an
+ * assessment and clicking "run author agent".
+ *
+ * Guarded by the same `author_agent` flag startRun checks; checked again
+ * here up front so a disabled flag never even reaches the LLM call.
+ *
+ * Never throws anything but the three named errors this feature promises
+ * ('author agent disabled' | 'cohort not found' | 'could not understand the
+ * brief') plus whatever createAssessment/startRun themselves throw for other
+ * genuine failures (e.g. a bad opens/closes window) — those are not this
+ * feature's to hide.
+ */
+async function createAndAuthor({ institutionId, cohortId, actorInstitutionUserId, brief }, deps = {}) {
+  const d = { ...defaultDeps(), ...deps };
+
+  if (!d.isAgentEnabled('author_agent')) throw new Error('author agent disabled');
+
+  // Best-effort context for the prompt only — NOT the cohort-ownership guard.
+  // createAssessment (below) is the single source of truth for that check.
+  let cohortLabel;
+  try {
+    const cohort = await d.InstitutionCohort.findOne({ _id: cohortId, institutionId }).select('name label');
+    cohortLabel = cohort && (cohort.name || cohort.label);
+  } catch (_) {
+    // best-effort — an unresolved label just means a slightly less specific prompt
+  }
+
+  let spec;
+  try {
+    spec = await d.assessmentSpecService.parseBrief({ brief, cohortLabel }, d);
+  } catch (_err) {
+    throw new Error('could not understand the brief');
+  }
+
+  let assessment;
+  try {
+    assessment = await d.assessmentService.createAssessment(
+      { institutionId },
+      {
+        cohortId,
+        type: spec.type,
+        title: spec.title,
+        config: spec.config,
+        opensAt: spec.opensAt,
+        closesAt: spec.closesAt,
+        createdBy: actorInstitutionUserId,
+      },
+      d
+    );
+  } catch (err) {
+    if (err && err.message === 'COHORT_NOT_FOUND') throw new Error('cohort not found');
+    throw err;
+  }
+
+  // createdByAgent: true is passed straight into startRun's record() payload
+  // so it's written atomically at row creation — before runAuthoring's
+  // fire-and-forget loop starts concurrently mutating/saving this same row's
+  // action.runLog/action.result. No post-hoc findById/save here: that pattern
+  // used to race the running job and could clobber a runLog entry or the
+  // final result with a stale read.
+  const { decisionId } = await startRun(
+    { assessmentId: assessment._id, institutionId, cohortId, actorInstitutionUserId, brief, createdByAgent: true },
+    d
+  );
+
+  return { assessmentId: assessment._id, decisionId, spec };
 }
 
 // ── mcq runner ──────────────────────────────────────────────────────────────
@@ -624,5 +720,6 @@ module.exports = {
   runAuthoring,
   getRunStatus,
   reapOrphanedRuns,
+  createAndAuthor,
   _helpers: { computeFlaggedIndices, mcqAuthoringStatus, authoringStatusFor },
 };
