@@ -81,6 +81,7 @@ function defaultDeps() {
     AgentDecision: require('../../../models/AgentDecision'),
     Assessment: require('../../../models/Assessment'),
     ArtifactBundle: require('../../../coding/models/artifactBundle.model'),
+    CapstoneGenerationRequest: require('../../../coding/models/capstoneGenerationRequest.model'),
     authoring: require('./assessmentAuthoringService'),
     record: require('../../agentDecisionService').record,
     isAgentEnabled: require('../../../config/agentFlags').isAgentEnabled,
@@ -652,18 +653,38 @@ function bundleResult(type, status, evidence) {
  * ArtifactBundle and maps its real `status` enum (draft|validated|active|
  * retired) onto ready/needs_review/failed. No agent-level repair pass — the
  * coding module's own retry/cross-check/promotion pipeline IS the repair.
+ *
+ * Pending: authorCapstone/authorDrill's own poll budget can expire while
+ * generation is still genuinely running server-side (real capstones take
+ * ~7+ minutes) — that is NOT a failure, so it does not throw; it resolves
+ * with `{ pending: true, ... }` instead. On that sentinel this runner
+ * returns `null` rather than a bundleResult — the dispatcher (runAuthoring)
+ * reads that as "leave this run open" and skips finalizeResult entirely, so
+ * action.result stays null (exactly like a run that's still mid-flight) and
+ * the reconciler (reconcileBundleRuns, below) is the one that eventually
+ * closes it out once the real generation state resolves.
  */
 async function runBundleEngine(type, { decisionId, assessmentId }, d) {
   try {
     await appendLog(d.AgentDecision, decisionId, 'generation requested');
 
     const authorFn = type === 'capstone' ? d.authoring.authorCapstone : d.authoring.authorDrill;
+    let authorResult;
     try {
-      await authorFn(assessmentId, d);
+      authorResult = await authorFn(assessmentId, d);
     } catch (err) {
       const { code, logMsg } = describeAuthoringFailure(err);
       await appendLog(d.AgentDecision, decisionId, logMsg);
       return bundleResult(type, 'failed', { errorCode: code });
+    }
+
+    if (authorResult && authorResult.pending === true) {
+      await appendLog(
+        d.AgentDecision,
+        decisionId,
+        "still generating — a capstone takes about 10 minutes; this page will update when it's done"
+      );
+      return null;
     }
 
     const assessment = await d.Assessment.findById(assessmentId);
@@ -764,6 +785,13 @@ async function runAuthoring({ decisionId, assessmentId }, deps = {}) {
         result = { status: 'failed', engine, evidence: {}, flagged: [], passes: 0 };
     }
 
+    // null = runBundleEngine's pending sentinel (capstone/drill still
+    // generating past their own poll budget) — leave action.result null and
+    // let reconcileBundleRuns close this run out later; finalizing it here
+    // would be exactly the original bug (reporting failure for work that is
+    // still running).
+    if (result === null) return;
+
     result.evidence = { ...(result.evidence || {}), preflight: 'ok' };
     await finalizeResult(d.AgentDecision, decisionId, result);
   } catch (err) {
@@ -780,6 +808,62 @@ async function runAuthoring({ decisionId, assessmentId }, deps = {}) {
       });
     } catch (_) { /* best-effort */ }
   }
+}
+
+const BUNDLE_ENGINES = ['capstone', 'drill'];
+const CAPSTONE_IN_FLIGHT_STATUSES = ['queued', 'generating', 'validating', 'cross_checking'];
+
+/**
+ * resolveBundleGenerationState(engine, assessmentId, d)
+ *   -> Promise<{ state: 'ready'|'failed'|'pending', bundleId?, errorDetail? }>
+ *
+ * Resolves the REAL current state of a capstone/drill bundle generation for
+ * an assessment, independent of anything cached on the AgentDecision row.
+ * Shared by reapOrphanedRuns (so it never reaps a run that is genuinely
+ * still working — the original bug) and reconcileBundleRuns (which drives
+ * off this to attach/finalize/wait).
+ *
+ * capstone: keyed off CapstoneGenerationRequest.assessment_id — the real,
+ * DB-level link (added specifically so an institution-owned request, which
+ * has no student user_id, can be found back from the assessment side).
+ *
+ * drill: authorDrill's own pipeline (generationPipeline.runPipeline) runs
+ * synchronously — by the time authorDrill returns there is no async job left
+ * outside this process to poll again from a cron. The only way its poll loop
+ * can still exhaust is if the produced ArtifactBundle never reached 'active'
+ * (e.g. it was pushed to human review after exhausting its own retries).
+ * authorDrill persists that candidate bundle id onto
+ * `assessment.config.drill.pendingBundleId` in exactly that case — that is
+ * the real (and only) link available for drill, since ArtifactBundle itself
+ * carries no assessmentId (it's a shared, reusable library entity, not
+ * assessment-owned).
+ */
+async function resolveBundleGenerationState(engine, assessmentId, d) {
+  if (engine === 'capstone') {
+    const reqDoc = await d.CapstoneGenerationRequest.findOne({ assessment_id: assessmentId });
+    if (!reqDoc) return { state: 'pending' };
+    if (reqDoc.status === 'ready') return { state: 'ready', bundleId: reqDoc.bundle_id };
+    if (reqDoc.status === 'failed') {
+      return { state: 'failed', errorDetail: reqDoc.error || 'capstone generation failed' };
+    }
+    return { state: 'pending' }; // queued/generating/validating/cross_checking
+  }
+
+  if (engine === 'drill') {
+    const assessment = await d.Assessment.findById(assessmentId);
+    const cfg = (assessment && assessment.config && assessment.config.drill) || {};
+    if (cfg.bundleId) return { state: 'ready', bundleId: cfg.bundleId };
+    if (!cfg.pendingBundleId) return { state: 'pending' }; // nothing recorded yet either way
+    const bundle = await d.ArtifactBundle.findById(cfg.pendingBundleId);
+    if (!bundle) return { state: 'failed', errorDetail: 'generated drill bundle could not be found' };
+    if (bundle.status === 'active') return { state: 'ready', bundleId: bundle._id };
+    if (bundle.status === 'retired') {
+      return { state: 'failed', errorDetail: 'generated drill bundle was retired before promotion' };
+    }
+    return { state: 'pending' }; // draft/validated — still in validation / awaiting human review
+  }
+
+  return { state: 'pending' };
 }
 
 /**
@@ -801,6 +885,18 @@ async function runAuthoring({ decisionId, assessmentId }, deps = {}) {
  * cannot still be alive — it's a corpse from a dead process, not a slow run.
  * Per-row try/catch: one bad row must never stop the rest of the sweep, and
  * this function itself never throws.
+ *
+ * capstone/drill carve-out: these two engines are the exception to "anything
+ * still open past the window cannot still be alive" — a real capstone
+ * legitimately takes ~7+ minutes, comfortably inside this sweep's 30-minute
+ * window, and unlike mcq/interview there's no per-row-cheap way to tell "long
+ * but alive" apart from "orphaned" just from the ledger row. So before
+ * reaping a capstone/drill row this checks the REAL generation state via
+ * resolveBundleGenerationState; if it's still genuinely `pending` (in
+ * flight), this row is skipped entirely and left for reconcileBundleRuns
+ * (below) to own — which applies its OWN timeout (default 30 min) against
+ * the real generation, not the ledger row, before ever calling it abandoned.
+ * mcq/interview are unaffected — they still reap exactly as before.
  */
 async function reapOrphanedRuns(
   { olderThanMinutes = Number(process.env.AUTHOR_AGENT_ORPHAN_MINUTES || 30) } = {},
@@ -827,6 +923,15 @@ async function reapOrphanedRuns(
       row.action = row.action || {};
       const engine = row.action.engine || null;
       const assessmentId = row.action.assessmentId;
+
+      if (BUNDLE_ENGINES.includes(engine) && assessmentId) {
+        try {
+          const genState = await resolveBundleGenerationState(engine, assessmentId, d);
+          if (genState.state === 'pending') continue; // genuinely still working — reconcileBundleRuns owns this
+        } catch (_) {
+          // Lookup failed — fall through to the original reap-as-failed behavior below.
+        }
+      }
 
       row.action.runLog = Array.isArray(row.action.runLog) ? row.action.runLog : [];
       row.action.runLog.push({
@@ -868,6 +973,130 @@ async function reapOrphanedRuns(
   }
 
   return { reaped };
+}
+
+/**
+ * reconcileBundleRuns({ timeoutMinutes = 30 }, deps) -> Promise<{ reconciled }>
+ *
+ * The fix for the core bug this file exists to close: runBundleEngine leaves
+ * a capstone/drill run open (action.result null) whenever authorCapstone/
+ * authorDrill's own poll budget expires while generation is still genuinely
+ * running (see their doc comments). Nothing else ever revisits that run —
+ * this cron-driven sweep is that revisit. It reads the REAL generation state
+ * via resolveBundleGenerationState (never anything cached on the ledger row
+ * itself) and finalizes honestly:
+ *
+ *   ready   -> attach the bundle (via assessmentAuthoringService.attachBundle
+ *              — the SAME persist path authorCapstone/authorDrill use on
+ *              their own success path, not a re-implementation of it) if not
+ *              already attached, then finalize 'ready' (or 'needs_review' if
+ *              the bundle hasn't been promoted to 'active' yet) with the
+ *              normal bundle evidence.
+ *   failed  -> finalize 'failed' with the real error off the generation
+ *              request/bundle — never a bare code.
+ *   pending, younger than timeoutMinutes -> leave open; still working.
+ *   pending, older than timeoutMinutes   -> finalize 'failed' — genuinely
+ *              abandoned (this is the sweep's OWN timeout, measured off the
+ *              ledger row's age, deliberately separate from and longer than
+ *              authorCapstone's poll budget so a slow-but-alive run is never
+ *              caught here first).
+ *
+ * Per-row try/catch, like reapOrphanedRuns: one bad row must never abort the
+ * sweep, and this function itself never throws.
+ */
+async function reconcileBundleRuns({ timeoutMinutes = 30 } = {}, deps = {}) {
+  const d = { ...defaultDeps(), ...deps };
+
+  let rows = [];
+  try {
+    rows = await d.AgentDecision.find({
+      agentId: 'author_agent',
+      'action.result': null,
+      'action.engine': { $in: BUNDLE_ENGINES },
+    }).exec();
+  } catch (_) {
+    return { reconciled: 0 };
+  }
+
+  let reconciled = 0;
+
+  for (const row of rows || []) {
+    try {
+      row.action = row.action || {};
+      const engine = row.action.engine;
+      const assessmentId = row.action.assessmentId;
+      if (!BUNDLE_ENGINES.includes(engine) || !assessmentId) continue;
+
+      const genState = await resolveBundleGenerationState(engine, assessmentId, d);
+
+      row.action.runLog = Array.isArray(row.action.runLog) ? row.action.runLog : [];
+
+      if (genState.state === 'ready') {
+        const assessment = await d.Assessment.findById(assessmentId);
+        if (!assessment) continue; // nothing left to attach the bundle to
+
+        const authoring = d.authoring || require('./assessmentAuthoringService');
+        await authoring.attachBundle(assessment, engine, genState.bundleId);
+
+        const bundle = await d.ArtifactBundle.findById(genState.bundleId);
+        const evidence = {
+          bundleId: String(genState.bundleId),
+          bundleStatus: bundle ? bundle.status : null,
+          roleTrack: bundle ? bundle.role_track : null,
+          difficulty: bundle ? bundle.difficulty : null,
+          language: bundle ? bundle.language : null,
+          humanReviewed: !!(bundle && bundle.generated_by && bundle.generated_by.human_reviewed),
+          ...(engine === 'drill' && bundle ? { drillSubtype: bundle.drill_subtype } : {}),
+        };
+        const status = bundle && bundle.status === 'active' ? 'ready' : 'needs_review';
+
+        row.action.runLog.push({
+          at: new Date(),
+          msg: 'generation finished while this run was closed — bundle attached',
+        });
+        row.action.result = { status, engine, evidence, flagged: [], passes: 0 };
+        row.markModified('action');
+        await row.save();
+        reconciled += 1;
+        continue;
+      }
+
+      if (genState.state === 'failed') {
+        row.action.runLog.push({ at: new Date(), msg: `generation failed: ${genState.errorDetail}` });
+        row.action.result = {
+          status: 'failed',
+          engine,
+          evidence: { errorCode: engine === 'capstone' ? 'CAPSTONE_GEN_FAILED' : 'DRILL_GEN_FAILED', detail: genState.errorDetail },
+          flagged: [],
+          passes: 0,
+        };
+        row.markModified('action');
+        await row.save();
+        reconciled += 1;
+        continue;
+      }
+
+      // Still generating (genState.state === 'pending') — only abandon once
+      // this run's OWN age (not the generation request's) exceeds the sweep
+      // timeout.
+      const ageMinutes = (Date.now() - new Date(row.createdAt).getTime()) / 60000;
+      if (ageMinutes >= timeoutMinutes) {
+        row.action.runLog.push({
+          at: new Date(),
+          msg: `generation ran over ${timeoutMinutes} minutes and was abandoned`,
+        });
+        row.action.result = { status: 'failed', engine, evidence: {}, flagged: [], passes: 0, note: 'abandoned' };
+        row.markModified('action');
+        await row.save();
+        reconciled += 1;
+      }
+      // else: still young — leave open, no-op.
+    } catch (_) {
+      // Per-row isolation — never let one bad row abort the sweep.
+    }
+  }
+
+  return { reconciled };
 }
 
 /**
@@ -954,6 +1183,7 @@ module.exports = {
   runAuthoring,
   getRunStatus,
   reapOrphanedRuns,
+  reconcileBundleRuns,
   createAndAuthor,
   listRuns,
   _helpers: {
@@ -965,5 +1195,6 @@ module.exports = {
     humanizeAuthoringFailure,
     describeAuthoringFailure,
     runPreflight,
+    resolveBundleGenerationState,
   },
 };

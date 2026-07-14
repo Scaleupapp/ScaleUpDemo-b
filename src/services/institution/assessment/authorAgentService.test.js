@@ -8,6 +8,7 @@ const {
   runAuthoring,
   getRunStatus,
   reapOrphanedRuns,
+  reconcileBundleRuns,
   createAndAuthor,
   listRuns,
   _helpers: { computeFlaggedIndices, buildObjectiveContext, humanizeAuthoringFailure, describeAuthoringFailure, runPreflight },
@@ -60,6 +61,11 @@ function matchesDecisionQuery(row, query) {
   return Object.entries(query).every(([key, expected]) => {
     if (key === 'agentId') return row.agentId === expected;
     if (key === 'action.assessmentId') return !!row.action && row.action.assessmentId === expected;
+    if (key === 'action.engine') {
+      const val = row.action && row.action.engine;
+      if (expected && typeof expected === 'object' && '$in' in expected) return expected.$in.includes(val);
+      return val === expected;
+    }
     if (key === 'action.result') {
       // Mongo's `{ field: null }` matches both an explicit null and a missing field.
       if (expected === null) return !row.action || row.action.result === null || row.action.result === undefined;
@@ -781,6 +787,43 @@ test('runAuthoring: capstone authorCapstone throws with a real underlying reason
   );
 });
 
+test('runAuthoring: capstone authorCapstone returns pending -> run left OPEN (result null) with the "still generating" log line, never finalized', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({});
+
+  const authoring = { authorCapstone: async () => ({ pending: true, requestId: 'req1' }) };
+
+  await assert.doesNotReject(
+    runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring })
+  );
+
+  const doc = decisionStore.dec1;
+  assert.strictEqual(doc.action.result, null, 'a pending generation must never be finalized as failed (or anything else)');
+  assert.ok(
+    doc.action.runLog.some((e) => /still generating/.test(e.msg) && /10 minutes/.test(e.msg)),
+    `expected the "still generating" log line, got: ${JSON.stringify(doc.action.runLog)}`,
+  );
+});
+
+test('runAuthoring: drill authorDrill returns pending -> run left OPEN (result null), same as capstone', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'drill', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({});
+
+  const authoring = { authorDrill: async () => ({ pending: true, bundleId: 'b1' }) };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring });
+
+  const doc = decisionStore.dec1;
+  assert.strictEqual(doc.action.result, null);
+  assert.ok(doc.action.runLog.some((e) => /still generating/.test(e.msg)));
+});
+
 // ── runAuthoring: drill engine ───────────────────────────────────────────
 
 test('runAuthoring: drill bundle active -> ready, evidence includes drillSubtype', async () => {
@@ -1105,7 +1148,7 @@ test('reapOrphanedRuns: row already finalized (action.result non-null) -> untouc
   assert.strictEqual(decisionStore.dec1.action.result.status, 'ready');
 });
 
-test('reapOrphanedRuns: capstone row (no authoring flag) -> row failed, no assessment write attempted', async () => {
+test('reapOrphanedRuns: capstone row whose generation request already resolved (failed) -> row failed, no assessment write attempted', async () => {
   const decisionStore = { dec1: orphanCandidateDoc({ engine: 'capstone', ageMinutes: 60 }) };
   const AgentDecision = makeAgentDecisionModel(decisionStore);
 
@@ -1113,13 +1156,58 @@ test('reapOrphanedRuns: capstone row (no authoring flag) -> row failed, no asses
     async findById() { throw new Error('should not be called'); },
     async updateOne() { throw new Error('capstone has no authoring flag — updateOne must not be called'); },
   };
+  // Generation already resolved (failed) — this row is a genuine orphan, not
+  // still-in-flight work, so the reaper's usual behavior applies.
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'failed', error: 'bundle rejected' }) };
 
-  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment, CapstoneGenerationRequest });
 
   assert.strictEqual(reaped, 1);
   const row = decisionStore.dec1;
   assert.strictEqual(row.action.result.status, 'failed');
   assert.strictEqual(row.action.result.engine, 'capstone');
+});
+
+test('reapOrphanedRuns: skips a capstone row whose generation is still genuinely in flight — never marks it failed', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'capstone', ageMinutes: 60 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const Assessment = { async findById() { throw new Error('should not be called for capstone'); } };
+  // Still generating — this is EXACTLY the scenario that used to falsely fail
+  // a run that was about to finish successfully.
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'generating' }) };
+
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment, CapstoneGenerationRequest });
+
+  assert.strictEqual(reaped, 0);
+  assert.strictEqual(decisionStore.dec1.action.result, null, 'still-in-flight work must never be marked failed');
+});
+
+test('reapOrphanedRuns: skips a drill row whose pending bundle is still validating', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'drill', assessmentId: 'a1', ageMinutes: 60 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = { a1: bundleAssessment({ type: 'drill', bundleId: null, configExtra: { pendingBundleId: 'b1' } }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({ b1: bundleDoc({ status: 'validated' }) });
+
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment, ArtifactBundle });
+
+  assert.strictEqual(reaped, 0);
+  assert.strictEqual(decisionStore.dec1.action.result, null);
+});
+
+test('reapOrphanedRuns: mcq row is unaffected by the capstone/drill in-flight carve-out — still reaps normally', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'mcq', ageMinutes: 60 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: baseAssessment({ questions: [], authoringStatus: 'generating' }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+
+  const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
+
+  assert.strictEqual(reaped, 1);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'failed');
+  assert.strictEqual(assessmentStore.a1.config.mcq.authoring.status, 'failed');
 });
 
 test('reapOrphanedRuns: per-row failure isolation — one row throwing on save does not stop the others', async () => {
@@ -1152,6 +1240,143 @@ test('reapOrphanedRuns: no orphaned rows -> reaped 0, never throws', async () =>
   const Assessment = makeAssessmentModel({});
   const { reaped } = await reapOrphanedRuns({ olderThanMinutes: 30 }, { AgentDecision, Assessment });
   assert.strictEqual(reaped, 0);
+});
+
+// ── reconcileBundleRuns ──────────────────────────────────────────────────
+
+test('reconcileBundleRuns: capstone request ready + bundle active -> attaches bundle + finalizes ready', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'capstone', assessmentId: 'a1', ageMinutes: 5 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const bundleStore = { bundle1: bundleDoc({ status: 'active', role_track: 'swe', difficulty: 'medium', language: 'python', human_reviewed: true }) };
+  const ArtifactBundle = makeArtifactBundleModel(bundleStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'ready', bundle_id: 'bundle1' }) };
+
+  const { reconciled } = await reconcileBundleRuns({}, { AgentDecision, Assessment, ArtifactBundle, CapstoneGenerationRequest });
+
+  assert.strictEqual(reconciled, 1);
+  assert.strictEqual(String(assessmentStore.a1.config.capstone.bundleId), 'bundle1', 'the finished bundle must be attached — this is the whole point of the fix');
+  const row = decisionStore.dec1;
+  assert.strictEqual(row.action.result.status, 'ready');
+  assert.strictEqual(row.action.result.engine, 'capstone');
+  assert.strictEqual(row.action.result.evidence.bundleId, 'bundle1');
+  assert.strictEqual(row.action.result.evidence.humanReviewed, true);
+  assert.ok(row.action.runLog.some((e) => /bundle attached/.test(e.msg)));
+});
+
+test('reconcileBundleRuns: capstone request ready but bundle not yet promoted to active -> needs_review', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'capstone', assessmentId: 'a1', ageMinutes: 5 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const bundleStore = { bundle1: bundleDoc({ status: 'validated' }) };
+  const ArtifactBundle = makeArtifactBundleModel(bundleStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'ready', bundle_id: 'bundle1' }) };
+
+  const { reconciled } = await reconcileBundleRuns({}, { AgentDecision, Assessment, ArtifactBundle, CapstoneGenerationRequest });
+
+  assert.strictEqual(reconciled, 1);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'needs_review');
+});
+
+test('reconcileBundleRuns: capstone request failed -> finalizes failed with the real reason', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'capstone', assessmentId: 'a1', ageMinutes: 5 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'failed', error: 'validator rejected: seeded_mistakes_fail' }) };
+
+  const { reconciled } = await reconcileBundleRuns({}, { AgentDecision, CapstoneGenerationRequest });
+
+  assert.strictEqual(reconciled, 1);
+  const row = decisionStore.dec1;
+  assert.strictEqual(row.action.result.status, 'failed');
+  assert.strictEqual(row.action.result.evidence.errorCode, 'CAPSTONE_GEN_FAILED');
+  assert.ok(row.action.runLog.some((e) => e.msg.includes('validator rejected: seeded_mistakes_fail')));
+});
+
+test('reconcileBundleRuns: still generating and YOUNGER than timeoutMinutes -> left open, untouched', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'capstone', assessmentId: 'a1', ageMinutes: 5 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'generating' }) };
+
+  const { reconciled } = await reconcileBundleRuns({ timeoutMinutes: 30 }, { AgentDecision, CapstoneGenerationRequest });
+
+  assert.strictEqual(reconciled, 0);
+  assert.strictEqual(decisionStore.dec1.action.result, null, 'genuinely in-flight work must never be touched');
+});
+
+test('reconcileBundleRuns: still generating and OLDER than timeoutMinutes -> finalizes failed as abandoned', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'capstone', assessmentId: 'a1', ageMinutes: 45 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'generating' }) };
+
+  const { reconciled } = await reconcileBundleRuns({ timeoutMinutes: 30 }, { AgentDecision, CapstoneGenerationRequest });
+
+  assert.strictEqual(reconciled, 1);
+  const row = decisionStore.dec1;
+  assert.strictEqual(row.action.result.status, 'failed');
+  assert.strictEqual(row.action.result.note, 'abandoned');
+  assert.ok(row.action.runLog.some((e) => /ran over 30 minutes and was abandoned/.test(e.msg)));
+});
+
+test('reconcileBundleRuns: drill bundle went active via pendingBundleId -> attaches + finalizes ready with drillSubtype evidence', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'drill', assessmentId: 'a1', ageMinutes: 5 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'drill', bundleId: null, configExtra: { pendingBundleId: 'bundle1' } }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  // bundleDoc() always stamps _id: 'bundle1' — key the fake store the same
+  // way the existing runAuthoring bundle tests above do, so a re-findById on
+  // the attached id resolves back to the same doc.
+  const bundleStore = { bundle1: bundleDoc({ status: 'active', drill_subtype: 'refactor' }) };
+  const ArtifactBundle = makeArtifactBundleModel(bundleStore);
+
+  const { reconciled } = await reconcileBundleRuns({}, { AgentDecision, Assessment, ArtifactBundle });
+
+  assert.strictEqual(reconciled, 1);
+  assert.strictEqual(String(assessmentStore.a1.config.drill.bundleId), 'bundle1');
+  const row = decisionStore.dec1;
+  assert.strictEqual(row.action.result.status, 'ready');
+  assert.strictEqual(row.action.result.evidence.drillSubtype, 'refactor');
+});
+
+test('reconcileBundleRuns: drill with no pendingBundleId recorded yet -> treated as still generating, left open', async () => {
+  const decisionStore = { dec1: orphanCandidateDoc({ engine: 'drill', assessmentId: 'a1', ageMinutes: 5 }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'drill', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+
+  const { reconciled } = await reconcileBundleRuns({}, { AgentDecision, Assessment });
+
+  assert.strictEqual(reconciled, 0);
+  assert.strictEqual(decisionStore.dec1.action.result, null);
+});
+
+test('reconcileBundleRuns: per-row isolation — one row throwing on lookup does not stop the sweep', async () => {
+  const badDoc = orphanCandidateDoc({ id: 'dec-bad', engine: 'capstone', assessmentId: 'a-bad', ageMinutes: 5 });
+  const goodDoc = orphanCandidateDoc({ id: 'dec-good', engine: 'capstone', assessmentId: 'a-good', ageMinutes: 45 });
+  const decisionStore = { 'dec-bad': badDoc, 'dec-good': goodDoc };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const CapstoneGenerationRequest = {
+    findOne: async ({ assessment_id }) => {
+      if (assessment_id === 'a-bad') throw new Error('DB exploded');
+      return { status: 'generating' };
+    },
+  };
+
+  const { reconciled } = await reconcileBundleRuns({ timeoutMinutes: 30 }, { AgentDecision, CapstoneGenerationRequest });
+
+  // Only the good row (abandoned — old + still 'generating') counts; the bad
+  // row's lookup throw is caught and swallowed, never propagating.
+  assert.strictEqual(reconciled, 1);
+  assert.strictEqual(badDoc.action.result, null);
+  assert.strictEqual(goodDoc.action.result.status, 'failed');
+  assert.strictEqual(goodDoc.action.result.note, 'abandoned');
+});
+
+test('reconcileBundleRuns: no matching rows -> reconciled 0, never throws', async () => {
+  const AgentDecision = makeAgentDecisionModel({});
+  const { reconciled } = await reconcileBundleRuns({}, { AgentDecision });
+  assert.strictEqual(reconciled, 0);
 });
 
 // ── createAndAuthor: the one-prompt path (parseBrief -> createAssessment -> ──

@@ -41,7 +41,49 @@ const MCQ_GROUNDING_LIMIT = 6000; // chars of syllabus text injected into genera
 const MCQ_OVER_GENERATION_FACTOR = 1.5; // over-generate the servable pool
 const MCQ_MAX_ROUNDS = 3; // initial generation + 2 regeneration rounds
 const MCQ_SYLLABUS_EXCERPT_LIMIT = 2000; // judge context
+// Real capstone generation (Opus writes a repo -> E2B sandbox proof -> Gemini
+// cross-check) takes ~7+ minutes. Default poll budget deliberately well above
+// that so a slow-but-succeeding run is never mistaken for a dead one. Env-
+// tunable; see .env.example.
+const CAPSTONE_AUTHOR_POLL_MINUTES_DEFAULT = 12;
 const { LANG_BY_TRACK } = require('../../../coding/services/langByTrack');
+
+/**
+ * Poll budget (maxPolls), computed from CAPSTONE_AUTHOR_POLL_MINUTES (default
+ * 12) at call time so tests that stub process.env see it take effect, and
+ * pollMs stays at its existing default. `deps.maxPolls`, when provided
+ * (every existing test), always wins — this only fills in the real default.
+ */
+function computeMaxPolls(deps, pollMs) {
+  if (deps.maxPolls !== undefined) return deps.maxPolls;
+  const minutes = Number(process.env.CAPSTONE_AUTHOR_POLL_MINUTES) || CAPSTONE_AUTHOR_POLL_MINUTES_DEFAULT;
+  const effectivePollMs = pollMs > 0 ? pollMs : 3000;
+  return Math.max(1, Math.round((minutes * 60 * 1000) / effectivePollMs));
+}
+
+/**
+ * Attach a completed bundle id onto assessment.config.<type>.bundleId — the
+ * one write that turns a finished generation into a releasable assessment.
+ * Idempotent (no-op once the same bundle is already attached), so it is safe
+ * to call both from authorCapstone/authorDrill's own success path AND from
+ * authorAgentService.reconcileBundleRuns, which must attach a bundle a
+ * timed-out run finished without ever duplicating this persistence logic.
+ *
+ * @param {object} assessment - Assessment doc with markModified()/save()
+ * @param {'capstone'|'drill'} type
+ * @param {string|ObjectId} bundleId
+ * @returns {Promise<object>} the (possibly mutated) assessment
+ */
+async function attachBundle(assessment, type, bundleId) {
+  if (!assessment || !assessment.config || !assessment.config[type]) return assessment;
+  const cfg = assessment.config[type];
+  if (cfg.bundleId && String(cfg.bundleId) === String(bundleId)) return assessment; // already attached
+  cfg.bundleId = bundleId;
+  if (type === 'drill' && cfg.pendingBundleId) cfg.pendingBundleId = undefined;
+  if (typeof assessment.markModified === 'function') assessment.markModified('config');
+  if (typeof assessment.save === 'function') await assessment.save();
+  return assessment;
+}
 
 function getModel(deps) { return (deps && deps.Assessment) || require('../../../models/Assessment'); }
 function getQuiz(deps) { return (deps && deps.Quiz) || require('../../../models/Quiz'); }
@@ -533,11 +575,27 @@ async function persistInterviewConfig(Assessment, assessment, { requireUnrelease
  *   - Uses source.extractedText (truncated to 2000 chars) as jobDescription
  * Otherwise uses cfg.jobDescription || assessment.title as before.
  *
+ * Timeout vs failure — a timed-out poll budget is NOT the same thing as a
+ * real failure. Real generation (Opus writes a repo -> E2B sandbox proof ->
+ * Gemini cross-check) takes ~7+ minutes; the poll budget
+ * (CAPSTONE_AUTHOR_POLL_MINUTES, default 12) is sized to comfortably outlast
+ * that, but if it STILL isn't done, the request is only ever `queued` /
+ * `generating` / `validating` / `cross_checking` at that point — genuinely
+ * still working, not broken. Throwing here used to report that as
+ * CAPSTONE_GEN_FAILED, which told the TPO the run failed, and — because the
+ * caller had already moved on — silently discarded the bundle the moment it
+ * DID finish a few minutes later. Now a timeout returns a pending sentinel
+ * instead: `{ pending: true, requestId }`. Only a request that the pipeline
+ * itself marked `status: 'failed'` throws CAPSTONE_GEN_FAILED (with the real
+ * `.detail` attached) — that is the one case that is an actual failure.
+ *
  * @param {string|ObjectId} assessmentId
  * @param {object}          deps  - injectable: { Assessment, ArtifactBundle,
  *                                    CapstoneGenerationRequest, requestGeneration,
  *                                    sleep, pollMs, maxPolls, AssessmentSource }
- * @returns {Promise<Assessment|null>} updated Assessment, or null if not capstone type
+ * @returns {Promise<Assessment|{pending:true,requestId}|null>} updated Assessment
+ *   on success, a pending sentinel if the poll budget expired while the
+ *   request is still generating, or null if not capstone type
  */
 async function authorCapstone(assessmentId, deps = {}) {
   const Assessment = deps.Assessment || require('../../../models/Assessment');
@@ -550,7 +608,7 @@ async function authorCapstone(assessmentId, deps = {}) {
     require('../../../coding/services/capstoneAuthoringSupport').requestGeneration;
   const sleep = deps.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const pollMs = deps.pollMs !== undefined ? deps.pollMs : 3000;
-  const maxPolls = deps.maxPolls !== undefined ? deps.maxPolls : 60;
+  const maxPolls = computeMaxPolls(deps, pollMs);
 
   const assessment = await Assessment.findById(assessmentId);
   if (!assessment) throw new Error('NOT_FOUND');
@@ -621,10 +679,7 @@ async function authorCapstone(assessmentId, deps = {}) {
     const polled = await CapstoneGenerationRequest.findById(reqDoc._id);
     if (!polled) throw new Error('CAPSTONE_GEN_FAILED');
     if (polled.status === 'ready') {
-      assessment.config.capstone.bundleId = polled.bundle_id;
-      assessment.markModified('config');
-      await assessment.save();
-      return assessment;
+      return attachBundle(assessment, 'capstone', polled.bundle_id);
     }
     if (polled.status === 'failed') {
       const err = new Error('CAPSTONE_GEN_FAILED');
@@ -637,7 +692,13 @@ async function authorCapstone(assessmentId, deps = {}) {
       throw err;
     }
   }
-  throw new Error('CAPSTONE_GEN_FAILED'); // timeout — no request-level reason to attach
+  // Timeout — the request is still queued/generating/validating/cross_checking,
+  // NOT failed. Never discard it: hand back a pending sentinel so the caller
+  // can leave this open (authorAgentService.runBundleEngine does exactly
+  // that) rather than reporting a false failure. The generation keeps running
+  // server-side regardless of what this function returns; reconcileBundleRuns
+  // (authorAgentService.js) picks it up by assessment_id once it resolves.
+  return { pending: true, requestId: reqDoc._id };
 }
 
 /**
@@ -681,17 +742,14 @@ async function authorDrill(assessmentId, deps = {}) {
   });
 
   if (bundle) {
-    assessment.config.drill.bundleId = bundle._id;
-    assessment.markModified('config');
-    await assessment.save();
-    return assessment;
+    return attachBundle(assessment, 'drill', bundle._id);
   }
 
   // No library bundle found — generate one
   const generateDrill = deps.generateDrill || (async (params) => require('../../../coding/services/generationPipeline').runPipeline(params));
   const sleep = deps.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const pollMs = deps.pollMs !== undefined ? deps.pollMs : 3000;
-  const maxPolls = deps.maxPolls !== undefined ? deps.maxPolls : 60;
+  const maxPolls = computeMaxPolls(deps, pollMs);
 
   const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
   const roleTrack = VALID_ROLE_TRACKS.includes(cfg.roleTrack) ? cfg.roleTrack : 'swe';
@@ -718,15 +776,32 @@ async function authorDrill(assessmentId, deps = {}) {
     await sleep(pollMs);
     const polled = await ArtifactBundle.findById(pipelineResult.bundle_id);
     if (polled && polled.status === 'active') {
-      assessment.config.drill.bundleId = polled._id;
-      assessment.markModified('config');
-      await assessment.save();
-      return assessment;
+      return attachBundle(assessment, 'drill', polled._id);
     }
   }
-  // Timeout — leave bundleId unset; never throw
-  console.warn('[assessmentAuthoring:authorDrill] polling timeout, bundleId left unset');
-  return assessment;
+  // Budget expired without the bundle reaching 'active' — generationPipeline
+  // runs synchronously, so by this point the pipeline itself has already
+  // finished (this is not a genuinely still-running async job the way
+  // capstone's is); the bundle just never got promoted (e.g. it was pushed to
+  // human review after exhausting its own retries). Still: never throw, and
+  // never silently drop the bundle we already know exists. Persist the
+  // candidate id onto pendingBundleId (does NOT gate release — only
+  // `bundleId` does) so reconcileBundleRuns can pick it up if/when it goes
+  // active, and hand the caller the same pending sentinel authorCapstone
+  // uses instead of quietly returning as if nothing happened.
+  assessment.config.drill.pendingBundleId = pipelineResult.bundle_id;
+  assessment.markModified('config');
+  try { await assessment.save(); } catch (_) { /* best-effort */ }
+  console.warn('[assessmentAuthoring:authorDrill] polling budget expired, bundle not yet active — left pending:', pipelineResult.bundle_id);
+  return { pending: true, bundleId: pipelineResult.bundle_id };
 }
 
-module.exports = { authorMcq, authorInterview, authorCapstone, authorDrill, regenerateQuestion, _helpers: { buildGroundingText, accumulateReport } };
+module.exports = {
+  authorMcq,
+  authorInterview,
+  authorCapstone,
+  authorDrill,
+  regenerateQuestion,
+  attachBundle,
+  _helpers: { buildGroundingText, accumulateReport, computeMaxPolls },
+};

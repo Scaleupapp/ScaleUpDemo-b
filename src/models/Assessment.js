@@ -56,6 +56,14 @@ const AssessmentSchema = new mongoose.Schema({
       drillSubtype: String,
       difficulty: { type: String, default: 'medium' },
       bundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },
+      // Candidate bundle authorDrill produced but hadn't yet confirmed 'active'
+      // when its poll budget expired (see assessmentAuthoringService.authorDrill).
+      // Never gates release — only `bundleId` does that. This is the real link
+      // the run reconciler (authorAgentService.reconcileBundleRuns) uses to find
+      // its way back to the bundle once (if) it goes active, since ArtifactBundle
+      // itself carries no assessmentId (it's a shared library entity, not
+      // assessment-owned).
+      pendingBundleId: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtifactBundle' },
     },
   },
   integrityRequired: { type: Boolean, default: true },
