@@ -1785,6 +1785,49 @@ test('createAndAuthor: performs no extra findById/save on the decision row itsel
   assert.strictEqual(row.action.createdByAgent, true, 'the flag must already be set from record() time');
 });
 
+// ── createAndAuthor: opensAt/closesAt/durationMinutes overrides ──────────
+
+test('createAndAuthor: opensAt/closesAt overrides are applied onto the spec before createAssessment', async () => {
+  const { deps, assessmentStore } = createAndAuthorDeps({ spec: { ...mcqSpec, config: { mcq: { ...mcqSpec.config.mcq } } } });
+
+  let createAssessmentArgs = null;
+  deps.assessmentService.createAssessment = async (scope, payload) => {
+    createAssessmentArgs = payload;
+    const doc = { _id: 'a1', institutionId: scope.institutionId, status: 'draft', type: payload.type, config: payload.config };
+    assessmentStore.a1 = doc;
+    return doc;
+  };
+
+  const opensAt = new Date('2026-08-01T00:00:00Z');
+  const closesAt = new Date('2026-08-02T00:00:00Z');
+  await createAndAuthor(
+    { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x', opensAt, closesAt },
+    deps
+  );
+
+  assert.strictEqual(createAssessmentArgs.opensAt, opensAt);
+  assert.strictEqual(createAssessmentArgs.closesAt, closesAt);
+});
+
+test('createAndAuthor: durationMinutes overrides config[type].durationSeconds', async () => {
+  const { deps, assessmentStore } = createAndAuthorDeps({ spec: { ...mcqSpec, config: { mcq: { ...mcqSpec.config.mcq } } } });
+
+  let createAssessmentArgs = null;
+  deps.assessmentService.createAssessment = async (scope, payload) => {
+    createAssessmentArgs = payload;
+    const doc = { _id: 'a1', institutionId: scope.institutionId, status: 'draft', type: payload.type, config: payload.config };
+    assessmentStore.a1 = doc;
+    return doc;
+  };
+
+  await createAndAuthor(
+    { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x', durationMinutes: 45 },
+    deps
+  );
+
+  assert.strictEqual(createAssessmentArgs.config.mcq.durationSeconds, 2700);
+});
+
 // ── buildObjectiveContext ────────────────────────────────────────────────
 
 test('buildObjectiveContext: null template -> null', () => {

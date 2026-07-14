@@ -384,7 +384,8 @@ async function startRun(
 }
 
 /**
- * createAndAuthor({ institutionId, cohortId, actorInstitutionUserId, brief }, deps)
+ * createAndAuthor({ institutionId, cohortId, actorInstitutionUserId, brief,
+ *   opensAt?, closesAt?, durationMinutes? }, deps)
  *   -> Promise<{ assessmentId, decisionId, spec }>
  *
  * The one-prompt path: a TPO describes the assessment they want in free text
@@ -397,6 +398,20 @@ async function startRun(
  * that logic — it is the same run a TPO gets by hand-configuring an
  * assessment and clicking "run author agent".
  *
+ * `opensAt`/`closesAt` (optional, already-parsed Date objects — the route is
+ * the layer that rejects unparseable input): override whatever parseBrief's
+ * LLM call may or may not have inferred, applied onto `spec` before it's
+ * handed to createAssessment (which still independently enforces
+ * opensAt < closesAt via its own 'BAD_WINDOW' — not duplicated here).
+ *
+ * `durationMinutes` (optional): overrides `spec.config[spec.type]
+ * .durationSeconds` — the per-engine duration field every authorable type
+ * except drill has (drill has no timed duration in the schema; a
+ * durationMinutes passed alongside a drill-typed spec is a harmless no-op,
+ * same as it would be on the manual create path). Range/numeric validation
+ * is the route's job (BAD_DURATION); this function just applies whatever
+ * value it's given.
+ *
  * Guarded by the same `author_agent` flag startRun checks; checked again
  * here up front so a disabled flag never even reaches the LLM call.
  *
@@ -406,7 +421,10 @@ async function startRun(
  * genuine failures (e.g. a bad opens/closes window) — those are not this
  * feature's to hide.
  */
-async function createAndAuthor({ institutionId, cohortId, actorInstitutionUserId, brief }, deps = {}) {
+async function createAndAuthor(
+  { institutionId, cohortId, actorInstitutionUserId, brief, opensAt, closesAt, durationMinutes },
+  deps = {}
+) {
   const d = { ...defaultDeps(), ...deps };
 
   if (!d.isAgentEnabled('author_agent')) throw new Error('author agent disabled');
@@ -422,6 +440,15 @@ async function createAndAuthor({ institutionId, cohortId, actorInstitutionUserId
     spec = await d.assessmentSpecService.parseBrief({ brief, cohortLabel, objective }, d);
   } catch (_err) {
     throw new Error('could not understand the brief');
+  }
+
+  if (opensAt !== undefined) spec.opensAt = opensAt;
+  if (closesAt !== undefined) spec.closesAt = closesAt;
+  if (durationMinutes !== undefined && Number.isFinite(Number(durationMinutes))) {
+    spec.config[spec.type] = {
+      ...(spec.config[spec.type] || {}),
+      durationSeconds: Math.round(Number(durationMinutes) * 60),
+    };
   }
 
   let assessment;

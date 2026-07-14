@@ -22,6 +22,13 @@ const { institutionScope, requireInstitutionRole } = require('../../middleware/i
 const authorAgentService = require('../../services/institution/assessment/authorAgentService');
 const { isAgentEnabled } = require('../../config/agentFlags');
 
+// Upper bound for the agent-create route's optional `durationMinutes`
+// override — 8 hours, matching capstone's own durationSeconds ceiling (the
+// longest of any authorable engine's per-attempt duration; see
+// src/models/Assessment.js config.capstone.durationSeconds and
+// assessmentSpecService.repairCapstone's clampInt max of 8*3600).
+const MAX_DURATION_MINUTES = 480;
+
 /**
  * Handler factory with DI seams (repo test convention: zero DB in tests).
  */
@@ -126,32 +133,94 @@ function makeHandlers(deps = {}) {
    * .parseBrief -> assessmentService.createAssessment) then immediately
    * kicks off the SAME author-agent run startRunHandler above starts.
    * institutionScope comes from the authed principal — NEVER the body.
+   *
+   * Every error response from this route carries a stable machine-readable
+   * `code` (house pattern — see src/routes/institution/assessments.js) so
+   * clients key off `code`, never regex-match `message` text:
+   *   400 VALIDATION     — cohortId/brief missing
+   *   400 BAD_WINDOW      — opensAt/closesAt unparseable, or opensAt >= closesAt
+   *   400 BAD_DURATION    — durationMinutes non-numeric or out of range
+   *   404 NOT_FOUND        — author_agent flag is off
+   *   404 COHORT_NOT_FOUND — cohortId doesn't exist / isn't owned by this institution
+   *   422 BAD_BRIEF        — the brief couldn't be understood, even after repair
+   *
+   * opensAt/closesAt/durationMinutes are all optional overrides on top of
+   * the brief-derived spec — see authorAgentService.createAndAuthor's doc
+   * comment for exactly how each is applied.
    */
   async function createAssessmentHandler(req, res) {
     try {
       if (!d.isAgentEnabled('author_agent')) {
-        return res.status(404).json({ success: false, message: 'Not found' });
+        return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Not found' });
       }
-      const { cohortId, brief } = req.body || {};
+      const { cohortId, brief, opensAt, closesAt, durationMinutes } = req.body || {};
       if (!cohortId || !brief || typeof brief !== 'string') {
-        return res.status(400).json({ success: false, message: 'cohortId and brief are required' });
+        return res.status(400).json({ success: false, code: 'VALIDATION', message: 'cohortId and brief are required' });
+      }
+
+      // opensAt/closesAt: parseability is this route's job — an unparseable
+      // date would otherwise silently slip past createAssessment's own
+      // ordering check (new Date('garbage') >= new Date('garbage2') is
+      // false, not an error) and reach the DB as an Invalid Date. Ordering
+      // itself (opensAt >= closesAt) is left to createAssessment's existing
+      // 'BAD_WINDOW' throw, mapped below — not duplicated here.
+      let parsedOpensAt;
+      if (opensAt !== undefined && opensAt !== null && opensAt !== '') {
+        parsedOpensAt = new Date(opensAt);
+        if (Number.isNaN(parsedOpensAt.getTime())) {
+          return res.status(400).json({ success: false, code: 'BAD_WINDOW', message: 'opensAt is not a valid date.' });
+        }
+      }
+      let parsedClosesAt;
+      if (closesAt !== undefined && closesAt !== null && closesAt !== '') {
+        parsedClosesAt = new Date(closesAt);
+        if (Number.isNaN(parsedClosesAt.getTime())) {
+          return res.status(400).json({ success: false, code: 'BAD_WINDOW', message: 'closesAt is not a valid date.' });
+        }
+      }
+      if (parsedOpensAt && parsedClosesAt && parsedOpensAt >= parsedClosesAt) {
+        return res.status(400).json({ success: false, code: 'BAD_WINDOW', message: 'opensAt must be before closesAt.' });
+      }
+
+      let parsedDurationMinutes;
+      if (durationMinutes !== undefined && durationMinutes !== null && durationMinutes !== '') {
+        const n = Number(durationMinutes);
+        if (!Number.isFinite(n) || n <= 0 || n > MAX_DURATION_MINUTES) {
+          return res.status(400).json({
+            success: false,
+            code: 'BAD_DURATION',
+            message: `durationMinutes must be a number between 1 and ${MAX_DURATION_MINUTES}.`,
+          });
+        }
+        parsedDurationMinutes = n;
       }
 
       const scope = institutionScope(req);
+
       const { assessmentId, decisionId, spec } = await d.createAndAuthor({
         institutionId: scope.institutionId,
         cohortId,
         actorInstitutionUserId: req.institution.institutionUserId,
         brief,
+        opensAt: parsedOpensAt,
+        closesAt: parsedClosesAt,
+        durationMinutes: parsedDurationMinutes,
       });
       return res.json({
         success: true,
         data: { assessmentId: String(assessmentId), decisionId: String(decisionId), spec },
       });
     } catch (err) {
-      if (/disabled/i.test(err.message)) return res.status(404).json({ success: false, message: 'Not found' });
-      if (/cohort not found/i.test(err.message)) return res.status(404).json({ success: false, message: 'Cohort not found' });
-      if (/could not understand/i.test(err.message)) return res.status(422).json({ success: false, message: err.message });
+      if (/disabled/i.test(err.message)) return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Not found' });
+      if (/cohort not found/i.test(err.message)) {
+        return res.status(404).json({ success: false, code: 'COHORT_NOT_FOUND', message: 'Cohort not found' });
+      }
+      if (err.message === 'BAD_WINDOW') {
+        return res.status(400).json({ success: false, code: 'BAD_WINDOW', message: 'opensAt must be before closesAt.' });
+      }
+      if (/could not understand/i.test(err.message)) {
+        return res.status(422).json({ success: false, code: 'BAD_BRIEF', message: err.message });
+      }
       console.error('[institution/author-agent] createAndAuthor error', err);
       return res.status(500).json({ success: false, message: 'Could not create the assessment.' });
     }

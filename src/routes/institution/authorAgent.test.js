@@ -206,7 +206,7 @@ test('POST agent/create-assessment: happy path returns assessmentId/decisionId/s
   });
 });
 
-test('POST agent/create-assessment: flag off -> 404 envelope', async () => {
+test('POST agent/create-assessment: flag off -> 404 envelope with code NOT_FOUND', async () => {
   const h = makeHandlers({
     isAgentEnabled: () => false,
     createAndAuthor: async () => { throw new Error('should not run'); },
@@ -215,9 +215,10 @@ test('POST agent/create-assessment: flag off -> 404 envelope', async () => {
   await h.createAssessmentHandler(baseReq({ body: { cohortId: 'c1', brief: 'x' } }), r);
   assert.strictEqual(r.statusCode, 404);
   assert.strictEqual(r.body.success, false);
+  assert.strictEqual(r.body.code, 'NOT_FOUND');
 });
 
-test('POST agent/create-assessment: missing cohortId -> 400', async () => {
+test('POST agent/create-assessment: missing cohortId -> 400 with code VALIDATION', async () => {
   const h = makeHandlers({
     isAgentEnabled: () => true,
     createAndAuthor: async () => { throw new Error('should not run'); },
@@ -226,9 +227,10 @@ test('POST agent/create-assessment: missing cohortId -> 400', async () => {
   await h.createAssessmentHandler(baseReq({ body: { brief: 'x' } }), r);
   assert.strictEqual(r.statusCode, 400);
   assert.strictEqual(r.body.success, false);
+  assert.strictEqual(r.body.code, 'VALIDATION');
 });
 
-test('POST agent/create-assessment: missing brief -> 400', async () => {
+test('POST agent/create-assessment: missing brief -> 400 with code VALIDATION', async () => {
   const h = makeHandlers({
     isAgentEnabled: () => true,
     createAndAuthor: async () => { throw new Error('should not run'); },
@@ -237,9 +239,10 @@ test('POST agent/create-assessment: missing brief -> 400', async () => {
   await h.createAssessmentHandler(baseReq({ body: { cohortId: 'c1' } }), r);
   assert.strictEqual(r.statusCode, 400);
   assert.strictEqual(r.body.success, false);
+  assert.strictEqual(r.body.code, 'VALIDATION');
 });
 
-test('POST agent/create-assessment: cohort not found -> 404', async () => {
+test('POST agent/create-assessment: cohort not found -> 404 with code COHORT_NOT_FOUND', async () => {
   const h = makeHandlers({
     isAgentEnabled: () => true,
     createAndAuthor: async () => { throw new Error('cohort not found'); },
@@ -248,9 +251,10 @@ test('POST agent/create-assessment: cohort not found -> 404', async () => {
   await h.createAssessmentHandler(baseReq({ body: { cohortId: 'nope', brief: 'x' } }), r);
   assert.strictEqual(r.statusCode, 404);
   assert.strictEqual(r.body.success, false);
+  assert.strictEqual(r.body.code, 'COHORT_NOT_FOUND');
 });
 
-test('POST agent/create-assessment: unparseable brief -> 422', async () => {
+test('POST agent/create-assessment: unparseable brief -> 422 with code BAD_BRIEF', async () => {
   const h = makeHandlers({
     isAgentEnabled: () => true,
     createAndAuthor: async () => { throw new Error('could not understand the brief'); },
@@ -259,9 +263,10 @@ test('POST agent/create-assessment: unparseable brief -> 422', async () => {
   await h.createAssessmentHandler(baseReq({ body: { cohortId: 'c1', brief: 'asdkjfh' } }), r);
   assert.strictEqual(r.statusCode, 422);
   assert.strictEqual(r.body.success, false);
+  assert.strictEqual(r.body.code, 'BAD_BRIEF');
 });
 
-test('POST agent/create-assessment: unexpected service error -> 500', async () => {
+test('POST agent/create-assessment: unexpected service error -> 500 (no code — genuinely unclassified)', async () => {
   const h = makeHandlers({
     isAgentEnabled: () => true,
     createAndAuthor: async () => { throw new Error('boom'); },
@@ -270,6 +275,154 @@ test('POST agent/create-assessment: unexpected service error -> 500', async () =
   await h.createAssessmentHandler(baseReq({ body: { cohortId: 'c1', brief: 'x' } }), r);
   assert.strictEqual(r.statusCode, 500);
   assert.strictEqual(r.body.success, false);
+});
+
+// ── POST agent/create-assessment — opensAt/closesAt window validation ─────
+
+test('POST agent/create-assessment: opensAt unparseable -> 400 BAD_WINDOW, createAndAuthor never called', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', opensAt: 'not-a-date' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.code, 'BAD_WINDOW');
+});
+
+test('POST agent/create-assessment: closesAt unparseable -> 400 BAD_WINDOW, createAndAuthor never called', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', closesAt: 'garbage' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.code, 'BAD_WINDOW');
+});
+
+test('POST agent/create-assessment: opensAt >= closesAt -> 400 BAD_WINDOW, createAndAuthor never called', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({
+      body: {
+        cohortId: 'c1',
+        brief: 'x',
+        opensAt: '2026-08-02T00:00:00Z',
+        closesAt: '2026-08-01T00:00:00Z',
+      },
+    }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.code, 'BAD_WINDOW');
+});
+
+test('POST agent/create-assessment: createAndAuthor throws BAD_WINDOW (createAssessment E3) -> 400 BAD_WINDOW', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('BAD_WINDOW'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', opensAt: '2026-08-01T00:00:00Z', closesAt: '2026-08-02T00:00:00Z' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.code, 'BAD_WINDOW');
+});
+
+test('POST agent/create-assessment: a valid window is parsed and passed through to createAndAuthor as Dates', async () => {
+  let captured;
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async (args) => {
+      captured = args;
+      return { assessmentId: 'a1', decisionId: 'dec1', spec: {} };
+    },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', opensAt: '2026-08-01T00:00:00Z', closesAt: '2026-08-02T00:00:00Z' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 200);
+  assert.ok(captured.opensAt instanceof Date);
+  assert.ok(captured.closesAt instanceof Date);
+  assert.strictEqual(captured.opensAt.toISOString(), '2026-08-01T00:00:00.000Z');
+  assert.strictEqual(captured.closesAt.toISOString(), '2026-08-02T00:00:00.000Z');
+});
+
+// ── POST agent/create-assessment — durationMinutes validation ─────────────
+
+test('POST agent/create-assessment: durationMinutes non-numeric -> 400 BAD_DURATION, createAndAuthor never called', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', durationMinutes: 'ninety' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.code, 'BAD_DURATION');
+});
+
+test('POST agent/create-assessment: durationMinutes <= 0 -> 400 BAD_DURATION', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', durationMinutes: 0 } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.code, 'BAD_DURATION');
+});
+
+test('POST agent/create-assessment: durationMinutes over the max -> 400 BAD_DURATION', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', durationMinutes: 10000 } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.code, 'BAD_DURATION');
+});
+
+test('POST agent/create-assessment: a valid durationMinutes is passed through to createAndAuthor', async () => {
+  let captured;
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    createAndAuthor: async (args) => {
+      captured = args;
+      return { assessmentId: 'a1', decisionId: 'dec1', spec: {} };
+    },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', durationMinutes: 45 } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 200);
+  assert.strictEqual(captured.durationMinutes, 45);
 });
 
 // ── GET /author-agent/runs — list recent runs for a cohort ────────────────
