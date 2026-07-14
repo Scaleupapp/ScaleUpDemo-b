@@ -10,7 +10,7 @@ const {
   reapOrphanedRuns,
   createAndAuthor,
   listRuns,
-  _helpers: { computeFlaggedIndices, buildObjectiveContext },
+  _helpers: { computeFlaggedIndices, buildObjectiveContext, humanizeAuthoringFailure, describeAuthoringFailure },
 } = require('./authorAgentService');
 
 /** Dot-path get/set — the reaper's Assessment.updateOne fake needs both. */
@@ -275,6 +275,8 @@ test('runAuthoring: authorMcq throws -> failed result + log entry, never throws'
   const result = doc.action.result;
   assert.strictEqual(result.status, 'failed');
   assert.ok(doc.action.runLog.some((e) => /authoring failed: generateQuiz blew up/.test(e.msg)));
+  // Raw code retained for debugging even though the log line is human-facing.
+  assert.strictEqual(result.evidence.errorCode, 'generateQuiz blew up');
 });
 
 // ── runAuthoring: authoring settles but never reaches 'ready' ───────────
@@ -740,6 +742,42 @@ test('runAuthoring: capstone authorCapstone throws -> failed result, never throw
   const result = decisionStore.dec1.action.result;
   assert.strictEqual(result.status, 'failed');
   assert.strictEqual(result.engine, 'capstone');
+  // Raw code retained for debugging...
+  assert.strictEqual(result.evidence.errorCode, 'CAPSTONE_GEN_FAILED');
+  // ...but the TPO-facing run log shows a human sentence, not the bare code.
+  const doc = decisionStore.dec1;
+  assert.ok(
+    doc.action.runLog.some((e) => /failed its own quality checks/.test(e.msg)),
+    `expected a human sentence in the run log, got: ${JSON.stringify(doc.action.runLog)}`,
+  );
+  assert.ok(
+    !doc.action.runLog.some((e) => /^authoring failed: CAPSTONE_GEN_FAILED$/.test(e.msg)),
+    'run log must not show the bare engine code',
+  );
+});
+
+test('runAuthoring: capstone authorCapstone throws with a real underlying reason (.detail) -> surfaced in run log', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({});
+
+  const authoring = {
+    authorCapstone: async () => {
+      const err = new Error('CAPSTONE_GEN_FAILED');
+      err.detail = 'seeded_mistakes_fail: seeded_mistake location "src/wallet.js — debit balance check" does not reference any bundle file';
+      throw err;
+    },
+  };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring });
+  const doc = decisionStore.dec1;
+  assert.strictEqual(doc.action.result.evidence.errorCode, 'CAPSTONE_GEN_FAILED');
+  assert.ok(
+    doc.action.runLog.some((e) => e.msg.includes('failed its own quality checks') && e.msg.includes('seeded_mistake location')),
+    `expected the underlying reason to be surfaced, got: ${JSON.stringify(doc.action.runLog)}`,
+  );
 });
 
 // ── runAuthoring: drill engine ───────────────────────────────────────────
@@ -1399,4 +1437,59 @@ test('listRuns: no rows -> empty array, Assessment.find never called (no wasted 
 
   assert.deepStrictEqual(runs, []);
   assert.strictEqual(assessmentFindCalled, false);
+});
+
+// ── humanizeAuthoringFailure / describeAuthoringFailure — pure mapping ────────
+
+test('humanizeAuthoringFailure: CAPSTONE_GEN_FAILED -> quality-check sentence', () => {
+  assert.match(humanizeAuthoringFailure('CAPSTONE_GEN_FAILED'), /failed its own quality checks/);
+});
+
+test('humanizeAuthoringFailure: DRILL_GEN_FAILED -> same quality-check sentence', () => {
+  assert.strictEqual(humanizeAuthoringFailure('DRILL_GEN_FAILED'), humanizeAuthoringFailure('CAPSTONE_GEN_FAILED'));
+});
+
+test('humanizeAuthoringFailure: NOT_FOUND -> vanished-assessment sentence', () => {
+  assert.match(humanizeAuthoringFailure('NOT_FOUND'), /vanished before authoring could finish/);
+});
+
+test('humanizeAuthoringFailure: BAD_CONFIG -> brief-detail sentence', () => {
+  assert.match(humanizeAuthoringFailure('BAD_CONFIG'), /didn't give enough to build this/);
+});
+
+test('humanizeAuthoringFailure: unknown code -> kept, prefixed with "authoring failed: "', () => {
+  assert.strictEqual(humanizeAuthoringFailure('SOME_WEIRD_CODE'), 'authoring failed: SOME_WEIRD_CODE');
+});
+
+test('humanizeAuthoringFailure: no code -> "authoring failed: unknown error"', () => {
+  assert.strictEqual(humanizeAuthoringFailure(null), 'authoring failed: unknown error');
+  assert.strictEqual(humanizeAuthoringFailure(undefined), 'authoring failed: unknown error');
+});
+
+test('describeAuthoringFailure: retains the raw code separately from the human log message', () => {
+  const { code, logMsg } = describeAuthoringFailure(new Error('BAD_CONFIG'));
+  assert.strictEqual(code, 'BAD_CONFIG');
+  assert.match(logMsg, /didn't give enough to build this/);
+  assert.ok(!logMsg.includes('BAD_CONFIG'), 'human log message should not leak the raw code');
+});
+
+test('describeAuthoringFailure: appends a trimmed .detail when present', () => {
+  const err = new Error('CAPSTONE_GEN_FAILED');
+  err.detail = '  seeded_mistakes_fail: bad location  ';
+  const { code, logMsg } = describeAuthoringFailure(err);
+  assert.strictEqual(code, 'CAPSTONE_GEN_FAILED');
+  assert.ok(logMsg.includes('seeded_mistakes_fail: bad location'));
+  assert.ok(!logMsg.startsWith(' '), 'detail should be trimmed before appending');
+});
+
+test('describeAuthoringFailure: truncates an overlong .detail', () => {
+  const err = new Error('CAPSTONE_GEN_FAILED');
+  err.detail = 'x'.repeat(1000);
+  const { logMsg } = describeAuthoringFailure(err);
+  assert.ok(logMsg.length < 500, `expected a truncated log message, got length ${logMsg.length}`);
+});
+
+test('describeAuthoringFailure: no .detail -> just the human sentence, no dangling separator', () => {
+  const { logMsg } = describeAuthoringFailure(new Error('NOT_FOUND'));
+  assert.ok(!logMsg.includes(' — '), `expected no detail separator, got: ${logMsg}`);
 });

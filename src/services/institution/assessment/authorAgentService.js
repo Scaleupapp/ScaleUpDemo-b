@@ -198,6 +198,45 @@ async function finalizeResult(AgentDecision, decisionId, result) {
 }
 
 /**
+ * Translates a raw engine error CODE (an Error#message thrown by
+ * assessmentAuthoringService — e.g. 'CAPSTONE_GEN_FAILED', 'NOT_FOUND',
+ * 'BAD_CONFIG') into a sentence a TPO can act on without knowing the engine's
+ * internals. The portal used to show bare codes like "authoring failed:
+ * CAPSTONE_GEN_FAILED" straight from the run log — meaningless to a TPO and a
+ * dead end. Every code path is still retained as `evidence.errorCode` on the
+ * result for debugging.
+ */
+function humanizeAuthoringFailure(code) {
+  switch (code) {
+    case 'CAPSTONE_GEN_FAILED':
+    case 'DRILL_GEN_FAILED':
+      return "the generated project failed its own quality checks (it was retried and still didn't pass) — try running again, or add more detail to the brief";
+    case 'NOT_FOUND':
+      return 'the assessment vanished before authoring could finish';
+    case 'BAD_CONFIG':
+      return "the brief didn't give enough to build this — name the format, length and topics";
+    default:
+      return `authoring failed: ${code || 'unknown error'}`;
+  }
+}
+
+/**
+ * Builds the run-log line + evidence.errorCode for an authorFn failure.
+ * If the thrown error carries `.detail` (a real underlying reason read off
+ * the generation-request/bundle doc — see assessmentAuthoringService's
+ * authorCapstone, which attaches CapstoneGenerationRequest.error), a trimmed
+ * version of that is appended so the TPO sees the actual cause, not just the
+ * category.
+ */
+function describeAuthoringFailure(err) {
+  const code = (err && err.message) || null;
+  const human = humanizeAuthoringFailure(code);
+  const detail = err && err.detail ? String(err.detail).trim().slice(0, 300) : null;
+  const logMsg = detail ? `${human} — ${detail}` : human;
+  return { code: code || 'UNKNOWN', logMsg };
+}
+
+/**
  * startRun({ assessmentId, institutionId, cohortId, actorInstitutionUserId, brief, createdByAgent }, deps)
  *   -> Promise<{ decisionId }>
  *
@@ -398,8 +437,11 @@ async function runMcqEngine({ decisionId, assessmentId }, d) {
     try {
       assessment = await d.authoring.authorMcq(assessmentId, d);
     } catch (err) {
-      await appendLog(d.AgentDecision, decisionId, `authoring failed: ${err && err.message}`);
-      return mcqResult('failed', { totalQuestions: 0, regenerated: 0, flaggedIndices: [], passes: 0 });
+      const { code, logMsg } = describeAuthoringFailure(err);
+      await appendLog(d.AgentDecision, decisionId, logMsg);
+      const result = mcqResult('failed', { totalQuestions: 0, regenerated: 0, flaggedIndices: [], passes: 0 });
+      result.evidence.errorCode = code;
+      return result;
     }
 
     // Re-read canonical state — authorMcq persists via Assessment.updateOne
@@ -498,8 +540,9 @@ async function runInterviewEngine({ decisionId, assessmentId }, d) {
     try {
       await d.authoring.authorInterview(assessmentId, d);
     } catch (err) {
-      await appendLog(d.AgentDecision, decisionId, `authoring failed: ${err && err.message}`);
-      return interviewResult('failed', {});
+      const { code, logMsg } = describeAuthoringFailure(err);
+      await appendLog(d.AgentDecision, decisionId, logMsg);
+      return interviewResult('failed', { errorCode: code });
     }
 
     const assessment = await d.Assessment.findById(assessmentId);
@@ -559,8 +602,9 @@ async function runBundleEngine(type, { decisionId, assessmentId }, d) {
     try {
       await authorFn(assessmentId, d);
     } catch (err) {
-      await appendLog(d.AgentDecision, decisionId, `authoring failed: ${err && err.message}`);
-      return bundleResult(type, 'failed', {});
+      const { code, logMsg } = describeAuthoringFailure(err);
+      await appendLog(d.AgentDecision, decisionId, logMsg);
+      return bundleResult(type, 'failed', { errorCode: code });
     }
 
     const assessment = await d.Assessment.findById(assessmentId);
@@ -839,5 +883,13 @@ module.exports = {
   reapOrphanedRuns,
   createAndAuthor,
   listRuns,
-  _helpers: { computeFlaggedIndices, mcqAuthoringStatus, authoringStatusFor, buildObjectiveContext, loadCohortContext },
+  _helpers: {
+    computeFlaggedIndices,
+    mcqAuthoringStatus,
+    authoringStatusFor,
+    buildObjectiveContext,
+    loadCohortContext,
+    humanizeAuthoringFailure,
+    describeAuthoringFailure,
+  },
 };

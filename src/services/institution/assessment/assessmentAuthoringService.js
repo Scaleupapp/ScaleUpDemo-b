@@ -617,9 +617,18 @@ async function authorCapstone(assessmentId, deps = {}) {
       await assessment.save();
       return assessment;
     }
-    if (polled.status === 'failed') throw new Error('CAPSTONE_GEN_FAILED');
+    if (polled.status === 'failed') {
+      const err = new Error('CAPSTONE_GEN_FAILED');
+      // Real reason lives on the request row (set by the generation pipeline
+      // on its last failed attempt — e.g. a validator check that rejected the
+      // bundle). Attach it so callers that want to show a TPO more than the
+      // bare code can (authorAgentService's runBundleEngine does); routes
+      // that only branch on err.message are unaffected.
+      if (polled.error) err.detail = polled.error;
+      throw err;
+    }
   }
-  throw new Error('CAPSTONE_GEN_FAILED'); // timeout
+  throw new Error('CAPSTONE_GEN_FAILED'); // timeout — no request-level reason to attach
 }
 
 /**
