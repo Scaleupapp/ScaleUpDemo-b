@@ -385,8 +385,10 @@ test('authorCapstone throws NOT_FOUND when assessment not found', async () => {
   );
 });
 
-test('authorCapstone throws CAPSTONE_GEN_FAILED on timeout (maxPolls exhausted)', async () => {
+test('authorCapstone: budget expires while still generating -> returns pending sentinel, does NOT throw, does NOT touch the assessment', async () => {
   const assessment = makeCapstoneAssessment();
+  let saveCalled = false;
+  assessment.save = async function () { saveCalled = true; return this; };
   // Always returns 'queued' → never becomes 'ready' or 'failed'
   const deps = makeCapstoneDeps({
     Assessment: { findById: async () => assessment },
@@ -396,13 +398,26 @@ test('authorCapstone throws CAPSTONE_GEN_FAILED on timeout (maxPolls exhausted)'
     maxPolls: 2,
   });
 
-  await assert.rejects(
-    () => authorCapstone('assess-cap-1', deps),
-    (err) => {
-      assert.strictEqual(err.message, 'CAPSTONE_GEN_FAILED');
-      return true;
-    }
-  );
+  const result = await authorCapstone('assess-cap-1', deps);
+
+  assert.deepStrictEqual(result, { pending: true, requestId: 'req1' });
+  assert.strictEqual(saveCalled, false, 'a timed-out poll must never write to the assessment');
+  assert.strictEqual(assessment.config.capstone.bundleId, undefined, 'bundleId must stay unset — nothing to discard, nothing to fake');
+});
+
+test('authorCapstone: poll budget defaults from CAPSTONE_AUTHOR_POLL_MINUTES when maxPolls is not injected', async () => {
+  const { _helpers } = require('../../services/institution/assessment/assessmentAuthoringService');
+  const prev = process.env.CAPSTONE_AUTHOR_POLL_MINUTES;
+  try {
+    process.env.CAPSTONE_AUTHOR_POLL_MINUTES = '1';
+    // 1 minute / 3000ms default pollMs = 20 polls
+    assert.strictEqual(_helpers.computeMaxPolls({}, 3000), 20);
+    // deps.maxPolls always wins over the env-derived default
+    assert.strictEqual(_helpers.computeMaxPolls({ maxPolls: 7 }, 3000), 7);
+  } finally {
+    if (prev === undefined) delete process.env.CAPSTONE_AUTHOR_POLL_MINUTES;
+    else process.env.CAPSTONE_AUTHOR_POLL_MINUTES = prev;
+  }
 });
 
 test('authorCapstone passes institution ownership to requestGeneration — no userId key, assessment.createdBy goes on requestedByInstitutionUserId', async () => {
@@ -1057,6 +1072,36 @@ test('authorDrill still prefers existing active library bundle over generation',
   assert.ok(result, 'should return assessment');
   assert.strictEqual(String(result.config.drill.bundleId), 'bundleLib', 'bundleId should be set from library');
   assert.strictEqual(generateDrillCalled, false, 'generateDrill must NOT be called when library bundle found');
+});
+
+test('authorDrill: poll budget expires before bundle goes active -> returns pending sentinel, persists pendingBundleId (not bundleId)', async () => {
+  const assessment = makeDrillAssessment({
+    config: { drill: { roleTrack: 'swe', drillSubtype: 'algo', difficulty: 'medium' } },
+  });
+  let markModifiedCalled = false;
+  let savedCalled = false;
+  assessment.markModified = () => { markModifiedCalled = true; };
+  assessment.save = async function () { savedCalled = true; return this; };
+
+  const deps = {
+    Assessment: { findById: async () => assessment },
+    ArtifactBundle: {
+      findById: async () => ({ _id: 'b1', status: 'validated' }), // never reaches 'active'
+      findOne: async () => null, // no library match
+    },
+    generateDrill: async () => ({ ok: true, bundle_id: 'b1' }),
+    sleep: async () => {},
+    pollMs: 0,
+    maxPolls: 2,
+  };
+
+  const result = await authorDrill('assess-drill-1', deps);
+
+  assert.deepStrictEqual(result, { pending: true, bundleId: 'b1' });
+  assert.strictEqual(String(assessment.config.drill.pendingBundleId), 'b1', 'candidate bundle id should be persisted for the reconciler');
+  assert.ok(!assessment.config.drill.bundleId, 'bundleId (which gates release) must stay unset');
+  assert.strictEqual(markModifiedCalled, true);
+  assert.strictEqual(savedCalled, true);
 });
 
 test('authorDrill handles generateDrill failure gracefully without throwing', async () => {

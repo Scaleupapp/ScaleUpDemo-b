@@ -179,6 +179,22 @@ function startCronJobs() {
     removeOnComplete: true,
   });
 
+  // 25. Author Agent Bundle Reconciler — Every 2 minutes. Real capstone
+  // generation (Opus writes a repo -> E2B sandbox proof -> Gemini cross-
+  // check) takes ~7+ minutes, longer than authorCapstone/authorDrill's own
+  // poll budget can always wait fire-and-forget inside a single request.
+  // When that budget expires the run is left open (action.result null,
+  // NOT failed — see runBundleEngine's pending handling) rather than
+  // reporting a false failure and discarding whatever the pipeline finishes
+  // with a few minutes later. This sweep is what actually closes those runs
+  // out — attaching the bundle the moment generation truly finishes, marking
+  // a real pipeline failure honestly, or (only past its own much longer
+  // timeoutMinutes window) giving up on one that's genuinely gone missing.
+  cronQueue.add('authorAgentBundleReconciler', {}, {
+    repeat: { pattern: '*/2 * * * *' },
+    removeOnComplete: true,
+  });
+
   // Competition: Generate + activate daily challenges (and live events on eve days)
   // Daily midnight IST = 18:30 UTC previous day
   competitionQueue.add('generateAndActivateDaily', {}, {
@@ -323,6 +339,12 @@ function startCronJobs() {
         const { reapOrphanedRuns } = require('../services/institution/assessment/authorAgentService');
         const r = await reapOrphanedRuns();
         console.log(`[cron] authorAgentOrphanReaper: ${r.reaped} orphaned runs failed`);
+        break;
+      }
+      case 'authorAgentBundleReconciler': {
+        const { reconcileBundleRuns } = require('../services/institution/assessment/authorAgentService');
+        const r = await reconcileBundleRuns();
+        console.log(`[cron] authorAgentBundleReconciler: ${r.reconciled} runs closed`);
         break;
       }
     }
