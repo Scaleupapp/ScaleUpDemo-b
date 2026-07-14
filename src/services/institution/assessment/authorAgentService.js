@@ -84,6 +84,9 @@ function defaultDeps() {
     authoring: require('./assessmentAuthoringService'),
     record: require('../../agentDecisionService').record,
     isAgentEnabled: require('../../../config/agentFlags').isAgentEnabled,
+    InstitutionCohort: require('../../../models/InstitutionCohort'),
+    assessmentSpecService: require('./assessmentSpecService'),
+    assessmentService: require('./assessmentService'),
   };
 }
 
@@ -207,6 +210,96 @@ async function startRun({ assessmentId, institutionId, cohortId, actorInstitutio
   runAuthoring({ decisionId, assessmentId }, d).catch(console.warn);
 
   return { decisionId };
+}
+
+/**
+ * createAndAuthor({ institutionId, cohortId, actorInstitutionUserId, brief }, deps)
+ *   -> Promise<{ assessmentId, decisionId, spec }>
+ *
+ * The one-prompt path: a TPO describes the assessment they want in free text
+ * — no pre-existing shell, no picker. Turns the brief into a validated
+ * create-assessment payload (assessmentSpecService.parseBrief), creates the
+ * Assessment (assessmentService.createAssessment — which already enforces
+ * the cohort-belongs-to-institution guard and per-type config validation),
+ * then reuses the EXISTING startRun/runAuthoring generate -> QA -> repair
+ * pipeline on the freshly created assessment. Does not reimplement any of
+ * that logic — it is the same run a TPO gets by hand-configuring an
+ * assessment and clicking "run author agent".
+ *
+ * Guarded by the same `author_agent` flag startRun checks; checked again
+ * here up front so a disabled flag never even reaches the LLM call.
+ *
+ * Never throws anything but the three named errors this feature promises
+ * ('author agent disabled' | 'cohort not found' | 'could not understand the
+ * brief') plus whatever createAssessment/startRun themselves throw for other
+ * genuine failures (e.g. a bad opens/closes window) — those are not this
+ * feature's to hide.
+ */
+async function createAndAuthor({ institutionId, cohortId, actorInstitutionUserId, brief }, deps = {}) {
+  const d = { ...defaultDeps(), ...deps };
+
+  if (!d.isAgentEnabled('author_agent')) throw new Error('author agent disabled');
+
+  // Best-effort context for the prompt only — NOT the cohort-ownership guard.
+  // createAssessment (below) is the single source of truth for that check.
+  let cohortLabel;
+  try {
+    const cohort = await d.InstitutionCohort.findOne({ _id: cohortId, institutionId }).select('name label');
+    cohortLabel = cohort && (cohort.name || cohort.label);
+  } catch (_) {
+    // best-effort — an unresolved label just means a slightly less specific prompt
+  }
+
+  let spec;
+  try {
+    spec = await d.assessmentSpecService.parseBrief({ brief, cohortLabel }, d);
+  } catch (_err) {
+    throw new Error('could not understand the brief');
+  }
+
+  let assessment;
+  try {
+    assessment = await d.assessmentService.createAssessment(
+      { institutionId },
+      {
+        cohortId,
+        type: spec.type,
+        title: spec.title,
+        config: spec.config,
+        opensAt: spec.opensAt,
+        closesAt: spec.closesAt,
+        createdBy: actorInstitutionUserId,
+      },
+      d
+    );
+  } catch (err) {
+    if (err && err.message === 'COHORT_NOT_FOUND') throw new Error('cohort not found');
+    throw err;
+  }
+
+  const { decisionId } = await startRun(
+    { assessmentId: assessment._id, institutionId, cohortId, actorInstitutionUserId, brief },
+    d
+  );
+
+  // Tag the ledger row as agent-originated. Best-effort: startRun's own
+  // record() call already persisted action.engine = spec.type (assessment.type
+  // at the moment startRun read it), runLog and result — this only adds one
+  // extra field, it never recreates or races the row's core content.
+  try {
+    const row = await d.AgentDecision.findById(decisionId);
+    if (row) {
+      row.action = row.action || {};
+      row.action.createdByAgent = true;
+      row.markModified('action');
+      await row.save();
+    }
+  } catch (_) {
+    // best-effort — the run itself already started; a missing flag on the
+    // ledger row doesn't affect the assessment or the run outcome.
+  }
+
+  return { assessmentId: assessment._id, decisionId, spec };
 }
 
 // ── mcq runner ──────────────────────────────────────────────────────────────
@@ -624,5 +717,6 @@ module.exports = {
   runAuthoring,
   getRunStatus,
   reapOrphanedRuns,
+  createAndAuthor,
   _helpers: { computeFlaggedIndices, mcqAuthoringStatus, authoringStatusFor },
 };
