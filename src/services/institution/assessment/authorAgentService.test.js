@@ -9,7 +9,7 @@ const {
   getRunStatus,
   reapOrphanedRuns,
   createAndAuthor,
-  _helpers: { computeFlaggedIndices },
+  _helpers: { computeFlaggedIndices, buildObjectiveContext },
 } = require('./authorAgentService');
 
 /** Dot-path get/set — the reaper's Assessment.updateOne fake needs both. */
@@ -1169,4 +1169,108 @@ test('createAndAuthor: performs no extra findById/save on the decision row itsel
   assert.ok(row, 'expected the ledger row to exist');
   assert.strictEqual(row.saveCalls || 0, 0, 'createAndAuthor must never save the decision row itself');
   assert.strictEqual(row.action.createdByAgent, true, 'the flag must already be set from record() time');
+});
+
+// ── buildObjectiveContext ────────────────────────────────────────────────
+
+test('buildObjectiveContext: null template -> null', () => {
+  assert.strictEqual(buildObjectiveContext(null), null);
+});
+
+test('buildObjectiveContext: compacts specifics + competencies, omitting missing fields', () => {
+  const template = {
+    label: 'Data Analyst Placement Prep',
+    specifics: { targetRole: 'Data Analyst', targetSkill: 'SQL' }, // no targetCompany
+    competencies: [
+      { name: 'SQL', weight: 8, category: 'core' },
+      { name: '', weight: 3 }, // dropped — no name
+      { name: 'Excel', weight: 5 },
+    ],
+  };
+  const objective = buildObjectiveContext(template);
+  assert.deepStrictEqual(objective, {
+    label: 'Data Analyst Placement Prep',
+    targetRole: 'Data Analyst',
+    targetSkill: 'SQL',
+    competencies: [{ name: 'SQL', weight: 8 }, { name: 'Excel', weight: 5 }],
+  });
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(objective, 'targetCompany'), false);
+});
+
+test('buildObjectiveContext: no specifics/competencies -> just the label', () => {
+  const objective = buildObjectiveContext({ label: 'Casual Learning' });
+  assert.deepStrictEqual(objective, { label: 'Casual Learning' });
+});
+
+// ── createAndAuthor: objective grounding (cohort's ObjectiveTemplate) ────
+
+function makeObjectiveTemplateModel(store) {
+  return {
+    findById(id) {
+      const doc = store[id] || null;
+      return { select: async () => doc };
+    },
+  };
+}
+
+test('createAndAuthor: cohort with objectiveTemplateId -> objective is loaded and passed into parseBrief', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+
+  deps.InstitutionCohort = {
+    findOne: () => ({
+      select: async () => ({ label: 'CSE Final Year', objectiveTemplateId: 'obj1' }),
+    }),
+  };
+  deps.ObjectiveTemplate = makeObjectiveTemplateModel({
+    obj1: {
+      label: 'Data Analyst Placement Prep',
+      specifics: { targetRole: 'Data Analyst' },
+      competencies: [{ name: 'SQL', weight: 8 }],
+    },
+  });
+
+  let parseBriefArgs = null;
+  deps.assessmentSpecService.parseBrief = async (args) => { parseBriefArgs = args; return mcqSpec; };
+
+  await createAndAuthor({ institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x' }, deps);
+
+  assert.ok(parseBriefArgs.objective, 'expected an objective to be passed to parseBrief');
+  assert.strictEqual(parseBriefArgs.objective.label, 'Data Analyst Placement Prep');
+  assert.strictEqual(parseBriefArgs.objective.targetRole, 'Data Analyst');
+  assert.deepStrictEqual(parseBriefArgs.objective.competencies, [{ name: 'SQL', weight: 8 }]);
+});
+
+test('createAndAuthor: cohort with no objectiveTemplateId -> objective is null', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+
+  deps.InstitutionCohort = {
+    findOne: () => ({ select: async () => ({ label: 'CSE Final Year' }) }),
+  };
+
+  let parseBriefArgs = null;
+  deps.assessmentSpecService.parseBrief = async (args) => { parseBriefArgs = args; return mcqSpec; };
+
+  await createAndAuthor({ institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x' }, deps);
+
+  assert.strictEqual(parseBriefArgs.objective, null);
+});
+
+test('createAndAuthor: cohort lookup throws -> best-effort, run still proceeds with objective null', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+
+  deps.InstitutionCohort = {
+    findOne: () => { throw new Error('db down'); },
+  };
+
+  let parseBriefArgs = null;
+  deps.assessmentSpecService.parseBrief = async (args) => { parseBriefArgs = args; return mcqSpec; };
+
+  const result = await createAndAuthor(
+    { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x' },
+    deps
+  );
+
+  assert.ok(result.assessmentId, 'run should still succeed despite the cohort lookup failure');
+  assert.strictEqual(parseBriefArgs.objective, null);
+  assert.strictEqual(parseBriefArgs.cohortLabel, undefined);
 });

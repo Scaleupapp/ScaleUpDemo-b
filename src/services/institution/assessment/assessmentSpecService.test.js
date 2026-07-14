@@ -3,7 +3,11 @@
 const { test } = require('node:test');
 const assert = require('assert');
 
-const { parseBrief, validateSpec } = require('./assessmentSpecService');
+const {
+  parseBrief,
+  validateSpec,
+  _helpers: { roleTrackFromObjective, resolveRoleTrack },
+} = require('./assessmentSpecService');
 
 /** Fake aiProvider.analyzeWithClaude that returns a fixed object (or throws). */
 function fakeAi(response, { throws } = {}) {
@@ -248,4 +252,154 @@ test('validateSpec: a valid ordered window is carried through; an inverted one i
   });
   assert.strictEqual(inverted.opensAt, undefined);
   assert.strictEqual(inverted.closesAt, undefined);
+});
+
+// ── roleTrackFromObjective: keyword map unit tests ───────────────────────
+
+test('roleTrackFromObjective: no objective -> null', () => {
+  assert.strictEqual(roleTrackFromObjective(null), null);
+  assert.strictEqual(roleTrackFromObjective(undefined), null);
+});
+
+test('roleTrackFromObjective: objective with neither targetRole nor targetSkill -> null', () => {
+  assert.strictEqual(roleTrackFromObjective({ label: 'Something' }), null);
+});
+
+test('roleTrackFromObjective: targetRole "Data Analyst" -> ds', () => {
+  assert.strictEqual(roleTrackFromObjective({ targetRole: 'Data Analyst' }), 'ds');
+});
+
+test('roleTrackFromObjective: targetRole "Data Scientist" -> ds', () => {
+  assert.strictEqual(roleTrackFromObjective({ targetRole: 'Data Scientist' }), 'ds');
+});
+
+test('roleTrackFromObjective: targetSkill "Machine Learning" (no "engineer") -> ds', () => {
+  assert.strictEqual(roleTrackFromObjective({ targetSkill: 'Machine Learning' }), 'ds');
+});
+
+test('roleTrackFromObjective: targetRole "AI Engineer" -> ai_eng', () => {
+  assert.strictEqual(roleTrackFromObjective({ targetRole: 'AI Engineer' }), 'ai_eng');
+});
+
+test('roleTrackFromObjective: targetRole "GenAI Engineer" -> ai_eng', () => {
+  assert.strictEqual(roleTrackFromObjective({ targetRole: 'GenAI Engineer' }), 'ai_eng');
+});
+
+test('roleTrackFromObjective: targetRole "Machine Learning Engineer" -> ai_eng (checked before the ds bucket)', () => {
+  assert.strictEqual(roleTrackFromObjective({ targetRole: 'Machine Learning Engineer' }), 'ai_eng');
+});
+
+test('roleTrackFromObjective: targetRole "Backend Engineer" (general engineering, no data/AI keyword) -> swe', () => {
+  assert.strictEqual(roleTrackFromObjective({ targetRole: 'Backend Engineer' }), 'swe');
+});
+
+// ── resolveRoleTrack: precedence ─────────────────────────────────────────
+
+test('resolveRoleTrack: brief value wins over objective', () => {
+  const result = resolveRoleTrack('ai engineer', { targetRole: 'Data Analyst' });
+  assert.deepStrictEqual(result, { roleTrack: 'ai_eng', source: 'brief' });
+});
+
+test('resolveRoleTrack: no brief value -> falls back to objective-derived', () => {
+  const result = resolveRoleTrack(undefined, { targetRole: 'Data Analyst' });
+  assert.deepStrictEqual(result, { roleTrack: 'ds', source: 'objective' });
+});
+
+test('resolveRoleTrack: neither brief nor objective -> "swe" default', () => {
+  const result = resolveRoleTrack(undefined, null);
+  assert.deepStrictEqual(result, { roleTrack: 'swe', source: 'default' });
+});
+
+// ── validateSpec: objective grounding — drill roleTrack ──────────────────
+
+test('validateSpec: drill, objective present, brief silent on role -> roleTrack from objective', () => {
+  const spec = validateSpec(
+    { type: 'drill', title: 'T', config: { drill: { drillSubtype: 'refactor' } } },
+    { label: 'Data Analyst Placement Prep', targetRole: 'Data Analyst' }
+  );
+  assert.strictEqual(spec.config.drill.roleTrack, 'ds');
+  assert.strictEqual(spec.groundedIn.roleTrackSource, 'objective');
+  assert.strictEqual(spec.groundedIn.objective, 'Data Analyst Placement Prep');
+});
+
+test('validateSpec: drill, objective present, brief explicitly says "AI engineer" -> brief wins', () => {
+  const spec = validateSpec(
+    { type: 'drill', title: 'T', config: { drill: { drillSubtype: 'refactor', roleTrack: 'AI engineer' } } },
+    { label: 'Data Analyst Placement Prep', targetRole: 'Data Analyst' }
+  );
+  assert.strictEqual(spec.config.drill.roleTrack, 'ai_eng');
+  assert.strictEqual(spec.groundedIn.roleTrackSource, 'brief');
+});
+
+test('validateSpec: drill, no objective -> "swe" default with roleTrackSource "default"', () => {
+  const spec = validateSpec({ type: 'drill', title: 'T', config: { drill: { drillSubtype: 'refactor' } } });
+  assert.strictEqual(spec.config.drill.roleTrack, 'swe');
+  assert.strictEqual(spec.groundedIn.roleTrackSource, 'default');
+  assert.strictEqual(spec.groundedIn.objective, null);
+});
+
+// ── validateSpec: objective grounding — interview targetRole/targetCompany ──
+
+test('validateSpec: interview spec inherits targetRole/targetCompany from objective when brief omits them', () => {
+  const spec = validateSpec(
+    { type: 'interview', title: 'T', config: { interview: {} } },
+    { label: 'FAANG SWE Prep', targetRole: 'Backend Engineer', targetCompany: 'Amazon' }
+  );
+  assert.strictEqual(spec.config.interview.targetRole, 'Backend Engineer');
+  assert.strictEqual(spec.config.interview.targetCompany, 'Amazon');
+  assert.strictEqual(spec.groundedIn.targetRoleSource, 'objective');
+});
+
+test('validateSpec: interview spec keeps the brief-stated targetRole over the objective', () => {
+  const spec = validateSpec(
+    { type: 'interview', title: 'T', config: { interview: { targetRole: 'Frontend Engineer' } } },
+    { label: 'FAANG SWE Prep', targetRole: 'Backend Engineer', targetCompany: 'Amazon' }
+  );
+  assert.strictEqual(spec.config.interview.targetRole, 'Frontend Engineer');
+  assert.strictEqual(spec.groundedIn.targetRoleSource, 'brief');
+  // targetCompany still inherited from the objective since the brief didn't state one.
+  assert.strictEqual(spec.config.interview.targetCompany, 'Amazon');
+});
+
+test('validateSpec: interview spec with no objective and no brief targetRole -> targetRoleSource null, falls back to title', () => {
+  const spec = validateSpec({ type: 'interview', title: 'Placement Interview', config: { interview: {} } });
+  assert.strictEqual(spec.config.interview.targetRole, 'Placement Interview');
+  assert.strictEqual(spec.groundedIn.targetRoleSource, null);
+});
+
+// ── parseBrief: threads objective through to the prompt and validateSpec ──
+
+test('parseBrief: objective is injected into the prompt as authoritative context', async () => {
+  let capturedUserPrompt = null;
+  const aiProvider = {
+    async analyzeWithClaude({ userPrompt }) {
+      capturedUserPrompt = userPrompt;
+      return { type: 'drill', title: 'T', drill: { drillSubtype: 'verify' } };
+    },
+  };
+
+  const spec = await parseBrief(
+    { brief: 'A short coding drill for this cohort', objective: { label: 'Data Analyst Placement Prep', targetRole: 'Data Analyst', competencies: [{ name: 'SQL', weight: 8 }] } },
+    { aiProvider }
+  );
+
+  assert.match(capturedUserPrompt, /AUTHORITATIVE CONTEXT/);
+  assert.match(capturedUserPrompt, /Data Analyst Placement Prep/);
+  assert.match(capturedUserPrompt, /SQL/);
+  // Brief was silent on role -> objective-derived roleTrack for a Data Analyst.
+  assert.strictEqual(spec.config.drill.roleTrack, 'ds');
+  assert.strictEqual(spec.groundedIn.roleTrackSource, 'objective');
+});
+
+test('parseBrief: no objective -> prompt has no AUTHORITATIVE CONTEXT line', async () => {
+  let capturedUserPrompt = null;
+  const aiProvider = {
+    async analyzeWithClaude({ userPrompt }) {
+      capturedUserPrompt = userPrompt;
+      return { type: 'mcq', title: 'T', mcq: { topic: 'x' } };
+    },
+  };
+
+  await parseBrief({ brief: 'An MCQ test' }, { aiProvider });
+  assert.doesNotMatch(capturedUserPrompt, /AUTHORITATIVE CONTEXT/);
 });

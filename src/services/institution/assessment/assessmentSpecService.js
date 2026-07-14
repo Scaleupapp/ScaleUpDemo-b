@@ -20,6 +20,22 @@
  * Only when a requirement has no safe deterministic default (no
  * recognizable drillSubtype; a `type` that can't be resolved at all) does
  * validateSpec throw `Error('could not understand the brief')`.
+ *
+ * Objective grounding (cohort's ObjectiveTemplate, when the cohort has one):
+ * authorAgentService.createAndAuthor resolves the cohort's objectiveTemplateId
+ * -> ObjectiveTemplate and passes a compact `objective` context
+ * ({ label, targetRole, targetCompany, targetSkill, competencies }) into
+ * parseBrief. That context is (a) injected into the LLM prompt as
+ * AUTHORITATIVE CONTEXT the model should design around unless the brief
+ * explicitly overrides it, and (b) used as a DETERMINISTIC fallback —
+ * roleTrackFromObjective()/resolveRoleTrack() for drill's roleTrack, and the
+ * objective's targetRole/targetCompany for interview specs — whenever the
+ * brief itself is silent. Precedence (documented again at resolveRoleTrack):
+ * explicit brief > LLM-chosen from brief > objective-derived > 'swe' default.
+ * Every spec returns `groundedIn: { objective, roleTrackSource,
+ * targetRoleSource }` so the provenance is honest and visible to the UI —
+ * this is never persisted onto the Assessment doc (not in its schema); it's
+ * a response-only field.
  */
 
 const VALID_TYPES = ['mcq', 'capstone', 'interview', 'drill'];
@@ -66,6 +82,65 @@ function coerceRoleTrack(value) {
   if (VALID_ROLE_TRACKS.includes(value)) return value;
   const key = cleanString(value).toLowerCase();
   return ROLE_TRACK_ALIASES[key] || null;
+}
+
+// ── objective-derived roleTrack fallback ────────────────────────────────────
+//
+// Keyword map from an ObjectiveTemplate's targetRole/targetSkill text to one
+// of the three roleTrack enum values. Order matters: AI/LLM/GenAI engineering
+// roles are checked BEFORE the broader data/analytics bucket, since a role
+// like "ML Engineer" would otherwise also match the data keywords below.
+// Anything that names a role/skill at all but matches neither bucket is
+// treated as a general engineering role ('swe') — only a completely absent
+// targetRole/targetSkill yields "no signal" (null).
+const OBJECTIVE_ROLE_TRACK_RULES = [
+  {
+    track: 'ai_eng',
+    pattern: /\b(ai|artificial[\s-]?intelligence|llm|genai|gen[\s-]?ai|generative[\s-]?ai|prompt engineer(?:ing)?|ml engineer|machine[\s-]?learning engineer)\b/i,
+  },
+  {
+    track: 'ds',
+    pattern: /\b(data scientist|data science|data analyst|analytics|analyst|machine[\s-]?learning|ml)\b/i,
+  },
+];
+
+/**
+ * roleTrackFromObjective(objective) -> 'swe' | 'ds' | 'ai_eng' | null
+ *
+ * null means the objective gave no targetRole/targetSkill text to derive
+ * anything from (no objective at all, or an objective with neither field
+ * set) — the caller should fall through to the next precedence tier, not
+ * treat null as 'swe'.
+ */
+function roleTrackFromObjective(objective) {
+  if (!objective) return null;
+  const text = [objective.targetRole, objective.targetSkill].filter(Boolean).join(' ').trim();
+  if (!text) return null;
+  for (const rule of OBJECTIVE_ROLE_TRACK_RULES) {
+    if (rule.pattern.test(text)) return rule.track;
+  }
+  return 'swe';
+}
+
+/**
+ * resolveRoleTrack(rawValue, objective) -> { roleTrack, source }
+ *
+ * The roleTrack precedence used everywhere a roleTrack must be resolved:
+ *   1. explicit brief / LLM-chosen from brief — `rawValue` is whatever the
+ *      LLM put in the per-engine config block for this brief (which itself
+ *      reflects an explicit brief statement when there was one); coerced
+ *      through the same alias table brief-only resolution always used.
+ *   2. objective-derived — roleTrackFromObjective() when (1) yields nothing.
+ *   3. 'swe' default — only when neither the brief nor the objective gave
+ *      any signal. This REPLACES the old blind `|| 'swe'` that ignored the
+ *      cohort's objective entirely.
+ */
+function resolveRoleTrack(rawValue, objective) {
+  const fromBrief = coerceRoleTrack(rawValue);
+  if (fromBrief) return { roleTrack: fromBrief, source: 'brief' };
+  const fromObjective = roleTrackFromObjective(objective);
+  if (fromObjective) return { roleTrack: fromObjective, source: 'objective' };
+  return { roleTrack: 'swe', source: 'default' };
 }
 
 function coerceDifficulty(value, fallback = 'medium') {
@@ -136,9 +211,29 @@ function repairCapstone(raw, brief) {
   return out;
 }
 
-function repairInterview(raw, title) {
+/**
+ * repairInterview(raw, title, objective) -> { config, targetRoleSource }
+ *
+ * targetRole/targetCompany precedence: explicit brief (the LLM's parse of
+ * it) > the cohort's objective > (targetRole only) the derived title as a
+ * last resort. targetRoleSource is 'brief' | 'objective' | null — null
+ * means neither the brief nor the objective named a role, so targetRole
+ * fell back to the assessment title (not a real signal worth reporting).
+ */
+function repairInterview(raw, title, objective) {
   const src = raw || {};
-  const targetRole = cleanString(src.targetRole, { maxLen: 150 });
+  let targetRoleSource = null;
+  let targetRole = cleanString(src.targetRole, { maxLen: 150 });
+  if (targetRole) {
+    targetRoleSource = 'brief';
+  } else if (objective && objective.targetRole) {
+    const fromObjective = cleanString(objective.targetRole, { maxLen: 150 });
+    if (fromObjective) {
+      targetRole = fromObjective;
+      targetRoleSource = 'objective';
+    }
+  }
+
   let interviewType = cleanString(src.interviewType, { maxLen: 40 });
   if (!VALID_INTERVIEW_TYPES.includes(interviewType)) {
     // No safe way to guess HR vs technical from nothing — lean technical when
@@ -147,37 +242,54 @@ function repairInterview(raw, title) {
   }
   const difficulty = cleanString(src.difficulty, { maxLen: 20 }) || 'moderate';
   const durationSeconds = clampInt(src.durationSeconds, { min: 300, max: 4 * 3600, fallback: 1800 });
-  const targetCompany = cleanString(src.targetCompany, { maxLen: 100 }) || undefined;
 
-  const out = { interviewType, targetRole: targetRole || title, difficulty, durationSeconds };
-  if (targetCompany) out.targetCompany = targetCompany;
-  return out;
-}
+  let targetCompany = cleanString(src.targetCompany, { maxLen: 100 }) || undefined;
+  if (!targetCompany && objective && objective.targetCompany) {
+    targetCompany = cleanString(objective.targetCompany, { maxLen: 100 }) || undefined;
+  }
 
-function repairDrill(raw) {
-  const src = raw || {};
-  const drillSubtype = coerceDrillSubtype(src.drillSubtype);
-  if (!drillSubtype) throw new Error('could not understand the brief');
-  const roleTrack = coerceRoleTrack(src.roleTrack) || 'swe';
-  const difficulty = coerceDifficulty(src.difficulty);
-  return { drillSubtype, roleTrack, difficulty };
+  const config = { interviewType, targetRole: targetRole || title, difficulty, durationSeconds };
+  if (targetCompany) config.targetCompany = targetCompany;
+  return { config, targetRoleSource };
 }
 
 /**
- * validateSpec(spec) -> repaired spec
+ * repairDrill(raw, objective) -> { config, roleTrackSource }
+ *
+ * roleTrack resolution goes through resolveRoleTrack() — see its doc comment
+ * for the full explicit-brief > LLM-chosen-from-brief > objective-derived >
+ * 'swe' precedence. This replaces the old blind `coerceRoleTrack(...) ||
+ * 'swe'`, which threw the cohort's objective away entirely.
+ */
+function repairDrill(raw, objective) {
+  const src = raw || {};
+  const drillSubtype = coerceDrillSubtype(src.drillSubtype);
+  if (!drillSubtype) throw new Error('could not understand the brief');
+  const { roleTrack, source: roleTrackSource } = resolveRoleTrack(src.roleTrack, objective);
+  const difficulty = coerceDifficulty(src.difficulty);
+  return { config: { drillSubtype, roleTrack, difficulty }, roleTrackSource };
+}
+
+/**
+ * validateSpec(spec, objective?) -> repaired spec
  *
  * spec (loose, model-shaped input allowed): { type, title, brief?,
  *   config: { mcq?, capstone?, interview?, drill? }, opensAt?, closesAt? }
+ * objective (optional): the cohort's grounding context — see the file-level
+ * doc comment and resolveRoleTrack()/repairInterview() for how it's used.
  *
- * Returns a spec matching createAssessment's payload shape exactly:
- *   { type, title, config: { [type]: {...} }, opensAt?, closesAt? }
+ * Returns a spec matching createAssessment's payload shape exactly, PLUS a
+ * response-only `groundedIn` provenance field (never fed into
+ * createAssessment — it's not in the Assessment schema):
+ *   { type, title, config: { [type]: {...} }, opensAt?, closesAt?,
+ *     groundedIn: { objective: label|null, roleTrackSource, targetRoleSource } }
  *
  * Throws Error('could not understand the brief') when `type` can't be
  * resolved to one of the four engines at all, or a per-type requirement has
  * no safe deterministic default (drill with no recognizable drillSubtype;
  * capstone with nothing to build bundleId/roleTrack/jobDescription from).
  */
-function validateSpec(spec) {
+function validateSpec(spec, objective) {
   if (!spec || typeof spec !== 'object') throw new Error('could not understand the brief');
 
   const cfgIn = (spec.config && typeof spec.config === 'object') ? spec.config : {};
@@ -192,10 +304,32 @@ function validateSpec(spec) {
   const title = deriveTitle(spec.title, deriveTitle(spec.brief, 'Untitled Assessment'));
 
   let config;
-  if (type === 'mcq') config = { mcq: repairMcq(cfgIn.mcq, title) };
-  else if (type === 'capstone') config = { capstone: repairCapstone(cfgIn.capstone, spec.brief) };
-  else if (type === 'interview') config = { interview: repairInterview(cfgIn.interview, title) };
-  else config = { drill: repairDrill(cfgIn.drill) };
+  let roleTrackSource = null;
+  let targetRoleSource = null;
+
+  if (type === 'mcq') {
+    config = { mcq: repairMcq(cfgIn.mcq, title) };
+  } else if (type === 'capstone') {
+    config = { capstone: repairCapstone(cfgIn.capstone, spec.brief) };
+  } else if (type === 'interview') {
+    const repaired = repairInterview(cfgIn.interview, title, objective);
+    config = { interview: repaired.config };
+    targetRoleSource = repaired.targetRoleSource;
+  } else {
+    const repaired = repairDrill(cfgIn.drill, objective);
+    config = { drill: repaired.config };
+    roleTrackSource = repaired.roleTrackSource;
+  }
+
+  // mcq/interview carry no roleTrack of their own, and capstone's roleTrack
+  // is optional and left untouched by repairCapstone above — for all three,
+  // still report (informationally, without mutating config) what roleTrack
+  // this cohort's objective would resolve to, so groundedIn is always a
+  // complete, honest signal rather than silently blank for those engines.
+  if (!roleTrackSource) {
+    const rawRoleTrack = type === 'capstone' && cfgIn.capstone ? cfgIn.capstone.roleTrack : undefined;
+    roleTrackSource = resolveRoleTrack(rawRoleTrack, objective).source;
+  }
 
   const out = { type, title, config };
 
@@ -209,12 +343,50 @@ function validateSpec(spec) {
     }
   }
 
+  out.groundedIn = {
+    objective: (objective && objective.label) || null,
+    roleTrackSource,
+    targetRoleSource,
+  };
+
   return out;
 }
 
 // ── parseBrief — one LLM call -> validated spec ──────────────────────────────
 
-function buildPrompt(brief, cohortLabel) {
+/**
+ * buildObjectiveContextLine(objective) -> string | null
+ *
+ * A single AUTHORITATIVE CONTEXT line injected into the user prompt when the
+ * cohort has an ObjectiveTemplate. null when there's no objective (or it has
+ * no label) — the prompt then falls back to the pre-existing brief-only shape.
+ */
+function buildObjectiveContextLine(objective) {
+  if (!objective || !objective.label) return null;
+
+  const parts = [];
+  if (objective.targetRole) parts.push(`target role: ${objective.targetRole}`);
+  if (objective.targetCompany) parts.push(`target company: ${objective.targetCompany}`);
+  if (objective.targetSkill) parts.push(`target skill: ${objective.targetSkill}`);
+  if (Array.isArray(objective.competencies) && objective.competencies.length) {
+    const names = objective.competencies
+      .slice()
+      .sort((a, b) => (b.weight || 0) - (a.weight || 0))
+      .map((c) => c && c.name)
+      .filter(Boolean)
+      .slice(0, 6);
+    if (names.length) parts.push(`key competencies: ${names.join(', ')}`);
+  }
+  const detail = parts.length ? ` (${parts.join('; ')})` : '';
+
+  return (
+    `AUTHORITATIVE CONTEXT: This cohort is preparing for: ${objective.label}${detail}. ` +
+    'Ground the assessment in that objective — the role, topics and competencies should serve it — ' +
+    'UNLESS the brief explicitly asks for something different, in which case the brief wins.'
+  );
+}
+
+function buildPrompt(brief, cohortLabel, objective) {
   const systemPrompt = [
     "You are an assessment-design assistant for a campus placement platform.",
     "A placement officer (TPO) describes, in free text, the assessment they want for a cohort.",
@@ -242,28 +414,34 @@ function buildPrompt(brief, cohortLabel) {
     'Return ONLY valid JSON. No markdown fences, no commentary.',
   ].join('\n');
 
-  const userPrompt = [
-    `Cohort: ${cohortLabel || 'this cohort'}`,
-    `TPO brief: "${brief}"`,
-  ].join('\n');
+  const userPromptLines = [`Cohort: ${cohortLabel || 'this cohort'}`];
+  const objectiveLine = buildObjectiveContextLine(objective);
+  if (objectiveLine) userPromptLines.push(objectiveLine);
+  userPromptLines.push(`TPO brief: "${brief}"`);
 
-  return { systemPrompt, userPrompt };
+  return { systemPrompt, userPrompt: userPromptLines.join('\n') };
 }
 
 /**
- * parseBrief({ brief, cohortLabel }, deps) -> Promise<{ type, title, config, opensAt?, closesAt? }>
+ * parseBrief({ brief, cohortLabel, objective }, deps)
+ *   -> Promise<{ type, title, config, opensAt?, closesAt?, groundedIn }>
  *
  * ONE LLM call via aiProvider.analyzeWithClaude (strict JSON — it throws on
  * a non-JSON response itself). Throws Error('could not understand the
  * brief') when the brief is empty/unusable, the LLM call fails, or the
  * model's answer can't be repaired into a valid spec by validateSpec.
+ *
+ * `objective` (optional): the cohort's grounding context built by
+ * authorAgentService.createAndAuthor from its ObjectiveTemplate — injected
+ * into the prompt as authoritative context AND used as validateSpec's
+ * deterministic fallback. See the file-level doc comment.
  */
-async function parseBrief({ brief, cohortLabel } = {}, deps = {}) {
+async function parseBrief({ brief, cohortLabel, objective } = {}, deps = {}) {
   const cleanBrief = cleanString(brief, { maxLen: 4000 });
   if (!cleanBrief) throw new Error('could not understand the brief');
 
   const aiProvider = deps.aiProvider || require('../../../config/aiProvider');
-  const { systemPrompt, userPrompt } = buildPrompt(cleanBrief, cohortLabel);
+  const { systemPrompt, userPrompt } = buildPrompt(cleanBrief, cohortLabel, objective);
 
   let raw;
   try {
@@ -273,18 +451,30 @@ async function parseBrief({ brief, cohortLabel } = {}, deps = {}) {
   }
   if (!raw || typeof raw !== 'object') throw new Error('could not understand the brief');
 
-  return validateSpec({
-    type: raw.type,
-    title: raw.title,
-    brief: cleanBrief,
-    config: { mcq: raw.mcq, capstone: raw.capstone, interview: raw.interview, drill: raw.drill },
-    opensAt: raw.opensAt,
-    closesAt: raw.closesAt,
-  });
+  return validateSpec(
+    {
+      type: raw.type,
+      title: raw.title,
+      brief: cleanBrief,
+      config: { mcq: raw.mcq, capstone: raw.capstone, interview: raw.interview, drill: raw.drill },
+      opensAt: raw.opensAt,
+      closesAt: raw.closesAt,
+    },
+    objective
+  );
 }
 
 module.exports = {
   parseBrief,
   validateSpec,
-  _helpers: { coerceRoleTrack, coerceDrillSubtype, coerceDifficulty, clampInt, cleanString, deriveTitle },
+  _helpers: {
+    coerceRoleTrack,
+    coerceDrillSubtype,
+    coerceDifficulty,
+    clampInt,
+    cleanString,
+    deriveTitle,
+    roleTrackFromObjective,
+    resolveRoleTrack,
+  },
 };

@@ -85,9 +85,67 @@ function defaultDeps() {
     record: require('../../agentDecisionService').record,
     isAgentEnabled: require('../../../config/agentFlags').isAgentEnabled,
     InstitutionCohort: require('../../../models/InstitutionCohort'),
+    ObjectiveTemplate: require('../../../models/ObjectiveTemplate'),
     assessmentSpecService: require('./assessmentSpecService'),
     assessmentService: require('./assessmentService'),
   };
+}
+
+/**
+ * buildObjectiveContext(template) -> { label, targetRole?, targetCompany?,
+ *   targetSkill?, competencies? } | null
+ *
+ * Compacts an ObjectiveTemplate doc into the grounding context
+ * assessmentSpecService.parseBrief expects — null-safe, omitting any
+ * specifics field the template didn't set, and dropping competency rows
+ * with no name.
+ */
+function buildObjectiveContext(template) {
+  if (!template) return null;
+  const specifics = template.specifics || {};
+  const objective = { label: template.label };
+  if (specifics.targetRole) objective.targetRole = specifics.targetRole;
+  if (specifics.targetCompany) objective.targetCompany = specifics.targetCompany;
+  if (specifics.targetSkill) objective.targetSkill = specifics.targetSkill;
+  if (Array.isArray(template.competencies) && template.competencies.length) {
+    const competencies = template.competencies
+      .filter((c) => c && c.name)
+      .map((c) => ({ name: c.name, weight: c.weight }));
+    if (competencies.length) objective.competencies = competencies;
+  }
+  return objective;
+}
+
+/**
+ * loadCohortContext({ institutionId, cohortId }, d)
+ *   -> Promise<{ cohortLabel, objective }>
+ *
+ * Best-effort context for the parseBrief prompt only — NOT an ownership
+ * guard (createAssessment remains the single source of truth for that).
+ * Grounds the brief in the cohort's ObjectiveTemplate (via
+ * InstitutionCohort.objectiveTemplateId) when the cohort has one; silently
+ * falls back to { objective: null } on any lookup failure or when the
+ * cohort has no objectiveTemplateId, so an unresolved objective only ever
+ * means a slightly less specific prompt, never a failed run.
+ */
+async function loadCohortContext({ institutionId, cohortId }, d) {
+  let cohortLabel;
+  let objective = null;
+  try {
+    const cohort = await d.InstitutionCohort.findOne({ _id: cohortId, institutionId }).select(
+      'name label objectiveTemplateId'
+    );
+    cohortLabel = cohort && (cohort.name || cohort.label);
+    if (cohort && cohort.objectiveTemplateId) {
+      const template = await d.ObjectiveTemplate.findById(cohort.objectiveTemplateId).select(
+        'label specifics competencies'
+      );
+      objective = buildObjectiveContext(template);
+    }
+  } catch (_) {
+    // best-effort — an unresolved cohort/objective just means a less specific prompt
+  }
+  return { cohortLabel, objective };
 }
 
 /** Indices in config.mcq.questions whose QA solver gate passed on low confidence. */
@@ -256,17 +314,13 @@ async function createAndAuthor({ institutionId, cohortId, actorInstitutionUserId
 
   // Best-effort context for the prompt only — NOT the cohort-ownership guard.
   // createAssessment (below) is the single source of truth for that check.
-  let cohortLabel;
-  try {
-    const cohort = await d.InstitutionCohort.findOne({ _id: cohortId, institutionId }).select('name label');
-    cohortLabel = cohort && (cohort.name || cohort.label);
-  } catch (_) {
-    // best-effort — an unresolved label just means a slightly less specific prompt
-  }
+  // Grounds the brief in the cohort's ObjectiveTemplate (if it has one) —
+  // see loadCohortContext / assessmentSpecService's file-level doc comment.
+  const { cohortLabel, objective } = await loadCohortContext({ institutionId, cohortId }, d);
 
   let spec;
   try {
-    spec = await d.assessmentSpecService.parseBrief({ brief, cohortLabel }, d);
+    spec = await d.assessmentSpecService.parseBrief({ brief, cohortLabel, objective }, d);
   } catch (_err) {
     throw new Error('could not understand the brief');
   }
@@ -721,5 +775,5 @@ module.exports = {
   getRunStatus,
   reapOrphanedRuns,
   createAndAuthor,
-  _helpers: { computeFlaggedIndices, mcqAuthoringStatus, authoringStatusFor },
+  _helpers: { computeFlaggedIndices, mcqAuthoringStatus, authoringStatusFor, buildObjectiveContext, loadCohortContext },
 };
