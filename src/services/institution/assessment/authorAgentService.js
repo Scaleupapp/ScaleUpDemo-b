@@ -140,7 +140,7 @@ async function finalizeResult(AgentDecision, decisionId, result) {
 }
 
 /**
- * startRun({ assessmentId, institutionId, cohortId, actorInstitutionUserId, brief }, deps)
+ * startRun({ assessmentId, institutionId, cohortId, actorInstitutionUserId, brief, createdByAgent }, deps)
  *   -> Promise<{ decisionId }>
  *
  * Guards: agent flag on; assessment exists and belongs to institutionId;
@@ -154,8 +154,21 @@ async function finalizeResult(AgentDecision, decisionId, result) {
  * Records the AgentDecision row (action.engine = assessment.type, userId
  * stays unset — this is an institution-side agent), then fires runAuthoring
  * in the background.
+ *
+ * `createdByAgent` (optional, default false): when true, `action.createdByAgent
+ * = true` is written INTO the record() payload itself, atomically at row
+ * creation — before runAuthoring is kicked. This must never be set via a
+ * post-hoc findById/save on the row: runAuthoring's fire-and-forget loop
+ * concurrently mutates and saves action.runLog/action.result on the same row,
+ * so any save issued after startRun returns risks reading a stale copy and
+ * clobbering whatever the run has written in the meantime. Callers that don't
+ * pass the flag (or pass false) see byte-identical behavior to before — no
+ * `createdByAgent` key is added to the action object at all.
  */
-async function startRun({ assessmentId, institutionId, cohortId, actorInstitutionUserId, brief }, deps = {}) {
+async function startRun(
+  { assessmentId, institutionId, cohortId, actorInstitutionUserId, brief, createdByAgent = false },
+  deps = {}
+) {
   const d = { ...defaultDeps(), ...deps };
 
   if (!d.isAgentEnabled('author_agent')) throw new Error('author agent disabled');
@@ -200,6 +213,7 @@ async function startRun({ assessmentId, institutionId, cohortId, actorInstitutio
         assessmentId: String(assessmentId),
         runLog: [{ at: new Date(), msg: 'run queued' }],
         result: null,
+        ...(createdByAgent ? { createdByAgent: true } : {}),
       },
       promptVersion: 'author-agent-v1',
     },
@@ -277,27 +291,16 @@ async function createAndAuthor({ institutionId, cohortId, actorInstitutionUserId
     throw err;
   }
 
+  // createdByAgent: true is passed straight into startRun's record() payload
+  // so it's written atomically at row creation — before runAuthoring's
+  // fire-and-forget loop starts concurrently mutating/saving this same row's
+  // action.runLog/action.result. No post-hoc findById/save here: that pattern
+  // used to race the running job and could clobber a runLog entry or the
+  // final result with a stale read.
   const { decisionId } = await startRun(
-    { assessmentId: assessment._id, institutionId, cohortId, actorInstitutionUserId, brief },
+    { assessmentId: assessment._id, institutionId, cohortId, actorInstitutionUserId, brief, createdByAgent: true },
     d
   );
-
-  // Tag the ledger row as agent-originated. Best-effort: startRun's own
-  // record() call already persisted action.engine = spec.type (assessment.type
-  // at the moment startRun read it), runLog and result — this only adds one
-  // extra field, it never recreates or races the row's core content.
-  try {
-    const row = await d.AgentDecision.findById(decisionId);
-    if (row) {
-      row.action = row.action || {};
-      row.action.createdByAgent = true;
-      row.markModified('action');
-      await row.save();
-    }
-  } catch (_) {
-    // best-effort — the run itself already started; a missing flag on the
-    // ledger row doesn't affect the assessment or the run outcome.
-  }
 
   return { assessmentId: assessment._id, decisionId, spec };
 }
