@@ -9116,10 +9116,18 @@ paths:
         POST /api/institution/assessments/{id}/author-agent — poll its
         status via GET /api/institution/author-agent/runs/{decisionId}.
 
-        `opensAt`/`closesAt`/`durationMinutes` are optional overrides
-        applied on top of whatever the brief's LLM parse produces — see
-        authorAgentService.createAndAuthor for exactly how each is folded
-        into the spec.
+        `opensAt`/`closesAt`/`durationMinutes`/`sourceId` are optional
+        overrides applied on top of whatever the brief's LLM parse produces
+        — see authorAgentService.createAndAuthor for exactly how each is
+        folded into the spec. `sourceId` grounds the assessment in a
+        previously-uploaded AssessmentSource (POST
+        /api/institution/assessment-sources): the source must belong to the
+        caller's institution and have finished extraction (`status:
+        'ready'`) — a source still processing or one whose extraction
+        failed is rejected rather than silently authoring ungrounded
+        questions (this readiness gate does NOT apply to the manual
+        create-assessment path, which does not check sourceId readiness at
+        all today).
 
         Every error response from this endpoint carries a stable
         machine-readable `code` field clients should key off instead of
@@ -9132,6 +9140,12 @@ paths:
           - 404 `NOT_FOUND` — the `author_agent` flag is off
           - 404 `COHORT_NOT_FOUND` — `cohortId` doesn't exist / isn't owned
             by the caller's institution
+          - 404 `SOURCE_NOT_FOUND` — `sourceId` doesn't exist / isn't owned
+            by the caller's institution
+          - 409 `SOURCE_NOT_READY` — `sourceId` exists but extraction
+            hasn't finished yet — retry shortly
+          - 409 `SOURCE_FAILED` — `sourceId` exists but extraction failed —
+            re-upload the source
           - 422 `BAD_BRIEF` — the brief could not be understood, even after
             deterministic repair
       security:
@@ -9159,6 +9173,9 @@ paths:
                   minimum: 1
                   maximum: 480
                   description: 'Optional override for the per-attempt time limit (minutes). Applied onto the chosen engine''s config.<type>.durationSeconds; a no-op for drill, which has no timed duration.'
+                sourceId:
+                  type: string
+                  description: 'Optional id of a previously-uploaded AssessmentSource (see POST /api/institution/assessment-sources) to ground the generated questions in. Must belong to the caller''s institution and have status "ready".'
       responses:
         '200':
           description: Assessment created and authoring started
@@ -9211,7 +9228,12 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: 'Not found. `code` is one of NOT_FOUND (author_agent flag off), COHORT_NOT_FOUND.'
+          description: 'Not found. `code` is one of NOT_FOUND (author_agent flag off), COHORT_NOT_FOUND, SOURCE_NOT_FOUND.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }
+        '409':
+          description: 'The attached sourceId exists but isn''t usable yet. `code` is SOURCE_NOT_READY (extraction still in flight — retry shortly) or SOURCE_FAILED (extraction errored — re-upload).'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiErrorEnvelope' }

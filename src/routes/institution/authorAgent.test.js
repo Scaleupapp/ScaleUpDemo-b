@@ -425,6 +425,91 @@ test('POST agent/create-assessment: a valid durationMinutes is passed through to
   assert.strictEqual(captured.durationMinutes, 45);
 });
 
+// ── POST agent/create-assessment — sourceId grounding-readiness guard ─────
+
+test('POST agent/create-assessment: sourceId not found -> 404 SOURCE_NOT_FOUND, createAndAuthor never called', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    resolveGroundingSource: async () => { throw new Error('SOURCE_NOT_FOUND'); },
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', sourceId: 'src-missing' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 404);
+  assert.strictEqual(r.body.code, 'SOURCE_NOT_FOUND');
+});
+
+test('POST agent/create-assessment: sourceId still processing -> 409 SOURCE_NOT_READY, createAndAuthor never called (no assessment created)', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    resolveGroundingSource: async () => { throw new Error('SOURCE_NOT_READY'); },
+    createAndAuthor: async () => { throw new Error('should not run — no assessment must be created'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', sourceId: 'src-processing' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 409);
+  assert.strictEqual(r.body.code, 'SOURCE_NOT_READY');
+});
+
+test('POST agent/create-assessment: sourceId extraction failed -> 409 SOURCE_FAILED, createAndAuthor never called', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    resolveGroundingSource: async () => { throw new Error('SOURCE_FAILED'); },
+    createAndAuthor: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', sourceId: 'src-failed' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 409);
+  assert.strictEqual(r.body.code, 'SOURCE_FAILED');
+});
+
+test('POST agent/create-assessment: sourceId ready -> proceeds, sourceId passed through to createAndAuthor', async () => {
+  let captured;
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    resolveGroundingSource: async ({ sourceId, institutionId }) => {
+      assert.strictEqual(sourceId, 'src-ready');
+      assert.strictEqual(institutionId, 'inst1');
+      return { _id: sourceId, status: 'ready' };
+    },
+    createAndAuthor: async (args) => {
+      captured = args;
+      return { assessmentId: 'a1', decisionId: 'dec1', spec: {} };
+    },
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', sourceId: 'src-ready' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 200);
+  assert.strictEqual(captured.sourceId, 'src-ready');
+});
+
+test('POST agent/create-assessment: createAndAuthor itself throwing SOURCE_NOT_READY (defence-in-depth path) -> 409 SOURCE_NOT_READY', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    resolveGroundingSource: async () => ({ status: 'ready' }), // route-level check passes...
+    createAndAuthor: async () => { throw new Error('SOURCE_NOT_READY'); }, // ...but the service's own guard still fires
+  });
+  const r = res();
+  await h.createAssessmentHandler(
+    baseReq({ body: { cohortId: 'c1', brief: 'x', sourceId: 'src-race' } }),
+    r
+  );
+  assert.strictEqual(r.statusCode, 409);
+  assert.strictEqual(r.body.code, 'SOURCE_NOT_READY');
+});
+
 // ── GET /author-agent/runs — list recent runs for a cohort ────────────────
 
 test('GET author-agent/runs: happy path returns runs from the service, scoped by the authed institution', async () => {

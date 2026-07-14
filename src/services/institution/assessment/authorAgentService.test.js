@@ -11,6 +11,7 @@ const {
   reconcileBundleRuns,
   createAndAuthor,
   listRuns,
+  resolveGroundingSource,
   _helpers: { computeFlaggedIndices, buildObjectiveContext, humanizeAuthoringFailure, describeAuthoringFailure, runPreflight },
 } = require('./authorAgentService');
 
@@ -1647,9 +1648,24 @@ function createAndAuthorDeps({ agentEnabled = true, spec, createAssessmentImpl }
     // AgentDecision above, which the spread of `d` into d.record(payload, d)
     // supplies.
     record: require('../../agentDecisionService').record,
+    // Default: no test in this block passes a sourceId, so this should never
+    // be called — a throw makes an accidental call loud instead of silent.
+    AssessmentSource: { findOne: async () => { throw new Error('AssessmentSource.findOne should not be called without a sourceId'); } },
   };
 
   return { deps, decisionStore, assessmentStore };
+}
+
+/** Fake AssessmentSource model — findOne(query) resolves the fixture matching query._id. */
+function makeAssessmentSourceModel(bySourceId) {
+  return {
+    findOne: async ({ _id, institutionId }) => {
+      const doc = bySourceId[_id];
+      if (!doc) return null;
+      if (String(doc.institutionId) !== String(institutionId)) return null;
+      return doc;
+    },
+  };
 }
 
 test('createAndAuthor: agent disabled -> throws /disabled/', async () => {
@@ -1826,6 +1842,150 @@ test('createAndAuthor: durationMinutes overrides config[type].durationSeconds', 
   );
 
   assert.strictEqual(createAssessmentArgs.config.mcq.durationSeconds, 2700);
+});
+
+// ── createAndAuthor: sourceId grounding-readiness guard (defence in depth) ─
+
+test('createAndAuthor: sourceId ready -> folds sourceId into config[type], proceeds to createAssessment', async () => {
+  const { deps, assessmentStore } = createAndAuthorDeps({ spec: { ...mcqSpec, config: { mcq: { ...mcqSpec.config.mcq } } } });
+  deps.AssessmentSource = makeAssessmentSourceModel({
+    'src-ready': { _id: 'src-ready', institutionId: 'inst1', status: 'ready' },
+  });
+
+  let createAssessmentArgs = null;
+  deps.assessmentService.createAssessment = async (scope, payload) => {
+    createAssessmentArgs = payload;
+    const doc = { _id: 'a1', institutionId: scope.institutionId, status: 'draft', type: payload.type, config: payload.config };
+    assessmentStore.a1 = doc;
+    return doc;
+  };
+
+  const result = await createAndAuthor(
+    { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x', sourceId: 'src-ready' },
+    deps
+  );
+
+  assert.strictEqual(createAssessmentArgs.config.mcq.sourceId, 'src-ready');
+  assert.ok(result.assessmentId, 'expected the assessment to have been created');
+});
+
+test('createAndAuthor: sourceId still processing -> throws SOURCE_NOT_READY, createAssessment never called', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+  deps.AssessmentSource = makeAssessmentSourceModel({
+    'src-processing': { _id: 'src-processing', institutionId: 'inst1', status: 'extracting' },
+  });
+
+  let createAssessmentCalled = false;
+  deps.assessmentService.createAssessment = async () => { createAssessmentCalled = true; return {}; };
+
+  await assert.rejects(
+    createAndAuthor(
+      { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x', sourceId: 'src-processing' },
+      deps
+    ),
+    /SOURCE_NOT_READY/
+  );
+  assert.strictEqual(createAssessmentCalled, false, 'no assessment must be created when the source is not ready');
+});
+
+test('createAndAuthor: sourceId "uploaded" (extraction not yet started) -> also SOURCE_NOT_READY', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+  deps.AssessmentSource = makeAssessmentSourceModel({
+    'src-uploaded': { _id: 'src-uploaded', institutionId: 'inst1', status: 'uploaded' },
+  });
+
+  await assert.rejects(
+    createAndAuthor(
+      { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x', sourceId: 'src-uploaded' },
+      deps
+    ),
+    /SOURCE_NOT_READY/
+  );
+});
+
+test('createAndAuthor: sourceId extraction failed -> throws SOURCE_FAILED, createAssessment never called', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+  deps.AssessmentSource = makeAssessmentSourceModel({
+    'src-failed': { _id: 'src-failed', institutionId: 'inst1', status: 'failed' },
+  });
+
+  let createAssessmentCalled = false;
+  deps.assessmentService.createAssessment = async () => { createAssessmentCalled = true; return {}; };
+
+  await assert.rejects(
+    createAndAuthor(
+      { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x', sourceId: 'src-failed' },
+      deps
+    ),
+    /SOURCE_FAILED/
+  );
+  assert.strictEqual(createAssessmentCalled, false);
+});
+
+test('createAndAuthor: sourceId unknown -> throws SOURCE_NOT_FOUND', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+  deps.AssessmentSource = makeAssessmentSourceModel({});
+
+  await assert.rejects(
+    createAndAuthor(
+      { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x', sourceId: 'nope' },
+      deps
+    ),
+    /SOURCE_NOT_FOUND/
+  );
+});
+
+test('createAndAuthor: sourceId belonging to another institution -> throws SOURCE_NOT_FOUND (never leaks cross-tenant existence)', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+  deps.AssessmentSource = makeAssessmentSourceModel({
+    'src-other': { _id: 'src-other', institutionId: 'other-inst', status: 'ready' },
+  });
+
+  await assert.rejects(
+    createAndAuthor(
+      { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x', sourceId: 'src-other' },
+      deps
+    ),
+    /SOURCE_NOT_FOUND/
+  );
+});
+
+// ── resolveGroundingSource — direct unit coverage ──────────────────────────
+
+test('resolveGroundingSource: ready source resolves with the doc', async () => {
+  const AssessmentSource = makeAssessmentSourceModel({
+    s1: { _id: 's1', institutionId: 'inst1', status: 'ready' },
+  });
+  const source = await resolveGroundingSource({ sourceId: 's1', institutionId: 'inst1' }, { AssessmentSource });
+  assert.strictEqual(source.status, 'ready');
+});
+
+test('resolveGroundingSource: not found -> throws SOURCE_NOT_FOUND', async () => {
+  const AssessmentSource = makeAssessmentSourceModel({});
+  await assert.rejects(
+    resolveGroundingSource({ sourceId: 'missing', institutionId: 'inst1' }, { AssessmentSource }),
+    /SOURCE_NOT_FOUND/
+  );
+});
+
+test('resolveGroundingSource: "extracting" -> throws SOURCE_NOT_READY', async () => {
+  const AssessmentSource = makeAssessmentSourceModel({
+    s1: { _id: 's1', institutionId: 'inst1', status: 'extracting' },
+  });
+  await assert.rejects(
+    resolveGroundingSource({ sourceId: 's1', institutionId: 'inst1' }, { AssessmentSource }),
+    /SOURCE_NOT_READY/
+  );
+});
+
+test('resolveGroundingSource: "failed" -> throws SOURCE_FAILED', async () => {
+  const AssessmentSource = makeAssessmentSourceModel({
+    s1: { _id: 's1', institutionId: 'inst1', status: 'failed' },
+  });
+  await assert.rejects(
+    resolveGroundingSource({ sourceId: 's1', institutionId: 'inst1' }, { AssessmentSource }),
+    /SOURCE_FAILED/
+  );
 });
 
 // ── buildObjectiveContext ────────────────────────────────────────────────

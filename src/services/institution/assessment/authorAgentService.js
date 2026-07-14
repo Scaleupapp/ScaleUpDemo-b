@@ -89,7 +89,53 @@ function defaultDeps() {
     ObjectiveTemplate: require('../../../models/ObjectiveTemplate'),
     assessmentSpecService: require('./assessmentSpecService'),
     assessmentService: require('./assessmentService'),
+    AssessmentSource: require('../../../models/AssessmentSource'),
   };
+}
+
+// Non-terminal AssessmentSource.status values — extraction is still running.
+// See src/models/AssessmentSource.js: status lifecycle is
+// uploaded -> extracting -> ready|failed.
+const SOURCE_PROCESSING_STATUSES = ['uploaded', 'extracting'];
+
+/**
+ * resolveGroundingSource({ sourceId, institutionId }, deps) -> Promise<AssessmentSourceDoc>
+ *
+ * Institution-scoped existence + readiness gate for a TPO-attached sourceId
+ * on the agent-create path (POST /api/institution/agent/create-assessment).
+ * Read src/models/AssessmentSource.js first: status only ever reaches
+ * 'ready' once extraction has actually populated extractedText/
+ * extractedTopics — engineAdapters.js / assessmentAuthoringService.js only
+ * fold that text into the generation prompt when status === 'ready'; a
+ * non-ready source is otherwise just treated as absent, so authoring
+ * proceeds SILENTLY UNGROUNDED even though the TPO believes their upload was
+ * used. This closes that gap for the agent-create path specifically (the
+ * manual create path has the same hole — out of scope here, see the route's
+ * doc comment).
+ *
+ * Called from BOTH createAssessmentHandler (route) AND createAndAuthor
+ * itself (defence in depth — createAndAuthor is also reachable service-side,
+ * bypassing the route's HTTP-layer check entirely).
+ *
+ * Throws:
+ *   Error('SOURCE_NOT_FOUND') — no such source, or it belongs to a
+ *     different institution (never distinguished to the caller — same as
+ *     every other cross-tenant lookup in this codebase).
+ *   Error('SOURCE_NOT_READY') — status is 'uploaded' or 'extracting':
+ *     extraction is still in flight; try again shortly.
+ *   Error('SOURCE_FAILED') — status is 'failed': extraction errored out;
+ *     the source must be re-uploaded.
+ * Resolves with the source doc only when status === 'ready'.
+ */
+async function resolveGroundingSource({ sourceId, institutionId }, deps = {}) {
+  const d = { ...defaultDeps(), ...deps };
+  const source = await d.AssessmentSource.findOne({ _id: sourceId, institutionId });
+  if (!source) throw new Error('SOURCE_NOT_FOUND');
+  if (source.status === 'ready') return source;
+  if (source.status === 'failed') throw new Error('SOURCE_FAILED');
+  // 'uploaded' | 'extracting' | any future non-terminal status: fail closed
+  // as "not ready" rather than silently letting authoring proceed ungrounded.
+  throw new Error('SOURCE_NOT_READY');
 }
 
 /**
@@ -385,7 +431,7 @@ async function startRun(
 
 /**
  * createAndAuthor({ institutionId, cohortId, actorInstitutionUserId, brief,
- *   opensAt?, closesAt?, durationMinutes? }, deps)
+ *   opensAt?, closesAt?, durationMinutes?, sourceId? }, deps)
  *   -> Promise<{ assessmentId, decisionId, spec }>
  *
  * The one-prompt path: a TPO describes the assessment they want in free text
@@ -412,17 +458,28 @@ async function startRun(
  * is the route's job (BAD_DURATION); this function just applies whatever
  * value it's given.
  *
+ * `sourceId` (optional): grounds the assessment in a TPO-uploaded
+ * AssessmentSource. Re-validated here via resolveGroundingSource — even
+ * though createAssessmentHandler (the route) already validates it before
+ * ever calling this function — because createAndAuthor is a public service
+ * function reachable service-side without going through the route at all;
+ * see resolveGroundingSource's doc comment for the full gap this closes.
+ * On success, `sourceId` is folded into `spec.config[spec.type]` BEFORE
+ * createAssessment runs, so the freshly created assessment is grounded from
+ * the moment authoring starts.
+ *
  * Guarded by the same `author_agent` flag startRun checks; checked again
  * here up front so a disabled flag never even reaches the LLM call.
  *
- * Never throws anything but the three named errors this feature promises
+ * Never throws anything but the named errors this feature promises
  * ('author agent disabled' | 'cohort not found' | 'could not understand the
- * brief') plus whatever createAssessment/startRun themselves throw for other
- * genuine failures (e.g. a bad opens/closes window) — those are not this
- * feature's to hide.
+ * brief' | 'SOURCE_NOT_FOUND' | 'SOURCE_NOT_READY' | 'SOURCE_FAILED') plus
+ * whatever createAssessment/startRun themselves throw for other genuine
+ * failures (e.g. a bad opens/closes window) — those are not this feature's
+ * to hide.
  */
 async function createAndAuthor(
-  { institutionId, cohortId, actorInstitutionUserId, brief, opensAt, closesAt, durationMinutes },
+  { institutionId, cohortId, actorInstitutionUserId, brief, opensAt, closesAt, durationMinutes, sourceId },
   deps = {}
 ) {
   const d = { ...defaultDeps(), ...deps };
@@ -440,6 +497,15 @@ async function createAndAuthor(
     spec = await d.assessmentSpecService.parseBrief({ brief, cohortLabel, objective }, d);
   } catch (_err) {
     throw new Error('could not understand the brief');
+  }
+
+  // Source-readiness guard — BEFORE any assessment is created or generation
+  // is started (see resolveGroundingSource's doc comment: a not-ready source
+  // must never result in a silently-ungrounded run). Throws SOURCE_NOT_FOUND
+  // / SOURCE_NOT_READY / SOURCE_FAILED, left untranslated for the route to map.
+  if (sourceId) {
+    await resolveGroundingSource({ sourceId, institutionId }, d);
+    spec.config[spec.type] = { ...(spec.config[spec.type] || {}), sourceId };
   }
 
   if (opensAt !== undefined) spec.opensAt = opensAt;
@@ -1335,6 +1401,7 @@ module.exports = {
   reconcileBundleRuns,
   createAndAuthor,
   listRuns,
+  resolveGroundingSource,
   _helpers: {
     computeFlaggedIndices,
     mcqAuthoringStatus,

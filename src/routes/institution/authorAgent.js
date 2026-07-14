@@ -39,6 +39,7 @@ function makeHandlers(deps = {}) {
     getRunStatus: deps.getRunStatus || authorAgentService.getRunStatus,
     createAndAuthor: deps.createAndAuthor || authorAgentService.createAndAuthor,
     listRuns: deps.listRuns || authorAgentService.listRuns,
+    resolveGroundingSource: deps.resolveGroundingSource || authorAgentService.resolveGroundingSource,
     Assessment: deps.Assessment || require('../../models/Assessment'),
   };
 
@@ -142,18 +143,21 @@ function makeHandlers(deps = {}) {
    *   400 BAD_DURATION    — durationMinutes non-numeric or out of range
    *   404 NOT_FOUND        — author_agent flag is off
    *   404 COHORT_NOT_FOUND — cohortId doesn't exist / isn't owned by this institution
+   *   404 SOURCE_NOT_FOUND — sourceId doesn't exist / isn't owned by this institution
+   *   409 SOURCE_NOT_READY — sourceId exists but extraction hasn't finished yet
+   *   409 SOURCE_FAILED    — sourceId exists but extraction failed
    *   422 BAD_BRIEF        — the brief couldn't be understood, even after repair
    *
-   * opensAt/closesAt/durationMinutes are all optional overrides on top of
-   * the brief-derived spec — see authorAgentService.createAndAuthor's doc
-   * comment for exactly how each is applied.
+   * opensAt/closesAt/durationMinutes/sourceId are all optional overrides on
+   * top of the brief-derived spec — see authorAgentService.createAndAuthor's
+   * doc comment for exactly how each is applied.
    */
   async function createAssessmentHandler(req, res) {
     try {
       if (!d.isAgentEnabled('author_agent')) {
         return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Not found' });
       }
-      const { cohortId, brief, opensAt, closesAt, durationMinutes } = req.body || {};
+      const { cohortId, brief, opensAt, closesAt, durationMinutes, sourceId } = req.body || {};
       if (!cohortId || !brief || typeof brief !== 'string') {
         return res.status(400).json({ success: false, code: 'VALIDATION', message: 'cohortId and brief are required' });
       }
@@ -197,6 +201,37 @@ function makeHandlers(deps = {}) {
 
       const scope = institutionScope(req);
 
+      // sourceId: existence/ownership/readiness, checked BEFORE createAndAuthor
+      // runs so a not-ready source never even reaches assessment creation —
+      // see authorAgentService.resolveGroundingSource's doc comment for the
+      // silently-ungrounded-questions gap this closes. createAndAuthor also
+      // re-checks this itself (defence in depth, for service-side callers
+      // that bypass this route entirely) — see its doc comment.
+      if (sourceId) {
+        try {
+          await d.resolveGroundingSource({ sourceId, institutionId: scope.institutionId });
+        } catch (srcErr) {
+          if (srcErr.message === 'SOURCE_NOT_FOUND') {
+            return res.status(404).json({ success: false, code: 'SOURCE_NOT_FOUND', message: 'Source material not found.' });
+          }
+          if (srcErr.message === 'SOURCE_NOT_READY') {
+            return res.status(409).json({
+              success: false,
+              code: 'SOURCE_NOT_READY',
+              message: 'That source material is still being processed — try again in a moment.',
+            });
+          }
+          if (srcErr.message === 'SOURCE_FAILED') {
+            return res.status(409).json({
+              success: false,
+              code: 'SOURCE_FAILED',
+              message: 'That source material failed to process — please re-upload it.',
+            });
+          }
+          throw srcErr;
+        }
+      }
+
       const { assessmentId, decisionId, spec } = await d.createAndAuthor({
         institutionId: scope.institutionId,
         cohortId,
@@ -205,6 +240,7 @@ function makeHandlers(deps = {}) {
         opensAt: parsedOpensAt,
         closesAt: parsedClosesAt,
         durationMinutes: parsedDurationMinutes,
+        sourceId,
       });
       return res.json({
         success: true,
@@ -217,6 +253,23 @@ function makeHandlers(deps = {}) {
       }
       if (err.message === 'BAD_WINDOW') {
         return res.status(400).json({ success: false, code: 'BAD_WINDOW', message: 'opensAt must be before closesAt.' });
+      }
+      if (err.message === 'SOURCE_NOT_FOUND') {
+        return res.status(404).json({ success: false, code: 'SOURCE_NOT_FOUND', message: 'Source material not found.' });
+      }
+      if (err.message === 'SOURCE_NOT_READY') {
+        return res.status(409).json({
+          success: false,
+          code: 'SOURCE_NOT_READY',
+          message: 'That source material is still being processed — try again in a moment.',
+        });
+      }
+      if (err.message === 'SOURCE_FAILED') {
+        return res.status(409).json({
+          success: false,
+          code: 'SOURCE_FAILED',
+          message: 'That source material failed to process — please re-upload it.',
+        });
       }
       if (/could not understand/i.test(err.message)) {
         return res.status(422).json({ success: false, code: 'BAD_BRIEF', message: err.message });
