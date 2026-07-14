@@ -7,12 +7,14 @@
  * Kicks off authorAgentService's engine-aware generate -> QA -> (repair,
  * where applicable) run for ANY authorable assessment type — mcq, interview,
  * capstone, drill (startRun) — and exposes a polling endpoint for its run
- * status (getRunStatus). The route itself carries no engine-specific gate:
- * authorAgentService.startRun owns the full authorability guard (assessment
- * type + status); this route just scopes to the caller's institution and
- * maps the service's errors onto HTTP status codes. Flag-off returns 404
- * (house convention: clients treat 404 as feature-off — see
- * src/routes/v2/agentDecisions.js).
+ * status (getRunStatus), plus a list endpoint (listRuns) so a TPO who
+ * refreshed mid-run — decisionId lived only in React state — can find their
+ * way back to it instead of starting a duplicate run. The route itself
+ * carries no engine-specific gate: authorAgentService.startRun owns the
+ * full authorability guard (assessment type + status); this route just
+ * scopes to the caller's institution and maps the service's errors onto
+ * HTTP status codes. Flag-off returns 404 (house convention: clients treat
+ * 404 as feature-off — see src/routes/v2/agentDecisions.js).
  */
 const express = require('express');
 const institutionAuth = require('../../middleware/institutionAuth');
@@ -29,6 +31,7 @@ function makeHandlers(deps = {}) {
     startRun: deps.startRun || authorAgentService.startRun,
     getRunStatus: deps.getRunStatus || authorAgentService.getRunStatus,
     createAndAuthor: deps.createAndAuthor || authorAgentService.createAndAuthor,
+    listRuns: deps.listRuns || authorAgentService.listRuns,
     Assessment: deps.Assessment || require('../../models/Assessment'),
   };
 
@@ -86,6 +89,37 @@ function makeHandlers(deps = {}) {
   }
 
   /**
+   * GET /api/institution/author-agent/runs?cohortId=&limit= — lets a TPO who
+   * refreshed mid-run find their way back to it. decisionId only ever lived
+   * in React state before this; this is the server-side lookup that replaces
+   * "start a new run because you lost the tab". institutionScope comes from
+   * the authed principal — NEVER the query — so a cohortId from another
+   * institution just returns an empty list (see authorAgentService.listRuns).
+   */
+  async function listRunsHandler(req, res) {
+    try {
+      if (!d.isAgentEnabled('author_agent')) {
+        return res.status(404).json({ success: false, message: 'Not found' });
+      }
+      const { cohortId, limit } = req.query || {};
+      if (!cohortId || typeof cohortId !== 'string') {
+        return res.status(400).json({ success: false, message: 'cohortId is required' });
+      }
+
+      const scope = institutionScope(req);
+      const { runs } = await d.listRuns({
+        institutionId: scope.institutionId,
+        cohortId,
+        limit: limit !== undefined ? Number(limit) : undefined,
+      });
+      return res.json({ success: true, data: { runs } });
+    } catch (err) {
+      console.error('[institution/author-agent] listRuns error', err);
+      return res.status(500).json({ success: false, message: 'Could not load recent runs.' });
+    }
+  }
+
+  /**
    * POST /api/institution/agent/create-assessment — the one-prompt path.
    * No pre-existing assessment shell, no picker: the TPO describes the
    * assessment they want and the agent creates it (assessmentSpecService
@@ -123,7 +157,7 @@ function makeHandlers(deps = {}) {
     }
   }
 
-  return { startRunHandler, getRunStatusHandler, createAssessmentHandler };
+  return { startRunHandler, getRunStatusHandler, listRunsHandler, createAssessmentHandler };
 }
 
 const router = express.Router();
@@ -133,6 +167,12 @@ router.post(
   institutionAuth,
   requireInstitutionRole('tpo_head', 'tpo_coordinator'),
   handlers.startRunHandler
+);
+router.get(
+  '/author-agent/runs',
+  institutionAuth,
+  requireInstitutionRole('tpo_head', 'tpo_coordinator'),
+  handlers.listRunsHandler
 );
 router.get(
   '/author-agent/runs/:decisionId',

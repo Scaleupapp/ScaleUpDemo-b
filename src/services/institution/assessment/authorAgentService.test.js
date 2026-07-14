@@ -9,6 +9,7 @@ const {
   getRunStatus,
   reapOrphanedRuns,
   createAndAuthor,
+  listRuns,
   _helpers: { computeFlaggedIndices, buildObjectiveContext },
 } = require('./authorAgentService');
 
@@ -1273,4 +1274,129 @@ test('createAndAuthor: cohort lookup throws -> best-effort, run still proceeds w
   assert.ok(result.assessmentId, 'run should still succeed despite the cohort lookup failure');
   assert.strictEqual(parseBriefArgs.objective, null);
   assert.strictEqual(parseBriefArgs.cohortLabel, undefined);
+});
+
+// ── listRuns ──────────────────────────────────────────────────────────────
+
+/** Fake AgentDecision model supporting the .find(query).sort().limit() chain listRuns uses. */
+function makeListRunsAgentDecisionModel(rows) {
+  return {
+    find(query) {
+      const matched = rows.filter((row) =>
+        row.agentId === query.agentId &&
+        String(row.institutionId) === String(query.institutionId) &&
+        String(row.cohortId) === String(query.cohortId)
+      );
+      return {
+        sort(sortSpec) {
+          const dir = sortSpec && sortSpec.createdAt === -1 ? -1 : 1;
+          const sorted = [...matched].sort((a, b) => dir * (new Date(a.createdAt) - new Date(b.createdAt)));
+          return {
+            async limit(n) {
+              return sorted.slice(0, n);
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+/** Fake Assessment model supporting the .find({_id:{$in}}).select().lean() chain listRuns uses. */
+function makeListRunsAssessmentModel(docs) {
+  return {
+    find(query) {
+      const ids = (query._id && query._id.$in) || [];
+      const matched = docs.filter((d) => ids.includes(String(d._id)));
+      return {
+        select() {
+          return { lean: async () => matched };
+        },
+      };
+    },
+  };
+}
+
+function listRunsRow({ id, institutionId = 'inst1', cohortId = 'c1', engine = 'mcq', assessmentId, result = null, createdAt }) {
+  return { _id: id, agentId: 'author_agent', institutionId, cohortId, createdAt, action: { assessmentId, engine, result } };
+}
+
+test('listRuns: returns newest-first', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([
+    listRunsRow({ id: 'dec1', assessmentId: 'a1', createdAt: minutesAgo(30) }),
+    listRunsRow({ id: 'dec2', assessmentId: 'a2', createdAt: minutesAgo(5) }),
+    listRunsRow({ id: 'dec3', assessmentId: 'a3', createdAt: minutesAgo(15) }),
+  ]);
+  const Assessment = makeListRunsAssessmentModel([
+    { _id: 'a1', title: 'Oldest' },
+    { _id: 'a2', title: 'Newest' },
+    { _id: 'a3', title: 'Middle' },
+  ]);
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  assert.deepStrictEqual(runs.map((r) => r.decisionId), ['dec2', 'dec3', 'dec1']);
+  assert.deepStrictEqual(runs.map((r) => r.assessmentTitle), ['Newest', 'Middle', 'Oldest']);
+});
+
+test('listRuns: cross-tenant cohort returns empty (not other institutions\' runs)', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([
+    listRunsRow({ id: 'dec1', institutionId: 'inst-other', cohortId: 'c1', assessmentId: 'a1', createdAt: minutesAgo(5) }),
+  ]);
+  const Assessment = makeListRunsAssessmentModel([{ _id: 'a1', title: 'Someone else\'s' }]);
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  assert.deepStrictEqual(runs, []);
+});
+
+test('listRuns: in-progress runs (action.result null) show status "generating"', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([
+    listRunsRow({ id: 'dec1', assessmentId: 'a1', result: null, createdAt: minutesAgo(2) }),
+    listRunsRow({ id: 'dec2', assessmentId: 'a2', result: { status: 'ready' }, createdAt: minutesAgo(1) }),
+  ]);
+  const Assessment = makeListRunsAssessmentModel([{ _id: 'a1', title: 'T1' }, { _id: 'a2', title: 'T2' }]);
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  const byId = Object.fromEntries(runs.map((r) => [r.decisionId, r]));
+  assert.strictEqual(byId.dec1.status, 'generating');
+  assert.strictEqual(byId.dec2.status, 'ready');
+});
+
+test('listRuns: respects the limit, capped at MAX_LIST_RUNS_LIMIT (50)', async () => {
+  const rows = Array.from({ length: 10 }, (_, i) =>
+    listRunsRow({ id: `dec${i}`, assessmentId: `a${i}`, createdAt: minutesAgo(i) })
+  );
+  const AgentDecision = makeListRunsAgentDecisionModel(rows);
+  const Assessment = makeListRunsAssessmentModel(rows.map((r, i) => ({ _id: `a${i}`, title: `T${i}` })));
+
+  const { runs: defaultRuns } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+  assert.strictEqual(defaultRuns.length, 5, 'default limit is 5');
+
+  const { runs: capped } = await listRuns({ institutionId: 'inst1', cohortId: 'c1', limit: 1000 }, { AgentDecision, Assessment });
+  assert.strictEqual(capped.length, 10, 'limit is capped, not literally 1000, but there are only 10 rows here');
+});
+
+test('listRuns: no assessmentId on a row -> assessmentTitle null, no crash', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([
+    listRunsRow({ id: 'dec1', assessmentId: undefined, createdAt: minutesAgo(1) }),
+  ]);
+  const Assessment = makeListRunsAssessmentModel([]);
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  assert.strictEqual(runs[0].assessmentId, null);
+  assert.strictEqual(runs[0].assessmentTitle, null);
+});
+
+test('listRuns: no rows -> empty array, Assessment.find never called (no wasted batch lookup)', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([]);
+  let assessmentFindCalled = false;
+  const Assessment = { find: () => { assessmentFindCalled = true; return { select: () => ({ lean: async () => [] }) }; } };
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  assert.deepStrictEqual(runs, []);
+  assert.strictEqual(assessmentFindCalled, false);
 });

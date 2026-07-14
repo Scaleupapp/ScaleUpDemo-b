@@ -272,6 +272,100 @@ test('POST agent/create-assessment: unexpected service error -> 500', async () =
   assert.strictEqual(r.body.success, false);
 });
 
+// ── GET /author-agent/runs — list recent runs for a cohort ────────────────
+
+test('GET author-agent/runs: happy path returns runs from the service, scoped by the authed institution', async () => {
+  const runs = [
+    { decisionId: 'dec2', assessmentId: 'a2', assessmentTitle: 'Newest', engine: 'mcq', status: 'ready', createdAt: new Date() },
+    { decisionId: 'dec1', assessmentId: 'a1', assessmentTitle: 'Oldest', engine: 'drill', status: 'generating', createdAt: new Date() },
+  ];
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    listRuns: async ({ institutionId, cohortId, limit }) => {
+      assert.strictEqual(institutionId, 'inst1');
+      assert.strictEqual(cohortId, 'c1');
+      assert.strictEqual(limit, undefined);
+      return { runs };
+    },
+  });
+  const r = res();
+  await h.listRunsHandler(baseReq({ query: { cohortId: 'c1' } }), r);
+  assert.strictEqual(r.statusCode, 200);
+  assert.strictEqual(r.body.success, true);
+  assert.deepStrictEqual(r.body.data.runs, runs);
+});
+
+test('GET author-agent/runs: passes a numeric limit through to the service', async () => {
+  let capturedLimit;
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    listRuns: async ({ limit }) => { capturedLimit = limit; return { runs: [] }; },
+  });
+  const r = res();
+  await h.listRunsHandler(baseReq({ query: { cohortId: 'c1', limit: '3' } }), r);
+  assert.strictEqual(r.statusCode, 200);
+  assert.strictEqual(capturedLimit, 3);
+});
+
+test('GET author-agent/runs: missing cohortId -> 400', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    listRuns: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.listRunsHandler(baseReq({ query: {} }), r);
+  assert.strictEqual(r.statusCode, 400);
+  assert.strictEqual(r.body.success, false);
+});
+
+test('GET author-agent/runs: flag off -> 404 envelope', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => false,
+    listRuns: async () => { throw new Error('should not run'); },
+  });
+  const r = res();
+  await h.listRunsHandler(baseReq({ query: { cohortId: 'c1' } }), r);
+  assert.strictEqual(r.statusCode, 404);
+  assert.strictEqual(r.body.success, false);
+});
+
+test('GET author-agent/runs: cross-tenant cohort -> empty list, not an error (service does the scoping)', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    listRuns: async ({ institutionId, cohortId }) => {
+      assert.strictEqual(institutionId, 'inst1');
+      assert.strictEqual(cohortId, 'other-institutions-cohort');
+      return { runs: [] };
+    },
+  });
+  const r = res();
+  await h.listRunsHandler(baseReq({ query: { cohortId: 'other-institutions-cohort' } }), r);
+  assert.strictEqual(r.statusCode, 200);
+  assert.deepStrictEqual(r.body.data.runs, []);
+});
+
+test('GET author-agent/runs: in-progress run surfaces status "generating"', async () => {
+  const runs = [{ decisionId: 'dec1', assessmentId: 'a1', assessmentTitle: 'T', engine: 'mcq', status: 'generating', createdAt: new Date() }];
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    listRuns: async () => ({ runs }),
+  });
+  const r = res();
+  await h.listRunsHandler(baseReq({ query: { cohortId: 'c1' } }), r);
+  assert.strictEqual(r.body.data.runs[0].status, 'generating');
+});
+
+test('GET author-agent/runs: unexpected service error -> 500', async () => {
+  const h = makeHandlers({
+    isAgentEnabled: () => true,
+    listRuns: async () => { throw new Error('boom'); },
+  });
+  const r = res();
+  await h.listRunsHandler(baseReq({ query: { cohortId: 'c1' } }), r);
+  assert.strictEqual(r.statusCode, 500);
+  assert.strictEqual(r.body.success, false);
+});
+
 // ── back to author-agent run status coverage ──────────────────────────────
 
 test('GET author-agent run status: passes through engine + evidence', async () => {

@@ -8969,6 +8969,67 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /api/institution/author-agent/runs:
+    get:
+      operationId: listAuthorAgentRuns
+      tags: [AuthorAgent]
+      summary: List the most recent author-agent runs for a cohort
+      description: |
+        Lets a TPO who refreshed mid-run (decisionId only ever lived in
+        React state) find their way back to it instead of starting a
+        duplicate run. Newest first, scoped to the caller's institution AND
+        the given cohortId — a cohortId belonging to another institution
+        simply returns an empty list, never that institution's runs.
+        `status` is the same 'generating' | 'ready' | 'needs_review' |
+        'failed' contract GET /author-agent/runs/{decisionId} uses.
+        `assessmentTitle` is resolved with one batched Assessment lookup
+        across all returned rows. 404 when the author_agent flag is off.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: cohortId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 5 }
+      responses:
+        '200':
+          description: Recent runs for this cohort, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [runs]
+                    properties:
+                      runs:
+                        type: array
+                        items:
+                          type: object
+                          required: [decisionId, assessmentId, assessmentTitle, engine, status, createdAt]
+                          properties:
+                            decisionId: { type: string }
+                            assessmentId: { type: string, nullable: true }
+                            assessmentTitle: { type: string, nullable: true }
+                            engine: { type: string, enum: [mcq, interview, capstone, drill], nullable: true }
+                            status: { type: string, enum: [generating, ready, needs_review, failed] }
+                            createdAt: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/institution/author-agent/runs/{decisionId}:
     get:
       operationId: getAuthorAgentRunStatus
@@ -9098,6 +9159,19 @@ paths:
                             description: 'Only the sub-object matching `type` is populated (config.mcq | config.capstone | config.interview | config.drill).'
                           opensAt: { type: string, format: date-time }
                           closesAt: { type: string, format: date-time }
+                          groundedIn:
+                            type: object
+                            description: |
+                              Provenance for how this spec was grounded — never persisted onto
+                              the Assessment doc, response-only. `objective` is the cohort's
+                              ObjectiveTemplate label (null if the cohort has none).
+                              `roleTrackSource`/`targetRoleSource` say whether the resolved
+                              roleTrack/targetRole came from the brief, the objective, or (for
+                              roleTrack only) the deterministic default.
+                            properties:
+                              objective: { type: string, nullable: true }
+                              roleTrackSource: { type: string, enum: [brief, objective, default] }
+                              targetRoleSource: { type: string, nullable: true, enum: [brief, objective, null] }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':

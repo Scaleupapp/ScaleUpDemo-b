@@ -769,11 +769,75 @@ async function getRunStatus({ decisionId, institutionId }, deps = {}) {
   return { status: (result && result.status) || 'generating', runLog, result };
 }
 
+const DEFAULT_LIST_RUNS_LIMIT = 5;
+const MAX_LIST_RUNS_LIMIT = 50;
+
+/**
+ * listRuns({ institutionId, cohortId, limit }, deps) -> Promise<{ runs }>
+ *
+ * Lets a TPO who refreshed mid-run (decisionId only ever lived in React
+ * state — see GET /author-agent/runs/:decisionId's polling contract above,
+ * which needs a decisionId it has no other way to recover) find their way
+ * back to a run in progress. Institution+cohort-scoped: both come from the
+ * route's authed principal / validated query, never trusted blindly — a
+ * cohortId belonging to a DIFFERENT institution simply matches zero rows,
+ * since every author_agent ledger row's institutionId is set at record()
+ * time to the run's OWN institution (not the caller's), so cross-tenant
+ * reads can't leak another institution's runs.
+ *
+ * Newest first; `status` is the same honest `action.result?.status ||
+ * 'generating'` getRunStatus already uses. assessmentTitle is resolved with
+ * ONE batched Assessment lookup across all returned rows (no N+1) — a title
+ * this batch can't find (assessment deleted, or the row predates the
+ * assessment somehow) resolves to null rather than throwing.
+ */
+async function listRuns({ institutionId, cohortId, limit = DEFAULT_LIST_RUNS_LIMIT } = {}, deps = {}) {
+  const d = { ...defaultDeps(), ...deps };
+
+  const boundedLimit = Math.min(Math.max(Number(limit) || DEFAULT_LIST_RUNS_LIMIT, 1), MAX_LIST_RUNS_LIMIT);
+
+  const rows =
+    (await d.AgentDecision.find({ agentId: 'author_agent', institutionId, cohortId })
+      .sort({ createdAt: -1 })
+      .limit(boundedLimit)) || [];
+
+  const assessmentIds = [
+    ...new Set(rows.map((row) => row.action && row.action.assessmentId).filter(Boolean).map(String)),
+  ];
+
+  let titleById = {};
+  if (assessmentIds.length) {
+    const assessments = (await d.Assessment.find({ _id: { $in: assessmentIds } }).select('title').lean()) || [];
+    titleById = assessments.reduce((acc, a) => {
+      acc[String(a._id)] = a.title;
+      return acc;
+    }, {});
+  }
+
+  const runs = rows.map((row) => {
+    const action = row.action || {};
+    const assessmentId = action.assessmentId ? String(action.assessmentId) : null;
+    return {
+      decisionId: String(row._id),
+      assessmentId,
+      assessmentTitle: assessmentId && Object.prototype.hasOwnProperty.call(titleById, assessmentId)
+        ? titleById[assessmentId]
+        : null,
+      engine: action.engine || null,
+      status: (action.result && action.result.status) || 'generating',
+      createdAt: row.createdAt,
+    };
+  });
+
+  return { runs };
+}
+
 module.exports = {
   startRun,
   runAuthoring,
   getRunStatus,
   reapOrphanedRuns,
   createAndAuthor,
+  listRuns,
   _helpers: { computeFlaggedIndices, mcqAuthoringStatus, authoringStatusFor, buildObjectiveContext, loadCohortContext },
 };
