@@ -405,6 +405,53 @@ test('authorCapstone throws CAPSTONE_GEN_FAILED on timeout (maxPolls exhausted)'
   );
 });
 
+test('authorCapstone passes institution ownership to requestGeneration — no userId key, assessment.createdBy goes on requestedByInstitutionUserId', async () => {
+  // Regression guard for the original bug: authorCapstone used to call
+  // requestGeneration({ userId: assessment.createdBy, ... }) — createdBy is
+  // an InstitutionUser id, not a User id. It must now pass institution
+  // ownership instead, and never a `userId` key at all.
+  const assessment = makeCapstoneAssessment({
+    institutionId: 'inst-1',
+    cohortId: 'cohort-1',
+    createdBy: 'institution-user-1',
+  });
+
+  let capturedParams = null;
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    requestGeneration: async (params) => { capturedParams = params; return { _id: 'req1' }; },
+  });
+
+  await authorCapstone('assess-cap-1', deps);
+
+  assert.ok(capturedParams, 'requestGeneration should have been called');
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(capturedParams, 'userId'), false, 'must not pass a userId key');
+  assert.strictEqual(capturedParams.institutionId, 'inst-1');
+  assert.strictEqual(capturedParams.cohortId, 'cohort-1');
+  assert.strictEqual(capturedParams.assessmentId, 'assess-cap-1');
+  assert.strictEqual(capturedParams.requestedByInstitutionUserId, 'institution-user-1');
+});
+
+test('authorCapstone still requests generation when createdBy is absent (the exact scenario that used to crash with "user_id is required")', async () => {
+  const assessment = makeCapstoneAssessment({
+    institutionId: 'inst-1',
+    cohortId: 'cohort-1',
+    createdBy: undefined,
+  });
+
+  let capturedParams = null;
+  const deps = makeCapstoneDeps({
+    Assessment: { findById: async () => assessment },
+    requestGeneration: async (params) => { capturedParams = params; return { _id: 'req1' }; },
+  });
+
+  const result = await authorCapstone('assess-cap-1', deps);
+
+  assert.ok(result, 'authorCapstone must succeed even without a createdBy');
+  assert.strictEqual(capturedParams.institutionId, 'inst-1');
+  assert.strictEqual(capturedParams.requestedByInstitutionUserId, undefined);
+});
+
 // ---------------------------------------------------------------------------
 // Anti-masking: strict-validator stub tests
 //

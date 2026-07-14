@@ -37,8 +37,18 @@ const { buildPayload, NOTIFICATION_TYPES } = require('./codingNotifications');
 
 const GENERATION_DEEP_LINK = 'scaleup://compass/coding';
 
-/** Best-effort push when generation finishes (never throws into the pipeline). */
+/**
+ * Best-effort push when generation finishes (never throws into the pipeline).
+ *
+ * Student-facing only: a request has EITHER user_id (D2C — a student is
+ * waiting on this) OR institution_id (institution — authored for a cohort,
+ * no single student to notify). Notifying is skipped entirely when
+ * user_id is unset — there is no learner-facing "your capstone is ready"
+ * push to send for an institution-authored request; a TPO watches its
+ * progress through the author-agent run log instead.
+ */
 async function notifyOutcome(reqDoc, ok) {
+  if (!reqDoc.user_id) return;
   try {
     const type = ok ? NOTIFICATION_TYPES.CODING_CAPSTONE_GENERATED : NOTIFICATION_TYPES.CODING_CAPSTONE_GENERATION_FAILED;
     await notificationService.sendToUser(

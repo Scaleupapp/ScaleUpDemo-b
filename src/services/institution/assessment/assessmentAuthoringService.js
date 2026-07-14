@@ -593,10 +593,19 @@ async function authorCapstone(assessmentId, deps = {}) {
     }
   }
 
-  // Request generation
+  // Request generation — institution-owned (this assessment belongs to a
+  // cohort, not a single student): pass institutionId/cohortId/assessmentId
+  // ownership, NOT userId. assessment.createdBy is an InstitutionUser id —
+  // it was previously (wrongly) passed as `userId`, a field typed
+  // `ref: 'User'`; it now goes on `requestedByInstitutionUserId`, its own
+  // correctly-typed field, and is optional (a capstone can still be
+  // authored even if createdBy was never set).
   const reqDoc = await requestGenerationFn(
     {
-      userId: assessment.createdBy,
+      institutionId: assessment.institutionId,
+      cohortId: assessment.cohortId,
+      assessmentId: assessment._id,
+      requestedByInstitutionUserId: assessment.createdBy,
       roleTrack,
       difficulty,
       language,

@@ -176,6 +176,65 @@ function mcqAuthoringStatus(assessment) {
   return authoringStatusFor(assessment, 'mcq');
 }
 
+const VALID_ROLE_TRACKS = ['swe', 'ds', 'ai_eng'];
+const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
+
+function nonEmptyString(v) {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+/**
+ * runPreflight(engine, assessment) -> { ok: true } | { ok: false, reason }
+ *
+ * Gate that runs BEFORE any engine is kicked — before any LLM call or
+ * sandbox spend. capstone/drill both flow into
+ * capstoneAuthoringSupport.requestGeneration (capstone directly on every
+ * run; drill only on the library-miss fallback), which requires resolvable
+ * institution ownership plus real role_track/difficulty/language values.
+ * Before this fix, a bad config surfaced as either a raw Mongoose
+ * ValidationError ("user_id: Path 'user_id' is required.") after real LLM
+ * spend, or a silent coercion to defaults that masked what the TPO actually
+ * configured. This catches it first, in plain language, for free.
+ *
+ * Deliberately lenient on ABSENT fields (roleTrack/difficulty default
+ * exactly the way assessmentAuthoringService.authorCapstone/authorDrill
+ * already default them — 'swe'/'medium'/track-language — so an assessment
+ * that never set them still authors fine, same as before this change) but
+ * strict on a PRESENT-and-garbage value (a real, not-in-enum string can
+ * only come from corrupted data or an API caller bypassing the UI's
+ * dropdowns) and on capstone having literally nothing to build from.
+ */
+function runPreflight(engine, assessment) {
+  if (!assessment) return { ok: true }; // let the per-engine runner's own NOT_FOUND handling surface this
+
+  if (!assessment.institutionId) {
+    return { ok: false, reason: "this assessment isn't linked to an institution" };
+  }
+
+  if (engine !== 'capstone' && engine !== 'drill') return { ok: true };
+
+  const cfg = (assessment.config && assessment.config[engine]) || {};
+
+  if (cfg.roleTrack != null && !VALID_ROLE_TRACKS.includes(cfg.roleTrack)) {
+    return { ok: false, reason: `roleTrack must be one of ${VALID_ROLE_TRACKS.join(', ')} (got '${cfg.roleTrack}')` };
+  }
+  if (cfg.difficulty != null && !VALID_DIFFICULTIES.includes(cfg.difficulty)) {
+    return { ok: false, reason: `difficulty must be one of ${VALID_DIFFICULTIES.join(', ')} (got '${cfg.difficulty}')` };
+  }
+  if (cfg.language != null && !nonEmptyString(cfg.language)) {
+    return { ok: false, reason: 'language cannot be blank' };
+  }
+  if (engine === 'capstone') {
+    const hasContent =
+      nonEmptyString(cfg.jobDescription) || nonEmptyString(cfg.topicHint) || nonEmptyString(assessment.title);
+    if (!hasContent) {
+      return { ok: false, reason: 'add a job description or topic hint so I know what to build' };
+    }
+  }
+
+  return { ok: true };
+}
+
 /** findById -> mutate action.runLog -> markModified('action') -> save. */
 async function appendLog(AgentDecision, decisionId, msg) {
   const row = await AgentDecision.findById(decisionId);
@@ -673,6 +732,19 @@ async function runAuthoring({ decisionId, assessmentId }, deps = {}) {
     const assessment = await d.Assessment.findById(assessmentId);
     engine = (assessment && assessment.type) || engine;
 
+    const preflight = runPreflight(engine, assessment);
+    if (!preflight.ok) {
+      await appendLog(d.AgentDecision, decisionId, `I couldn't start generation: ${preflight.reason}`);
+      await finalizeResult(d.AgentDecision, decisionId, {
+        status: 'failed',
+        engine,
+        evidence: { preflight: preflight.reason },
+        flagged: [],
+        passes: 0,
+      });
+      return;
+    }
+
     let result;
     switch (engine) {
       case 'mcq':
@@ -692,6 +764,7 @@ async function runAuthoring({ decisionId, assessmentId }, deps = {}) {
         result = { status: 'failed', engine, evidence: {}, flagged: [], passes: 0 };
     }
 
+    result.evidence = { ...(result.evidence || {}), preflight: 'ok' };
     await finalizeResult(d.AgentDecision, decisionId, result);
   } catch (err) {
     try {
@@ -891,5 +964,6 @@ module.exports = {
     loadCohortContext,
     humanizeAuthoringFailure,
     describeAuthoringFailure,
+    runPreflight,
   },
 };

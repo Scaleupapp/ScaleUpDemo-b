@@ -10,7 +10,7 @@ const {
   reapOrphanedRuns,
   createAndAuthor,
   listRuns,
-  _helpers: { computeFlaggedIndices, buildObjectiveContext, humanizeAuthoringFailure, describeAuthoringFailure },
+  _helpers: { computeFlaggedIndices, buildObjectiveContext, humanizeAuthoringFailure, describeAuthoringFailure, runPreflight },
 } = require('./authorAgentService');
 
 /** Dot-path get/set — the reaper's Assessment.updateOne fake needs both. */
@@ -610,14 +610,15 @@ function interviewAssessment({ authoringStatus = 'ready', questionPlan, error = 
   };
 }
 
-function bundleAssessment({ type, bundleId, status = 'draft', institutionId = 'inst1' } = {}) {
+function bundleAssessment({ type, bundleId, status = 'draft', institutionId = 'inst1', title = 'Backend Engineer Capstone', configExtra = {} } = {}) {
   return {
     _id: 'a1',
     institutionId,
     status,
     type,
+    title,
     config: {
-      [type]: { bundleId },
+      [type]: { bundleId, ...configExtra },
     },
   };
 }
@@ -834,6 +835,131 @@ test('runAuthoring: drill bundle id set but bundle doc missing -> failed', async
 
   const result = decisionStore.dec1.action.result;
   assert.strictEqual(result.status, 'failed');
+});
+
+// ── runAuthoring: preflight (fail fast before any engine spend) ─────────
+
+test('runAuthoring: capstone success -> evidence.preflight is "ok"', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: 'bundle1' }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const bundleStore = { bundle1: bundleDoc({ status: 'active' }) };
+  const ArtifactBundle = makeArtifactBundleModel(bundleStore);
+
+  const authoring = { authorCapstone: async () => assessmentStore.a1 };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring });
+
+  const result = decisionStore.dec1.action.result;
+  assert.strictEqual(result.status, 'ready');
+  assert.strictEqual(result.evidence.preflight, 'ok');
+});
+
+test('runAuthoring: capstone preflight rejects an invalid roleTrack before any generation call', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = {
+    a1: bundleAssessment({ type: 'capstone', bundleId: null, configExtra: { roleTrack: 'cobol' } }),
+  };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({});
+
+  let authorCapstoneCalled = false;
+  const authoring = { authorCapstone: async () => { authorCapstoneCalled = true; return assessmentStore.a1; } };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring });
+
+  assert.strictEqual(authorCapstoneCalled, false, 'no generation call should be made when preflight fails');
+  const doc = decisionStore.dec1;
+  assert.strictEqual(doc.action.result.status, 'failed');
+  assert.strictEqual(doc.action.result.engine, 'capstone');
+  assert.ok(/roleTrack must be one of swe, ds, ai_eng/.test(doc.action.result.evidence.preflight));
+  assert.ok(
+    doc.action.runLog.some((e) => /^I couldn't start generation: roleTrack must be one of/.test(e.msg)),
+    `expected a human pre-flight message in the run log, got: ${JSON.stringify(doc.action.runLog)}`,
+  );
+});
+
+test('runAuthoring: capstone preflight rejects an invalid difficulty before any generation call', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = {
+    a1: bundleAssessment({ type: 'capstone', bundleId: null, configExtra: { difficulty: 'extreme' } }),
+  };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({});
+
+  let authorCapstoneCalled = false;
+  const authoring = { authorCapstone: async () => { authorCapstoneCalled = true; return assessmentStore.a1; } };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring });
+
+  assert.strictEqual(authorCapstoneCalled, false);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'failed');
+  assert.ok(/difficulty must be one of easy, medium, hard/.test(decisionStore.dec1.action.result.evidence.preflight));
+});
+
+test('runAuthoring: capstone preflight rejects when there is no job description, topic hint, or title to build from', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = {
+    a1: bundleAssessment({ type: 'capstone', bundleId: null, title: '' }),
+  };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({});
+
+  let authorCapstoneCalled = false;
+  const authoring = { authorCapstone: async () => { authorCapstoneCalled = true; return assessmentStore.a1; } };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring });
+
+  assert.strictEqual(authorCapstoneCalled, false);
+  const result = decisionStore.dec1.action.result;
+  assert.strictEqual(result.status, 'failed');
+  assert.ok(/add a job description or topic hint/.test(result.evidence.preflight));
+});
+
+test('runAuthoring: drill preflight rejects an invalid roleTrack before any generation call', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = {
+    a1: bundleAssessment({ type: 'drill', bundleId: null, configExtra: { roleTrack: 'nope' } }),
+  };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({});
+
+  let authorDrillCalled = false;
+  const authoring = { authorDrill: async () => { authorDrillCalled = true; return assessmentStore.a1; } };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring });
+
+  assert.strictEqual(authorDrillCalled, false);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'failed');
+});
+
+test('runAuthoring: mcq is unaffected by capstone/drill-only preflight checks (evidence.preflight still "ok")', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+
+  const assessmentStore = { a1: baseAssessment({ questions: [passedQuestion(), passedQuestion()] }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+
+  const authoring = {
+    authorMcq: async () => assessmentStore.a1,
+    regenerateQuestion: async () => {},
+  };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, authoring });
+
+  const result = decisionStore.dec1.action.result;
+  assert.strictEqual(result.status, 'ready');
+  assert.strictEqual(result.evidence.preflight, 'ok');
 });
 
 // ── startRun: engine-aware guards ───────────────────────────────────────
@@ -1492,4 +1618,75 @@ test('describeAuthoringFailure: truncates an overlong .detail', () => {
 test('describeAuthoringFailure: no .detail -> just the human sentence, no dangling separator', () => {
   const { logMsg } = describeAuthoringFailure(new Error('NOT_FOUND'));
   assert.ok(!logMsg.includes(' — '), `expected no detail separator, got: ${logMsg}`);
+});
+
+// ── runPreflight ──────────────────────────────────────────────────────────
+
+test('runPreflight: mcq/interview are always ok — capstone/drill-only checks do not apply', () => {
+  assert.deepStrictEqual(runPreflight('mcq', { institutionId: 'inst1', config: {} }), { ok: true });
+  assert.deepStrictEqual(runPreflight('interview', { institutionId: 'inst1', config: {} }), { ok: true });
+});
+
+test('runPreflight: no assessment loaded -> ok (defers to the per-engine NOT_FOUND path)', () => {
+  assert.deepStrictEqual(runPreflight('capstone', null), { ok: true });
+});
+
+test('runPreflight: assessment with no institutionId -> fails', () => {
+  const result = runPreflight('capstone', { config: { capstone: {} }, title: 'x' });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /isn't linked to an institution/);
+});
+
+test('runPreflight: capstone with everything absent -> ok (defaults apply downstream, same as before)', () => {
+  const result = runPreflight('capstone', { institutionId: 'inst1', title: 'Backend Capstone', config: { capstone: {} } });
+  assert.deepStrictEqual(result, { ok: true });
+});
+
+test('runPreflight: capstone with an invalid (present) roleTrack -> fails with the enum listed', () => {
+  const result = runPreflight('capstone', {
+    institutionId: 'inst1',
+    title: 'x',
+    config: { capstone: { roleTrack: 'php' } },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /roleTrack must be one of swe, ds, ai_eng/);
+});
+
+test('runPreflight: capstone with an invalid (present) difficulty -> fails with the enum listed', () => {
+  const result = runPreflight('capstone', {
+    institutionId: 'inst1',
+    title: 'x',
+    config: { capstone: { difficulty: 'nightmare' } },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /difficulty must be one of easy, medium, hard/);
+});
+
+test('runPreflight: capstone with a blank (present) language -> fails', () => {
+  const result = runPreflight('capstone', {
+    institutionId: 'inst1',
+    title: 'x',
+    config: { capstone: { language: '   ' } },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /language cannot be blank/);
+});
+
+test('runPreflight: capstone with no jobDescription, topicHint, or title -> fails', () => {
+  const result = runPreflight('capstone', { institutionId: 'inst1', config: { capstone: {} } });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /add a job description or topic hint/);
+});
+
+test('runPreflight: capstone with only a topicHint (no jobDescription/title) -> ok', () => {
+  const result = runPreflight('capstone', {
+    institutionId: 'inst1',
+    config: { capstone: { topicHint: 'inventory management' } },
+  });
+  assert.deepStrictEqual(result, { ok: true });
+});
+
+test('runPreflight: drill does not require a jobDescription/topicHint (capstone-only check)', () => {
+  const result = runPreflight('drill', { institutionId: 'inst1', config: { drill: { roleTrack: 'swe', difficulty: 'easy' } } });
+  assert.deepStrictEqual(result, { ok: true });
 });
