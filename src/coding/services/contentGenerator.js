@@ -28,6 +28,7 @@ Hard requirements:
 - pin dependency versions to well-known existing releases; do not invent versions or use "latest"
 - visible_tests and hidden_tests must be distinct
 - seeded_mistakes (where applicable) must each be a plausible bug Compass might suggest
+- seeded_mistakes[].location MUST be EXACTLY one file path from the bundle's own files (starter_repo or reference_solution) — copy the path verbatim, character for character. Do NOT append a description, a dash, a colon, a line reference, or any other text to it (e.g. "src/wallet.js" is correct; "src/wallet.js — debit balance check" or "src/wallet.js: bad check" is WRONG and will be rejected). Put the human-readable explanation of the bug in seeded_mistakes[].bug_description instead — that field is where the description belongs.
 - expected_meta_skill_signals must be populated with realistic guidance
 
 DO NOT include a content_hash, status, or generated_by — those are added by the system.

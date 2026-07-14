@@ -189,6 +189,86 @@ async function checkNonSolutionFails(bundle) {
 }
 
 /**
+ * Strip a trailing human descriptor off a seeded_mistake `location` string,
+ * returning the leading token (trimmed) — or null if no separator was found.
+ * Handles: em dash (—), en dash (–), pipe (|), a colon NOT followed purely by
+ * digits (a digit-only suffix is a line number, not a descriptor — that's
+ * parsed separately), a parenthetical suffix ("file.js (line 42)"), and a
+ * hyphen surrounded by whitespace (" - ") — deliberately NOT a bare hyphen,
+ * so kebab-case filenames like "seeded-mistake.js" are never split.
+ */
+function stripLocationDescriptor(location) {
+  const dashSplit = location.split(/\s*[—–|]\s*/);
+  if (dashSplit.length > 1 && dashSplit[0].trim()) return dashSplit[0].trim();
+
+  const colonIdx = location.indexOf(':');
+  if (colonIdx > 0) {
+    const rest = location.slice(colonIdx + 1).trim();
+    if (rest && !/^\d+$/.test(rest)) return location.slice(0, colonIdx).trim();
+  }
+
+  const parenIdx = location.indexOf('(');
+  if (parenIdx > 0) return location.slice(0, parenIdx).trim();
+
+  const hyphenSplit = location.split(/\s+-\s+/);
+  if (hyphenSplit.length > 1 && hyphenSplit[0].trim()) return hyphenSplit[0].trim();
+
+  return null;
+}
+
+/**
+ * Resolves a seeded_mistake `location` string (which the LLM sometimes pads
+ * with a human descriptor, e.g. "src/wallet.js — debit balance check") to a
+ * real bundle file path, or `null` if it genuinely can't be resolved.
+ *
+ * Conservative by design: it only ever returns a path that is verbatim in
+ * `bundleFilePaths` — never a guess, never a fuzzy/partial path. A location
+ * that can't be resolved must still fail `checkSeededMistakesFail`.
+ *
+ * Resolution order:
+ *  1. exact match against a bundle file path;
+ *  2. strip a trailing descriptor (dash/colon/pipe/paren) and exact-match the
+ *     leading token — including a "file:LINE — descriptor" combo, where the
+ *     line suffix is dropped after stripping;
+ *  3. any bundle file path appearing as a whitespace-delimited token, or as a
+ *     raw substring, of the location — longest path wins (least ambiguous).
+ *
+ * Exported for direct unit testing.
+ */
+function normalizeSeededMistakeLocation(location, bundleFilePaths) {
+  const loc = String(location || '').trim();
+  const paths = Array.isArray(bundleFilePaths) ? bundleFilePaths.filter(Boolean) : [];
+  if (!loc || paths.length === 0) return null;
+
+  if (paths.includes(loc)) return loc;
+
+  const stripped = stripLocationDescriptor(loc);
+  if (stripped) {
+    if (paths.includes(stripped)) return stripped;
+    // "file.js:42 — descriptor" → stripping the descriptor still leaves a
+    // line-number suffix; drop that too and re-check.
+    const idx = stripped.lastIndexOf(':');
+    if (idx > 0 && /^\d+$/.test(stripped.slice(idx + 1))) {
+      const filePart = stripped.slice(0, idx);
+      if (paths.includes(filePart)) return filePart;
+    }
+  }
+
+  // Token match first (safer — avoids e.g. "a.js" matching inside "banana.js"),
+  // then fall back to raw substring containment. Longest path wins either way.
+  const tokens = loc.split(/[\s,;]+/).filter(Boolean);
+  let best = null;
+  for (const p of paths) {
+    if (tokens.includes(p) && (!best || p.length > best.length)) best = p;
+  }
+  if (best) return best;
+  for (const p of paths) {
+    if (loc.includes(p) && (!best || p.length > best.length)) best = p;
+  }
+  return best;
+}
+
+/**
  * Check 4: seeded_mistakes are REAL, mechanically confirmed (Wave 2 block 5 —
  * no longer a no-op stub). Two parts:
  *
@@ -211,15 +291,33 @@ async function checkSeededMistakesFail(bundle) {
   for (const f of (bundle.reference_solution?.files || [])) {
     if (!knownFiles.has(f.path)) knownFiles.set(f.path, f);
   }
+  const knownFilePaths = Array.from(knownFiles.keys());
   for (const m of seeded) {
     const loc = String(m.location || '');
     const idx = loc.lastIndexOf(':');
     const hasLine = idx > 0 && /^\d+$/.test(loc.slice(idx + 1));
-    const file = hasLine ? loc.slice(0, idx) : loc;
+    let file = hasLine ? loc.slice(0, idx) : loc;
     const line = hasLine ? parseInt(loc.slice(idx + 1), 10) : null;
-    const f = knownFiles.get(file);
+    let f = knownFiles.get(file);
     if (!f) {
-      return { ok: false, error: `seeded_mistake location "${loc}" does not reference any bundle file` };
+      // The LLM often pads `location` with a human descriptor on top of a
+      // real path (e.g. "src/wallet.js — debit balance check"). Try to
+      // resolve it to a real bundle file before giving up — a false
+      // rejection here burns a full generation attempt for nothing.
+      const resolved = normalizeSeededMistakeLocation(loc, knownFilePaths);
+      if (resolved) {
+        file = resolved;
+        f = knownFiles.get(file);
+      }
+    }
+    if (!f) {
+      const shown = knownFilePaths.length > 8
+        ? `${knownFilePaths.slice(0, 8).join(', ')}, … (+${knownFilePaths.length - 8} more)`
+        : knownFilePaths.join(', ');
+      return {
+        ok: false,
+        error: `seeded_mistake location "${loc}" does not reference any bundle file (bundle files: ${shown || 'none'})`,
+      };
     }
     if (line != null) {
       const lineCount = String(f.content || '').split('\n').length;
@@ -433,4 +531,5 @@ module.exports = {
   // Exported for direct unit testing
   checkTestsDistinct,
   checkContentHashUnique,
+  normalizeSeededMistakeLocation,
 };

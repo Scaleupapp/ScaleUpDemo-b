@@ -99,7 +99,7 @@ HumanReviewQueue.create = async (doc) => {
 
 // ── Module under test — loaded AFTER stubs are in place ──────────────────────
 
-const { validate, pushToHumanReview, checkTestsDistinct, checkContentHashUnique } =
+const { validate, pushToHumanReview, checkTestsDistinct, checkContentHashUnique, normalizeSeededMistakeLocation } =
   require('../../coding/services/contentValidator');
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -407,6 +407,126 @@ test('validate: starter passes ALL tests despite seeded_mistakes → { ok: false
     result.errors.some(e => e.includes('seeded_mistakes')),
     `expected seeded_mistakes error, got: ${JSON.stringify(result.errors)}`,
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. normalizeSeededMistakeLocation — pure resolver, no network/sandbox
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BUNDLE_PATHS = ['src/wallet.js', 'src/utils/helpers.js', 'test/wallet.test.js'];
+
+test('normalizeSeededMistakeLocation: exact match → returns the path unchanged', () => {
+  assert.strictEqual(normalizeSeededMistakeLocation('src/wallet.js', BUNDLE_PATHS), 'src/wallet.js');
+});
+
+test('normalizeSeededMistakeLocation: em-dash descriptor → resolves to the leading path', () => {
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('src/wallet.js — debit balance check', BUNDLE_PATHS),
+    'src/wallet.js',
+  );
+});
+
+test('normalizeSeededMistakeLocation: en-dash descriptor → resolves to the leading path', () => {
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('src/wallet.js – debit balance check', BUNDLE_PATHS),
+    'src/wallet.js',
+  );
+});
+
+test('normalizeSeededMistakeLocation: colon descriptor (non-numeric suffix) → resolves', () => {
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('src/wallet.js: bad check', BUNDLE_PATHS),
+    'src/wallet.js',
+  );
+});
+
+test('normalizeSeededMistakeLocation: pipe descriptor → resolves', () => {
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('src/wallet.js | off-by-one', BUNDLE_PATHS),
+    'src/wallet.js',
+  );
+});
+
+test('normalizeSeededMistakeLocation: parenthetical suffix → resolves', () => {
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('src/wallet.js (line 42)', BUNDLE_PATHS),
+    'src/wallet.js',
+  );
+});
+
+test('normalizeSeededMistakeLocation: spaced-hyphen descriptor → resolves', () => {
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('src/wallet.js - debit balance check', BUNDLE_PATHS),
+    'src/wallet.js',
+  );
+});
+
+test('normalizeSeededMistakeLocation: hyphenated filename survives descriptor-stripping (bare hyphen not split)', () => {
+  const paths = ['src/seeded-mistake.js'];
+  // The bare, unspaced hyphen inside the filename itself must NOT be treated
+  // as a descriptor separator — only " - " (hyphen with surrounding spaces) is.
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('src/seeded-mistake.js — flaky counter', paths),
+    'src/seeded-mistake.js',
+  );
+});
+
+test('normalizeSeededMistakeLocation: file:line + em-dash descriptor combo → resolves to the file', () => {
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('src/wallet.js:42 — off by one', BUNDLE_PATHS),
+    'src/wallet.js',
+  );
+});
+
+test('normalizeSeededMistakeLocation: substring/token match → resolves, longest path wins', () => {
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('the bug is in src/wallet.js near the top', BUNDLE_PATHS),
+    'src/wallet.js',
+  );
+  // Longest match wins when one path is a substring of another candidate's directory.
+  const nested = ['src/wallet.js', 'src/wallet.js.bak'];
+  assert.strictEqual(
+    normalizeSeededMistakeLocation('see src/wallet.js.bak for reference', nested),
+    'src/wallet.js.bak',
+  );
+});
+
+test('normalizeSeededMistakeLocation: genuinely non-existent file → null (rejection preserved)', () => {
+  assert.strictEqual(normalizeSeededMistakeLocation('ghost.py', BUNDLE_PATHS), null);
+  assert.strictEqual(normalizeSeededMistakeLocation('ghost.py — imaginary bug', BUNDLE_PATHS), null);
+});
+
+test('normalizeSeededMistakeLocation: empty/garbage input → null', () => {
+  assert.strictEqual(normalizeSeededMistakeLocation('', BUNDLE_PATHS), null);
+  assert.strictEqual(normalizeSeededMistakeLocation(null, BUNDLE_PATHS), null);
+  assert.strictEqual(normalizeSeededMistakeLocation(undefined, BUNDLE_PATHS), null);
+  assert.strictEqual(normalizeSeededMistakeLocation('   ', BUNDLE_PATHS), null);
+  assert.strictEqual(normalizeSeededMistakeLocation('!!!###@@@', BUNDLE_PATHS), null);
+  assert.strictEqual(normalizeSeededMistakeLocation('src/wallet.js', []), null);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. validate — seeded_mistake location carries a descriptor → still validates
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('validate: seeded_mistake location with a real path + descriptor → resolves, bundle validates', async () => {
+  stubBundle = {
+    ...COMPLETE_BUNDLE,
+    seeded_mistakes: [{ location: 'solution.py — off-by-one in reverse()', bug_description: 'Off-by-one error' }],
+  };
+  stubFindOne = null;
+  sandboxMode = (opts) => {
+    sandboxMode._call = (sandboxMode._call || 0) + 1;
+    if (sandboxMode._call <= 2) return Promise.resolve({ exit_code: 0, stdout: '', stderr: '', timed_out: false });
+    return Promise.resolve({ exit_code: 1, stdout: '', stderr: 'err', timed_out: false });
+  };
+  sandboxMode._call = 0;
+  stubLlmResponse = {
+    content: { parts: [{ text: JSON.stringify({ difficulty_matches: true, brief_unambiguous: true, notes: 'ok' }) }] },
+  };
+
+  const result = await validate({ bundle_id: BUNDLE_ID });
+  assert.strictEqual(result.ok, true, `expected ok:true, got: ${JSON.stringify(result)}`);
 });
 
 test('validate: no seeded_mistakes → seeded check skipped, bundle validates', async () => {

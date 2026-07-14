@@ -85,9 +85,67 @@ function defaultDeps() {
     record: require('../../agentDecisionService').record,
     isAgentEnabled: require('../../../config/agentFlags').isAgentEnabled,
     InstitutionCohort: require('../../../models/InstitutionCohort'),
+    ObjectiveTemplate: require('../../../models/ObjectiveTemplate'),
     assessmentSpecService: require('./assessmentSpecService'),
     assessmentService: require('./assessmentService'),
   };
+}
+
+/**
+ * buildObjectiveContext(template) -> { label, targetRole?, targetCompany?,
+ *   targetSkill?, competencies? } | null
+ *
+ * Compacts an ObjectiveTemplate doc into the grounding context
+ * assessmentSpecService.parseBrief expects — null-safe, omitting any
+ * specifics field the template didn't set, and dropping competency rows
+ * with no name.
+ */
+function buildObjectiveContext(template) {
+  if (!template) return null;
+  const specifics = template.specifics || {};
+  const objective = { label: template.label };
+  if (specifics.targetRole) objective.targetRole = specifics.targetRole;
+  if (specifics.targetCompany) objective.targetCompany = specifics.targetCompany;
+  if (specifics.targetSkill) objective.targetSkill = specifics.targetSkill;
+  if (Array.isArray(template.competencies) && template.competencies.length) {
+    const competencies = template.competencies
+      .filter((c) => c && c.name)
+      .map((c) => ({ name: c.name, weight: c.weight }));
+    if (competencies.length) objective.competencies = competencies;
+  }
+  return objective;
+}
+
+/**
+ * loadCohortContext({ institutionId, cohortId }, d)
+ *   -> Promise<{ cohortLabel, objective }>
+ *
+ * Best-effort context for the parseBrief prompt only — NOT an ownership
+ * guard (createAssessment remains the single source of truth for that).
+ * Grounds the brief in the cohort's ObjectiveTemplate (via
+ * InstitutionCohort.objectiveTemplateId) when the cohort has one; silently
+ * falls back to { objective: null } on any lookup failure or when the
+ * cohort has no objectiveTemplateId, so an unresolved objective only ever
+ * means a slightly less specific prompt, never a failed run.
+ */
+async function loadCohortContext({ institutionId, cohortId }, d) {
+  let cohortLabel;
+  let objective = null;
+  try {
+    const cohort = await d.InstitutionCohort.findOne({ _id: cohortId, institutionId }).select(
+      'name label objectiveTemplateId'
+    );
+    cohortLabel = cohort && (cohort.name || cohort.label);
+    if (cohort && cohort.objectiveTemplateId) {
+      const template = await d.ObjectiveTemplate.findById(cohort.objectiveTemplateId).select(
+        'label specifics competencies'
+      );
+      objective = buildObjectiveContext(template);
+    }
+  } catch (_) {
+    // best-effort — an unresolved cohort/objective just means a less specific prompt
+  }
+  return { cohortLabel, objective };
 }
 
 /** Indices in config.mcq.questions whose QA solver gate passed on low confidence. */
@@ -137,6 +195,45 @@ async function finalizeResult(AgentDecision, decisionId, result) {
   row.action.result = result;
   row.markModified('action');
   await row.save();
+}
+
+/**
+ * Translates a raw engine error CODE (an Error#message thrown by
+ * assessmentAuthoringService — e.g. 'CAPSTONE_GEN_FAILED', 'NOT_FOUND',
+ * 'BAD_CONFIG') into a sentence a TPO can act on without knowing the engine's
+ * internals. The portal used to show bare codes like "authoring failed:
+ * CAPSTONE_GEN_FAILED" straight from the run log — meaningless to a TPO and a
+ * dead end. Every code path is still retained as `evidence.errorCode` on the
+ * result for debugging.
+ */
+function humanizeAuthoringFailure(code) {
+  switch (code) {
+    case 'CAPSTONE_GEN_FAILED':
+    case 'DRILL_GEN_FAILED':
+      return "the generated project failed its own quality checks (it was retried and still didn't pass) — try running again, or add more detail to the brief";
+    case 'NOT_FOUND':
+      return 'the assessment vanished before authoring could finish';
+    case 'BAD_CONFIG':
+      return "the brief didn't give enough to build this — name the format, length and topics";
+    default:
+      return `authoring failed: ${code || 'unknown error'}`;
+  }
+}
+
+/**
+ * Builds the run-log line + evidence.errorCode for an authorFn failure.
+ * If the thrown error carries `.detail` (a real underlying reason read off
+ * the generation-request/bundle doc — see assessmentAuthoringService's
+ * authorCapstone, which attaches CapstoneGenerationRequest.error), a trimmed
+ * version of that is appended so the TPO sees the actual cause, not just the
+ * category.
+ */
+function describeAuthoringFailure(err) {
+  const code = (err && err.message) || null;
+  const human = humanizeAuthoringFailure(code);
+  const detail = err && err.detail ? String(err.detail).trim().slice(0, 300) : null;
+  const logMsg = detail ? `${human} — ${detail}` : human;
+  return { code: code || 'UNKNOWN', logMsg };
 }
 
 /**
@@ -256,17 +353,13 @@ async function createAndAuthor({ institutionId, cohortId, actorInstitutionUserId
 
   // Best-effort context for the prompt only — NOT the cohort-ownership guard.
   // createAssessment (below) is the single source of truth for that check.
-  let cohortLabel;
-  try {
-    const cohort = await d.InstitutionCohort.findOne({ _id: cohortId, institutionId }).select('name label');
-    cohortLabel = cohort && (cohort.name || cohort.label);
-  } catch (_) {
-    // best-effort — an unresolved label just means a slightly less specific prompt
-  }
+  // Grounds the brief in the cohort's ObjectiveTemplate (if it has one) —
+  // see loadCohortContext / assessmentSpecService's file-level doc comment.
+  const { cohortLabel, objective } = await loadCohortContext({ institutionId, cohortId }, d);
 
   let spec;
   try {
-    spec = await d.assessmentSpecService.parseBrief({ brief, cohortLabel }, d);
+    spec = await d.assessmentSpecService.parseBrief({ brief, cohortLabel, objective }, d);
   } catch (_err) {
     throw new Error('could not understand the brief');
   }
@@ -344,8 +437,11 @@ async function runMcqEngine({ decisionId, assessmentId }, d) {
     try {
       assessment = await d.authoring.authorMcq(assessmentId, d);
     } catch (err) {
-      await appendLog(d.AgentDecision, decisionId, `authoring failed: ${err && err.message}`);
-      return mcqResult('failed', { totalQuestions: 0, regenerated: 0, flaggedIndices: [], passes: 0 });
+      const { code, logMsg } = describeAuthoringFailure(err);
+      await appendLog(d.AgentDecision, decisionId, logMsg);
+      const result = mcqResult('failed', { totalQuestions: 0, regenerated: 0, flaggedIndices: [], passes: 0 });
+      result.evidence.errorCode = code;
+      return result;
     }
 
     // Re-read canonical state — authorMcq persists via Assessment.updateOne
@@ -444,8 +540,9 @@ async function runInterviewEngine({ decisionId, assessmentId }, d) {
     try {
       await d.authoring.authorInterview(assessmentId, d);
     } catch (err) {
-      await appendLog(d.AgentDecision, decisionId, `authoring failed: ${err && err.message}`);
-      return interviewResult('failed', {});
+      const { code, logMsg } = describeAuthoringFailure(err);
+      await appendLog(d.AgentDecision, decisionId, logMsg);
+      return interviewResult('failed', { errorCode: code });
     }
 
     const assessment = await d.Assessment.findById(assessmentId);
@@ -505,8 +602,9 @@ async function runBundleEngine(type, { decisionId, assessmentId }, d) {
     try {
       await authorFn(assessmentId, d);
     } catch (err) {
-      await appendLog(d.AgentDecision, decisionId, `authoring failed: ${err && err.message}`);
-      return bundleResult(type, 'failed', {});
+      const { code, logMsg } = describeAuthoringFailure(err);
+      await appendLog(d.AgentDecision, decisionId, logMsg);
+      return bundleResult(type, 'failed', { errorCode: code });
     }
 
     const assessment = await d.Assessment.findById(assessmentId);
@@ -715,11 +813,83 @@ async function getRunStatus({ decisionId, institutionId }, deps = {}) {
   return { status: (result && result.status) || 'generating', runLog, result };
 }
 
+const DEFAULT_LIST_RUNS_LIMIT = 5;
+const MAX_LIST_RUNS_LIMIT = 50;
+
+/**
+ * listRuns({ institutionId, cohortId, limit }, deps) -> Promise<{ runs }>
+ *
+ * Lets a TPO who refreshed mid-run (decisionId only ever lived in React
+ * state — see GET /author-agent/runs/:decisionId's polling contract above,
+ * which needs a decisionId it has no other way to recover) find their way
+ * back to a run in progress. Institution+cohort-scoped: both come from the
+ * route's authed principal / validated query, never trusted blindly — a
+ * cohortId belonging to a DIFFERENT institution simply matches zero rows,
+ * since every author_agent ledger row's institutionId is set at record()
+ * time to the run's OWN institution (not the caller's), so cross-tenant
+ * reads can't leak another institution's runs.
+ *
+ * Newest first; `status` is the same honest `action.result?.status ||
+ * 'generating'` getRunStatus already uses. assessmentTitle is resolved with
+ * ONE batched Assessment lookup across all returned rows (no N+1) — a title
+ * this batch can't find (assessment deleted, or the row predates the
+ * assessment somehow) resolves to null rather than throwing.
+ */
+async function listRuns({ institutionId, cohortId, limit = DEFAULT_LIST_RUNS_LIMIT } = {}, deps = {}) {
+  const d = { ...defaultDeps(), ...deps };
+
+  const boundedLimit = Math.min(Math.max(Number(limit) || DEFAULT_LIST_RUNS_LIMIT, 1), MAX_LIST_RUNS_LIMIT);
+
+  const rows =
+    (await d.AgentDecision.find({ agentId: 'author_agent', institutionId, cohortId })
+      .sort({ createdAt: -1 })
+      .limit(boundedLimit)) || [];
+
+  const assessmentIds = [
+    ...new Set(rows.map((row) => row.action && row.action.assessmentId).filter(Boolean).map(String)),
+  ];
+
+  let titleById = {};
+  if (assessmentIds.length) {
+    const assessments = (await d.Assessment.find({ _id: { $in: assessmentIds } }).select('title').lean()) || [];
+    titleById = assessments.reduce((acc, a) => {
+      acc[String(a._id)] = a.title;
+      return acc;
+    }, {});
+  }
+
+  const runs = rows.map((row) => {
+    const action = row.action || {};
+    const assessmentId = action.assessmentId ? String(action.assessmentId) : null;
+    return {
+      decisionId: String(row._id),
+      assessmentId,
+      assessmentTitle: assessmentId && Object.prototype.hasOwnProperty.call(titleById, assessmentId)
+        ? titleById[assessmentId]
+        : null,
+      engine: action.engine || null,
+      status: (action.result && action.result.status) || 'generating',
+      createdAt: row.createdAt,
+    };
+  });
+
+  return { runs };
+}
+
 module.exports = {
   startRun,
   runAuthoring,
   getRunStatus,
   reapOrphanedRuns,
   createAndAuthor,
-  _helpers: { computeFlaggedIndices, mcqAuthoringStatus, authoringStatusFor },
+  listRuns,
+  _helpers: {
+    computeFlaggedIndices,
+    mcqAuthoringStatus,
+    authoringStatusFor,
+    buildObjectiveContext,
+    loadCohortContext,
+    humanizeAuthoringFailure,
+    describeAuthoringFailure,
+  },
 };

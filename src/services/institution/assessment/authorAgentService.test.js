@@ -9,7 +9,8 @@ const {
   getRunStatus,
   reapOrphanedRuns,
   createAndAuthor,
-  _helpers: { computeFlaggedIndices },
+  listRuns,
+  _helpers: { computeFlaggedIndices, buildObjectiveContext, humanizeAuthoringFailure, describeAuthoringFailure },
 } = require('./authorAgentService');
 
 /** Dot-path get/set — the reaper's Assessment.updateOne fake needs both. */
@@ -274,6 +275,8 @@ test('runAuthoring: authorMcq throws -> failed result + log entry, never throws'
   const result = doc.action.result;
   assert.strictEqual(result.status, 'failed');
   assert.ok(doc.action.runLog.some((e) => /authoring failed: generateQuiz blew up/.test(e.msg)));
+  // Raw code retained for debugging even though the log line is human-facing.
+  assert.strictEqual(result.evidence.errorCode, 'generateQuiz blew up');
 });
 
 // ── runAuthoring: authoring settles but never reaches 'ready' ───────────
@@ -739,6 +742,42 @@ test('runAuthoring: capstone authorCapstone throws -> failed result, never throw
   const result = decisionStore.dec1.action.result;
   assert.strictEqual(result.status, 'failed');
   assert.strictEqual(result.engine, 'capstone');
+  // Raw code retained for debugging...
+  assert.strictEqual(result.evidence.errorCode, 'CAPSTONE_GEN_FAILED');
+  // ...but the TPO-facing run log shows a human sentence, not the bare code.
+  const doc = decisionStore.dec1;
+  assert.ok(
+    doc.action.runLog.some((e) => /failed its own quality checks/.test(e.msg)),
+    `expected a human sentence in the run log, got: ${JSON.stringify(doc.action.runLog)}`,
+  );
+  assert.ok(
+    !doc.action.runLog.some((e) => /^authoring failed: CAPSTONE_GEN_FAILED$/.test(e.msg)),
+    'run log must not show the bare engine code',
+  );
+});
+
+test('runAuthoring: capstone authorCapstone throws with a real underlying reason (.detail) -> surfaced in run log', async () => {
+  const decisionStore = { dec1: makeDecisionDoc() };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const ArtifactBundle = makeArtifactBundleModel({});
+
+  const authoring = {
+    authorCapstone: async () => {
+      const err = new Error('CAPSTONE_GEN_FAILED');
+      err.detail = 'seeded_mistakes_fail: seeded_mistake location "src/wallet.js — debit balance check" does not reference any bundle file';
+      throw err;
+    },
+  };
+
+  await runAuthoring({ decisionId: 'dec1', assessmentId: 'a1' }, { AgentDecision, Assessment, ArtifactBundle, authoring });
+  const doc = decisionStore.dec1;
+  assert.strictEqual(doc.action.result.evidence.errorCode, 'CAPSTONE_GEN_FAILED');
+  assert.ok(
+    doc.action.runLog.some((e) => e.msg.includes('failed its own quality checks') && e.msg.includes('seeded_mistake location')),
+    `expected the underlying reason to be surfaced, got: ${JSON.stringify(doc.action.runLog)}`,
+  );
 });
 
 // ── runAuthoring: drill engine ───────────────────────────────────────────
@@ -1169,4 +1208,288 @@ test('createAndAuthor: performs no extra findById/save on the decision row itsel
   assert.ok(row, 'expected the ledger row to exist');
   assert.strictEqual(row.saveCalls || 0, 0, 'createAndAuthor must never save the decision row itself');
   assert.strictEqual(row.action.createdByAgent, true, 'the flag must already be set from record() time');
+});
+
+// ── buildObjectiveContext ────────────────────────────────────────────────
+
+test('buildObjectiveContext: null template -> null', () => {
+  assert.strictEqual(buildObjectiveContext(null), null);
+});
+
+test('buildObjectiveContext: compacts specifics + competencies, omitting missing fields', () => {
+  const template = {
+    label: 'Data Analyst Placement Prep',
+    specifics: { targetRole: 'Data Analyst', targetSkill: 'SQL' }, // no targetCompany
+    competencies: [
+      { name: 'SQL', weight: 8, category: 'core' },
+      { name: '', weight: 3 }, // dropped — no name
+      { name: 'Excel', weight: 5 },
+    ],
+  };
+  const objective = buildObjectiveContext(template);
+  assert.deepStrictEqual(objective, {
+    label: 'Data Analyst Placement Prep',
+    targetRole: 'Data Analyst',
+    targetSkill: 'SQL',
+    competencies: [{ name: 'SQL', weight: 8 }, { name: 'Excel', weight: 5 }],
+  });
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(objective, 'targetCompany'), false);
+});
+
+test('buildObjectiveContext: no specifics/competencies -> just the label', () => {
+  const objective = buildObjectiveContext({ label: 'Casual Learning' });
+  assert.deepStrictEqual(objective, { label: 'Casual Learning' });
+});
+
+// ── createAndAuthor: objective grounding (cohort's ObjectiveTemplate) ────
+
+function makeObjectiveTemplateModel(store) {
+  return {
+    findById(id) {
+      const doc = store[id] || null;
+      return { select: async () => doc };
+    },
+  };
+}
+
+test('createAndAuthor: cohort with objectiveTemplateId -> objective is loaded and passed into parseBrief', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+
+  deps.InstitutionCohort = {
+    findOne: () => ({
+      select: async () => ({ label: 'CSE Final Year', objectiveTemplateId: 'obj1' }),
+    }),
+  };
+  deps.ObjectiveTemplate = makeObjectiveTemplateModel({
+    obj1: {
+      label: 'Data Analyst Placement Prep',
+      specifics: { targetRole: 'Data Analyst' },
+      competencies: [{ name: 'SQL', weight: 8 }],
+    },
+  });
+
+  let parseBriefArgs = null;
+  deps.assessmentSpecService.parseBrief = async (args) => { parseBriefArgs = args; return mcqSpec; };
+
+  await createAndAuthor({ institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x' }, deps);
+
+  assert.ok(parseBriefArgs.objective, 'expected an objective to be passed to parseBrief');
+  assert.strictEqual(parseBriefArgs.objective.label, 'Data Analyst Placement Prep');
+  assert.strictEqual(parseBriefArgs.objective.targetRole, 'Data Analyst');
+  assert.deepStrictEqual(parseBriefArgs.objective.competencies, [{ name: 'SQL', weight: 8 }]);
+});
+
+test('createAndAuthor: cohort with no objectiveTemplateId -> objective is null', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+
+  deps.InstitutionCohort = {
+    findOne: () => ({ select: async () => ({ label: 'CSE Final Year' }) }),
+  };
+
+  let parseBriefArgs = null;
+  deps.assessmentSpecService.parseBrief = async (args) => { parseBriefArgs = args; return mcqSpec; };
+
+  await createAndAuthor({ institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x' }, deps);
+
+  assert.strictEqual(parseBriefArgs.objective, null);
+});
+
+test('createAndAuthor: cohort lookup throws -> best-effort, run still proceeds with objective null', async () => {
+  const { deps } = createAndAuthorDeps({ spec: mcqSpec });
+
+  deps.InstitutionCohort = {
+    findOne: () => { throw new Error('db down'); },
+  };
+
+  let parseBriefArgs = null;
+  deps.assessmentSpecService.parseBrief = async (args) => { parseBriefArgs = args; return mcqSpec; };
+
+  const result = await createAndAuthor(
+    { institutionId: 'inst1', cohortId: 'c1', actorInstitutionUserId: 'iu1', brief: 'x' },
+    deps
+  );
+
+  assert.ok(result.assessmentId, 'run should still succeed despite the cohort lookup failure');
+  assert.strictEqual(parseBriefArgs.objective, null);
+  assert.strictEqual(parseBriefArgs.cohortLabel, undefined);
+});
+
+// ── listRuns ──────────────────────────────────────────────────────────────
+
+/** Fake AgentDecision model supporting the .find(query).sort().limit() chain listRuns uses. */
+function makeListRunsAgentDecisionModel(rows) {
+  return {
+    find(query) {
+      const matched = rows.filter((row) =>
+        row.agentId === query.agentId &&
+        String(row.institutionId) === String(query.institutionId) &&
+        String(row.cohortId) === String(query.cohortId)
+      );
+      return {
+        sort(sortSpec) {
+          const dir = sortSpec && sortSpec.createdAt === -1 ? -1 : 1;
+          const sorted = [...matched].sort((a, b) => dir * (new Date(a.createdAt) - new Date(b.createdAt)));
+          return {
+            async limit(n) {
+              return sorted.slice(0, n);
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+/** Fake Assessment model supporting the .find({_id:{$in}}).select().lean() chain listRuns uses. */
+function makeListRunsAssessmentModel(docs) {
+  return {
+    find(query) {
+      const ids = (query._id && query._id.$in) || [];
+      const matched = docs.filter((d) => ids.includes(String(d._id)));
+      return {
+        select() {
+          return { lean: async () => matched };
+        },
+      };
+    },
+  };
+}
+
+function listRunsRow({ id, institutionId = 'inst1', cohortId = 'c1', engine = 'mcq', assessmentId, result = null, createdAt }) {
+  return { _id: id, agentId: 'author_agent', institutionId, cohortId, createdAt, action: { assessmentId, engine, result } };
+}
+
+test('listRuns: returns newest-first', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([
+    listRunsRow({ id: 'dec1', assessmentId: 'a1', createdAt: minutesAgo(30) }),
+    listRunsRow({ id: 'dec2', assessmentId: 'a2', createdAt: minutesAgo(5) }),
+    listRunsRow({ id: 'dec3', assessmentId: 'a3', createdAt: minutesAgo(15) }),
+  ]);
+  const Assessment = makeListRunsAssessmentModel([
+    { _id: 'a1', title: 'Oldest' },
+    { _id: 'a2', title: 'Newest' },
+    { _id: 'a3', title: 'Middle' },
+  ]);
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  assert.deepStrictEqual(runs.map((r) => r.decisionId), ['dec2', 'dec3', 'dec1']);
+  assert.deepStrictEqual(runs.map((r) => r.assessmentTitle), ['Newest', 'Middle', 'Oldest']);
+});
+
+test('listRuns: cross-tenant cohort returns empty (not other institutions\' runs)', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([
+    listRunsRow({ id: 'dec1', institutionId: 'inst-other', cohortId: 'c1', assessmentId: 'a1', createdAt: minutesAgo(5) }),
+  ]);
+  const Assessment = makeListRunsAssessmentModel([{ _id: 'a1', title: 'Someone else\'s' }]);
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  assert.deepStrictEqual(runs, []);
+});
+
+test('listRuns: in-progress runs (action.result null) show status "generating"', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([
+    listRunsRow({ id: 'dec1', assessmentId: 'a1', result: null, createdAt: minutesAgo(2) }),
+    listRunsRow({ id: 'dec2', assessmentId: 'a2', result: { status: 'ready' }, createdAt: minutesAgo(1) }),
+  ]);
+  const Assessment = makeListRunsAssessmentModel([{ _id: 'a1', title: 'T1' }, { _id: 'a2', title: 'T2' }]);
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  const byId = Object.fromEntries(runs.map((r) => [r.decisionId, r]));
+  assert.strictEqual(byId.dec1.status, 'generating');
+  assert.strictEqual(byId.dec2.status, 'ready');
+});
+
+test('listRuns: respects the limit, capped at MAX_LIST_RUNS_LIMIT (50)', async () => {
+  const rows = Array.from({ length: 10 }, (_, i) =>
+    listRunsRow({ id: `dec${i}`, assessmentId: `a${i}`, createdAt: minutesAgo(i) })
+  );
+  const AgentDecision = makeListRunsAgentDecisionModel(rows);
+  const Assessment = makeListRunsAssessmentModel(rows.map((r, i) => ({ _id: `a${i}`, title: `T${i}` })));
+
+  const { runs: defaultRuns } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+  assert.strictEqual(defaultRuns.length, 5, 'default limit is 5');
+
+  const { runs: capped } = await listRuns({ institutionId: 'inst1', cohortId: 'c1', limit: 1000 }, { AgentDecision, Assessment });
+  assert.strictEqual(capped.length, 10, 'limit is capped, not literally 1000, but there are only 10 rows here');
+});
+
+test('listRuns: no assessmentId on a row -> assessmentTitle null, no crash', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([
+    listRunsRow({ id: 'dec1', assessmentId: undefined, createdAt: minutesAgo(1) }),
+  ]);
+  const Assessment = makeListRunsAssessmentModel([]);
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  assert.strictEqual(runs[0].assessmentId, null);
+  assert.strictEqual(runs[0].assessmentTitle, null);
+});
+
+test('listRuns: no rows -> empty array, Assessment.find never called (no wasted batch lookup)', async () => {
+  const AgentDecision = makeListRunsAgentDecisionModel([]);
+  let assessmentFindCalled = false;
+  const Assessment = { find: () => { assessmentFindCalled = true; return { select: () => ({ lean: async () => [] }) }; } };
+
+  const { runs } = await listRuns({ institutionId: 'inst1', cohortId: 'c1' }, { AgentDecision, Assessment });
+
+  assert.deepStrictEqual(runs, []);
+  assert.strictEqual(assessmentFindCalled, false);
+});
+
+// ── humanizeAuthoringFailure / describeAuthoringFailure — pure mapping ────────
+
+test('humanizeAuthoringFailure: CAPSTONE_GEN_FAILED -> quality-check sentence', () => {
+  assert.match(humanizeAuthoringFailure('CAPSTONE_GEN_FAILED'), /failed its own quality checks/);
+});
+
+test('humanizeAuthoringFailure: DRILL_GEN_FAILED -> same quality-check sentence', () => {
+  assert.strictEqual(humanizeAuthoringFailure('DRILL_GEN_FAILED'), humanizeAuthoringFailure('CAPSTONE_GEN_FAILED'));
+});
+
+test('humanizeAuthoringFailure: NOT_FOUND -> vanished-assessment sentence', () => {
+  assert.match(humanizeAuthoringFailure('NOT_FOUND'), /vanished before authoring could finish/);
+});
+
+test('humanizeAuthoringFailure: BAD_CONFIG -> brief-detail sentence', () => {
+  assert.match(humanizeAuthoringFailure('BAD_CONFIG'), /didn't give enough to build this/);
+});
+
+test('humanizeAuthoringFailure: unknown code -> kept, prefixed with "authoring failed: "', () => {
+  assert.strictEqual(humanizeAuthoringFailure('SOME_WEIRD_CODE'), 'authoring failed: SOME_WEIRD_CODE');
+});
+
+test('humanizeAuthoringFailure: no code -> "authoring failed: unknown error"', () => {
+  assert.strictEqual(humanizeAuthoringFailure(null), 'authoring failed: unknown error');
+  assert.strictEqual(humanizeAuthoringFailure(undefined), 'authoring failed: unknown error');
+});
+
+test('describeAuthoringFailure: retains the raw code separately from the human log message', () => {
+  const { code, logMsg } = describeAuthoringFailure(new Error('BAD_CONFIG'));
+  assert.strictEqual(code, 'BAD_CONFIG');
+  assert.match(logMsg, /didn't give enough to build this/);
+  assert.ok(!logMsg.includes('BAD_CONFIG'), 'human log message should not leak the raw code');
+});
+
+test('describeAuthoringFailure: appends a trimmed .detail when present', () => {
+  const err = new Error('CAPSTONE_GEN_FAILED');
+  err.detail = '  seeded_mistakes_fail: bad location  ';
+  const { code, logMsg } = describeAuthoringFailure(err);
+  assert.strictEqual(code, 'CAPSTONE_GEN_FAILED');
+  assert.ok(logMsg.includes('seeded_mistakes_fail: bad location'));
+  assert.ok(!logMsg.startsWith(' '), 'detail should be trimmed before appending');
+});
+
+test('describeAuthoringFailure: truncates an overlong .detail', () => {
+  const err = new Error('CAPSTONE_GEN_FAILED');
+  err.detail = 'x'.repeat(1000);
+  const { logMsg } = describeAuthoringFailure(err);
+  assert.ok(logMsg.length < 500, `expected a truncated log message, got length ${logMsg.length}`);
+});
+
+test('describeAuthoringFailure: no .detail -> just the human sentence, no dangling separator', () => {
+  const { logMsg } = describeAuthoringFailure(new Error('NOT_FOUND'));
+  assert.ok(!logMsg.includes(' — '), `expected no detail separator, got: ${logMsg}`);
 });
