@@ -976,7 +976,7 @@ async function reapOrphanedRuns(
 }
 
 /**
- * reconcileBundleRuns({ timeoutMinutes = 30 }, deps) -> Promise<{ reconciled }>
+ * reconcileBundleRuns({ timeoutMinutes = 30 }, deps) -> Promise<{ reconciled, healed }>
  *
  * The fix for the core bug this file exists to close: runBundleEngine leaves
  * a capstone/drill run open (action.result null) whenever authorCapstone/
@@ -1001,6 +1001,38 @@ async function reapOrphanedRuns(
  *              authorCapstone's poll budget so a slow-but-alive run is never
  *              caught here first).
  *
+ * Second pass — healing false failures: authorCapstone's poll timeout used to
+ * be misreported as a hard failure (runBundleEngine catches the thrown
+ * 'CAPSTONE_GEN_FAILED' and finalizes the row 'failed' — see its own history
+ * before this fix, and the earlier reap/reconcile carve-outs above) even
+ * though generation was still genuinely running server-side and could go on
+ * to finish successfully, producing a perfectly good ArtifactBundle that
+ * nothing ever attaches — an expensive capstone stranded behind a false
+ * "failed" the TPO has no way to recover from. This second pass finds rows
+ * shaped exactly like that ambiguous case — 'failed' with
+ * evidence.errorCode === 'CAPSTONE_GEN_FAILED' specifically (never a
+ * preflight failure, which carries evidence.preflight and no errorCode; never
+ * a plain 'DRILL_GEN_FAILED', which only ever comes from THIS reconciler's own
+ * genuinely-failed branch above, i.e. already reflects the real generation
+ * state and must not be second-guessed) — and, only if the Assessment still
+ * has no bundle attached for that engine (never double-attach), re-resolves
+ * the REAL generation state exactly the same way the first pass does:
+ *
+ *   ready         -> attach the bundle and rewrite the row to 'ready' with
+ *                     the normal bundle evidence (or 'needs_review' if the
+ *                     bundle hasn't been promoted to 'active' yet — same rule
+ *                     as the first pass), plus a run-log line explaining the
+ *                     recovery.
+ *   failed        -> genuinely failed for real this time — leave the failed
+ *                     row exactly as-is, untouched.
+ *   pending       -> still generating — leave the closed row as-is; a future
+ *                     run can be started, or a later sweep will heal it.
+ *
+ * Assessment lookups for this pass are batched (one $in query across every
+ * candidate row's assessmentId) rather than issued per-row, since the whole
+ * point of this pass is to sweep potentially many already-closed rows, not
+ * just the handful of still-open ones the first pass sees.
+ *
  * Per-row try/catch, like reapOrphanedRuns: one bad row must never abort the
  * sweep, and this function itself never throws.
  */
@@ -1015,7 +1047,7 @@ async function reconcileBundleRuns({ timeoutMinutes = 30 } = {}, deps = {}) {
       'action.engine': { $in: BUNDLE_ENGINES },
     }).exec();
   } catch (_) {
-    return { reconciled: 0 };
+    rows = [];
   }
 
   let reconciled = 0;
@@ -1096,7 +1128,97 @@ async function reconcileBundleRuns({ timeoutMinutes = 30 } = {}, deps = {}) {
     }
   }
 
-  return { reconciled };
+  // ── second pass: heal false failures ──────────────────────────────────
+  // Rows already finalized 'failed' with the exact ambiguous timeout code —
+  // see the doc comment above for why this filter is this precise. A
+  // separate query (rather than folding into the first pass's `find`) since
+  // the first pass's `'action.result': null` and this pass's
+  // `'action.result.status': 'failed'` are mutually exclusive conditions on
+  // the same field.
+  let healableRows = [];
+  try {
+    healableRows = await d.AgentDecision.find({
+      agentId: 'author_agent',
+      'action.engine': { $in: BUNDLE_ENGINES },
+      'action.result.status': 'failed',
+      'action.result.evidence.errorCode': 'CAPSTONE_GEN_FAILED',
+    }).exec();
+  } catch (_) {
+    healableRows = [];
+  }
+
+  let healed = 0;
+
+  if (healableRows && healableRows.length) {
+    // Batch the Assessment lookups up front — one $in query across every
+    // candidate row, not a per-row findById — since this pass may sweep many
+    // already-closed rows, unlike the handful of open rows the first pass
+    // sees. Full (non-lean) docs, deliberately: attachBundle below calls
+    // .markModified()/.save() on whatever it's handed.
+    const assessmentIds = [
+      ...new Set((healableRows || []).map((row) => row.action && row.action.assessmentId).filter(Boolean).map(String)),
+    ];
+
+    let assessmentsById = {};
+    if (assessmentIds.length) {
+      try {
+        const assessments = (await d.Assessment.find({ _id: { $in: assessmentIds } })) || [];
+        assessmentsById = assessments.reduce((acc, a) => {
+          acc[String(a._id)] = a;
+          return acc;
+        }, {});
+      } catch (_) {
+        assessmentsById = {};
+      }
+    }
+
+    for (const row of healableRows) {
+      try {
+        row.action = row.action || {};
+        const engine = row.action.engine;
+        const assessmentId = row.action.assessmentId;
+        if (!BUNDLE_ENGINES.includes(engine) || !assessmentId) continue;
+
+        const assessment = assessmentsById[String(assessmentId)];
+        if (!assessment) continue; // nothing left to attach the bundle to
+
+        const alreadyAttached = assessment.config && assessment.config[engine] && assessment.config[engine].bundleId;
+        if (alreadyAttached) continue; // never double-attach — some other path already recovered this one
+
+        const genState = await resolveBundleGenerationState(engine, assessmentId, d);
+        if (genState.state !== 'ready') continue; // still generating, or genuinely failed — leave the failed run as-is
+
+        const authoring = d.authoring || require('./assessmentAuthoringService');
+        await authoring.attachBundle(assessment, engine, genState.bundleId);
+
+        const bundle = await d.ArtifactBundle.findById(genState.bundleId);
+        const evidence = {
+          bundleId: String(genState.bundleId),
+          bundleStatus: bundle ? bundle.status : null,
+          roleTrack: bundle ? bundle.role_track : null,
+          difficulty: bundle ? bundle.difficulty : null,
+          language: bundle ? bundle.language : null,
+          humanReviewed: !!(bundle && bundle.generated_by && bundle.generated_by.human_reviewed),
+          ...(engine === 'drill' && bundle ? { drillSubtype: bundle.drill_subtype } : {}),
+        };
+        const status = bundle && bundle.status === 'active' ? 'ready' : 'needs_review';
+
+        row.action.runLog = Array.isArray(row.action.runLog) ? row.action.runLog : [];
+        row.action.runLog.push({
+          at: new Date(),
+          msg: 'recovered — generation actually finished after the run had timed out; the capstone is attached and ready',
+        });
+        row.action.result = { status, engine, evidence, flagged: [], passes: 0 };
+        row.markModified('action');
+        await row.save();
+        healed += 1;
+      } catch (_) {
+        // Per-row isolation — never let one bad row abort the sweep.
+      }
+    }
+  }
+
+  return { reconciled, healed };
 }
 
 /**

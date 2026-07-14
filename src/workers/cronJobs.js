@@ -344,7 +344,7 @@ function startCronJobs() {
       case 'authorAgentBundleReconciler': {
         const { reconcileBundleRuns } = require('../services/institution/assessment/authorAgentService');
         const r = await reconcileBundleRuns();
-        console.log(`[cron] authorAgentBundleReconciler: ${r.reconciled} runs closed`);
+        console.log(`[cron] authorAgentBundleReconciler: ${r.reconciled} runs closed, ${r.healed} healed`);
         break;
       }
     }

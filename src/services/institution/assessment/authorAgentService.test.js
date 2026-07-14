@@ -71,6 +71,17 @@ function matchesDecisionQuery(row, query) {
       if (expected === null) return !row.action || row.action.result === null || row.action.result === undefined;
       return !!row.action && row.action.result === expected;
     }
+    if (key === 'action.result.status') {
+      return !!row.action && !!row.action.result && row.action.result.status === expected;
+    }
+    if (key === 'action.result.evidence.errorCode') {
+      return (
+        !!row.action &&
+        !!row.action.result &&
+        !!row.action.result.evidence &&
+        row.action.result.evidence.errorCode === expected
+      );
+    }
     if (key === 'createdAt' && expected && typeof expected === 'object' && '$lt' in expected) {
       return new Date(row.createdAt).getTime() < new Date(expected.$lt).getTime();
     }
@@ -123,6 +134,17 @@ function makeAssessmentModel(store) {
   return {
     async findById(id) {
       return store[id] || null;
+    },
+    // Mirrors `Assessment.find({ _id: { $in: [...] } })` — used by
+    // reconcileBundleRuns' healing pass to batch-fetch candidate assessments
+    // instead of one findById per row. Mongoose queries are thenable, so this
+    // is directly awaitable (no .exec() needed), matching production usage.
+    find(query = {}) {
+      const ids = query && query._id && query._id.$in ? query._id.$in.map(String) : null;
+      const matched = ids
+        ? Object.values(store).filter((doc) => ids.includes(String(doc._id)))
+        : Object.values(store);
+      return Promise.resolve(matched);
     },
     // Scoped update mirroring Assessment.updateOne({_id, <dot-path>: cond}, {$set: {...}})
     // used by reapOrphanedRuns to reset a stuck config.<engine>.authoring.status.
@@ -1097,6 +1119,39 @@ function orphanCandidateDoc({ id = 'dec1', engine = 'mcq', assessmentId = 'a1', 
   });
 }
 
+/**
+ * A capstone/drill ledger row already finalized 'failed', shaped for
+ * reconcileBundleRuns' healing-pass tests. `errorCode: 'CAPSTONE_GEN_FAILED'`
+ * (default) is the exact ambiguous timeout code the healer targets;
+ * `evidenceExtra` lets a test override/omit it to exercise the "must not
+ * heal" filters (e.g. a preflight failure, which carries no errorCode at
+ * all).
+ */
+function failedBundleDoc({
+  id = 'dec1',
+  engine = 'capstone',
+  assessmentId = 'a1',
+  errorCode = 'CAPSTONE_GEN_FAILED',
+  evidenceExtra = {},
+  ageMinutes = 60,
+} = {}) {
+  const evidence = errorCode === null ? { ...evidenceExtra } : { errorCode, ...evidenceExtra };
+  return makeDecisionDoc({
+    _id: id,
+    agentId: 'author_agent',
+    institutionId: 'inst1',
+    createdAt: minutesAgo(ageMinutes),
+    action: {
+      kind: 'assessment_authoring_run',
+      engine,
+      brief: 'brief',
+      assessmentId,
+      runLog: [{ at: new Date(), msg: 'run queued' }, { at: new Date(), msg: 'authoring failed: CAPSTONE_GEN_FAILED' }],
+      result: { status: 'failed', engine, evidence, flagged: [], passes: 0 },
+    },
+  });
+}
+
 test('reapOrphanedRuns: row older than window -> row failed + assessment authoring status reset', async () => {
   const decisionStore = { dec1: orphanCandidateDoc({ ageMinutes: 40 }) };
   const AgentDecision = makeAgentDecisionModel(decisionStore);
@@ -1377,6 +1432,175 @@ test('reconcileBundleRuns: no matching rows -> reconciled 0, never throws', asyn
   const AgentDecision = makeAgentDecisionModel({});
   const { reconciled } = await reconcileBundleRuns({}, { AgentDecision });
   assert.strictEqual(reconciled, 0);
+});
+
+// ── reconcileBundleRuns: healing false failures ──────────────────────────
+// The production bug this fix closes: a capstone run misreported 'failed'
+// (evidence.errorCode === 'CAPSTONE_GEN_FAILED', the ambiguous poll-timeout
+// code) while generation was still genuinely running server-side and went on
+// to finish successfully — stranding a perfectly good ArtifactBundle nothing
+// ever attached.
+
+test('reconcileBundleRuns: heals a false failure — failed+CAPSTONE_GEN_FAILED, no bundle attached, generation resolved ready -> bundle attached, run flipped to ready, healed incremented', async () => {
+  const decisionStore = { dec1: failedBundleDoc({ engine: 'capstone', assessmentId: 'a1' }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const bundleStore = { bundle1: bundleDoc({ status: 'active', role_track: 'swe', difficulty: 'medium', language: 'python', human_reviewed: true }) };
+  const ArtifactBundle = makeArtifactBundleModel(bundleStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'ready', bundle_id: 'bundle1' }) };
+
+  const { reconciled, healed } = await reconcileBundleRuns(
+    {},
+    { AgentDecision, Assessment, ArtifactBundle, CapstoneGenerationRequest }
+  );
+
+  assert.strictEqual(healed, 1);
+  assert.strictEqual(reconciled, 0, 'this row was already closed — it belongs to the healing pass, not the open-row pass');
+  assert.strictEqual(
+    String(assessmentStore.a1.config.capstone.bundleId),
+    'bundle1',
+    'the stranded bundle must be attached — this is the whole point of the fix'
+  );
+
+  const row = decisionStore.dec1;
+  assert.strictEqual(row.action.result.status, 'ready');
+  assert.strictEqual(row.action.result.engine, 'capstone');
+  assert.strictEqual(row.action.result.evidence.bundleId, 'bundle1');
+  assert.strictEqual(row.action.result.evidence.humanReviewed, true);
+  assert.ok(
+    row.action.runLog.some((e) => /recovered — generation actually finished after the run had timed out/.test(e.msg)),
+    'must append a run-log line explaining the recovery'
+  );
+});
+
+test('reconcileBundleRuns: does NOT heal a failed row from a preflight reason (no CAPSTONE_GEN_FAILED errorCode) -> left untouched', async () => {
+  const decisionStore = {
+    dec1: failedBundleDoc({
+      engine: 'capstone',
+      assessmentId: 'a1',
+      errorCode: null, // preflight failures carry evidence = { preflight }, no errorCode at all
+      evidenceExtra: { preflight: "the brief didn't give enough to build this" },
+    }),
+  };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  // The healing query must not even select this row — if it did, this would throw.
+  const CapstoneGenerationRequest = { findOne: async () => { throw new Error('should not be called for a preflight failure'); } };
+
+  const { healed } = await reconcileBundleRuns({}, { AgentDecision, CapstoneGenerationRequest });
+
+  assert.strictEqual(healed, 0);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'failed');
+  assert.strictEqual(decisionStore.dec1.action.result.evidence.preflight, "the brief didn't give enough to build this");
+});
+
+test('reconcileBundleRuns: does NOT heal when generation genuinely failed for real -> leaves the failed row untouched', async () => {
+  const decisionStore = { dec1: failedBundleDoc({ engine: 'capstone', assessmentId: 'a1' }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'failed', error: 'validator rejected: seeded_mistakes_fail' }) };
+
+  const { healed } = await reconcileBundleRuns({}, { AgentDecision, Assessment, CapstoneGenerationRequest });
+
+  assert.strictEqual(healed, 0);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'failed');
+  assert.strictEqual(decisionStore.dec1.action.result.evidence.errorCode, 'CAPSTONE_GEN_FAILED');
+  assert.strictEqual(assessmentStore.a1.config.capstone.bundleId, null, 'nothing should ever be attached for a genuine failure');
+});
+
+test('reconcileBundleRuns: does NOT heal when the assessment already has a bundle attached -> no double-attach', async () => {
+  const decisionStore = { dec1: failedBundleDoc({ engine: 'capstone', assessmentId: 'a1' }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: 'already-attached' }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  // Bundle-presence must short-circuit before ever resolving generation state.
+  const CapstoneGenerationRequest = { findOne: async () => { throw new Error('should not be called — already attached'); } };
+
+  const { healed } = await reconcileBundleRuns({}, { AgentDecision, Assessment, CapstoneGenerationRequest });
+
+  assert.strictEqual(healed, 0);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'failed', 'row must be left exactly as-is');
+  assert.strictEqual(assessmentStore.a1.config.capstone.bundleId, 'already-attached');
+});
+
+test('reconcileBundleRuns: does NOT heal when generation is still genuinely pending -> leaves the closed row as-is', async () => {
+  const decisionStore = { dec1: failedBundleDoc({ engine: 'capstone', assessmentId: 'a1' }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'generating' }) };
+
+  const { healed } = await reconcileBundleRuns({}, { AgentDecision, Assessment, CapstoneGenerationRequest });
+
+  assert.strictEqual(healed, 0);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'failed');
+  assert.strictEqual(assessmentStore.a1.config.capstone.bundleId, null);
+});
+
+test('reconcileBundleRuns: heals a drill row via pendingBundleId, bundle already active -> attaches + ready, with drillSubtype evidence', async () => {
+  const decisionStore = { dec1: failedBundleDoc({ engine: 'drill', assessmentId: 'a1' }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'drill', bundleId: null, configExtra: { pendingBundleId: 'bundle1' } }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const bundleStore = { bundle1: bundleDoc({ status: 'active', drill_subtype: 'refactor' }) };
+  const ArtifactBundle = makeArtifactBundleModel(bundleStore);
+
+  const { healed } = await reconcileBundleRuns({}, { AgentDecision, Assessment, ArtifactBundle });
+
+  assert.strictEqual(healed, 1);
+  assert.strictEqual(String(assessmentStore.a1.config.drill.bundleId), 'bundle1');
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'ready');
+  assert.strictEqual(decisionStore.dec1.action.result.evidence.drillSubtype, 'refactor');
+});
+
+test('reconcileBundleRuns: heals but the recovered bundle is only validated (not yet active) -> needs_review, still healed and attached', async () => {
+  const decisionStore = { dec1: failedBundleDoc({ engine: 'capstone', assessmentId: 'a1' }) };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = { a1: bundleAssessment({ type: 'capstone', bundleId: null }) };
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const bundleStore = { bundle1: bundleDoc({ status: 'validated' }) };
+  const ArtifactBundle = makeArtifactBundleModel(bundleStore);
+  const CapstoneGenerationRequest = { findOne: async () => ({ status: 'ready', bundle_id: 'bundle1' }) };
+
+  const { healed } = await reconcileBundleRuns({}, { AgentDecision, Assessment, ArtifactBundle, CapstoneGenerationRequest });
+
+  assert.strictEqual(healed, 1);
+  assert.strictEqual(decisionStore.dec1.action.result.status, 'needs_review');
+  assert.strictEqual(String(assessmentStore.a1.config.capstone.bundleId), 'bundle1', 'still attached even though not yet promoted to active');
+});
+
+test('reconcileBundleRuns: mixed sweep — one open row reconciled and one closed row healed in the same call, counted independently', async () => {
+  const decisionStore = {
+    'dec-open': orphanCandidateDoc({ id: 'dec-open', engine: 'capstone', assessmentId: 'a-open', ageMinutes: 5 }),
+    'dec-failed': failedBundleDoc({ id: 'dec-failed', engine: 'capstone', assessmentId: 'a-failed' }),
+  };
+  const AgentDecision = makeAgentDecisionModel(decisionStore);
+  const assessmentStore = {
+    'a-open': bundleAssessment({ type: 'capstone', bundleId: null }),
+    'a-failed': bundleAssessment({ type: 'capstone', bundleId: null }),
+  };
+  assessmentStore['a-open']._id = 'a-open';
+  assessmentStore['a-failed']._id = 'a-failed';
+  const Assessment = makeAssessmentModel(assessmentStore);
+  const bundleStore = { 'bundle-open': bundleDoc({ status: 'active' }), 'bundle-failed': bundleDoc({ status: 'active' }) };
+  bundleStore['bundle-open']._id = 'bundle-open';
+  bundleStore['bundle-failed']._id = 'bundle-failed';
+  const ArtifactBundle = makeArtifactBundleModel(bundleStore);
+  const CapstoneGenerationRequest = {
+    findOne: async ({ assessment_id }) =>
+      assessment_id === 'a-open' ? { status: 'ready', bundle_id: 'bundle-open' } : { status: 'ready', bundle_id: 'bundle-failed' },
+  };
+
+  const { reconciled, healed } = await reconcileBundleRuns(
+    {},
+    { AgentDecision, Assessment, ArtifactBundle, CapstoneGenerationRequest }
+  );
+
+  assert.strictEqual(reconciled, 1);
+  assert.strictEqual(healed, 1);
+  assert.strictEqual(decisionStore['dec-open'].action.result.status, 'ready');
+  assert.strictEqual(decisionStore['dec-failed'].action.result.status, 'ready');
 });
 
 // ── createAndAuthor: the one-prompt path (parseBrief -> createAssessment -> ──
