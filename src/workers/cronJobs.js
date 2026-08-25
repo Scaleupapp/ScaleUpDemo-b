@@ -11,6 +11,15 @@ const { quizGenerationQueue, notificationQueue, competitionQueue } = require('..
 const { resetStaleStreaks } = require('../services/streakService');
 
 function startCronJobs() {
+  // Kill switch: set CRON_ENABLED=false to skip registering every scheduled job.
+  // Default is ON (any value other than the literal string "false" keeps crons
+  // running), so this changes nothing unless explicitly disabled. Used to keep
+  // the whole scheduler dark on a low-traffic / paused deployment without ripping
+  // out code — flip the env back to re-enable on the next restart.
+  if (process.env.CRON_ENABLED === 'false') {
+    console.log('[cron] CRON_ENABLED=false — skipping all scheduled job registration');
+    return;
+  }
   // Use BullMQ repeatable jobs for cron scheduling
   const connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
   const cronQueue = new Queue('cronJobs', { connection });
